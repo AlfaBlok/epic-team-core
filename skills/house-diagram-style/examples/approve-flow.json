@@ -1,0 +1,11 @@
+{
+  "title": "Nothing goes out until I approve it",
+  "subtitle": "Every post waits for one yes from me.",
+  "layout": "flow",
+  "nodes": [
+    {"id": "ask", "label": "I ask", "sub": "one line", "tone": "warm"},
+    {"id": "draft", "label": "Agent drafts", "sub": "post and image"},
+    {"id": "approve", "label": "I approve", "sub": "or send it back", "tone": "accent"},
+    {"id": "live", "label": "It goes live", "sub": "on the right account", "tone": "muted"}
+  ]
+}

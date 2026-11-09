@@ -1,0 +1,14 @@
+{
+  "title": "Every seat gets the same skills",
+  "subtitle": "One library in the repo, linked into each agent on both servers.",
+  "layout": "tree",
+  "root": "lib",
+  "nodes": [
+    {"id": "lib", "label": "Team skill library", "sub": "one list in the repo", "tone": "accent"},
+    {"id": "v1", "label": "Server one", "sub": "production"},
+    {"id": "v3", "label": "Server three", "sub": "builds and tests"},
+    {"id": "a1", "label": "Every seat", "tone": "muted"},
+    {"id": "a3", "label": "Every seat", "tone": "muted"}
+  ],
+  "edges": [["lib", "v1"], ["lib", "v3"], ["v1", "a1"], ["v3", "a3"]]
+}

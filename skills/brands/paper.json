@@ -1,0 +1,78 @@
+{
+  "schema": "epic-team.brand/1",
+  "name": "paper",
+  "title": "Paper: the team's deck and page style (warm paper, one ink, one deep green, Newsreader and Instrument Sans), no letter mark",
+  "source": "The team's paper deck style. One source for the skills: `deck` is read by paper-deck (scripts/paper_deck.py writes it into a deck's paper.css); `deck.tokens` and `fonts` by house-diagram-style's paper style. A style, not a product: no mark (never invent a logo). Fonts: OFL copies in skills/paper-deck/assets/fonts; font paths are relative to this file.",
+  "wordmark": "",
+  "fonts": [
+    {
+      "family": "Newsreader",
+      "file": "../paper-deck/assets/fonts/newsreader-400.ttf",
+      "weight": 400,
+      "licence": "OFL 1.1"
+    },
+    {
+      "family": "Newsreader",
+      "file": "../paper-deck/assets/fonts/newsreader-500.ttf",
+      "weight": 500,
+      "licence": "OFL 1.1"
+    },
+    {
+      "family": "Instrument Sans",
+      "file": "../paper-deck/assets/fonts/instrument-sans-400.ttf",
+      "weight": 400,
+      "licence": "OFL 1.1"
+    },
+    {
+      "family": "Instrument Sans",
+      "file": "../paper-deck/assets/fonts/instrument-sans-500.ttf",
+      "weight": 500,
+      "licence": "OFL 1.1"
+    },
+    {
+      "family": "Instrument Sans",
+      "file": "../paper-deck/assets/fonts/instrument-sans-600.ttf",
+      "weight": 600,
+      "licence": "OFL 1.1"
+    }
+  ],
+  "endCard": {
+    "paper": "#f6f2e9",
+    "ink": "#18211c",
+    "ink2": "#4a554e",
+    "link": "#1f4d3a",
+    "rule": "#c9c1ae"
+  },
+  "shot": {
+    "ground": "#f6f2e9",
+    "ground2": "#e9e3d5",
+    "ink": "#18211c",
+    "muted": "#4a554e",
+    "accent": "#1f4d3a",
+    "frame": "#c9c1ae",
+    "domain": "example.com",
+    "title_font": "Newsreader",
+    "title_weight": 400,
+    "body_font": "Instrument Sans"
+  },
+  "explainer": {
+    "warm": "#f3e8d2"
+  },
+  "deck": {
+    "tokens": {
+      "--bg": "#f6f2e9",
+      "--stage": "#e9e3d5",
+      "--stage-2": "#ded6c4",
+      "--ink": "#18211c",
+      "--muted": "#4a554e",
+      "--faint": "#8d948c",
+      "--line": "#c9c1ae",
+      "--accent": "#1f4d3a",
+      "--accent-soft": "#cfe0d4",
+      "--accent-ink": "#f6f2e9",
+      "--warn": "#8a4b1c",
+      "--serif": "\"Newsreader\", Georgia, \"Times New Roman\", serif",
+      "--sans": "\"Instrument Sans\", system-ui, sans-serif"
+    }
+  }
+}

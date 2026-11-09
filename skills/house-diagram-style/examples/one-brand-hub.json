@@ -1,0 +1,13 @@
+{
+  "title": "One paper file dresses everything we show",
+  "subtitle": "Decks, diagrams, screenshots and clips read the same colours and fonts.",
+  "layout": "hub",
+  "center": "brand",
+  "nodes": [
+    {"id": "brand", "label": "The paper file", "sub": "colours and fonts", "tone": "accent"},
+    {"id": "deck", "label": "Decks", "sub": "slides and pages"},
+    {"id": "diagram", "label": "Diagrams", "sub": "for posts and pages"},
+    {"id": "shot", "label": "Screenshots", "sub": "for review cards"},
+    {"id": "clip", "label": "Clips", "sub": "short videos"}
+  ]
+}

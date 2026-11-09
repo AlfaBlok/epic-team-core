@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "copy-editing",
+      "use_when": "edit existing marketing copy: tighten, cut filler, sharpen one message, proofread",
+      "source": {
+        "type": "github",
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/copy-editing"
+      }
+    },
+    {
+      "name": "copywriting",
+      "use_when": "write or rewrite marketing copy: headlines, hooks, value proposition, CTA, landing and feature pages",
+      "source": {
+        "type": "github",
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/copywriting"
+      }
+    },
+    {
+      "name": "design-taste-frontend",
+      "use_when": "make a web page or app screen look designed, not templated: dealt art directions, no-slop house rules, screenshot look-and-fix loop",
+      "source": {
+        "type": "github",
+        "repo": "Leonxlnx/taste-skill",
+        "commit": "12af471f627f866411b4bd785b19646d3672784c",
+        "path": "skills/taste-skill"
+      }
+    },
+    {
+      "name": "diagram-design",
+      "use_when": "a branded editorial diagram (architecture, flowchart, sequence, timeline, ER, quadrant, chart, ...) as self-contained HTML/SVG, exportable to PNG",
+      "source": {
+        "type": "github",
+        "repo": "cathrynlavery/diagram-design",
+        "commit": "0cf73c3fcc56667ad91a9a04c439ac6ccfabc9d1",
+        "path": "skills/diagram-design"
+      }
+    },
+    {
+      "name": "hallmark",
+      "use_when": "build a new page or visual identity that looks made, not generated: the Floor, dealt themes, one idea per screen, sloplint; do not run install-hook or imagegen (paid key)",
+      "source": {
+        "type": "github",
+        "repo": "Nutlope/hallmark",
+        "commit": "4f6a46c6dc325d40ab268c93e25c7b96676ebccd",
+        "path": "skills/hallmark"
+      }
+    },
+    {
+      "name": "house-diagram-style",
+      "use_when": "make or redo a post/page diagram in the team's house style (palette, type, layout, density, words, what to avoid): paper style by default, rendered from the diagram skill's JSON spec to PNG + HTML; five trial-only styles",
+      "source": {
+        "type": "local",
+        "path": "skills/house-diagram-style"
+      }
+    },
+    {
+      "name": "humanizer",
+      "use_when": "rewrite AI-sounding prose (scripts, posts, docs, asks) so it reads like a person: cuts staged contrasts, triads, dashes, inflation, stock words",
+      "source": {
+        "type": "github",
+        "repo": "blader/humanizer",
+        "commit": "0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0"
+      }
+    },
+    {
+      "name": "hyperframes",
+      "use_when": "make, edit or render a HyperFrames video (HTML to MP4): render contract, work loop, captions, vertical clips; video/ renders with it",
+      "source": {
+        "type": "github",
+        "repo": "heygen-com/hyperframes",
+        "commit": "57d23598a7269ac7e4d9c01003eb8c6039ed198b",
+        "path": "skills/hyperframes"
+      }
+    },
+    {
+      "name": "hyperframes-cli",
+      "use_when": "the HyperFrames CLI by job: check, look at frames, render, recover from failures; keep telemetry off, no cloud render or publish",
+      "source": {
+        "type": "github",
+        "repo": "heygen-com/hyperframes",
+        "commit": "57d23598a7269ac7e4d9c01003eb8c6039ed198b",
+        "path": "skills/hyperframes-cli"
+      }
+    },
+    {
+      "name": "hyperframes-registry",
+      "use_when": "ready-made HyperFrames blocks (captions, kinetic type, transitions, overlays) before hand-building one",
+      "source": {
+        "type": "github",
+        "repo": "heygen-com/hyperframes",
+        "commit": "57d23598a7269ac7e4d9c01003eb8c6039ed198b",
+        "path": "skills/hyperframes-registry"
+      }
+    },
+    {
+      "name": "paper-deck",
+      "use_when": "make a deck, slide pages, a one-pager, an explainer or a product page for any of the team's products in the team's paper deck style (warm paper, one deep green, Newsreader and Instrument Sans, one idea per screen, looping scenes); starter kit, tokens from the shared paper brand file",
+      "source": {
+        "type": "local",
+        "path": "skills/paper-deck"
+      }
+    },
+    {
+      "name": "security-audit",
+      "use_when": "Security guidance and vulnerability review for codebases, APIs, services, CLI tools, libraries, and daemons.",
+      "source": {
+        "type": "github",
+        "repo": "cloudflare/security-audit-skill",
+        "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+        "path": "skills/security-audit"
+      }
+    },
+    {
+      "name": "social",
+      "use_when": "write social posts and short-video hooks for X, LinkedIn, TikTok, Instagram; repurpose one piece across channels",
+      "source": {
+        "type": "github",
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/social"
+      }
+    },
+    {
+      "name": "video",
+      "use_when": "plan a marketing or demo video: hook, script, structure, platform specs, AI/programmatic tools (HyperFrames, Remotion)",
+      "source": {
+        "type": "github",
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/video"
+      }
+    }
+  ]
+}
