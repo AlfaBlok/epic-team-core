@@ -6,8 +6,8 @@ import { api } from "@/api";
 import { ProductPage } from "@/pages/social/Motion";
 import { SKINS, SkinProvider } from "@/lib/skin";
 import { sampleFeatureList as list, sampleMotionSpines, sampleProduct, withFeatures } from "@/lib/motionSample";
-import { computeMotion, parseProduct } from "../../../../../hosted/console/server/src/social/motionCompute";
-import { expandFeatures } from "../../../../../hosted/console/server/src/social/productFeatures";
+import { computeMotion, parseProduct } from "../../../server/src/social/motionCompute";
+import { expandFeatures } from "../../../server/src/social/productFeatures";
 
 // the
 // product deck's `Features:` part shows the service's whole feature list, one paper slide per group, every line on it.

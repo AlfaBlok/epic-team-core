@@ -10,7 +10,7 @@ import { sampleSocialExport } from "@/lib/social";
 import { SKINS, SkinProvider } from "@/lib/skin";
 import { mockTotems } from "@/lib/totems";
 import { sampleCampaignProduct, sampleMotionSpines, sampleProduct } from "@/lib/motionSample";
-import { CAMPAIGN_PRODUCT_PARTS, computeMotion, parseProduct } from "../../../../../hosted/console/server/src/social/motionCompute";
+import { CAMPAIGN_PRODUCT_PARTS, computeMotion, parseProduct } from "../../../server/src/social/motionCompute";
 
 // (a social world repo's desk note; the owner on their: "make a proposal I can examine on a post (on the deck?)
 // I'll give answer in situ"): every Product tab slide has the Brief slide's note box; the note is filed to the campaign's

@@ -6,7 +6,7 @@ import { api } from "@/api";
 import type { MotionBody } from "@/api/types";
 import { SKINS, SkinProvider } from "@/lib/skin";
 import { sampleMotionSpines, sampleProduct } from "@/lib/motionSample";
-import { computeMotion, parseProduct } from "../../../../../../hosted/console/server/src/social/motionCompute";
+import { computeMotion, metricDef, parseProduct } from "../../../../server/src/social/motionCompute";
 import { AppRoutes } from "@/App";
 import { CatalogView, PersonaDeck, ProductView, TargetsView } from "./Motion";
 
@@ -74,7 +74,7 @@ describe("T78-S1 targets, catalog, who moves what", () => {
     const t = screen.getAllByTestId("target");
     expect(t).toHaveLength(2);
     expect(t[0].textContent).toContain("proposed, you set it");
-    expect(t[0].textContent).toContain("of 500 site visitors on epicspine.dev by 23 Nov");
+    expect(t[0].textContent).toContain(`of 500 ${metricDef("site_visitors")!.label.toLowerCase()} by 23 Nov`); // the catalog's words: the neutral site in the open core, ours with the hosted layer
     expect(within(t[1]).getByTestId("target-now").textContent).toBe("1");
     expect(t[1].textContent).toContain("of 10 tester applications by 17 Nov");
   });

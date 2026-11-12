@@ -1669,11 +1669,11 @@ export interface SocialLiveNumbers {
  * five daily series (posts, replies sent, replies received, followers, impressions) and the best post, with the rule.
  * Shapes and the computation are the server's (server/src/social/kpisCompute.ts; the mock runs the same code).
  */
-export type { SocialKpisBody, PlatformKpis, KpiSeries, KpiPoint, BestPost, SeriesKey, KpiPlatform } from "../../../../../hosted/console/server/src/social/kpisCompute";
+export type { SocialKpisBody, PlatformKpis, KpiSeries, KpiPoint, BestPost, SeriesKey, KpiPlatform } from "../../../server/src/social/kpisCompute";
 /** GET /api/tenants/:id/site-kpis: page views, new users registered, code page views (server/src/siteKpisCompute.ts). */
-export type { SiteCount, SiteKpisBody, SiteSeries, SiteSeriesKey, SiteWhere } from "../../../../../hosted/console/server/src/siteKpisCompute";
+export type { SiteCount, SiteKpisBody, SiteSeries, SiteSeriesKey, SiteWhere } from "../../../server/src/siteKpisCompute";
 // the product deck, the metrics catalog with each campaign's target, and one slide per role.
-export type { MotionBody, CatalogRow, TargetView, PersonaSlide, ProductSlide, MetricId } from "../../../../../hosted/console/server/src/social/motionCompute";
+export type { MotionBody, CatalogRow, TargetView, PersonaSlide, ProductSlide, MetricId } from "../../../server/src/social/motionCompute";
 
 export interface SocialMetrics {
   tenantId: string;

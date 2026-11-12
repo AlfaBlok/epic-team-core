@@ -4,14 +4,14 @@ import { seed, type MockDb } from "./seed";
 import type { AddTeamServiceInput, CountsView, TeamServiceSecret, TeamService, TeamSkill, TicketSession, ChatRead, ChatAttachment, DeskChat, DeskMessage, RepoFreshness, ApprovalGrant, ApprovalsView, GrantInput, Assignment, AuthSite, HostsView, HostWake, AuthSync, Milestone, MilestoneStatus, MilestoneStatusView, MilestoneTree, PendingItem, StatusBatch, Run, Ticket, TreeColor, TreeNode, SocialWriteAction, SocialAssetUpload, TesterPayment, TesterWorldResult, FeedbackLink, FeedbackView } from "./types";
 import { nextRunAfter } from "@/lib/format";
 import { activeSeries, localDay } from "../../../server/src/activeAgents";
-import { hostSeries } from "../../../../../hosted/console/server/src/runHosts";
+import { hostSeries } from "../../../server/src/runHosts";
 import { milestoneRunStats, personaRunStats, runsForMilestone, wakesDidSomething } from "@/lib/derive";
 import { sampleSocialData } from "@/lib/social";
-import { computeKpis } from "../../../../../hosted/console/server/src/social/kpisCompute";
-import { computeSiteKpis } from "../../../../../hosted/console/server/src/siteKpisCompute";
-import { CAMPAIGN_PRODUCT_PARTS, campaignProductFile, campaignTarget, computeMotion, parseProduct } from "../../../../../hosted/console/server/src/social/motionCompute";
+import { computeKpis } from "../../../server/src/social/kpisCompute";
+import { computeSiteKpis } from "../../../server/src/siteKpisCompute";
+import { CAMPAIGN_PRODUCT_PARTS, campaignProductFile, campaignTarget, computeMotion, parseProduct } from "../../../server/src/social/motionCompute";
 import { sampleCampaignProduct, sampleProduct, sampleMotionSpines, withFeatures, sampleFeatureList } from "@/lib/motionSample";
-import { expandFeatures } from "../../../../../hosted/console/server/src/social/productFeatures";
+import { expandFeatures } from "../../../server/src/social/productFeatures";
 import { mockTotems } from "@/lib/totems";
 import { mockOnboarding } from "@/lib/onboarding";
 import { sampleMessages } from "@/lib/messagesSample";
@@ -24,7 +24,9 @@ import { mockCredits } from "./mockCredits";
 import type { CampaignInput, JobInput, NamedCampaignInput } from "./campaign-types";
 import { MOCK_CAMPAIGN_REPOS, mockCampaignCard, mockCampaignPlan } from "./mockCampaigns";
 import type { ConsoleMessage, OwnerActivity, OwnerResponse, LaptopSession, WaitingItem } from "./inbox-types";
-import { homeWorld, ownerName, socialWorld } from "@/lib/identity";
+import { homeWorld, mainHost, ownerName, socialWorld, workerHost } from "@/lib/identity";
+// the hosted layer's site numbers (our sites and the catalog's words) when its tree is there; the open core keeps its neutral example
+import.meta.glob("../../../../../hosted/console/web/src/hosted/numbers.ts", { eager: true });
 
 export interface MockOptions {
   db?: MockDb;
@@ -765,7 +767,7 @@ const mockMail = () => ({
         const p = r.parentRunId ? byId.get(r.parentRunId) : undefined;
         return { id: r.id, startedAt: r.startedAt, endedAt: r.endedAt, kind: r.kind, host: r.host, launchHost: r.launchHost, parentHost: p?.host, parentLaunchHost: p?.launchHost, seat: r.seat };
       });
-      return ok(hostSeries(rows, { range, now: new Date(now()) }));
+      return ok(hostSeries(rows, { range, now: new Date(now()), hosts: [mainHost(), workerHost()] }));
     },
     async listRunsTop({ top, milestoneId }) {
       const all = [...db.runs].sort((x, y) => y.startedAt.localeCompare(x.startedAt));

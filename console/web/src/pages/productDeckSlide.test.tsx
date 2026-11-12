@@ -12,7 +12,7 @@ import { SKINS, SkinProvider } from "@/lib/skin";
 import { mockTotems } from "@/lib/totems";
 import { sampleCampaignProduct, sampleMotionSpines, sampleProduct } from "@/lib/motionSample";
 import { screenUrl, slideBlocks, statValue } from "@/lib/productSlide";
-import { CAMPAIGN_PRODUCT_PARTS, computeMotion, parseProduct } from "../../../../../hosted/console/server/src/social/motionCompute";
+import { CAMPAIGN_PRODUCT_PARTS, computeMotion, parseProduct } from "../../../server/src/social/motionCompute";
 
 // the campaign's
 // Product tab is its one deck, drawn to persuade: a claim, big live numbers, real screens; the one-pager points to it.
