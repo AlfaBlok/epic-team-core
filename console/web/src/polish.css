@@ -1,0 +1,166 @@
+/*
+ * the approved polish (the two rounds of mockups), one layer for
+ * both skins over today's components and tokens. Only type, spacing, radius, colour weight and the phone layout change; the
+ * screen edits that need markup (brand, empty states, card heads, sidebar rows, tabs) live in the components. Each block
+ * names its mockup item (R1-n from assets/polish.css, R2-n from assets/polish-r2.css). Rollback: drop the import in main.tsx.
+ */
+
+/* R1-1. Type: one face, five sizes in use (26 page title, 15 section title, 14 body, 13 secondary, 12 meta), nothing under 12. */
+html, body { font-family: "Inter", ui-sans-serif, system-ui, sans-serif; font-feature-settings: "cv11", "ss03"; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+main h1 { font-size: 26px !important; line-height: 1.2 !important; letter-spacing: -0.022em !important; font-weight: 650 !important; }
+main h1 + p, main h1 + div > p:first-child { font-size: 14px; line-height: 1.5; max-width: 68ch; }
+main h2, main h3 { letter-spacing: -0.01em; }
+.text-\[10px\], .text-\[11px\] { font-size: 12px !important; line-height: 16px !important; }
+.uppercase.tracking-wide, .uppercase.tracking-wider, .uppercase.tracking-widest { text-transform: none !important; letter-spacing: 0 !important; font-size: 12px !important; font-weight: 500 !important; }
+main span.uppercase, main div.uppercase { text-transform: none !important; letter-spacing: 0 !important; }
+.font-mono { font-size: 12px; letter-spacing: -0.01em; }
+main .text-sm { line-height: 1.55; }
+main .text-xs { font-size: 13px !important; line-height: 18px !important; }
+main .font-mono.text-xs { font-size: 12px !important; }
+/* R2-1. Tabular figures only where numbers line up (Inter's tabular hyphen is wide: "seven-day" read "seven - day"). */
+time, .tabular-nums, [data-count-pill], [data-testid="big-root-pct"], [data-testid="post-numbers"] { font-variant-numeric: tabular-nums; }
+
+/* R1-2. Frame and rhythm: 40 px gutters on a computer, 16 on the phone; one radius (12) for panels, 8 for controls, 6 for chips; flat panels. */
+main { padding-top: 32px !important; padding-bottom: 64px !important; }
+@media (min-width: 1024px) { main { padding-left: 40px !important; padding-right: 40px !important; } }
+main .mb-6 { margin-bottom: 28px !important; }
+main section.rounded-lg, main section.rounded-xl, main .rounded-xl.border { border-radius: 12px !important; }
+main .shadow-sm, main .shadow { box-shadow: none !important; }
+main section.mb-3 { margin-bottom: 16px !important; }
+main section > div.min-h-11 { min-height: 52px !important; padding-left: 16px !important; padding-right: 16px !important; }
+main section > div.min-h-11 > button, main section > div.min-h-11 h2 { font-size: 15px !important; font-weight: 600 !important; }
+main section > .border-t.px-3 { padding: 16px !important; }
+main button.h-8, main a.h-8 { border-radius: 8px !important; }
+main .rounded-md.border.px-2, main .rounded-md.border.px-1\.5 { border-radius: 6px !important; }
+/* grid children may shrink; badges inside cards wrap instead of pushing a card past the screen */
+main .grid > * { min-width: 0; }
+main .rounded-xl .whitespace-nowrap.rounded-md, main .rounded-lg .whitespace-nowrap.rounded-md { white-space: normal !important; }
+main .grid:has(> [data-testid="milestone-card"]), main .grid:has(> .rounded-xl), main .grid:has(> .rounded-lg), main .grid:has(> section) { align-items: start; }
+
+/* R1-3. Sidebar: a quieter ground, 14 px items, 12 px headings, thin progress bars. */
+aside.border-r { background: hsl(var(--muted) / 0.35) !important; }
+aside nav a, aside nav button { font-size: 14px !important; min-height: 34px; }
+[data-testid="big-root"] { font-size: 13px !important; } /* project names one step under the nav, so the sidebar reads compact */
+[data-testid="sidebar-focus-heading"] { font-size: 12px !important; padding-top: 14px !important; padding-bottom: 6px !important; color: hsl(var(--muted-foreground)); }
+
+/* R1-5. No sideways scroll: long alert lines, paths and links wrap instead of pushing the page wider. */
+main a, main code, main .font-mono { overflow-wrap: anywhere; }
+[data-testid="monitor-alert-line"] { overflow-wrap: anywhere; }
+[data-testid="monitor-alert-line"] * { white-space: normal !important; }
+[data-testid="monitor-alert-line"] > div { flex-wrap: wrap !important; align-items: baseline !important; row-gap: 4px; }
+[data-testid="monitor-alert-line-why"] { flex: 1 1 0 !important; min-width: 0 !important; color: inherit !important; font-weight: 500; }
+/* an alarm under "Nothing waiting on you" reads as an alarm (an amber notice), not grey small print */
+[data-testid="monitor-alert-line"][data-state="alarm"] { background: hsl(38 92% 95%); color: hsl(28 80% 26%) !important; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+.dark [data-testid="monitor-alert-line"][data-state="alarm"] { background: hsl(38 60% 12%); color: hsl(38 90% 80%) !important; }
+
+/* R1-6. Cards on the Team home: one radius; the review outcome as a 20 px title. */
+[data-testid="fyi-card"] > div { padding: 14px 16px !important; }
+/* the wake toggle says only "Wake <persona>"; why stays in its tooltip */
+[data-testid="fyi-card"] [data-testid="wake-toggle"] .opacity-70 { display: none; }
+[data-testid="review-card"] { border-radius: 12px !important; }
+
+/* R1-7. Object headers (milestone, campaign): marks as quiet pills; tabs a little roomier. */
+[data-testid="outcome-badge"], [data-testid="flow-badge"] { padding: 3px 10px !important; font-size: 13px !important; border-radius: 999px !important; }
+[data-testid="outcome-badge"] > span:first-child, [data-testid="flow-badge"] > span:first-child { font-weight: 400 !important; opacity: 0.8; }
+[data-testid="state-card"], [data-testid="state-strip"] > div { border-radius: 12px !important; }
+[data-testid="defect-line"] { font-size: 12px !important; }
+[role="tablist"] { border-radius: 10px !important; padding: 4px !important; }
+[role="tablist"] > button { font-size: 13px !important; border-radius: 7px !important; padding: 5px 12px !important; }
+[role="tablist"] > button[data-state="inactive"] { color: hsl(240 4% 38%) !important; }
+.dark [role="tablist"] > button[data-state="inactive"] { color: hsl(240 5% 70%) !important; }
+
+/* R1-8. Social Pipeline: cards with one meta line, a five-line preview, pictures at one 16:10 ratio. */
+[data-testid="lane-item"] { border-radius: 12px !important; }
+[data-testid="lane-item"] > div { padding: 12px 14px !important; gap: 8px !important; }
+[data-testid="lane-item"] .break-words { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+[data-testid="post-title"] { font-weight: 600 !important; font-size: 14px !important; line-height: 1.4 !important; }
+[data-testid="lane-item"] img { aspect-ratio: 16 / 10; object-fit: cover; object-position: top; width: 100%; border-radius: 8px; border: 1px solid hsl(var(--border)); }
+/* The post page shows each picture whole, scaled to the card width (the 16:10 crop is for Pipeline cards only; it cut P-0104's diagram). */
+[data-testid="post-page"] [data-testid="post-image"] { display: block; min-width: 0; }
+[data-testid="post-page"] [data-testid="post-image"] img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid hsl(var(--border)); }
+[data-testid="card-campaign"] { flex-basis: 100%; }
+/* R2-9. compact card actions on one row */
+[data-testid="lane-item"] .flex.flex-wrap.gap-1\.5 { gap: 6px !important; }
+[data-testid="lane-item"] .flex.flex-wrap.gap-1\.5 > button { height: 30px !important; padding: 0 9px !important; font-size: 12px !important; }
+[data-testid="lane-item"] .flex.flex-wrap.gap-1\.5 > button svg { width: 14px !important; height: 14px !important; }
+
+/* R1-9. Post page and Brief: the deck is a real button; stamps in sentence case; the post text reads like the post. */
+[data-testid="campaign-deck-link"] { display: inline-flex !important; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; text-decoration: none !important; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)) !important; font-size: 13px !important; }
+[data-testid="campaign-deck-link"]::after { content: "↗"; font-size: 12px; }
+[data-testid="stamp-draft"] { text-transform: none !important; letter-spacing: 0 !important; }
+main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12px !important; border-radius: 8px !important; }
+[data-testid="post-basics"] { border-radius: 12px !important; }
+[data-testid="post-basics"] dt, [data-testid="post-basics"] > div > div:first-child { color: hsl(var(--muted-foreground)); font-size: 13px !important; }
+[data-testid="post-text"] { font-size: 15px !important; line-height: 1.6 !important; }
+/* R2-10. "New version for your note" is a callout with a violet rule, not small coloured print. */
+[data-testid="post-state"] { font-size: 13px !important; line-height: 1.5 !important; padding: 10px 14px; border-left: 3px solid hsl(var(--primary)); background: hsl(var(--primary) / 0.06); border-radius: 0 8px 8px 0; color: hsl(var(--foreground)) !important; }
+
+/* R1-10 + R2-11. History rows breathe; feedback buttons small and quiet; plain links. */
+[data-testid="history-row"] { padding-top: 10px !important; padding-bottom: 10px !important; }
+[data-testid="history-row"] button { height: 28px !important; min-height: 28px !important; padding: 0 8px !important; font-size: 12px !important; }
+[data-testid="history-row"] button svg { width: 14px !important; height: 14px !important; }
+[data-testid="history-row"] a.underline { text-decoration: none !important; color: hsl(var(--foreground)) !important; }
+
+/* R1-11 + R2-6. Chat: one bubble radius, the owner's messages in a soft tint (not a black slab), a 44 px composer. */
+[data-testid="chat-user"] > div, [data-testid="chat-assistant"] > div { border-radius: 16px !important; }
+[data-testid="chat-user"] > div { padding: 12px 16px !important; background: hsl(var(--muted)) !important; color: hsl(var(--foreground)) !important; }
+[data-testid="chat-assistant"] > div { background: hsl(var(--background)) !important; }
+[data-testid="chat-user"] p.mt-1, [data-testid="chat-assistant"] p.mt-1 { opacity: 1 !important; color: hsl(var(--muted-foreground)) !important; font-size: 12px !important; }
+/* the chat box is one frame (words over a short row of buttons); only that row's buttons are 44 px, never the pill or a file's remove cross */
+[data-testid="chat-dock"] [data-testid="words-field"] { border-radius: 12px; }
+[data-testid="words-field"] textarea { border: 0 !important; border-radius: 0 !important; background: transparent !important; outline: none !important; resize: none; }
+[data-testid="words-field"] textarea:focus-visible { outline: none !important; }
+[data-testid="words-field"]:focus-within { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+[data-testid="chat-dock"] [data-testid="words-tools"] button { height: 44px !important; border-radius: 12px !important; }
+
+/* R2-3. Links: a thin underline that darkens on hover; breadcrumbs in grey, not blue. */
+main a.underline, main a.text-blue-600 { text-decoration-thickness: 1px !important; text-underline-offset: 3px !important; text-decoration-color: hsl(var(--foreground) / 0.25) !important; }
+main a.underline:hover, main a.text-blue-600:hover { text-decoration-color: currentColor !important; }
+[data-testid="review-tree"] a { color: hsl(var(--foreground)) !important; }
+[data-testid="review-crumb"] a { color: hsl(var(--muted-foreground)) !important; text-decoration: none !important; }
+[data-testid="review-crumb"] a:hover { color: hsl(var(--foreground)) !important; text-decoration: underline !important; }
+
+/* R2-5. Review card: the evidence picture fades out at the cut, with its caption as a white label; the tree on a quiet tint. */
+[data-testid="review-evidence"] { border-radius: 12px !important; box-shadow: 0 1px 0 hsl(var(--border)); }
+[data-testid="review-evidence"]::after { content: ""; position: absolute; inset: auto 0 0 0; height: 64px; background: linear-gradient(to bottom, hsl(var(--card) / 0), hsl(var(--card))); pointer-events: none; }
+[data-testid="review-evidence"] > span { z-index: 1; background: hsl(var(--background)) !important; color: hsl(var(--foreground)) !important; border: 1px solid hsl(var(--border)); box-shadow: 0 2px 8px rgb(0 0 0 / 0.08); font-weight: 500; }
+
+/* R2-7. Connections: the "where the items went" note is a quiet disclosure with a chevron, not a coloured bar. */
+[data-testid="where-items-went"] { border: 1px solid hsl(var(--border)) !important; background: transparent !important; border-radius: 12px !important; padding: 14px 16px !important; font-size: 13px !important; }
+[data-testid="where-items-went"] > summary { list-style: none; display: flex; align-items: center; gap: 8px; font-weight: 500 !important; font-size: 14px; cursor: pointer; }
+[data-testid="where-items-went"] > summary::-webkit-details-marker { display: none; }
+[data-testid="where-items-went"] > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: currentColor; opacity: 0.6; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; }
+[data-testid="where-items-went"][open] > summary::before { transform: rotate(90deg); }
+
+/* R2-12. Count pills: one size and weight everywhere. */
+[data-count-pill] { min-width: 20px; height: 20px; font-size: 12px !important; font-weight: 600 !important; }
+
+/* R2-13. Focus rings on keyboard use: one 2 px ring in the product's colour. */
+main :is(a, button, select, input, textarea, summary):focus-visible, aside :is(a, button):focus-visible { outline: 2px solid hsl(var(--ring)) !important; outline-offset: 2px; box-shadow: none !important; }
+
+/* Contrast (design inspector): one filled green at 7:1, readable amber and calmer tinted borders. */
+main .bg-green-600, main .bg-emerald-600:not([data-count-pill]) { background-color: hsl(142 72% 26%) !important; }
+main .text-amber-600 { color: hsl(26 90% 32%) !important; }
+.dark main .text-amber-600 { color: hsl(38 90% 65%) !important; }
+main .border-sky-500\/30 { border-color: hsl(199 80% 86%) !important; }
+main .border-amber-500\/40, main .border-amber-500\/60 { border-color: hsl(38 85% 82%) !important; }
+.dark main .border-sky-500\/30 { border-color: hsl(199 50% 25%) !important; }
+.dark main .border-amber-500\/40, .dark main .border-amber-500\/60 { border-color: hsl(38 50% 25%) !important; }
+
+/* R1-12. The phone (< 640 px): 16 px gutters, a 22 px title, compact header buttons in one wrapped row. */
+@media (max-width: 639px) {
+  main { padding: 20px 16px 48px !important; }
+  main h1 { font-size: 22px !important; }
+  main .mb-6 { margin-bottom: 20px !important; }
+  main .mb-6 .flex.flex-wrap.gap-2 > button, main .mb-6 .flex.flex-wrap.gap-2 > a, main .mb-6 > div:last-child > button { height: 34px !important; font-size: 13px !important; padding: 0 10px !important; }
+  [data-testid="lane-item"] .break-words { -webkit-line-clamp: 6; }
+}
+/* page header: title and actions stack until there is room for both */
+@media (max-width: 1099px) { main .mb-6.sm\:flex-row { flex-direction: column !important; align-items: stretch !important; } }
+
+/* inbox and review cards keep their quiet look,
+   but the grey text on them is dark enough to read and the body text is a normal 15 px. No new colours or badges. */
+[data-testid="waiting-card"] .text-muted-foreground, [data-testid="review-card"] .text-muted-foreground { color: hsl(240 5% 34%) !important; }
+.dark [data-testid="waiting-card"] .text-muted-foreground, .dark [data-testid="review-card"] .text-muted-foreground { color: hsl(240 5% 70%) !important; }
+/* the Why line 15 px, the rest of a card 14 px. */
+[data-testid="ask-why"], [data-testid="review-task-goal"] { font-size: 15px !important; line-height: 1.5 !important; }

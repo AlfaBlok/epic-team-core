@@ -1,0 +1,80 @@
+{
+  "root": "docs/EPIC-900-OPERATING-SYSTEM.md",
+  "nodes": [
+    {
+      "id": "EPIC-900",
+      "path": "docs/EPIC-900-OPERATING-SYSTEM.md",
+      "title": "EPIC-900: EpicSpine operating system",
+      "parent": null,
+      "type": "root",
+      "status": "active",
+      "rollup_status": "active",
+      "dod": [{ "id": "DOD-1", "text": "Every repo on every machine runs the same always-on block.", "done": true }],
+      "children": ["docs/EPIC-904-DOCTRINE-2.md"],
+      "goal": "One way of running agent work across every repo: a root spine, epics that serve it, and workers that integrate fast.",
+      "serves": null,
+      "done_means": [{ "id": "DOD-1", "text": "Every repo on every machine runs the same always-on block.", "done": true }],
+      "contributes": { "docs/EPIC-904-DOCTRINE-2.md": "Makes every epic say why it exists, so the tree reads as one plan." },
+      "pages": [],
+      "missing_sections": [],
+      "size": { "lines": 140, "long_cells": 0 }
+    },
+    {
+      "id": "EPIC-904",
+      "path": "docs/EPIC-904-DOCTRINE-2.md",
+      "title": "EPIC-904: Doctrine 2",
+      "parent": "docs/EPIC-900-OPERATING-SYSTEM.md",
+      "type": "leaf",
+      "status": "active",
+      "rollup_status": "active",
+      "dod": [
+        { "id": "DOD-1", "text": "spines.py --json emits goal, serves, done_means, contributes, pages.", "done": true },
+        { "id": "DOD-2", "text": "The console Overview renders them in contract order.", "done": false }
+      ],
+      "children": ["docs/EPIC-903-EPIC-LOG.md", "docs/EPIC-905-CONSOLE-OVERVIEW.md"],
+      "goal": "Every epic states its goal and how it serves its parent, so humans and agents read one plan top-down.",
+      "serves": "Gives EPIC-900 a tree whose every node explains itself, which the console and the agents both read.",
+      "done_means": [
+        { "id": "DOD-1", "text": "spines.py --json emits goal, serves, done_means, contributes, pages.", "done": true },
+        { "id": "DOD-2", "text": "The console Overview renders them in contract order.", "done": false }
+      ],
+      "contributes": { "docs/EPIC-903-EPIC-LOG.md": "Discovers the epic tree that the doctrine fields hang on." },
+      "pages": [
+        { "path": "docs/doctrine/enforcement.md", "title": "Doctrine enforcement plan", "via": "docs/EPIC-904-DOCTRINE-2.md" },
+        { "path": "docs/doctrine/console-contract.md", "title": "Console contract", "via": "docs/EPIC-904-DOCTRINE-2.md" }
+      ],
+      "missing_sections": [],
+      "size": { "lines": 120, "long_cells": 3 }
+    },
+    {
+      "id": "EPIC-903",
+      "path": "docs/EPIC-903-EPIC-LOG.md",
+      "title": "EPIC-903: Epic log",
+      "parent": "docs/EPIC-904-DOCTRINE-2.md",
+      "type": "leaf",
+      "status": "done",
+      "rollup_status": "done",
+      "dod": [],
+      "children": [],
+      "goal": "Find every epic in a repo from the root, by links.",
+      "serves": "Discovers the epic tree that the doctrine fields hang on.",
+      "missing_sections": []
+    },
+    {
+      "id": "EPIC-905",
+      "path": "docs/EPIC-905-CONSOLE-OVERVIEW.md",
+      "title": "EPIC-905: Console overview",
+      "parent": "docs/EPIC-904-DOCTRINE-2.md",
+      "type": "leaf",
+      "status": "ready",
+      "rollup_status": "ready",
+      "dod": [],
+      "children": [],
+      "missing_sections": ["goal", "serves"]
+    }
+  ],
+  "orphans": [],
+  "mismatches": [],
+  "orphan_pages": ["docs/old-notes.md"],
+  "looks_like_epic": []
+}

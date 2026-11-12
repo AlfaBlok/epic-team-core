@@ -1,0 +1,286 @@
+import { execFile } from "node:child_process";
+import { headSha, upstreamSha } from "./gitRefs.js";
+import fs from "node:fs";
+import path from "node:path";
+import { createRepoPuller } from "./cycle/repoPull.js";
+import type { LockHealer } from "./gitStaleLock.js";
+
+/**
+ * source freshness. The console reads the checkouts on this host; they move by (a) the EpicSpine 15-min sync,
+ * (b) the run-end pull, and here (c) a pull when a milestone page is opened and its repo's last pull is older
+ * than 60 s (the console mounts 5 min), (d) a `git ls-remote` poll of every repo with an unsettled milestone (
+ * every 5 min, was 20 s), (e) the Refresh button.
+ * Every pull is `git pull -q --ff-only` (one in flight per repo, never forced: a dirty or diverged tree is left alone
+ * and reported), and the spines.py cache of the repo is dropped when HEAD moved.
+ */
+export type GitOut = (repoDir: string, args: string[]) => Promise<string>;
+
+export const gitOut =
+  (timeoutMs = 30_000): GitOut =>
+  (repoDir, args) =>
+    new Promise((resolve, reject) => {
+      execFile("git", ["-C", repoDir, ...args], { timeout: timeoutMs }, (err, stdout, stderr) => {
+        if (!err) return resolve(String(stdout));
+        // git's last line is often just "Aborting": the first error:/fatal: line says why.
+        const lines = String(stderr || "").trim().split("\n").filter(Boolean);
+        const why = lines.find((l) => /^(error|fatal):/.test(l)) || lines.pop() || (err.killed ? `timed out after ${timeoutMs} ms` : err.message);
+        reject(new Error(why));
+      });
+    });
+
+export interface RepoFreshness {
+  repo: string;
+  /** Checkout HEAD (full sha; the web shows 7). */
+  sha?: string;
+  /** Last time this checkout heard from GitHub: newest of `.git/FETCH_HEAD` (any fetch/pull, cron included) and our last good pull. */
+  syncedAt?: string;
+  /** Commits on the upstream branch (origin/main) not in HEAD, as of the last fetch. */
+  behind?: number;
+  ahead?: number;
+  /** Last pull failed (diverged, network,...) or the tree is dirty: shown amber with this on hover. */
+  error?: string;
+  pulling?: boolean;
+}
+
+export interface RefreshResult extends RepoFreshness {
+  /** HEAD moved. */
+  pulled: boolean;
+  /** Refused: this repo was refreshed less than refreshMinMs ago. */
+  rateLimited?: boolean;
+}
+
+export interface FreshnessOptions {
+  git?: GitOut;
+  /** Drop the spines.py cache of repoDir. */
+  invalidate?: (repoDir: string) => void;
+  now?: () => number;
+  log?: (msg: string) => void;
+  /** Pull on open when the last pull is older than this (default 60 s). */
+  openMaxAgeMs?: number;
+  /** An open waits for its pull at most this long (default 3 s), then serves what it has. */
+  openWaitMs?: number;
+  /** the same for a repo pulled before (default openWaitMs; the console sets 0: it serves the last trees meanwhile). */
+  reopenWaitMs?: number;
+  /** the poll skips a repo pulled less than this ago (default 0 = always ask; the console mounts its poll interval). */
+  pollSkipMs?: number;
+  /** Refresh at most once per this per repo (default 5 s). */
+  refreshMinMs?: number;
+  /** stale-lock self-heal (default on, false = off). */
+  healLock?: LockHealer | false;
+  /** read HEAD and the upstream from.git (no git child) when the layout allows; default on with the real git. */
+  headFromFiles?: boolean;
+  /** keep a checkout's uncommitted-changes check this long per HEAD (default 60 s). */
+  dirtyMaxAgeMs?: number;
+}
+
+interface RepoState {
+  lastOkAt?: number;
+  error?: string;
+  refreshedAt?: number;
+}
+
+export function createFreshness(o: FreshnessOptions = {}) {
+  const git = o.git ?? gitOut();
+  const now = o.now ?? (() => Date.now());
+  const log = o.log ?? ((m: string) => console.warn(m));
+  const openMaxAgeMs = o.openMaxAgeMs ?? 60_000;
+  const openWaitMs = o.openWaitMs ?? 3_000;
+  const reopenWaitMs = o.reopenWaitMs ?? openWaitMs;
+  const refreshMinMs = o.refreshMinMs ?? 5_000;
+  const pollSkipMs = o.pollSkipMs ?? 0;
+  const puller = createRepoPuller({ git: (d, a) => git(d, a).then(() => undefined), log, now, healLock: o.healLock });
+  const state = new Map<string, RepoState>();
+  const st = (dir: string) => state.get(dir) ?? (state.set(dir, {}), state.get(dir)!);
+  const inFlight = new Map<string, Promise<boolean>>();
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  // HEAD from the files when the checkout is a plain one (no git child), else git as before. Only for the real git:
+  // a test's fake git answers from its own script.
+  const fromFiles = o.headFromFiles ?? !o.git;
+  const dirtyMaxAgeMs = o.dirtyMaxAgeMs ?? 60_000;
+  const dirtyMemo = new Map<string, { at: number; sha?: string; value?: string }>();
+  const head = (dir: string) => {
+    const sha = fromFiles ? headSha(dir) : undefined;
+    return sha ? Promise.resolve(sha) : git(dir, ["rev-parse", "HEAD"]).then((s) => s.trim(), () => undefined);
+  };
+  /** ahead/behind per (HEAD, upstream) pair: it only changes when one of them moves. */
+  const counts = new Map<string, { key: string; ahead: number; behind: number }>();
+
+  /** One ff-only pull of dir (concurrent callers share it); drops the cache when HEAD moved (or always when forced). Resolves true when HEAD moved. */
+  const pullAndDrop = (dir: string, dropAlways = false): Promise<boolean> => {
+    const running = inFlight.get(dir);
+    if (running) return dropAlways ? running.then((moved) => (moved || o.invalidate?.(dir), moved)) : running;
+    const p = (async () => {
+      const before = await head(dir);
+      const r = await puller.pull(dir);
+      const after = await head(dir);
+      const s = st(dir);
+      if (r.ok) {
+        s.lastOkAt = now();
+        s.error = await dirtyReason(dir);
+      } else s.error = r.reason;
+      const moved = !!after && after !== before;
+      if (moved || dropAlways) o.invalidate?.(dir);
+      return moved;
+    })().finally(() => inFlight.delete(dir));
+    inFlight.set(dir, p);
+    return p;
+  };
+
+  const dirtyReason = async (dir: string): Promise<string | undefined> => {
+    try {
+      const changed = (await git(dir, ["status", "--porcelain", "--untracked-files=no"])).split("\n").filter(Boolean).length;
+      return changed ? `checkout has ${changed} uncommitted change${changed === 1 ? "" : "s"} (left as is, nothing reset)` : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** Pull on open: when the last pull of dir is older than openMaxAgeMs, start one and wait for it at most openWaitMs. */
+  const onOpen = async (dir: string): Promise<void> => {
+    let p = inFlight.get(dir);
+    const at = puller.lastPullAt(dir);
+    if (!p) {
+      if (at !== undefined && now() - at < openMaxAgeMs) return;
+      p = pullAndDrop(dir);
+    }
+    const waitMs = at === undefined ? openWaitMs : reopenWaitMs;
+    if (waitMs <= 0) return void p.catch(() => false);
+    let t: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([p.catch(() => false), new Promise((r) => (t = setTimeout(r, waitMs)))]);
+    if (t) clearTimeout(t);
+  };
+
+  const fetchHeadAt = (dir: string): number | undefined => {
+    try {
+      // A worktree's.git is a file; the main checkouts the console reads have a.git directory.
+      return fs.statSync(path.join(dir, ".git", "FETCH_HEAD")).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const status = async (dir: string): Promise<RepoFreshness> => {
+    const s = state.get(dir);
+    const sha = await head(dir);
+    let ahead: number | undefined;
+    let behind: number | undefined;
+    const up = fromFiles && sha ? upstreamSha(dir) : undefined;
+    const key = up ? `${sha}:${up}` : undefined;
+    const known = key ? counts.get(dir) : undefined;
+    if (known && known.key === key) [ahead, behind] = [known.ahead, known.behind];
+    else
+      try {
+        const [a, b] = (await git(dir, ["rev-list", "--left-right", "--count", "HEAD...@{u}"])).trim().split(/\s+/).map(Number);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          [ahead, behind] = [a, b];
+          if (key) counts.set(dir, { key, ahead: a, behind: b });
+        }
+      } catch {
+        /* no upstream */
+      }
+    const synced = Math.max(fetchHeadAt(dir) ?? 0, s?.lastOkAt ?? 0);
+    // a repo this process never pulled ran `git status` on every status call (each /api/freshness poll)
+    let error = s?.error;
+    if (!s) {
+      const m = dirtyMemo.get(dir);
+      if (m && m.sha === sha && now() - m.at < dirtyMaxAgeMs) error = m.value;
+      else dirtyMemo.set(dir, { at: now(), sha, value: (error = await dirtyReason(dir)) });
+    }
+    return {
+      repo: path.basename(dir),
+      ...(sha ? { sha } : {}),
+      ...(synced ? { syncedAt: new Date(synced).toISOString() } : {}),
+      ...(behind !== undefined ? { behind, ahead } : {}),
+      ...(error ? { error } : {}),
+      ...(inFlight.has(dir) ? { pulling: true } : {}),
+    };
+  };
+
+  /** Refresh button: fetch + ff-only pull + cache drop, once per refreshMinMs per repo. */
+  const refresh = async (dir: string): Promise<RefreshResult> => {
+    const s = st(dir);
+    if (s.refreshedAt !== undefined && now() - s.refreshedAt < refreshMinMs) return { ...(await status(dir)), pulled: false, rateLimited: true };
+    s.refreshedAt = now();
+    const pulled = await pullAndDrop(dir, true);
+    return { ...(await status(dir)), pulled };
+  };
+
+  /**
+   * One poll: `git ls-remote origin main` per repo; a remote sha HEAD does not already contain → pull.
+   * a repo pulled here within `pollSkipMs` (an open, a run end, Refresh) is not asked again.
+   */
+  const poll = async (dirs: string[]): Promise<void> => {
+    for (const dir of [...new Set(dirs)]) {
+      const pulledAt = puller.lastPullAt(dir);
+      if (pulledAt !== undefined && now() - pulledAt < pollSkipMs) continue;
+      try {
+        const remote = (await git(dir, ["ls-remote", "origin", "refs/heads/main"])).trim().split(/\s+/)[0];
+        const local = await head(dir);
+        if (!remote || !local || remote === local) continue;
+        // Local is ahead (a console spine write not pushed yet): nothing to pull.
+        const contained = await git(dir, ["merge-base", "--is-ancestor", remote, "HEAD"]).then(() => true, () => false);
+        if (!contained) await pullAndDrop(dir);
+      } catch (e) {
+        log(`freshness poll ${dir}: ${(e as Error).message}`);
+      }
+    }
+  };
+
+  const start = (everyMs: number, dirs: () => string[]) => {
+    if (timer || everyMs <= 0) return;
+    let busy = false;
+    timer = setInterval(() => {
+      if (busy) return;
+      busy = true;
+      // A throw from dirs (its db closed, a bad row) is logged, never an uncaught exception in the timer.
+      void Promise.resolve()
+        .then(() => poll(dirs()))
+        .catch((e) => log(`freshness poll: ${(e as Error).message}`))
+        .finally(() => (busy = false));
+    }, everyMs);
+    timer.unref?.();
+  };
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+  };
+
+  return { onOpen, status, refresh, poll, start, stop, pullAndDrop };
+}
+
+export type Freshness = ReturnType<typeof createFreshness>;
+
+/** First timestamp in a `Verified at:` value; a bare date counts as the end of that day (UTC). */
+export function parseVerifiedAt(v: string | null | undefined): number | undefined {
+  const m = /(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2})?)\s*(Z|[+-]\d{2}:?\d{2})?)?/.exec(v ?? "");
+  if (!m) return undefined;
+  const t = m[2] ? Date.parse(`${m[1]}T${m[2].length === 5 ? m[2] + ":00" : m[2]}${m[3] ?? "Z"}`) : Date.parse(`${m[1]}T23:59:59Z`);
+  return Number.isFinite(t) ? t : undefined;
+}
+
+export interface NarrativeAge {
+  verifiedAt?: string;
+  /** Newest commit on a descendant spine or ticket file. */
+  childCommitAt?: string;
+  /** How far the Current State is behind its children (only when a child is newer): minutes, and hours rounded. */
+  behindMinutes?: number;
+  behindHours?: number;
+}
+
+/** Item 7: is the spine's Current State (prose, `Verified at`) older than the newest commit on its descendants? */
+export async function narrativeAge(git: GitOut, repoDir: string, verifiedAt: string | null | undefined, childPaths: string[]): Promise<NarrativeAge> {
+  const v = parseVerifiedAt(verifiedAt);
+  const out: NarrativeAge = v !== undefined ? { verifiedAt: new Date(v).toISOString() } : {};
+  const paths = [...new Set(childPaths)].filter(Boolean);
+  if (!paths.length) return out;
+  const at = await git(repoDir, ["log", "-1", "--format=%cI", "--", ...paths]).then((s) => s.trim(), () => "");
+  const c = at ? Date.parse(at) : NaN;
+  if (!Number.isFinite(c)) return out;
+  out.childCommitAt = new Date(c).toISOString();
+  if (v !== undefined && c > v) {
+    out.behindMinutes = Math.max(1, Math.round((c - v) / 60_000));
+    out.behindHours = Math.round((c - v) / 3_600_000);
+  }
+  return out;
+}

@@ -1,0 +1,5 @@
+/* the app's faces. Inter and Instrument Sans (OFL), Latin subset, loaded with the app so every screen looks the same on any machine. */
+@font-face { font-family: "Inter"; font-weight: 400; font-display: swap; src: url(./assets/fonts/inter-400.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500 700; font-display: swap; src: url(./assets/fonts/inter-600.woff2) format("woff2"); }
+@font-face { font-family: "Instrument Sans"; font-weight: 600; font-display: swap; src: url(./assets/fonts/instrument-sans-600.woff2) format("woff2"); }
+

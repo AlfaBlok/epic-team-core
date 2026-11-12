@@ -1,0 +1,92 @@
+{
+  "root": "docs/EPIC-906-outcome.md",
+  "nodes": [
+    {
+      "id": "EPIC-906",
+      "path": "docs/EPIC-906-outcome.md",
+      "title": "EPIC-906: Outcome card",
+      "parent": null,
+      "status": "done",
+      "rollup_status": "done",
+      "dod": [
+        {
+          "id": "E6-1",
+          "text": "The console shows the verdict on every milestone page",
+          "done": true
+        },
+        {
+          "id": "E6-2",
+          "text": "Activity is a run timeline with spine commits",
+          "done": true
+        }
+      ],
+      "children": [
+        "docs/EPIC-907-open.md"
+      ],
+      "done_means": [
+        {
+          "id": "E6-1",
+          "text": "The console shows the verdict on every milestone page",
+          "done": true
+        },
+        {
+          "id": "E6-2",
+          "text": "Activity is a run timeline with spine commits",
+          "done": true
+        }
+      ],
+      "pages": [
+        {
+          "path": "docs/outcome/notes.md",
+          "title": "Notes",
+          "via": "docs/EPIC-906-outcome.md"
+        }
+      ],
+      "outcome": {
+        "verdict": "accomplished",
+        "sentence": "Sam sees, on every milestone, whether it was accomplished and the runs that got it there.",
+        "evidence": [
+          {
+            "done_means": "E6-1 The console shows the verdict on every milestone page",
+            "links": [
+              "https://github.com/Acme/home_repo/pull/12",
+              "0891cbb"
+            ]
+          },
+          {
+            "done_means": "E6-2 Activity is a run timeline with spine commits",
+            "links": [
+              "PR #13",
+              "docs/spines/m2-team-console.md"
+            ]
+          }
+        ],
+        "risk": "commits outside the spine's folder are not listed",
+        "closed_at": "2026-10-20",
+        "closed_by": "run_0f3c"
+      }
+    },
+    {
+      "id": "EPIC-907",
+      "path": "docs/EPIC-907-open.md",
+      "title": "EPIC-907: Open",
+      "parent": "docs/EPIC-906-outcome.md",
+      "status": "active",
+      "rollup_status": "active",
+      "dod": [],
+      "children": [],
+      "outcome": null,
+      "current_state": {
+        "status": "active",
+        "last_attempted": "2026-10-20 timeline built (3e563d0)",
+        "result": "card renders",
+        "evidence": "PR #14, 3e563d0",
+        "waiting_on": "Sam's approval of the card copy",
+        "next_action": "Sam reviews the card",
+        "verified_at": "2026-10-20"
+      }
+    }
+  ],
+  "orphans": [],
+  "mismatches": []
+}

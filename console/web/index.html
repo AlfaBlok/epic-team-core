@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
+    <title>EpicTeam</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+    <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16">
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <!-- the phone's status bar and system bar take the app's colour (dark #09090b, light #ffffff); the script below
+         sets them to the theme the app opens in. The status bar is see-through on iOS, the page pads under it (safe-area). -->
+    <meta name="theme-color" content="#09090b" data-app-theme>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- installable from the phone's browser (Add to Home Screen opens it full screen, its own icon, no browser bar). -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="EpicTeam">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="EpicTeam">
+    <meta property="og:url" content="https://team.example.com/">
+    <meta property="og:title" content="EpicTeam">
+    <meta property="og:description" content="The agent team's console. Goals, reviews and asks in one place.">
+    <meta property="og:image" content="https://team.example.com/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="EpicTeam">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="EpicTeam">
+    <meta name="twitter:description" content="The agent team's console. Goals, reviews and asks in one place.">
+    <meta name="twitter:image" content="https://team.example.com/og-image.png">
+    <script>
+      try {
+        const t = localStorage.getItem("theme");
+        if (t === "dark" || (!t && matchMedia("(prefers-color-scheme: dark)").matches))
+          document.documentElement.classList.add("dark");
+        else {
+          document.querySelector("meta[data-app-theme]").content = "#ffffff";
+          // Light theme: an opaque light status bar (white text on a light page would vanish).
+          document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]').content = "default";
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

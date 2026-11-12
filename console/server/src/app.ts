@@ -1,0 +1,3703 @@
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+import { createHash } from "node:crypto";
+import { headSha } from "./gitRefs.js";
+import { Hono, type Context } from "hono";
+import { compress } from "hono/compress";
+import { HTTPException } from "hono/http-exception";
+import type { ZodSchema, z } from "zod";
+import { DEFAULT_TENANT, defaultDbPath, ensureTenancy, type DB } from "./db.js";
+import { createStore, forTenant, UnknownReference, type Milestone, type Persona, type Run } from "./store.js";
+import * as s from "./schemas.js";
+import { logToggle, toggleActorFor, worldToggleRefusal } from "./assignmentToggle.js";
+import { locate } from "./adapters/milestone.js";
+import { listRepos, resolveRepo } from "./adapters/repos.js";
+import { mountLanding, mountLandingMarks } from "./landing.js";
+import { readSeats, seatBlockerFor } from "./adapters/seats.js";
+import { movingLimit, stalledWake, STALL_WATCH_BY } from "./cycle/movement.js";
+import { runStats, runsOfMilestones, wakesDidSomething } from "./runStats.js";
+import { activeSeries, BUCKETS, dayBounds, localDay, validTimeZone } from "./activeAgents.js";
+import { createMovement } from "./cycle/movementRoutes.js";
+import { currentStateFor, doctrineFor, docTitleFor, dodFor, invalidateSpines, outcomeFor, softSpines, SPINES_TIMEOUT_MS, type SpinesJson } from "./adapters/spines.js";
+import { deriveVerdict, runCommitsLookup, type RunCommit } from "./adapters/outcome.js";
+import { buildTree, subtree, treeTodoSection, type Tree } from "./adapters/tree.js";
+import { DEFAULT_OWNER, ownerOf } from "./tenancy/owner.js";
+import { activeGrantsFor } from "./cycle/grants.js";
+import { runStateFor } from "./cycle/runState.js";
+import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
+import { repeatStreak } from "./cycle/repeat.js";
+import { followUp } from "./cycle/followUp.js";
+import { childEpicsFor } from "./cycle/children.js";
+import { textHash } from "./cycle/skipUnchanged.js";
+import { listTemplates } from "./personaTemplates.js";
+import { mountUnblockerStats } from "./cycle/unblockerStats.js";
+import { mountWakeStats } from "./cycle/wakeStats.js";
+import { commentHash, evidenceHash, mountAskMemory, readAskMemory, rememberChecks, withCarriedChecks } from "./cycle/askMemory.js";
+import { bindRubricRepo, mountRubric, rubricOfRun, rubricProblem, stampRubric } from "./cycle/rubric.js";
+import { spinesRoutes, trackedIn } from "./routes/spines.js";
+import { deriveMilestone, readConfigFromEnv, readRoutes, type ReadConfig } from "./routes/read.js";
+import { createCycle, SETTLED_REASON, type CycleOptions, type RunState } from "./cycle/service.js";
+import { mountCycle } from "./cycle/routes.js";
+import { createDesk, migrateDesk } from "./desk/desk.js";
+import { BIG_ROOTS_FILE, createTeamState, TEAM_REPO_DEFAULT, teamRepoWrites } from "./team/teamState.js";
+import { createMilestoneRecord, RecordError } from "./team/milestoneRecord.js";
+import { createPersonaRecord } from "./team/personaRecord.js";
+import { createAssignmentRecord } from "./team/assignmentRecord.js";
+import { packIntakeRunner } from "./desk/packIntake.js";
+import { mountDesk } from "./desk/routes.js";
+import { deliveryFor } from "./desk/delivery.js";
+import { createRepoIndex, type RepoScan } from "./desk/repoIndex.js";
+import { createMilestoneChats, spinesBindRunner } from "./desk/milestoneChat.js";
+import { sinceBlock } from "./desk/since.js";
+import { mountChatScope } from "./desk/scope.js";
+import { claimsFor, claimsSection, mountChatDispatch } from "./desk/dispatch.js";
+import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, hasStandingDuty, noteAck } from "./wakePrompt.js";
+import { mountInbox } from "./inbox/routes.js";
+import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } from "./inbox/redLineEdit.js";
+import { withCounts, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
+import { readBuilding } from "./building.js";
+import { createPursuits } from "./pursuits.js";
+import { createLeases, mountClaims } from "./review/leases.js";
+import { createCheckoutSync, mountCheckoutSync, type CheckoutSync } from "./status/checkoutSync.js";
+import { createJobServers, mountJobServers, type JobServers } from "./status/jobServers.js";
+import { createReview, liveCheckDepsFromEnv, mountReview, reviewItemsOf, runReview, type LiveCheckDeps } from "./review/review.js";
+import { createAgentWake } from "./review/agentWake.js";
+import type { PostReview } from "./review/postCards.js";
+import { createWebPush, mountWebPush, vapidFromEnv, type PushTransport, type Vapid } from "./notify/webpush.js";
+import { asksFrom, reviewNotices, teamLink, type Sender } from "./notify/notice.js";
+import { cachedSudoRead as sudoRead } from "./secretCache.js";
+import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteList } from "./plug/memory.js";
+import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
+import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
+import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
+import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
+import type { WaitingItem } from "./inbox/waiting.js";
+import { anthropicStoreFile, ANTHROPIC_TEXT_MODEL, textModelProvider } from "./textModel.js";
+import { secretFromFile } from "./auth/signedHook.js";
+import { mountPlugs, type BrowserOptions, type CreditNotice, type DiskWatch, type AskWorderShape, type HostedPlug, type PackCheck, type Notifier, type WorldDesksArea, type MemoryArea } from "./plug/hosted.js";
+import { hooks, registeredPlugs } from "./plug/hooks.js";
+import type { SecretPut } from "./plug/keys.js";
+import { askLine, raiseAsk, retireAsk, type RaiseDeps } from "./inbox/raise.js";
+import { askGateProblem, heldAsksSection } from "./inbox/askGate.js";
+import { datedReport, heldWhat, monitorValue, monitorWhat, writeMonitoring } from "./repoState/monitoringLine.js";
+import { carryNeedsJordi } from "./inbox/carry.js";
+import { carryE62s8 } from "./repoState/carryE62s8.js";
+import { createSpineWriter, type SpineWrite, type SpineWriter } from "./inbox/spineWrite.js";
+import { groupEdits } from "./inbox/groupWrite.js";
+import { createCloneWriter } from "./inbox/writeClone.js";
+import { createPresses } from "./press/presses.js";
+import { mountPresses, type PressWorker } from "./press/mount.js";
+import { createAfterClose, mountAfterClose } from "./review/afterClose.js";
+import { computeReviewRows, TEST_REPO, TEST_ROW } from "./review/rows.js";
+import { createPressTest, PRESS_TEST_RUN, pressTestHome, type PressTest, type ListLeak } from "./press/dailyTest.js";
+import { mountApprovals, wakeDeliveryManager } from "./approvals.js";
+import { createSteps, keyInIndex, mountSteps } from "./steps/steps.js";
+import { stepVoicePage } from "./steps/stepVoice.js";
+import { copyPasteInText, copyPasteProblem } from "./steps/copyPaste.js";
+import { alertReasons, askLookupIn, askRefs, monitorAlerts, monitorAlertSection, refKey, worldHost } from "./status/monitorAlert.js";
+import { askedNoRowFor, askedNoRowSection, dedupeAsked, mountAskedNoRow, subtree as spineSubtree, type AskedNoRow } from "./status/askedNoRow.js";
+import { gitRun, mountOrphanCommits, orphanCommitsIn, orphanSection, sinceFor, type OrphanCommit } from "./status/orphanCommits.js";
+import { cliRunner, libraryRepo, mountTeamSkills, readLibrary, readWorldSkills, wakeSkillCheck, type CliRun, type WorldSkillsOf } from "./teamSkills.js";
+import { threadRefusal, worldOfAssignment, worldOfRun } from "./cycle/threadBinding.js";
+import { citedAskCodes, isDeliveryManager, isUnblocker, parseAsks, unblockerChecksProblem } from "./inbox/asks.js";
+import { answeredReferences, isDm, waitingAndDefects, waitingAndHeld, waitingOnJordi, type WaitingDeps } from "./inbox/waiting.js";
+import { releaseHeld } from "./cycle/held.js";
+import { createUsageCollector, type UsageOptions } from "./usage/collector.js";
+import { createStatus, mountStatus, coverOfIn } from "./status/routes.js";
+import { mountAlertActions } from "./status/alertActions.js";
+import { asksForSettle, deskOnly, mountMark, SETTLE_OK, SETTLE_REFUSED } from "./status/mark.js";
+import { mountStamp } from "./status/stamp.js";
+import { mountTreeAdd } from "./status/add.js";
+import { createTicketSessions, migrateTicketSessions, mountTicketSessions } from "./tickets/sessions.js";
+import { selfReadied } from "./cycle/selfReady.js";
+import { readyToMarkOf } from "./status/autoSettle.js";
+import { redCount } from "./status/compute.js";
+import { mountUsage, runLiveUsageLookup, runUsageLookup } from "./usage/routes.js";
+import { mountFreshness, type FreshnessMount } from "./routes/freshness.js";
+import { createNewAskWaker, defaultCadenceFor, gitAuthorRun, type NewAskWaker } from "./cycle/newAskWake.js";
+import { gitOut } from "./freshness.js";
+import { createBook, bookStore, followBook, BOOK_TTL_MS } from "./book/service.js";
+import { launchIndexer, type IndexerHandle, type IndexerLaunchMode } from "./indexer/launch.js";
+import { ensureIndexerTables, indexerBeat, kvAt, kvSet, sendToIndexer } from "./indexer/queue.js";
+import { persistedSpinesRunner } from "./indexer/spinesCache.js";
+import { slimBook, type Book, type BookEpic } from "./book/build.js";
+import { milestoneBook } from "./book/milestone.js";
+import { bookUrls, bookWithChecks, createLinkChecker, type Fetcher } from "./book/links.js";
+import { createBookRefresh, realProbe, REFRESH_HOUR_UTC, type ProbeRunner } from "./book/refresh.js";
+import { readBigRocks, BIG_ROCKS_FILE } from "./deck/bigRocks.js";
+import { arcFor, readArcs } from "./deck/arcs.js";
+import { deckList, epicDeck, findEpic, deckCode, deckHref, type DeckRef, type DeckTrendPoint, type EpicDeck } from "./deck/build.js";
+import { createDeckNotify, DECK_UPDATES_FILE, type DeckNotify } from "./deck/notify.js";
+import { deckWorkers, rocksAbout, utcHourText, type DeckAbout } from "./deck/about.js";
+import { createRepoPuller, type PullResult } from "./cycle/repoPull.js";
+import { mountProviders } from "./providers/routes.js";
+import { noticeRef, parseNoticeRef } from "./plug/marks.js";
+import { ensureAuth } from "./auth/schema.js";
+import { authModeFromEnv, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
+import { customerHosts, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
+import { mountOAuth } from "./auth/oauth.js";
+import { socialHead, TEAM_HEAD } from "./brand.js";
+import { requestScopedStore } from "./auth/scopedStore.js";
+import { createAttachments, mountAttachments } from "./desk/attachments.js";
+import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
+import { milestoneRanks } from "./inbox/priority.js";
+import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
+import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { mountReplyVoice } from "./voice/speak.js";
+import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
+import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
+import { anthropicTouchJudge, createNoteTouch, openAiTouchJudge, type NoteTouch, type TouchCard, type TouchJudge } from "./voice/touch.js";
+import { addMarks } from "./review/noteMarks.js";
+import { createVoiceNotes, mountVoiceNotesRec, openAiTranscriber, type Transcriber, type VoiceNotes } from "./voice/notes.js";
+import { campaignQuickStatus, milestoneInstructions, milestoneTools } from "./voice/milestoneCall.js";
+import { createChatUnread } from "./desk/unread.js";
+import { DeskError, TEAM_KEY, type DeskMessage } from "./desk/session.js";
+import { mountCounts } from "./counts.js";
+import { deskInboxSection, mountDeskInbox, readInbox } from "./desk/inbox.js";
+import { citeOf, handImprovement, improvementsOutSection, improvementsTakenSection, resolveImprovementTarget, type WorldRow } from "./inbox/improvement.js";
+import { bookBrief, briefing, treeBrief, type TreeEntry } from "./voice/brief.js";
+import { ownerOfPath } from "./auth/routeScope.js";
+import { ensureWorldStamps, milestoneWorld, mountWorldFilters } from "./tenancy/world.js";
+import { worldClaims } from "./tenancy/repoScope.js";
+import { configureRepoScope, milestoneRepoRefusal } from "./tenancy/repoScope.js";
+import { createSpineReads } from "./spineReads.js";
+import { createReadModelHost, type ReadModelHost } from "./readModel/host.js";
+import { driftLine, type DriftResult } from "./readModel/drift.js";
+import type { AnswerJobs } from "./inbox/answerJobs.js";
+import { viewWaiting, computeWaiting, computeStatus, type WaitingPayload } from "./readModel/views.js";
+import { sameRepo } from "./adapters/repoNames.js";
+import { homeRepo, homeWorld, type HostId, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, workerHost } from "./identity.js";
+import { identityIndex, originFile } from "./identityPage.js";
+
+/** the owner's own milestone Call (voice/milestoneCall.ts): also what a one-team console's every Call reads. */
+const MILESTONE_CALL = { instructions: (n: string) => milestoneInstructions(n), tools: (n?: string) => milestoneTools(n ?? "") };
+
+/** the one-team core has no memory service (the services plug reads the memory service). */
+const NO_MEMORY = "this console has no memory service (the services plug)";
+
+/** the one-team core has the Team desk only: every world desk call answers 404 (the tenancy plug makes them). */
+const ONE_TEAM_DESKS: WorldDesksArea = {
+  chatFor: () => {
+    throw new DeskError(404, "not_found", "this console has one team: no world desks");
+  },
+  view: async () => {
+    throw new DeskError(404, "not_found", "this console has one team: no world desks");
+  },
+  send: async () => {
+    throw new DeskError(404, "not_found", "this console has one team: no world desks");
+  },
+  tick: async () => undefined,
+  runHeader: (w) => `world-desk:${w}`,
+  bearer: () => "",
+  mount: () => undefined,
+};
+
+class ApiError extends Error {
+  constructor(
+    readonly status: 400 | 403 | 404 | 409 | 422 | 502,
+    readonly code: string,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+async function body<T extends ZodSchema>(c: Context, schema: T, fill?: (raw: unknown) => unknown): Promise<z.infer<T>> {
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    throw new ApiError(400, "invalid_json", "request body must be valid JSON");
+  }
+  if (fill) raw = fill(raw);
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new ApiError(400, "validation_error", "invalid request body", parsed.error.issues);
+  return parsed.data;
+}
+
+/** ?includeSettled=true|1 (default false) shows settled milestones in list endpoints. */
+const includeSettled = (c: Context) => ["true", "1"].includes(c.req.query("includeSettled") ?? "");
+/** the repo whose root spine is the Team desk's Epic Book (the desk call's book brief). */
+const DESK_BOOK_REPO = homeRepo();
+
+function found<T>(v: T | undefined, what: string, id: string): T {
+  if (v === undefined) throw new ApiError(404, "not_found", `${what} ${id} not found`);
+  return v;
+}
+
+/** icon path → the social product's file (web/public), served on the social hosts. */
+export const SOCIAL_ICONS: Record<string, string> = {
+  "/favicon.svg": "favicon-social.svg",
+  "/favicon.ico": "icon-social-192.png",
+  "/apple-touch-icon.png": "apple-touch-icon-social.png",
+  "/icon-192.png": "icon-social-192.png",
+  "/icon-512.png": "icon-social-512.png",
+  // logo C's 16/32 px tab icons and the 1200x630 share image
+  "/favicon-16.png": "favicon-16-social.png",
+  "/favicon-32.png": "favicon-32-social.png",
+  "/og-image.png": "og-image-social.png",
+  // the home-screen app's name and icons
+  "/manifest.webmanifest": "manifest-social.webmanifest",
+};
+
+/** a static file read once per (path, mtime, size), with its gzip (text types over 1 kB) and an ETag. */
+const staticFiles = new Map<string, { key: string; raw: Buffer; gzip?: Buffer; etag: string }>();
+function staticFile(file: string): { raw: Buffer; gzip?: Buffer; etag: string } {
+  const st = fs.statSync(file);
+  const key = `${st.mtimeMs}:${st.size}`;
+  const have = staticFiles.get(file);
+  if (have?.key === key) return have;
+  const raw = fs.readFileSync(file);
+  const text = /\.(?:html|js|mjs|css|json|svg|txt|webmanifest)$/.test(file);
+  const out = { key, raw, ...(text && raw.length > 1024 ? { gzip: zlib.gzipSync(raw, { level: 6 }) } : {}), etag: `"${createHash("sha1").update(raw).digest("base64url").slice(0, 20)}"` };
+  staticFiles.set(file, out);
+  return out;
+}
+
+/** index.html with the social product's head, made once per index version (same caching as the file it comes from). */
+const socialIndexes = new Map<string, { raw: Buffer; gzip?: Buffer; etag: string }>();
+function socialIndex(f: { raw: Buffer; etag: string }): { raw: Buffer; gzip?: Buffer; etag: string } {
+  const have = socialIndexes.get(f.etag);
+  if (have) return have;
+  const raw = Buffer.from(socialHead(f.raw.toString("utf8")));
+  const out = { raw, ...(raw.length > 1024 ? { gzip: zlib.gzipSync(raw, { level: 6 }) } : {}), etag: `"${createHash("sha1").update(raw).digest("base64url").slice(0, 20)}"` };
+  socialIndexes.clear();
+  socialIndexes.set(f.etag, out);
+  return out;
+}
+
+function contentType(file: string): string {
+  const types: Record<string, string> = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".txt": "text/plain; charset=utf-8",
+    ".webmanifest": "application/manifest+json",
+  };
+  return types[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+}
+
+/** The credit account's key for the Claude text calls: the store file, never a generic ANTHROPIC_API_KEY from the unit's env. */
+const anthropicKey = async () => process.env.CONSOLE_ANTHROPIC_API_KEY || (await sudoRead(anthropicStoreFile()));
+
+export function createApp(
+  db: DB,
+  opts: { /** the hosted layer's plugs (default hostedFromEnv: ours, none with CONSOLE_ONE_TEAM=1). */ hosted?: readonly HostedPlug[]; staticDir?: string; /** the landing reports' folder (default docs/landing in the code repo checkout). */ landingDir?: string; read?: ReadConfig; cycle?: CycleOptions; browser?: BrowserOptions;
+    /** tester worlds' own Team Browser instances (tests fake the runner); default from env, off unless CONSOLE_BROWSER_INSTANCES=on. */ browserInstances?: { enabled?: boolean; [k: string]: unknown };
+    /** `secret put` runner (tests fake it). */ secretPut?: SecretPut;
+    /** Secrets page sources (tests point them at fixtures; the secrets plug reads them). */ secrets?: { put?: SecretPut; [k: string]: unknown };
+    /** token usage per run (no scanner = nothing collected); sweepMs starts the periodic sweep. */ usage?: UsageOptions & { sweepMs?: number; /** live read of running runs every liveMs (0/unset = off) */ liveMs?: number };
+    /** source freshness (pull on open, ls-remote poll, Refresh); off unless enabled. */ freshness?: FreshnessMount;
+    /** new ask wakes the Unblocker (on with the cycle; enabled: false turns it off; headWatchMs: watch HEAD of every checkout). */
+    /** the lease sweep (an expired claim gives its row back to ready); 0 / absent = off (tests). */
+    leases?: { everyMs?: number };
+    /** the red line rewording from his words (tests pass their own; default the console's text model). */
+    redLineReword?: Reworder;
+    /** compare every tracked checkout with origin/main this often; out of sync over 5 min alerts. 0 / absent = off (tests). */
+    checkoutSync?: { everyMs?: number; afterMs?: number };
+    /** the worker server's home volume free space (`df` over the worker server ssh); no probe = off. */
+    hostDisk?: { everyMs?: number; probe?: () => Promise<string>; minFreePct?: number };
+    /** job servers' records from box/provision.py (status lines, alerts, spend) in `dir`; no dir = off. */
+    jobServers?: { everyMs?: number; dir?: string };
+    /** the review gate sweep (rows that are not cards wake their Delivery manager once); 0 / absent = off (tests). */
+    reviewGate?: { everyMs?: number; closeEveryMs?: number };
+    newAskWake?: { enabled?: boolean; debounceMs?: number; headWatchMs?: number; git?: (dir: string, args: string[]) => Promise<string>; pull?: (dir: string) => Promise<unknown> };
+    /** desk background pass (endpoint-list update, delivered notes) every this many ms; off unless set. */ deskTickMs?: number;
+    /** the Company view's uptime checks (each company's ops sites and EpicBooks); period, 0 / absent = off (tests). */
+    uptimeProbe?: { everyMs?: number };
+    /** the social product KPI recorder (data/kpi-daily.md in each social repo, once per UTC day); check period, 0 / absent = off (tests, staging). */ kpiRecord?: { everyMs?: number };
+    /** the launch board, run from the code repo checkout (tests fake `run`); everyMs 0 / absent = no timer (it still runs on the first read). */
+    launchBoard?: { everyMs?: number; run?: () => Promise<string>; cacheFile?: string };
+    /** reads GitHub's daily views of the public code page (gh api); absent = off (tests). */
+    siteCodeViews?: ((repo: string) => Promise<{ date: string; count: number }[]>) | null;
+    /** reads GitHub's referring sites of the public code page (gh api), for backlinks; absent = off (tests). */
+    siteReferrers?: ((repo: string) => Promise<string[]>) | null;
+    /** the owner's team state repo (CONSOLE_TEAM_REPO checkout, default `team`): sync period (unset = no timer; writes on a big-root change still happen). */ teamState?: { repo?: string; everyMs?: number; /** May this boot commit and push to the team repo (default teamRepoWrites(process.env)). */ write?: boolean };
+    /** the desk's repo index: per-host scanner (none = rows stay as stored) and refresh period (unset = no background refresh). */ repoIndex?: { scan?: RepoScan; everyMs?: number };
+    /** stall watch: real Run nows only when enabled (CONSOLE_STALL_WATCH=on) and the cycle is on; dry list always. */ stallWatch?: { enabled: boolean; everyMs?: number };
+    /**
+     * tenant scope of the store (CONSOLE_TENANT; unset = unscoped, today's behaviour). Only the store is scoped:
+     * modules reading the db directly (inbox, desk, cycle side tables) stay global until S3 puts the session's tenant on
+     * each request. Set to `the home world` it must answer exactly as unset while every row is the home world's.
+     */ tenant?: string;
+    /** milestone tree memo TTL in ms (CONSOLE_TREE_TTL_MS; 0 = no memo, no coalescing). */ treeTtlMs?: number;
+    /**
+     * read model: waiting-on-you lists and statuses served from console.db, kept current off the request path.
+     * `worker` (index.ts; needs dbPath) | `in-process` (tests) | `none` (default here and CONSOLE_READ_MODEL=off: computed per request as before).
+     */
+    /**
+     * spines.py, the read model's refresher and the Epic Book's build run in the indexer, a
+     * separate niced, CPU-capped process this console starts (indexer/launch.ts; `unit` = a systemd user unit, `child` =
+     * a child process); the console only reads their results from console.db. Needs readModel.dbPath. Unset = in process.
+     */
+    indexer?: { mode: IndexerLaunchMode; port: string | number; revision?: string; onLaunched?: (h: IndexerHandle) => void };
+    readModel?: {
+      mode?: "worker" | "in-process" | "none";
+      dbPath?: string;
+      tickMs?: number;
+      patchTtlMs?: number;
+      onHost?: (h: ReadModelHost) => void;
+      /** drift check (readModel/drift.ts): period (unset/0 = off), first run, confirm wait; `alert` sends the owner a WhatsApp on drift. */
+      drift?: { everyMs?: number; firstAfterMs?: number; confirmAfterMs?: number; alert?: boolean };
+    };
+    /**
+     * answers: `ack` saved (index.ts: reply once stored, the spine write and wake run after) | done (default: the
+     * reply waits for them); retryMs = the job's pauses between tries; onJobs hands the job runner to index.ts (drain on SIGTERM).
+     */
+    answers?: { ack?: "saved" | "done"; retryMs?: number[]; onJobs?: (j: AnswerJobs) => void };
+    /** one answer closes many (inbox/settles.ts): true = with the OpenAI model check; a judge for tests; absent = off. */
+    settle?: boolean | { judge?: Judge };
+    /** many humans (people/): the time-limit sweep every tickMs (0 or unset = only on the owner's request). */
+    people?: { tickMs?: number };
+    /**
+     * a voice note filed on one item (a card's box, a slide's note, a milestone chat) is read by a small model, and
+     * what it says beyond that item goes to the world's Team desk as one line (voice/spill.ts). true = the OpenAI model check;
+     * a judge (and timer) for tests; absent = off. Needs the cycle (the desk thread) to tell anything.
+     */
+    voiceSpill?: boolean | { judge?: SpillJudge; sweepMs?: number };
+    /**
+     * the owner's message to one desk (EpicTeam's Team desk, the social product's world desk) is read by a small model, and the
+     * part that belongs to the other desk crosses at once as one message quoting him (voice/cross.ts). true = the OpenAI model
+     * check and CONSOLE_DESK_PAIRS; a judge, pairs and timer for tests; absent = off. Needs the cycle (the desk threads).
+     * that automatic part runs only with `auto: true` (CONSOLE_DESK_CROSS=1, on the owner's word); otherwise the
+     * Team desk passes a part itself through POST /api/desk/pass (the relay).
+     */
+    deskCross?: boolean | { judge?: CrossJudge; sweepMs?: number; pairs?: string; auto?: boolean };
+    /**
+     * a long note of the owner's (WhatsApp, the Team desk's Chat, a card's box) is read by a small model next to the
+     * cards in his inbox; each card it touches is marked updated or stale in its spine and its owner is woken with his words
+     * (voice/touch.ts). true = the console's text model; a judge for tests; absent = off. Wakes and the desk line need the cycle.
+     */
+    noteTouch?: boolean | { judge?: TouchJudge };
+    /**
+     * the press log and outbox (press/). tickMs: how often the worker retries presses not landed yet (0 or unset =
+     * no timer; tests call the worker); retryMs / giveUpMs: its backoff; onWorker hands the worker to index.ts / tests.
+     */
+    presses?: { tickMs?: number; retryMs?: number[]; giveUpMs?: number; onWorker?: (w: PressWorker) => void; answerFirst?: boolean };
+    /**
+     * press writes commit in the console's checkout and push in the background (retried; a commit that cannot be
+     * rebased puts its presses back in the outbox), and skip the hooks after an in-process secret check. Off in tests by
+     * default; production turns it on unless CONSOLE_PUSH_BACKGROUND=0 (index.ts).
+     */
+    backgroundPush?: boolean;
+    /** the daily press test: tick period (0/absent = no timer; index.ts sets it), the TEST repo, and fakes for tests. */
+    pressTest?: { tickMs?: number; repo?: string; now?: () => number; pollMs?: number; landingLimitMs?: number; recheckMs?: number; sleep?: (ms: number) => Promise<void> };
+    /**
+     * spine writes go through the console's own clone of each checkout (inbox/writeClone.ts) under
+     * `root`; unset = the shared checkout as before (tests, and CONSOLE_WRITE_CLONE=off in index.ts).
+     */
+    writeClones?: { root: string; enabled?: boolean };
+    /** CONSOLE_AUTH off (default) | shadow | on (D12); see auth/identity.ts. */ auth?: AuthMode;
+    /** master key file of the world secret stores (CONSOLE_WORLD_SECRETS_KEY; tests use a temp file). */ worldSecretsKey?: string;
+    /** the run-end pack check (tests fake it; default runs `pack.py validate` over the run's commits). */ packCheck?: PackCheck;
+    /**
+     * Team services (the services plug, hosted/services.ts): the Gmail backend and the status probes, the memory service
+     * entry reader, its voice-note lister, the mailbox user, poll period and secret store (tests fake them).
+     */
+    mcp?: { memoryLookup?: MemoryLookup; voiceNoteList?: VoiceNoteList; mailTickMs?: number; [k: string]: unknown };
+    /** Epic Book: rebuild age (ms), git runner (tests fake it), and a background build at start (index.ts). */
+    book?: { ttlMs?: number; git?: (dir: string, args: string[]) => Promise<string>; prewarmAfterMs?: number; tickMs?: number };
+    /** warm the milestone trees this long after the start (index.ts sets it; absent = no warm-up); onDone for tests and the log. */
+    warmTrees?: { afterMs?: number; onDone?: (r: { milestones: number; ms: number }) => void };
+    /** how old a GET /moving-now answer may be (ms, default 10 s; 0 = built per request). */
+    movingMemoMs?: number;
+    /** the books' daily refresh: tick period (0/absent = no timer; index.ts sets it), probe and pull (tests fake them). */
+    bookRefresh?: { tickMs?: number; probe?: ProbeRunner; pull?: (dir: string) => Promise<PullResult>; now?: () => number };
+    /** compare the epic decks with docs/status/deck-updates.md every tickMs (0/absent = never, as in tests). */
+    deckNotify?: { tickMs?: number; now?: () => number };
+    /** check the books' deliverable links every tickMs (0/absent = never, as in tests); fetch is injectable. */
+    linkCheck?: { tickMs?: number; fetch?: Fetcher };
+    /** review list: the live check (tests fake fetch/revision; default loopback for the console's own names + app/REVISION). */
+    review?: { live?: LiveCheckDeps };
+    /** how old the unread snapshot may get before a /counts read starts a new pass (default 20 s; tests 0). */
+    chatUnread?: { staleMs?: number };
+    /** WhatsApp alerts: tick period (0/absent = no timer; index.ts sets it), and a fake sender for tests. */
+    whatsapp?: { tickMs?: number; sender?: () => Promise<Sender | undefined>; now?: () => Date };
+    /** phone notifications: the desk pass period (0/absent = no timer; index.ts sets it), and fakes for tests. */
+    webPush?: { deskTickMs?: number; vapid?: () => Promise<Vapid | undefined>; transport?: (v: Vapid) => PushTransport; now?: () => Date; deskGraceMs?: number };
+    /** poll the memory service for the owner's new voice notes and post them to the desk every this many ms (0/absent = no timer). */
+    voiceNotes?: { tickMs?: number; now?: () => Date; hookSecret?: () => string | undefined; hookNowSec?: () => number; hookRetryMs?: number[] };
+    /**
+     * option A: Voice notes from the memory service per world (a hosted services module). `enabled` defaults to
+     * the hosted module's own switch (off in production until the owner's yes), the memory service's URL and where it
+     * delivers (the production site). Tests pass fetch, store and later.
+     */
+    /** Chat voice notes forwarded to the owner's the memory service (a hosted services module); off unless `enabled` (index.ts: not on staging or a dev copy). Tests pass fetch, join and later. */
+    memoryForward?: { enabled?: boolean; tickMs?: number; memoryUrl?: string; fetch?: typeof fetch; join?: (files: string[], out: string) => Promise<void>; later?: (fn: () => Promise<unknown>) => void };
+    memoryConnections?: { enabled?: () => boolean; memoryUrl?: string; hookBase?: string; fetch?: typeof fetch; now?: () => Date; later?: (fn: () => Promise<unknown>) => void };
+    /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
+    memoryAsk?: { worder?: AskWorderShape | true };
+    /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
+    voice?: { mint?: Minter; now?: () => number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    /** where chat attachments are kept (tests). */
+    chatAttachmentsDir?: string;
+    /**
+     * team skills: the code repo checkout (default CONSOLE_TEAM_SKILLS_REPO, else the code repo under the repos root), the
+     * `team-skills.py` runner (tests fake it) and the wake check (index.ts turns it on; off = the wake only lists the skills).
+     */
+    teamSkills?: { repoDir?: string; cli?: CliRun; wakeCheck?: boolean; syncHosts?: (HostId)[]; worker?: { ssh: string; sshKey?: string; knownHosts: string } } } = {},
+) {
+  const tenantScope = opts.tenant ?? (process.env.CONSOLE_TENANT || undefined);
+  // one store object, scoped per request to the caller's world when CONSOLE_AUTH=on (auth/scopedStore.ts).
+  const store = requestScopedStore(db, createStore(db, { tenant: tenantScope }));
+  const read0 = opts.read ?? readConfigFromEnv();
+  // with the indexer running, spines.py output comes from its cache in console.db (one read, parsed once per run).
+  const indexer =
+    opts.indexer && opts.readModel?.dbPath && read0.spines
+      ? launchIndexer({
+          mode: opts.indexer.mode,
+          port: opts.indexer.port,
+          config: {
+            dbPath: opts.readModel.dbPath,
+            reposRoot: read0.reposRoot,
+            ...(read0.skillDir ? { skillDir: read0.skillDir } : {}),
+            ...(process.env.CONSOLE_SPINES_FIXTURE ? { spinesFixture: process.env.CONSOLE_SPINES_FIXTURE } : {}),
+            ...(tenantScope ? { tenant: tenantScope } : {}),
+            authOn: (opts.auth ?? authModeFromEnv()) === "on",
+            ...(opts.teamState?.repo ? { teamRepo: opts.teamState.repo } : {}),
+            ...(opts.indexer.revision ? { revision: opts.indexer.revision } : {}),
+            ...(process.env.CONSOLE_BOOK_PREWARM === "0" ? { bookTickMs: 0 } : {}),
+          },
+        })
+      : undefined;
+  if (indexer) {
+    ensureIndexerTables(db);
+    opts.indexer?.onLaunched?.(indexer);
+  }
+  const indexerAlive = () => (indexerBeat(db)?.ageMs ?? Infinity) < 60_000;
+  const read: ReadConfig = indexer && read0.spines ? { ...read0, spines: persistedSpinesRunner(db, { alive: indexerAlive, fallback: read0.spines }) } : read0;
+  configureRepoScope(db, read.reposRoot); // world milestones resolve only to their world's own checkouts
+  // the spine reads (spines.py view, trees, derived fields) live in spineReads.ts, shared with the read-model worker.
+  const reads = createSpineReads({ db, store, reposRoot: read.reposRoot, spines: read.spines, treeTtlMs: opts.treeTtlMs });
+  const { soft, spinesFor, locateDir, treeFor, docTitleOf, withDerived, withOutcome } = reads;
+  // a stopped monitor item's ask may sit in another world (a social world repo's Reddit waits on the code repo/): an unscoped read.
+  const monitorAskLookup = askLookupIn(createStore(db, { tenant: tenantScope }), (m) => treeFor(m, 1_500), worldHost, (m) => resolveRepo(read.reposRoot, m.repo)?.name);
+  /** the Delivery Manager's wake section for its milestone's stopped / overdue monitor items. */
+  const monitorAlertsOf = async (m: Milestone): Promise<string | undefined> => {
+    const info = await withOutcome(m, 1_500);
+    const t = Date.now();
+    const refs = (info.monitoring ?? []).filter((x) => alertReasons(x, t).why.length).flatMap(askRefs);
+    const asks = refs.length ? await monitorAskLookup(m, refs).catch(() => undefined) : undefined;
+    const sections = [
+      monitorAlertSection(monitorAlerts(info.monitoring, t, (r) => asks?.get(refKey(r))), t),
+      // the milestone's checkout has been out of sync with origin for over 5 min
+      checkoutSync?.section(resolveRepo(read.reposRoot, m.repo)?.path),
+      // the daily press test of the owner's buttons failed (the code repo's Delivery Manager)
+      resolveRepo(read.reposRoot, m.repo)?.name === homeRepo() ? pressTest?.section() : undefined,
+      // the worker server's home volume is under 15% free (the code repo's Delivery Manager)
+      resolveRepo(read.reposRoot, m.repo)?.name === homeRepo() ? hostDisk?.section() : undefined,
+    ].filter(Boolean);
+    return sections.length ? sections.join("\n\n") : undefined;
+  };
+  // the read model (waiting-on-you lists and statuses kept in console.db by a background worker); set below.
+  let readModel: ReadModelHost | undefined;
+  let onDrift: ((r: DriftResult) => void) | undefined; // set once the WhatsApp notifier exists (below)
+  /** A write to or pull of a checkout: drop its spines.py output and the memoized trees built from it. */
+  const dropSpines = (dir: string) => {
+    reads.drop(dir);
+    book?.invalidate();
+    readModel?.dirty(dir);
+  };
+  /**
+   * a pull of a checkout (freshness poll, pull on open, Refresh, a run's end, a new-ask pull). Reads keep the
+   * last spines.py output and trees while the new ones build in the background (spines.py for the code repo takes 13-23 s
+   * on the main server, and the first read after a pull waited for it: 10 s). The console's own spine writes keep `dropSpines`.
+   */
+  const pulledSpines = (dir: string) => {
+    reads.drop(dir, { stale: true });
+    book?.invalidate();
+    readModel?.dirty(dir, { stale: true }); // a pull is re-read within the rescan gap
+    const ranks = milestoneRanks(store.listMilestones({ includeSettled: true }));
+    void reads
+      .rewarm(dir, (ms) => [...ms].sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity)))
+      .catch((e) => console.warn(`trees rewarm ${path.basename(dir)}: ${e instanceof Error ? e.message : e}`));
+  };
+  const book = !read.spines
+    ? undefined
+    : indexer
+      ? followBook({ store: bookStore(db), ask: (rebuild) => sendToIndexer(db, { type: "book", ...(rebuild ? { rebuild: true } : {}) }) })
+      : createBook({
+        repos: () => listRepos(read.reposRoot),
+        spines: read.spines,
+        git: opts.book?.git ?? gitOut(30_000),
+        ttlMs: opts.book?.ttlMs ?? (process.env.CONSOLE_BOOK_TTL_MS ? Number(process.env.CONSOLE_BOOK_TTL_MS) : BOOK_TTL_MS),
+        store: bookStore(db), // rework: a restart serves the last book at once
+      });
+  const slims = new WeakMap<Book, Book>();
+  const slimOf = (b: Book) => slims.get(b) ?? (slims.set(b, slimBook(b)), slims.get(b)!);
+  if (book && opts.book?.prewarmAfterMs !== undefined) setTimeout(() => void book.prewarm(), opts.book.prewarmAfterMs).unref();
+  if (book && opts.book?.tickMs) book.start(opts.book.tickMs); // rework: rebuilt on a spine/git change, read or not
+  // does each deliverable in the books still answer? Checked in the background, never on a request.
+  const links = book ? createLinkChecker(opts.linkCheck?.fetch ? { fetch: opts.linkCheck.fetch } : {}) : undefined;
+  if (book && links && opts.linkCheck?.tickMs) {
+    const checkLinks = () => {
+      void book
+        .get()
+        .then((v) => (v.book ? links.run(bookUrls(v.book)) : 0))
+        .catch(() => undefined);
+    };
+    setTimeout(checkLinks, Math.min(opts.linkCheck.tickMs, 60_000)).unref?.();
+    setInterval(checkLinks, opts.linkCheck.tickMs).unref?.();
+  }
+  const runCommits = runCommitsLookup();
+  const app = new Hono();
+
+  app.onError((err, c) => {
+    if (err instanceof ApiError)
+      return c.json({ error: { code: err.code, message: err.message, details: err.details } }, err.status);
+    if (err instanceof UnknownReference)
+      return c.json({ error: { code: "unknown_reference", message: err.message } }, 400);
+    if (err instanceof HTTPException) return c.json({ error: { code: "http_error", message: err.message } }, err.status);
+    console.error(err);
+    return c.json({ error: { code: "internal", message: "internal server error" } }, 500);
+  });
+
+  const api = new Hono();
+  // login, sessions, agent tokens and the CONSOLE_AUTH gate, registered before every other route.
+  ensureAuth(db);
+  // worlds other than the home world (and the platform's own social world) wake no agent on a shared host.
+  const worldHold = opts.cycle?.worldHold ?? hooks.worldWakeGate();
+  // an EpicTeam sign-up's billing state, known once the tester worlds are mounted below.
+  let billingOf: ((world: string) => string | undefined) | undefined;
+  const auth = mountAuth(app, api, { db, store, mode: opts.auth ?? authModeFromEnv(), worldHold, billingOf: (w) => billingOf?.(w) });
+  // a login linked to a People handle (not the owner) reaches only its own inbox and goals.
+  ensurePeople(db);
+  mountPersonGate(app, { db, mode: opts.auth ?? authModeFromEnv() });
+  // list filters by the caller's world for repo/thread/placement lists (before the routes they wrap).
+  mountWorldFilters(api, { db, reposRoot: read.reposRoot, world: () => store.tenant });
+
+  // any write that went through re-checks the console rows the read model's lists read (cheap: a fingerprint).
+  api.use("*", async (c, next) => {
+    await next();
+    if (c.req.method !== "GET" && c.res.status < 400) readModel?.dirty();
+  });
+  // every press on the owner's buttons is logged, and the review buttons are saved first and retried
+  // until they land (press/mount.ts); before every route it wraps. The clone status is bound once the writer exists.
+  const presses = createPresses(db, { ...(opts.presses?.retryMs ? { retryMs: opts.presses.retryMs } : {}), ...(opts.presses?.giveUpMs ? { giveUpMs: opts.presses.giveUpMs } : {}) });
+  let cloneStatus: () => unknown = () => ({ enabled: false });
+  // set below once the spine writer (its background pushes) and the review list (a card's row) exist
+  let pressPushes: import("./inbox/spineWrite.js").BackgroundPushes | undefined;
+  let cardOfPress: ((id: string) => { repo: string; path: string; ref: string; title?: string; milestoneId?: string } | undefined) | undefined;
+  const pressWorker = mountPresses(api, {
+    db,
+    presses,
+    fetch: (req) => app.fetch(req),
+    authMode: opts.auth ?? authModeFromEnv(),
+    clones: () => ({ ...(cloneStatus() as object), ...(pressPushes ? { pushing: pressPushes.pending() } : {}) }),
+    answerFirst: !!opts.presses?.answerFirst,
+    pushes: () => pressPushes,
+    cardOf: (id) => cardOfPress?.(id),
+  });
+  // the world wake gate's on/off shows here so a check (deploy, regression) can confirm it without a login.
+  // and the last read-model drift check (the cache rebuilt from the repo and compared): ok, when, how many views.
+  // set below, once the WhatsApp alert path exists.
+  let checkoutSync: CheckoutSync | undefined;
+  // set below, once the WhatsApp alert path exists.
+  let hostDisk: DiskWatch | undefined;
+  let jobServers: JobServers | undefined;
+  // set below, once the review buttons and the spine writer exist.
+  let pressTest: PressTest | undefined;
+  // the hosted plugs mounted below (plug/hosted.ts); [] = the bare one-team core.
+  let plugsMounted: string[] = [];
+  const hostedPlugs = opts.hosted ?? registeredPlugs(); // the hosted layer's plugs ([] = the bare one-team core)
+  api.get("/health", (c) => {
+    const d = readModel?.drift();
+    const drift = !readModel
+      ? { state: "off" as const }
+      : !d
+        ? { state: "pending" as const }
+        : { state: d.ok ? ("ok" as const) : d.error ? ("error" as const) : ("drift" as const), at: d.at, checked: d.checked, skipped: d.skipped, differ: d.differ.length, ms: d.ms };
+    // today's presses and the failures of the last 24 h (details: /api/write-health)
+    const h = presses.health(1);
+    // `busy` = presses being written now plus due now, plus 1 while the daily press test runs (deploy.sh waits for
+    // 0 before a restart, so a restart never cuts a press or the test's run in half)
+    const b = pressWorker.busy();
+    const testing = pressTest?.running() ? 1 : 0;
+    const pressHealth = { today: h.today.presses, failedToday: h.today.failed, failed24h: h.failed24h, landing: h.pending.length, busy: b.inFlight + b.due + testing, answerFirst: !!opts.presses?.answerFirst };
+    // the indexer's heartbeat (ok while it beat in the last minute).
+    const beat = indexer ? indexerBeat(db) : undefined;
+    const indexerHealth = !indexer
+      ? { state: "off" as const }
+      : !beat
+        ? { state: "pending" as const, how: indexer.how }
+        : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null };
+    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
+  });
+  // the last drift check in full (which views differ, where, stored vs rebuilt).
+  api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
+  // set once the cycle exists (below); every pull that moved a checkout tells it, so a new ask wakes the Unblocker.
+  let newAsks: NewAskWaker | undefined;
+  // registered first so its pull-on-open middleware runs before the milestone routes below.
+  mountFreshness(api, {
+    ...opts.freshness,
+    // a re-pull that lands only marks the trees stale (served until rebuilt), so opening a page starts it and
+    // does not wait (it waited up to 3 s: House decision 3.0-4.5 s on each open after 60 s idle).
+    reopenWaitMs: opts.freshness?.reopenWaitMs ?? 0,
+    // with the read model, opening the waiting list starts the pull but never waits for it (the worker re-reads after).
+    noWaitOn: () => !!readModel,
+    store,
+    reposRoot: read.reposRoot,
+    treeFor: (m) => treeFor(m),
+    invalidate: (dir) => {
+      pulledSpines(dir);
+      newAsks?.repoMoved(dir);
+    },
+  });
+
+  // cycle (T3 sync, run-now, wake, bootstrap). Off unless opts.cycle.enabled (CONSOLE_CYCLE_ENABLED).
+  const cycleOpts = opts.cycle ?? { enabled: false, publicUrl: "http://127.0.0.1:8750" };
+  const inboxDeps: WaitingDeps = { store, reposRoot: read.reposRoot, treeFor: (m) => treeFor(m, 1_500), homeThread: (id) => cycle.getLink(id)?.threadId, threadEnvironment: (t) => cycle.threadEnvironment(t), teamRepo: opts.teamState?.repo };
+  const treeTodo = async (m: Milestone) => {
+    try {
+      if (!m.path) return undefined;
+      const tree = await treeFor(m);
+      // answers at canonical asks of other epics that this milestone's spines reference.
+      const items = await waitingOnJordi(inboxDeps, { milestoneId: m.id }).catch(() => undefined);
+      const referenced = items ? await answeredReferences(inboxDeps, m, items).catch(() => []) : [];
+      // answers come from the spine only (its `[answered]` lines, in the tree); an answer the console could not
+      // write is no answer here: the ask is still open in the spine (the owner's card shows the error and Retry).
+      return treeTodoSection(tree, 30, referenced);
+    } catch {
+      return undefined; // the wake never fails on the tree
+    }
+  };
+  // active standing approvals of the milestone (spines.py `grants`); none when spines.py is missing or slow.
+  const grants = async (m: Milestone) => {
+    const { rel, spines } = await spinesFor(m);
+    return spines && rel ? activeGrantsFor(spines, rel) : [];
+  };
+  /** the spine's run_state; undefined when spines.py is missing, slow or older than the field (wake as before). */
+  /** open Done-means lines in the milestone's runnable spines that no ledger row covers. */
+  const askedOf = async (m: Milestone, softMs = 4_000): Promise<AskedNoRow[]> => {
+    const { loc, rel, spines } = await spinesFor(m, softMs);
+    return loc && rel && spines ? askedNoRowFor(m, loc.repo.path, rel, spines) : [];
+  };
+  /**
+   * a repo's orphan commits belong to one milestone, its home: the one on the repo's root spine (`…/root.md`), else
+   * the oldest. `ms` = the milestones of one world, unsettled and not paused. A milestone with a Delivery Manager
+   * (on, or auto-parked) comes first, so the orphans reach a wake; a root spine also by its other names (`EPIC_SPINE.md`,
+   * `-….md`, `EPIC.md`).
+   */
+  const orphanGit = gitRun(20_000);
+  const hasDm = (m: Milestone) =>
+    store.listAssignments({ milestoneId: m.id }).some((a) => (a.enabled || (!!a.parkedAt && a.parkedReason !== SETTLED_REASON)) && isDeliveryManager(store.getPersona(a.personaId)?.name));
+  const orphansOf = async (ms: Milestone[]): Promise<OrphanCommit[]> => {
+    const homes = new Map<string, { m: Milestone; dir: string; name: string }>();
+    for (const m of ms) {
+      const r = resolveRepo(read.reposRoot, m.repo);
+      if (!r) continue;
+      const had = homes.get(r.path);
+      const rank = (x: Milestone) => (hasDm(x) ? 2 : 0) + (/(^|\/)(?:root|EPIC_SPINE|EPIC-0[\w-]*|EPIC0?)\.md$/i.test(x.path ?? "") ? 1 : 0);
+      if (!had || rank(m) > rank(had.m)) homes.set(r.path, { m, dir: r.path, name: r.name });
+    }
+    const since = sinceFor(Date.now());
+    const lists = await Promise.all(
+      [...homes.values()].map(async (h) =>
+        (await orphanCommitsIn(orphanGit, h.dir, since).catch(() => [])).map((c): OrphanCommit => ({
+          milestoneId: h.m.id,
+          milestoneTitle: h.m.title,
+          repo: h.name,
+          sha: c.sha,
+          short: c.sha.slice(0, 7),
+          author: c.author,
+          date: c.date,
+          subject: (c.message.split("\n")[0] ?? "").slice(0, 200),
+        })),
+      ),
+    );
+    return lists.flat();
+  };
+  const orphanMilestones = (world: string) => store.listMilestones().filter((m) => (store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT) === world && !m.paused);
+  /** the Delivery Manager's section on its repo's orphan commits (only the repo's home milestone gets it). */
+  // the social skin is a hosted plug (hosted/social.ts): the pack export, the launch board, the Publisher's
+  // pre-check and wake sections, the social routes, site numbers, campaigns; the one-team core has none of them.
+  const socialArea = hostedPlugs.find((p) => p.social)?.social?.({ db, reposRoot: read.reposRoot, packRunner: read.packRunner });
+  const agentTeamDir = () => resolveRepo(read.reposRoot, homeRepo())?.path;
+  // the launch board inside the console (launch/board.ts): the script runs from the code repo's checkout.
+  const launchBoard = socialArea?.launch({ run: opts.launchBoard?.run, cacheFile: opts.launchBoard?.cacheFile, everyMs: opts.launchBoard?.everyMs, teamDir: agentTeamDir });
+  /**
+   * reds with no open row go to the Delivery Manager whose milestone tree holds the owning epic, the smallest such
+   * tree of the world's unpaused milestones on the same repo (so the root milestone does not repeat its children's).
+   */
+  const launchDraftsOf = async (m: Milestone): Promise<string | undefined> => {
+    if (!launchBoard?.hasDrafts()) return undefined;
+    const r = resolveRepo(read.reposRoot, m.repo);
+    if (r?.name !== homeRepo()) return undefined;
+    const treeOf = async (x: Milestone) => {
+      const { rel, spines } = await spinesFor(x, 4_000).catch(() => ({}) as Awaited<ReturnType<typeof spinesFor>>);
+      return rel && spines ? new Set(spineSubtree(spines, rel).map((n) => n.path)) : new Set<string>();
+    };
+    const mine = await treeOf(m);
+    const others = await Promise.all(
+      orphanMilestones(store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT)
+        .filter((x) => x.id !== m.id && resolveRepo(read.reposRoot, x.repo)?.path === r.path)
+        .map(treeOf),
+    );
+    return launchBoard.section(mine, (spine) => others.some((t) => t.has(spine) && t.size < mine.size));
+  };
+  const orphanSectionOf = async (m: Milestone): Promise<string | undefined> =>
+    orphanSection((await orphansOf(orphanMilestones(store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT))).filter((c) => c.milestoneId === m.id));
+  /**
+   * the desk inbox section of a Delivery Manager wake: only the repo's home milestone in its world (the one on the
+   * root spine, else the oldest, as orphan commits) reads `desk/inbox/` of its checkout, so one wake answers each note.
+   */
+  const deskInboxOf = async (m: Milestone): Promise<string | undefined> => {
+    const r = resolveRepo(read.reposRoot, m.repo);
+    if (!r) return undefined;
+    const root = (x: Milestone) => /(^|\/)root\.md$/i.test(x.path ?? "");
+    const world = store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT;
+    const same = orphanMilestones(world).filter((x) => resolveRepo(read.reposRoot, x.repo)?.path === r.path);
+    const home = same.find(root) ?? same[0];
+    if (home?.id !== m.id) return undefined;
+    const notes = readInbox(r.path);
+    // the improvement requests this world handed to others (their state read from each builder's inbox), and the
+    // ones it took from others and has not told done yet.
+    const out = improvementsOutSection(world, worldsWithHome().filter((w) => w.world !== world).flatMap((w) => readInbox(w.checkout).map((note) => ({ world: w.world, repo: w.name, note }))));
+    const parts = [deskInboxSection(notes, r.name), improvementsTakenSection(notes), out].filter((x): x is string => !!x);
+    return parts.length ? parts.join("\n\n") : undefined;
+  };
+  /** a world's home checkout (the milestone on a root spine, else its oldest), where its desk inbox is. */
+  const worldHome = (world: string) => {
+    // the world's own store: an answer job runs in the caller's request scope, where `store` sees only the caller's world
+    const ms = forTenant(db, world).listMilestones().filter((x) => x.repo && !x.paused);
+    const home = ms.find((x) => /(^|\/)root\.md$/i.test(x.path ?? "")) ?? ms[0];
+    const r = home ? resolveRepo(read.reposRoot, home.repo) : undefined;
+    return home && r ? { world, checkout: r.path, name: r.name, remote: r.remote, policyPath: home.path || "docs/spines/root.md" } : undefined;
+  };
+  const worldsWithHome = () =>
+    (db.prepare("SELECT id FROM tenants").all() as { id: string }[]).map((t) => worldHome(t.id)).filter((x): x is NonNullable<ReturnType<typeof worldHome>> => !!x);
+  const runState = async (m: Milestone): Promise<RunState | undefined> => {
+    const { rel, spines } = await spinesFor(m);
+    return spines && rel ? runStateFor(spines, rel) : undefined;
+  };
+  /** raw text of a spine line in the milestone's checkout ("" when unreadable). */
+  const nonEmpty = <K extends string>(k: K, v: string) => (v ? ({ [k]: v } as Record<K, string>) : {});
+  const askLineText = (m: Milestone, rel: string | undefined, line: number | undefined) => {
+    const dir = rel && line !== undefined ? resolveRepo(read.reposRoot, m.repo)?.path : undefined;
+    if (!dir) return "";
+    try {
+      return fs.readFileSync(path.join(dir, rel!), "utf8").split("\n")[line!] ?? "";
+    } catch {
+      return "";
+    }
+  };
+  // usage per run, read from its transcript when the run ends (cycle hook below) and by a periodic sweep.
+  // credits per world; each collected run is debited once at its provider's price (credits/ledger.ts).
+  // the credits gate's owner notice is an ask in the held milestone's spine (inbox/raise.ts), taken out of the
+  // spine when credits are back; nothing about it is stored as an ask in console.db. (Called at wake / release time, after
+  // the spine writer below exists.)
+  const creditNotice = (): CreditNotice => ({
+    raise: async (m, t) => {
+      const r = await raiseAsk(raiseDeps(), m, { question: t.question, proposedAction: t.proposedAction, askedBy: "the credits gate" });
+      if (r.status !== "written") {
+        console.warn(`credits notice ${m.id}: not written into the spine (${r.reason}); the held run says why the team paused`);
+        return undefined;
+      }
+      return noticeRef(m.id, r.path, r.code);
+    },
+    retire: async (ref) => {
+      const n = parseNoticeRef(ref);
+      const m = n ? store.getMilestone(n.milestoneId) : undefined;
+      if (!n || !m) return;
+      const w = await retireAsk(raiseDeps(), m, n.path, n.code, "credits are back (top-up or grant); the team wakes again");
+      if (w.status !== "written") console.warn(`credits notice ${n.code}: still in ${n.path} (${w.reason})`);
+    },
+  });
+  // credits are the billing plug's (hosted/billing.ts); the one-team core charges nothing and holds no wake.
+  const credits = hostedPlugs.find((p) => p.credits)?.credits?.({ db, store, notice: creditNotice });
+  const usage = createUsageCollector(db, { ...opts.usage, onCollected: (ids) => credits?.debit(ids) });
+  if (opts.usage?.sweepMs) {
+    usage.start(opts.usage.sweepMs, opts.usage.liveMs ?? 0);
+    // the debit sweep (anything a pass missed) and the monthly plan grants, on the usage sweep's clock
+    const tick = () => {
+      try {
+        credits?.debit();
+        credits?.monthly();
+      } catch (e) {
+        console.error("credits tick:", (e as Error).message);
+      }
+    };
+    const t = setInterval(tick, opts.usage.sweepMs);
+    t.unref();
+  }
+  const usageOf = runUsageLookup(db);
+  const liveUsageOf = runLiveUsageLookup(db);
+  // the asks an Unblocker wake must report on (state open, coded), as /waiting-on-owner?milestoneId= lists them.
+  const openAsksOf = async (m: Milestone) =>
+    (await waitingOnJordi(inboxDeps, { milestoneId: m.id }))
+      .filter((i) => i.source === "ask" && i.state === "open" && i.code)
+      .map((i) => ({
+        code: i.code!,
+        kind: i.ask,
+        ...(i.path ? { path: i.path } : {}),
+        ...(i.line !== undefined ? { line: i.line + 1 } : {}),
+        // the ask line's text (and what was parsed from it) feeds the Unblocker's skip-if-unchanged fingerprint.
+        textHash: textHash([askLineText(m, i.path, i.line), i.question, i.steps ?? "", i.unblocks ?? "", i.recommendation ?? ""].join("\n")),
+        // the owner's comments on the card and the files the line links to feed the per-ask memory's fingerprint.
+        ...nonEmpty("commentHash", commentHash(db, i.id)),
+        ...nonEmpty("evidenceHash", i.path ? evidenceHash(askLineText(m, i.path, i.line), i.path, resolveRepo(read.reposRoot, m.repo)?.path) : ""),
+        // when the line was written, so the Unblocker numbers can time ask → verdict from the run log.
+        ...(i.since ? { since: i.since } : {}),
+      }));
+  // the pack export (hosted/social.ts), handed to the other plugs untouched.
+  const social = socialArea?.source;
+  // the Team Browser is a hosted plug (hosted/browser.ts: instances per world, their keys, the sign-in proxy);
+  // the one-team core has none (wakes list no instance, no /api/auth* routes).
+  const browserArea = hostedPlugs.find((p) => p.browser)?.browser?.({ api, db, options: opts.browser, instances: opts.browserInstances });
+  // Team services: the memory service, Gmail and the team mailbox, WhatsApp, the services hub. The services plug's
+  // (hosted/services.ts); the one-team core has no memory service, sends no WhatsApp and reads no mailbox.
+  const services = hostedPlugs.find((p) => p.services)?.services?.({ api, db, options: opts.mcp });
+  const memory: MemoryLookup = opts.mcp?.memoryLookup ?? services?.memory ?? (async () => ({ error: NO_MEMORY, unreachable: false }));
+  // the persona's team skills at wake (use_when lines; with wakeCheck on, a missing one fails the wake).
+  const skillsRepo = opts.teamSkills?.repoDir ?? libraryRepo(read.reposRoot);
+  const skillsCli = opts.teamSkills?.cli ?? cliRunner({ repoDir: skillsRepo, worker: opts.teamSkills?.worker });
+  // a world's checkouts here (its valid claims) and the one it keeps its own skills in: the one named after
+  // the world (a tester world's `<repos root>/<world id>`, a social world repo's memory-ai/a social world repo), else its oldest.
+  const worldCheckouts = (world: string) => [...worldClaims(db, read.reposRoot)].filter(([, ws]) => ws.has(world)).map(([p]) => p);
+  const worldRepo = (world: string) => {
+    const ds = worldCheckouts(world);
+    return ds.find((d) => path.basename(d) === world) ?? ds[0];
+  };
+  const worldSkillsOf: WorldSkillsOf = (m) => {
+    const world = milestoneWorld(db, m.id);
+    if (world === DEFAULT_TENANT) return undefined;
+    try {
+      return { world, skills: readWorldSkills(worldRepo(world)) };
+    } catch (e) {
+      return { world, skills: [], error: (e as Error).message };
+    }
+  };
+  const worldSkillCheck = wakeSkillCheck({ repoDir: skillsRepo, cli: skillsCli, worldSkills: worldSkillsOf });
+  // the main server (the console host): a repo with no T3 project yet is linked in the console's own checkout of it
+  const skillCheck: typeof worldSkillCheck = (p, w) =>
+    worldSkillCheck(p, w?.link && w.milestone && w.link.host === mainHost() ? { ...w, link: { ...w.link, checkout: async () => (await w.link!.checkout().catch(() => undefined)) ?? resolveRepo(read.reposRoot, w.milestone!.repo)?.path } } : w);
+  const worldOf = (id: string) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT;
+  const cycle = createCycle(db, store, {
+    seatsFile: read.seatsFile,
+    teamSkills: opts.teamSkills?.wakeCheck
+      ? skillCheck
+      : async (p, w) => {
+          try {
+            const lib = [...readLibrary(skillsRepo), ...((w?.milestone && worldSkillsOf(w.milestone)?.skills) || [])];
+            return { ok: true, use: Object.fromEntries(lib.filter((s) => p.skills.includes(s.name)).map((s) => [s.name, s.use_when])) };
+          } catch {
+            return { ok: true, use: {} };
+          }
+        },
+    // The last probe result only (the Services page probes): a wake never waits on a service.
+    teamServices: async (p, runId) => services?.wakeSection(p.id, runId),
+    // Publisher / Responder cadence and timed wakes run a model only when the ledger or inbox shows work.
+    wakeGate: socialArea?.wakeGate({
+      repoDir: (m) => resolveRepo(read.reposRoot, m.repo)?.path,
+      worldOf,
+      // The world's own instance first; then the home world's, where the personas' user-scope team-browser MCP reads today.
+      // a world the console made a browser for (a tester world) reads only its own, never the home world's.
+      browserUrls: (m) => browserArea?.urlsFor(store.worldOfMilestone(m.id) ?? DEFAULT_TENANT) ?? [],
+      browserHeaders: (url) => browserArea?.headersFor(url) ?? {},
+    }),
+    onRunEnded: (runId) => usage.runEnded(runId),
+    creditGate: (a, m) => credits?.gate(a, m), // per-world gate, default off; the home world never held (hosted/billing.ts)
+    // the wake also lists the rows other personas' running child runs claim (the repo desk's, the DM's).
+    treeTodo: async (m) => [await treeTodo(m), claimsSection(claimsFor(store, m))].filter(Boolean).join("\n\n") || undefined,
+    treeFor,
+    grants,
+    runState,
+    askedNoRow: async (m) => askedNoRowSection(await askedOf(m)), // open Done-means lines no row covers
+    heldAsks: async (m) => heldAsksSection((await waitingAndHeld(inboxDeps, m)).held), // asks the gate kept from the owner
+    orphanCommits: orphanSectionOf, // commits on main that name no ticket
+    orphansDue: async () => {
+      // every world's orphans, for the orphan sweep that wakes the home milestone's Delivery Manager
+      const worlds = new Set(store.listMilestones().map((m) => store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT));
+      return (await Promise.all([...worlds].map((w) => orphansOf(orphanMilestones(w))))).flat();
+    },
+    launchDrafts: launchDraftsOf, // launch board reds with no owner row
+    deskInbox: deskInboxOf, // notes other worlds dropped in this repo's desk/inbox/
+    createMilestone: (input) => recordFirst(() => recordedMilestones().createMilestone(input)),
+    monitorAlerts: monitorAlertsOf,
+    readyToMark: readyToMarkOf((m) => withOutcome(m, 1_500)), // cadence / timed wakes skip a milestone waiting for the owner's mark
+    // child epics of the milestone's spine, each with the enabled persona of its own milestone (if any).
+    children: async (m) => {
+      const { rel, spines } = await spinesFor(m);
+      if (!spines || !rel) return undefined;
+      const norm = (p: string) => p.replace(/^\.\//, "");
+      const world = store.worldOfMilestone(m.id); // only the milestone's own world names a child's persona
+      return childEpicsFor(spines, rel, (child) => {
+        for (const cm of store.listMilestones().filter((x) => sameRepo(x.repo, m.repo) && x.path && norm(x.path) === child && store.worldOfMilestone(x.id) === world)) {
+          const on = store.listAssignments({ milestoneId: cm.id }).find((x) => x.enabled);
+          if (on) return store.getPersona(on.personaId)?.name ?? on.personaId;
+        }
+        return undefined;
+      });
+    },
+    // only answers in a spine count (referenced canonical asks); a console copy of an unwritten answer is none.
+    referencedAnswers: async (m) => {
+      const items = await waitingOnJordi(inboxDeps, { milestoneId: m.id });
+      return (await answeredReferences(inboxDeps, m, items)).length;
+    },
+    openAsks: openAsksOf,
+    // a pack repo's wake names the persona's pack role, what it may write and the EPICSPINE_PERSONA to commit with.
+    ...(read.skillDir && socialArea
+      ? {
+          packSection: async (m: Milestone, p: Persona, since?: string) => { const dir = locateDir(m) ?? resolveRepo(read.reposRoot, m.repo)?.path; return dir ? socialArea.packSection(read.skillDir!, dir, m, p, since, worldOf) : undefined; },
+          // the Writer brief, right after the prompt's first line (built from the cached pack export).
+          roleBrief: async (m: Milestone, p: Persona, since?: string) => { const dir = locateDir(m) ?? resolveRepo(read.reposRoot, m.repo)?.path; return dir ? socialArea.roleBrief(read.skillDir!, dir, m, p, since, worldOf) : undefined; },
+        }
+      : {}),
+    // the run-end pull targets the checkout this console reads and drops its spines.py cache.
+    repoDir: (m) => resolveRepo(read.reposRoot, m.repo)?.path,
+    onRepoPulled: (dir) => {
+      pulledSpines(dir);
+      newAsks?.repoMoved(dir);
+    },
+    worldHold,
+    ...cycleOpts,
+  });
+  // the read model (readModel/host.ts). Worlds kept warm: every world with milestones when logins scope the store
+  // (CONSOLE_AUTH=on), else the console's own scope.
+  {
+    const mode = indexer && opts.readModel?.mode && opts.readModel.mode !== "none" ? ("external" as const) : (opts.readModel?.mode ?? "none");
+    const authOn = (opts.auth ?? authModeFromEnv()) === "on";
+    if (mode !== "none")
+      readModel = createReadModelHost({
+        db,
+        mode,
+        worlds: () => (authOn ? (db.prepare("SELECT DISTINCT tenant_id AS t FROM milestones").all() as { t: string }[]).map((r) => r.t) : [tenantScope ?? ""]),
+        refresher: { reposRoot: read.reposRoot, spines: read.spines, ...(tenantScope ? { tenant: tenantScope } : {}), homeThread: (id) => cycle.getLink(id)?.threadId, ...(opts.teamState?.repo ? { teamRepo: opts.teamState.repo } : {}) },
+        ...(read.spines ? { spines: read.spines } : {}),
+        ...(opts.readModel?.dbPath ? { worker: { dbPath: opts.readModel.dbPath, reposRoot: read.reposRoot, ...(read.skillDir ? { skillDir: read.skillDir } : {}), ...(process.env.CONSOLE_SPINES_FIXTURE ? { spinesFixture: process.env.CONSOLE_SPINES_FIXTURE } : {}), ...(tenantScope ? { tenant: tenantScope } : {}), ...(opts.teamState?.repo ? { teamRepo: opts.teamState.repo } : {}) } } : {}),
+        runningRuns: () => (db.prepare("SELECT id FROM runs WHERE outcome = 'running'").all() as { id: string }[]).map((r) => r.id),
+        t3State: (id) => cycle.runT3State(id),
+        ...(opts.readModel?.tickMs !== undefined ? { tickMs: opts.readModel.tickMs } : {}),
+        ...(opts.readModel?.patchTtlMs !== undefined ? { patchTtlMs: opts.readModel.patchTtlMs } : {}),
+        ...(opts.readModel?.drift?.everyMs
+          ? {
+              drift: {
+                everyMs: opts.readModel.drift.everyMs,
+                ...(opts.readModel.drift.firstAfterMs !== undefined ? { firstAfterMs: opts.readModel.drift.firstAfterMs } : {}),
+                ...(opts.readModel.drift.confirmAfterMs !== undefined ? { confirmAfterMs: opts.readModel.drift.confirmAfterMs } : {}),
+                onResult: (r: DriftResult) => onDrift?.(r),
+              },
+            }
+          : {}),
+      });
+    if (readModel) opts.readModel?.onHost?.(readModel);
+  }
+  /** The world a view is read under: the caller's (CONSOLE_AUTH=on), else the console's own scope. */
+  const viewWorld = () => store.tenant ?? "";
+  /** One milestone's open list (as `waitingOnJordi`) from the stored view when there is a read model. */
+  const waitingFor = async (milestoneId: string) => {
+    if (!readModel) return waitingOnJordi(inboxDeps, { milestoneId });
+    const k = { kind: "waiting" as const, world: viewWorld(), milestoneId, includeSettled: false };
+    return viewWaiting((await readModel.view(k, () => computeWaiting(inboxDeps, k))).payload as WaitingPayload, {});
+  };
+  // a new open ask after a pull wakes the milestone's switched-on Unblocker (debounced, one wake per batch).
+  if (cycleOpts.enabled && cycleOpts.t3 && opts.newAskWake?.enabled !== false) {
+    const git = opts.newAskWake?.git ?? gitOut(10_000);
+    newAsks = createNewAskWaker({
+      db,
+      store,
+      openAsks: cycleOpts.openAsks ?? openAsksOf,
+      grants: cycleOpts.grants ?? grants,
+      repoDir: cycleOpts.repoDir ?? ((m) => resolveRepo(read.reposRoot, m.repo)?.path),
+      authorRun: gitAuthorRun(git),
+      // read the asks as pushed, not as last synced (an ask answered meanwhile wakes nobody); the pull drops the spines cache.
+      pull: opts.newAskWake?.pull ?? createRepoPuller({ git: (dir, args) => gitOut(120_000)(dir, args).then(() => undefined), onPulled: pulledSpines }).pull,
+      wake: (id, note, noteBy) => cycle.runNow(id, { instructions: note, instructionsBy: noteBy }),
+      debounceMs: opts.newAskWake?.debounceMs,
+    });
+    if (opts.newAskWake?.headWatchMs) newAsks.watchHeads((dir) => { const sha = headSha(dir); return sha ? Promise.resolve(sha) : git(dir, ["rev-parse", "HEAD"]).then((x) => x.trim()); }, opts.newAskWake.headWatchMs); // HEAD from.git, no git child per repo per tick
+  }
+  // registered before the routes it guards: a milestone chat's run control, Add and ticket detail stay inside its subtree.
+  const chatScope = mountChatScope(api, {
+    store,
+    publicUrl: cycle.publicUrl,
+    locate: async (m) => {
+      const { loc, rel } = await spinesFor(m, 4_000);
+      return { repoDir: loc?.repo.path, rel };
+    },
+    treePaths: (m) => treePaths(m),
+  });
+  mountCycle(api, store, cycle);
+  // Team desk: one long-lived T3 thread, shown by the Chat page (no console chat store).
+  migrateDesk(db);
+  // every desk chat (Team, repo, world) runs on its persona's host, like a wake (cycle clientFor: the worker server over the tunnel).
+  const deskHosts = {
+    clientFor: (h: HostId) => {
+      if (!cycleOpts.enabled) return undefined;
+      if (h === mainHost()) return cycleOpts.t3;
+      if (!cycleOpts.worker) return undefined;
+      cycleOpts.worker.touchTunnel(); // opens the forward when down (never starts the box)
+      return cycleOpts.worker.client;
+    },
+    dispatcherFor: (h: HostId) => cycleOpts.hostDispatchers?.[h] ?? cycleOpts.dispatcher,
+    environmentIdFor: (h: HostId) => cycle.hostEnvironment(h),
+  };
+  // both desks carry the desk intake rule of repos with a pack on (pack.py <pack> --wake-text).
+  const intake = read.skillDir ? packIntakeRunner(read.skillDir) : undefined;
+  // The milestone page that shows a spine (its own, or the one whose tree holds it).
+  const spineMilestone = async (repoName: string, rel: string): Promise<string | undefined> => {
+    const mine = store.listMilestones({ includeSettled: true }).filter((m) => m.path && resolveRepo(read.reposRoot, m.repo)?.name === repoName);
+    const norm = (p: string) => p.replace(/^\.\//, "");
+    const own = mine.find((m) => norm(m.path!) === rel);
+    if (own) return own.id;
+    for (const m of mine) if ((await treePaths(m).catch(() => new Set<string>())).has(rel)) return m.id;
+    return undefined;
+  };
+  const desk = createDesk({
+    db,
+    store,
+    // the desk persona made on first need gets its file too (the record is set up just below; called later)
+    personaCreated: (p, world) => void personaRecord.write(world, p, `add ${p.name}`).catch((e) => console.warn(`personas: desk persona ${p.name} not written: ${(e as Error).message}`)),
+    t3: cycleOpts.enabled ? cycleOpts.t3 : undefined,
+    dispatcher: cycleOpts.dispatcher,
+    startGate: cycleOpts.startGate,
+    seatBlocked: seatBlockerFor(read.seatsFile), // a desk on a limited seat moves before the owner's send
+    publicUrl: cycle.publicUrl,
+    reposRoot: read.reposRoot,
+    repo: process.env.CONSOLE_DESK_REPO || undefined,
+    environmentId: () => cycle.hostEnvironment(mainHost()),
+    ...deskHosts,
+    intake,
+    delivery: (id) => deliveryFor(store, id),
+    // The milestone page that shows a spine (its own, or the one whose tree holds it): where the owner marks a draft epic ready.
+    milestoneFor: spineMilestone,
+  });
+  // one repo-desk thread per milestone (same engine, key milestone:<id>), in the milestone repo's T3 project.
+  const milestoneChats = createMilestoneChats({
+    db,
+    store,
+    t3: cycleOpts.enabled ? cycleOpts.t3 : undefined,
+    dispatcher: cycleOpts.dispatcher,
+    startGate: cycleOpts.startGate,
+    seatBlocked: seatBlockerFor(read.seatsFile), // a desk on a limited seat moves before the owner's send
+    publicUrl: cycle.publicUrl,
+    reposRoot: read.reposRoot,
+    deskRepo: process.env.CONSOLE_DESK_REPO || undefined,
+    environmentId: () => cycle.hostEnvironment(mainHost()),
+    ...deskHosts,
+    milestone: (id) => store.getMilestone(id),
+    locate: async (m) => {
+      const { loc, rel } = await spinesFor(m, 4_000);
+      return { repoDir: loc?.repo.path, rel };
+    },
+    ...(read.skillDir ? { bind: spinesBindRunner(read.skillDir) } : {}),
+    intake,
+    since: (m, sinceIso) =>
+      sinceBlock(
+        {
+          db,
+          store,
+          locate: async (mm) => {
+            const { loc, rel } = await spinesFor(mm, 2_000);
+            return { repoDir: loc?.repo.path, rel };
+          },
+          tree: (mm) => treeFor(mm, 2_000),
+        },
+        m,
+        sinceIso,
+      ),
+  });
+  // the repo index the desk reads (GET /api/desk/repos); git runs only in its background refresh.
+  const repoIndex = createRepoIndex({ db, store, scan: opts.repoIndex?.scan, publicUrl: cycle.publicUrl });
+  if (opts.repoIndex?.everyMs) repoIndex.start(opts.repoIndex.everyMs);
+  // screenshots and files in every chat (uploaded first, sent as links the desk opens; served within the world).
+  const attachments = createAttachments({
+    db,
+    dir: opts.chatAttachmentsDir ?? process.env.CONSOLE_CHAT_ATTACHMENTS_DIR ?? path.join(path.dirname(defaultDbPath()), "chat-attachments"),
+    world: () => store.tenant ?? DEFAULT_TENANT,
+    publicUrl: cycle.publicUrl,
+  });
+  mountAttachments(api, attachments);
+  // a message for one desk with a part for the other desk (EpicTeam ↔ the social product): that part crosses at once.
+  const deskTell = (w: string, text: string, id: string): Promise<true | string> =>
+    w === DEFAULT_TENANT ? desk.tell(text, id) : worldDesks.send(w, text, undefined, id).then(() => true as const);
+  /** His message is in that desk's thread (T3 shows a queued message only once its turn starts). */
+  const deskLanded = async (w: string, head: string): Promise<boolean> => {
+    const flat = (t: string) => t.replace(/\s+/g, " ").trim();
+    const v = await (w === DEFAULT_TENANT ? desk.view() : worldDesks.view(w));
+    return v.messages.some((m) => m.role === "user" && flat(m.text).includes(flat(head)));
+  };
+  // the last three small text calls (cross-world check, voice spill check, the memory service ask wording) on the same
+  // CONSOLE_TEXT_MODEL_PROVIDER as's two; a judge or worder a test passes in wins (here and in the probe).
+  const textOpenAiKey = async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile()));
+  const onClaude = textModelProvider() === "anthropic";
+  const crossOpt = opts.deskCross === true ? {} : opts.deskCross || undefined;
+  const spillOpt = opts.voiceSpill === true ? {} : opts.voiceSpill || undefined;
+  const textCrossJudge: CrossJudge = crossOpt?.judge ?? (onClaude ? anthropicCrossJudge(anthropicKey) : openAiCrossJudge(textOpenAiKey));
+  const textSpillJudge: SpillJudge = spillOpt?.judge ?? (onClaude ? anthropicSpillJudge(anthropicKey) : openAiSpillJudge(textOpenAiKey));
+  const textAsk = services?.askWorder({ onClaude, anthropicKey, openAiKey: textOpenAiKey, worder: opts.memoryAsk?.worder }); // (hosted/services.ts)
+  const askModel = textAsk?.model ?? "";
+  const deskCross: DeskCross | undefined = crossOpt
+    ? createDeskCross({
+        db,
+        judge: textCrossJudge,
+        auto: crossOpt.auto === true,
+        ...(cycleOpts.enabled ? { tell: deskTell, landed: deskLanded } : {}),
+        pairs: crossOpt.pairs ?? process.env.CONSOLE_DESK_PAIRS,
+        ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+      })
+    : undefined;
+  if (deskCross && cycleOpts.enabled && (crossOpt?.sweepMs ?? 60_000) > 0) setInterval(() => void deskCross.sweep().catch((e) => console.error("desk cross sweep:", e)), crossOpt?.sweepMs ?? 60_000).unref();
+  // made below, once the review list and the asks can be read; a desk message reaches it through deskSaid.
+  let noteTouch: NoteTouch | undefined;
+  const touchWhere = (text: string) => (/^🎙 Voice note \(WhatsApp/.test(text) ? "WhatsApp" : /^🎙 Voice note \(Chat\)/.test(text) ? "the Team desk Chat" : "a message to the Team desk");
+  const deskSaid = (world: string, text: string, requestId?: string, pending?: boolean) => {
+    void deskCross?.said({ world, words: text, ...(requestId ? { requestId } : {}), ...(pending ? { pending } : {}) }).catch((e) => console.error("desk cross:", e));
+    void noteTouch?.heard({ world, words: text, where: touchWhere(text), ...(requestId ? { id: requestId } : {}) }).catch((e) => console.error("note touch:", e));
+  };
+  mountDesk(api, desk, milestoneChats, repoIndex, attachments, (text, crid, pending) => deskSaid(DEFAULT_TENANT, text, crid, pending));
+  // the relay. The Team desk itself decides a part of the owner's words is the paired the social product desk's work and
+  // passes it here, quoting him; no router decides for it. Only the Team desk's own call (header X-Console-Run: team-desk).
+  /** The relay's body, the same for the Team desk and a world desk (each desk passes the other desk's part itself). */
+  const passFrom = async (c: Context, world: string) => {
+    const b = (await c.req.json().catch(() => undefined)) as { about?: unknown; quote?: unknown; clientRequestId?: unknown } | undefined;
+    const quote = typeof b?.quote === "string" ? b.quote.trim() : "";
+    if (!quote || quote.length > TRANSCRIPT_MAX) return c.json({ error: { code: "validation_error", message: `quote (${ownerName()}'s words, up to ${TRANSCRIPT_MAX} characters) is required; about (a few words) and clientRequestId are optional` } }, 400);
+    const r = await deskCross?.pass({
+      world,
+      quote,
+      about: typeof b?.about === "string" ? b.about.slice(0, 300) : "",
+      ...(typeof b?.clientRequestId === "string" && b.clientRequestId.trim() ? { requestId: b.clientRequestId.trim().slice(0, 120) } : {}),
+    });
+    if (!r) return c.json({ error: { code: "no_desk_across", message: `this console has no desk paired with ${world}'s desk (CONSOLE_DESK_PAIRS); drop a desk note instead (scripts/desk_note.py send)` } }, 409);
+    return c.json({ id: r.id, state: r.state, to: r.to.world, product: r.to.product, url: r.to.url }, r.state === "passed" ? 201 : 202);
+  };
+  api.post("/desk/pass", async (c) => {
+    const refused = deskOnly((n) => c.req.header(n));
+    if (refused) return c.json({ error: { code: "desk_only", message: refused } }, 403);
+    return passFrom(c, DEFAULT_TENANT);
+  });
+  /** A world desk's token header for a curl the console hands it (its seed's curls get the same through withWorldAuth). */
+  const deskBearer = (w: string): { auth?: string } => {
+    try {
+      return { auth: worldDesks.bearer(w, worldDesks.chatFor(w).persona().id) };
+    } catch {
+      return {};
+    }
+  };
+  // a world desk's own relay (the social product's desk passes EpicTeam's part at once too): only that desk's own call, in its world.
+  api.post("/tenants/:id/desk/pass", async (c) => {
+    const w = c.req.param("id") ?? "";
+    const run = (c.req.header("x-console-run") ?? "").trim().toLowerCase();
+    if (w === DEFAULT_TENANT || run !== worldDesks.runHeader(w).toLowerCase() || c.req.header("x-run-id") || (store.tenant ?? DEFAULT_TENANT) !== w)
+      return c.json({ error: { code: "desk_only", message: `only world ${w}'s own desk passes from here (header X-Console-Run: ${worldDesks.runHeader(w)}, its world's token, no run id); the Team desk uses /api/desk/pass` } }, 403);
+    return passFrom(c, w);
+  });
+  // a world's team desk (the social skin's top-level Chat): one thread across the world's campaigns, its own persona and token.
+  // many worlds are the tenancy plug's (hosted/tenancy.ts); the one-team core has the Team desk only.
+  const tenancy = hostedPlugs.find((p) => p.tenancy)?.tenancy?.();
+  const worldDesks: WorldDesksArea = tenancy?.worldDesks({
+    db,
+    store,
+    t3: cycleOpts.enabled ? cycleOpts.t3 : undefined,
+    dispatcher: cycleOpts.dispatcher,
+    startGate: cycleOpts.startGate,
+    seatBlocked: seatBlockerFor(read.seatsFile),
+    publicUrl: cycle.publicUrl,
+    reposRoot: read.reposRoot,
+    deskRepo: process.env.CONSOLE_DESK_REPO || undefined,
+    environmentId: () => cycle.hostEnvironment(mainHost()),
+    ...deskHosts,
+  }) ?? ONE_TEAM_DESKS;
+  if (tenancy) worldDesks.mount(api, store, attachments, deskSaid);
+  // the repo desk dispatches workers for its milestone on the owner's request (parent + child runs, scope + claims checked).
+  mountChatDispatch(api, {
+    store,
+    scope: chatScope,
+    dispatcher: cycleOpts.dispatcher,
+    publicUrl: cycle.publicUrl,
+    worldOf: (m) => milestoneWorld(db, m.id),
+    persona: (m) => milestoneChats.chatFor(m.id).persona(),
+    chatThread: (m) => milestoneChats.chatFor(m.id).current()?.threadId,
+    maxWorkers: cycleOpts.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS,
+  });
+  // the Team page's Moving now strip and the stall watch (dry list always; real Run nows behind the flag).
+  const movement = createMovement({
+    store,
+    memoMs: opts.movingMemoMs ?? 10_000, // one strip build per world per 10 s, however many tabs poll it
+    treeFor: (m) => treeFor(m, 1_500),
+    repoDir: (m) => resolveRepo(read.reposRoot, m.repo)?.path,
+    seats: () => {
+      try {
+        return read.seatsFile ? readSeats(read.seatsFile) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    waiting: (m) => waitingFor(m.id), // the [waits on] resolver names an idle epic's open ask
+    runNow: cycleOpts.enabled ? async (id, note) => (await cycle.runNowRequest(id, { instructions: note, instructionsBy: STALL_WATCH_BY })).run : undefined,
+    enabled: !!opts.stallWatch?.enabled && cycleOpts.enabled,
+    log: (msg) => console.log(msg),
+  });
+  movement.mount(api);
+  movement.start(opts.stallWatch?.everyMs ?? 10 * 60_000);
+  // one [delivered] note per closed placement and the sends queued while T3 was down (the endpoint-list update goes when a chat is next opened, not from here).
+  if (opts.deskTickMs && cycleOpts.enabled) {
+    const tick = () =>
+      void Promise.all([desk.tick(), milestoneChats.tick().catch((e) => console.error("milestone chat tick:", e)), worldDesks.tick().catch((e) => console.error("world desk tick:", e))]);
+    setTimeout(tick, 5_000).unref();
+    setInterval(tick, opts.deskTickMs).unref();
+  }
+  // Hosts view: cached status of the main server/the worker server (never starts the worker server) and the Wake the worker server button (hosted/hosts.ts).
+  const hostsArea = hostedPlugs.find((p) => p.hosts)?.hosts?.();
+  hostsArea?.mountView({
+    api,
+    store,
+    enabled: cycleOpts.enabled,
+    t3: cycleOpts.t3,
+    dispatcher: cycleOpts.dispatcher,
+    worker: cycleOpts.worker,
+    hostOf: (assignmentId) => {
+      const link = cycle.getLink(assignmentId);
+      if (link) return link.host;
+      const a = store.getAssignment(assignmentId);
+      return a ? store.getPersona(a.personaId)?.host : undefined;
+    },
+    runT3State: cycle.runT3State,
+    staleRunMs: cycleOpts.staleRunMs,
+  });
+  // waiting-on-the owner inbox + messages (inbox/routes.ts).
+  // One spine writer (one git lock per checkout) for inbox answers and the Secrets ledger.
+  let clones: ReturnType<typeof createCloneWriter> | undefined;
+  const sharedWriter = createSpineWriter({
+    onHeal: (h) => console.warn(`spine write: ${h.repoDir} held ${h.dropped.length} unpushed console commit(s) (${h.dropped.join("; ")}): kept on ${h.backup}, main reset to origin`),
+    // press writes answer at the local commit; the push follows in the background, the shared checkout after it
+    backgroundPush: !!opts.backgroundPush,
+    // CONSOLE_PRESS_HOOKS=full runs the repo's hooks on every press commit again (rollback of the secret check)
+    pressHooks: process.env.CONSOLE_PRESS_HOOKS === "full" ? "full" : "scan",
+    onPushed: (dir) => clones?.pushedFrom(dir),
+    onDropped: (d) => {
+      const n = presses.requeue(d.presses, `its commit could not be pushed (${d.reason.slice(0, 200)}); written again on the fresh spine`);
+      if (n) void pressWorker.tick().catch((e) => console.warn(`press outbox: ${(e as Error).message}`));
+    },
+  });
+  // writes commit and push from the console's own clone; the shared checkout follows.
+  clones = opts.writeClones ? createCloneWriter(sharedWriter, { root: opts.writeClones.root, enabled: opts.writeClones.enabled !== false }) : undefined;
+  if (clones && opts.backgroundPush) void clones.resumePushes().catch((e) => console.warn(`spine write: resuming pushes: ${(e as Error).message}`));
+  pressPushes = sharedWriter.pushes;
+  // press writes landing close together share one commit and push (inbox/groupWrite.ts)
+  const spine: SpineWriter = groupEdits(clones ?? sharedWriter, { log: (m) => console.log(m) });
+  // many humans: the People roster from the root spine, an inbox per human, the owner's board,
+  // two-step approval, Not sure and the time limit (people/).
+  mountPeople(api, app, {
+    db,
+    store,
+    reposRoot: read.reposRoot,
+    mode: opts.auth ?? authModeFromEnv(),
+    spine,
+    addMember: (i) => auth.addMember(i),
+    createSetup: (e) => auth.createSetup(e),
+    written: (dir) => dropSpines(dir),
+    ...(opts.people?.tickMs ? { tickMs: opts.people.tickMs } : {}),
+  });
+  cloneStatus = () => (clones ? { enabled: clones.enabled, root: opts.writeClones!.root, lagging: clones.lagging(), fallbacks: clones.fallbacks() } : { enabled: false });
+  // the Unblocker rubric lives in the repo: the global settings in the team repo's
+  // state/unblocker-rubric.json, a milestone's override on its spine's `Unblocker rubric:` line (cycle/rubric.ts).
+  const teamDir = () => {
+    const p = path.join(read.reposRoot, opts.teamState?.repo || TEAM_REPO_DEFAULT);
+    return fs.existsSync(path.join(p, ".git")) ? p : undefined;
+  };
+  const spineOfMilestone = (id: string) => {
+    const m = store.getMilestone(id);
+    const dir = m?.path ? (locateDir(m) ?? resolveRepo(read.reposRoot, m.repo)?.path) : undefined;
+    return m?.path && dir ? { dir, path: m.path } : undefined;
+  };
+  bindRubricRepo(db, { teamDir, spineOf: spineOfMilestone, writer: spine, invalidate: dropSpines });
+  // the owner's own team state (big roots, the desk's placements and chat) kept in its private repo (the team repo).
+  // the tracked milestones and the owner's marks on them live in each world's team repo (state/milestones.json).
+  // Only a boot that may write the team repo (the production unit) records there; a local or staging boot keeps it in console.db.
+  const teamWrites = opts.teamState?.write ?? teamRepoWrites();
+  const milestoneRecord = createMilestoneRecord({ db, reposRoot: read.reposRoot, teamRepo: opts.teamState?.repo, writer: spine, log: (msg) => console.log(msg), off: !teamWrites });
+  milestoneRecord.apply();
+  // each persona is a file in the same team repo (state/personas/<name>.md), written first, read back each pass.
+  const personaRecord = createPersonaRecord({ db, dirOf: milestoneRecord.dirOf, writer: spine, log: (msg) => console.log(msg) });
+  personaRecord.apply();
+  // assignments (cadence, the owner's switch, write grants) and access (service switches, send caps) in the same repo.
+  const assignmentRecord = createAssignmentRecord({ db, dirOf: milestoneRecord.dirOf, writer: spine, log: (msg) => console.log(msg) });
+  assignmentRecord.apply();
+  const recordedAssignments = () => assignmentRecord.recorded(store);
+  /** Store writes to milestones that record first; a file not written is a 409 / 502 and nothing changed. */
+  const recordedMilestones = () => milestoneRecord.recorded(store);
+  const recordedPersonas = () => personaRecord.recorded(store);
+  const recordFirst = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof RecordError) throw new ApiError(e.status === "failed" ? 502 : 409, e.status === "failed" ? "repo_write_failed" : "repo_write_refused", e.message);
+      throw e;
+    }
+  };
+  const team = createTeamState({
+    db,
+    reposRoot: read.reposRoot,
+    repo: opts.teamState?.repo,
+    beforeApply: () => void (milestoneRecord.apply(), personaRecord.apply(), assignmentRecord.apply()),
+    writer: spine,
+    placements: desk.placements,
+    transcript: cycleOpts.enabled ? () => desk.transcript() : undefined,
+    log: (msg) => console.log(msg),
+    readOnly: !teamWrites,
+  });
+  team.restorePlacements();
+  // big-root positions come back from state/big-roots.json at boot with the other files, not only on the
+  // first team-state pass (15 s later, and never without a timer), so a rebuilt console.db is whole from its first read.
+  team.applyBigRoots();
+  if (opts.teamState?.everyMs) {
+    const tick = () =>
+      void team
+        .sync()
+        .then((r) => Object.keys(r).length && console.log(`team state: ${JSON.stringify(r)}`))
+        .catch((e) => console.error("team state:", e));
+    setTimeout(tick, 15_000).unref();
+    setInterval(tick, opts.teamState.everyMs).unref();
+  }
+  /** a console change that touches the owner's big roots goes to the team repo (`teamState` in the answer; none = no checkout). */
+  // the file first, with the milestones as they will be; not written = the caller's 409 / 502, nothing changed.
+  const bigRootsWrite = async (why: string, ms?: Milestone[]) => {
+    const w = await team.bigRootsChanged(why, ms).catch((e): SpineWrite => ({ status: "failed", reason: (e as Error).message }));
+    if (w && w.status !== "written") throw new ApiError(w.status === "failed" ? 502 : 409, w.status === "failed" ? "repo_write_failed" : "repo_write_refused", `${BIG_ROOTS_FILE} not written (${w.reason ?? w.status}); nothing changed`);
+    return w ? { teamState: { file: BIG_ROOTS_FILE, status: w.status, ...(w.sha ? { sha: w.sha } : {}) } } : {};
+  };
+  /** the home world's milestones after a change to one of them (`m` replaces its row; `drop` takes it out). */
+  const homeAfter = (m: Milestone | undefined, drop?: string) => {
+    const all = createStore(db, { tenant: DEFAULT_TENANT }).listMilestones({ includeSettled: true }).filter((x) => x.id !== drop && x.id !== m?.id);
+    return m && !drop ? [...all, m] : all;
+  };
+  // the Epic Books' daily refresh (pull, capability probe committed through the spine writer, rebuild), recorded.
+  const bookRefresh = book
+    ? createBookRefresh({
+        db,
+        repos: () => listRepos(read.reposRoot),
+        book,
+        invalidate: dropSpines,
+        pull: opts.bookRefresh?.pull ?? createRepoPuller({ git: (dir, args) => gitOut(120_000)(dir, args).then(() => undefined) }).pull,
+        probe: opts.bookRefresh?.probe ?? realProbe({ base: process.env.CONSOLE_BROWSER_API || undefined }),
+        writer: spine,
+        ...(opts.bookRefresh?.now ? { now: opts.bookRefresh.now } : {}),
+      })
+    : undefined;
+  if (bookRefresh && opts.bookRefresh?.tickMs) bookRefresh.start(opts.bookRefresh.tickMs);
+  // the secret store is a hosted plug (hosted/secrets.ts: Secrets page, per-world stores); the
+  // one-team core keeps no keys (no Secrets routes, a key ask answers that nothing was stored).
+  const secretsArea = hostedPlugs.find((p) => p.secrets)?.secrets?.({ api, db, reposRoot: read.reposRoot, spine, secretPut: opts.secretPut, secrets: opts.secrets, worldSecretsKey: opts.worldSecretsKey });
+  // "done, waiting for your review" next to "waiting on you" on the Team home.
+  // a card is a spine row in `review` (the read model's review view); the owner's buttons write the row.
+  // held posts are cards in the same list (bound once the social writer is mounted, below)
+  let postReview: PostReview | undefined;
+  // a card the owner approved closes the open asks it clearly settles (bound once the inbox is mounted, below)
+  let settleApproved: ((r: { ref: string; repo: string; path: string; title: string; by: string; sha?: string }) => void) | undefined;
+  const review = createReview(db, {
+    store,
+    posts: () => postReview,
+    onApproved: () => settleApproved,
+    reposRoot: read.reposRoot,
+    writer: spine,
+    ...(readModel ? { readModel } : {}),
+    world: viewWorld,
+    cycle: cycle.enabled ? cycle : undefined,
+    live: opts.review?.live ?? liveCheckDepsFromEnv({ port: Number(process.env.PORT || 8750), host: process.env.HOST, repoDir: resolveRepo(read.reposRoot, homeRepo())?.path }),
+    wrote: dropSpines,
+    // New iteration on a held one-pager draft goes to its campaign's chat (the Repo desk that drafted it).
+    chatRelaunch: (mid, text) => milestoneChats.send(mid, text, undefined, `onepager-relaunch:${mid}:${Date.now()}`),
+    // test goals' rows show as cards on staging only
+    showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1",
+    // the daily press test's presses say so in the TEST commits (they said "the owner")
+    who: () => {
+      const i = currentAuth()?.identity;
+      return i?.kind === "legacy" && i.peer === PRESS_TEST_RUN ? "the daily press test" : ownerName();
+    },
+  });
+  mountReview(api, review, store, attachments, () => worldPriorities(store, read.reposRoot));
+  cardOfPress = (id) => review.card(id);
+  // after a card closes: Add comment (a last thought, any time later) and Bring it back once the press landed.
+  mountAfterClose(
+    api,
+    createAfterClose({ db, showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1", store, reposRoot: read.reposRoot, writer: spine, cycle: cycle.enabled ? cycle : undefined, wrote: dropSpines, ...(attachments ? { attachments } : {}), who: () => (currentAuth()?.identity?.kind === "legacy" && (currentAuth()?.identity as { peer?: string }).peer === PRESS_TEST_RUN ? "the daily press test" : ownerName()) }),
+  );
+  // the owner's red line (the Prioritizer's `redLine` in docs/priorities.json), the band on top of the Team home.
+  // several named lines (`redLines`, the first leads); `redLine` stays the first one for older screens.
+  // a line's live counts (the memory service's public counts) are read here, at most once an hour.
+  api.get("/red-line", async (c) => {
+    const redLines = await withCounts(worldRedLines(store, read.reposRoot)); // counts: hooks.counts (hosted: remoteCounts)
+    return c.json({ redLine: redLines[0] ?? null, redLines });
+  });
+  //..S9: the Company view (its companies, the Promo, Operations and Build wheels, the social product worlds' items) and
+  //'s uptime checks every 5 minutes (opts.uptimeProbe, off in tests): the tenancy plug's (hosted/tenancy.ts).
+  const buildSpinesOf = read.spines ? softSpines(read.spines) : undefined;
+  // parked by the owner 2026-11-12 (company level is for the future): off unless CONSOLE_COMPANY_VIEW=1 (companies.ts).
+  const companyViewOff = async (c: Context, next: () => Promise<void>) => {
+    if (companyViewOn() || companyPathStaysOff(c.req.path)) return next();
+    return c.json({ error: { code: "company_view_off", message: "the Company view is parked (CONSOLE_COMPANY_VIEW is off)" } }, 404);
+  };
+  if (tenancy) {
+    api.use("/companies", companyViewOff);
+    api.use("/companies/*", companyViewOff);
+  }
+  tenancy?.mountCompanies({
+    api,
+    db,
+    reposRoot: read.reposRoot,
+    social,
+    sitesDaily: (w) => socialArea?.sitesDaily(store, w) ?? [],
+    spinesOf: async (dir) => (buildSpinesOf ? buildSpinesOf(dir, 4_000) : undefined),
+    memberships: (userId) => auth.memberships(userId),
+    get: (p) => Promise.resolve(app.fetch(new Request(`http://console.local/api${p}`, { method: "GET" }))),
+    uptimeEveryMs: companyViewOn() ? opts.uptimeProbe?.everyMs : undefined,
+  });
+  // what the owner builds (docs/building.json of the code repo), each list's named campaigns and what waits on him, read from the spines.
+  api.get("/building", (c) => c.json({ lists: readBuilding(read.reposRoot) }));
+  // the owner's pursuits (docs/pursuits.json of the code repo): scorecard, totems, moving or stalled (pursuits.ts).
+  const pursuits = createPursuits({ reposRoot: read.reposRoot, board: () => launchBoard?.board() ?? null, git: gitOut(20_000) });
+  api.get("/pursuits", async (c) => c.json(await pursuits.get()));
+  // the owner's "wrong place" marks on a landing report's tree, one commit each in the code repo (landing.ts).
+  mountLandingMarks(api, { writer: spine, repo: () => resolveRepo(read.reposRoot, homeRepo())?.path, who: () => ownerName(), wrote: dropSpines });
+
+  // who holds each row (GET /api/claims, the home world) and the lease sweep: a lease that ran out (no commit naming
+  // the row) gives the row back to ready through the spine writer; the Delivery Manager's next wake re-dispatches it.
+  const leases = createLeases({ store: () => homeStore, reposRoot: read.reposRoot, writer: spine, git: gitOut(20_000), wrote: dropSpines, log: (m) => console.warn(m) });
+  mountClaims(api, () => leases);
+  if (opts.leases?.everyMs) leases.start(opts.leases.everyMs);
+  // "Commits with no ticket" on the Team home, per world.
+  mountOrphanCommits(api, { world: () => store.tenant ?? DEFAULT_TENANT, list: async (world) => orphansOf(orphanMilestones(world)) });
+  // "Asked, no row yet" on the Team home. Per world (TENANT_SAFE): the caller's world's milestones only.
+  launchBoard?.mount(api); // GET /api/launch-board (the home world only: routeScope's default; hosted/social.ts)
+  mountAskedNoRow(api, {
+    world: () => store.tenant ?? DEFAULT_TENANT,
+    list: async (world) => {
+      const ms = store.listMilestones().filter((m) => (store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT) === world && !m.paused);
+      // A cold spines.py read takes seconds after a deploy: wait for it (the section loads on its own), say when one is missing.
+      const lists = await Promise.all(
+        ms.map(async (m) => {
+          const { loc, rel, spines } = await spinesFor(m, 10_000).catch(() => ({}) as Awaited<ReturnType<typeof spinesFor>>);
+          if (!loc || !rel) return null; // no spine file in a checkout: nothing to list
+          return spines ? { repoDir: loc.repo.path, rel, items: askedNoRowFor(m, loc.repo.path, rel, spines) } : undefined;
+        }),
+      );
+      return { items: dedupeAsked(lists.filter((l): l is NonNullable<typeof l> => !!l)), partial: !!soft && lists.includes(undefined) };
+    },
+  });
+  // the two text calls on the provider CONSOLE_TEXT_MODEL_PROVIDER picks (textModel.ts), built once: the settle
+  // check, the feedback structurer and GET/POST /api/text-model below share them.
+  const textProvider = textModelProvider();
+  const openAiKey = async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile()));
+  const textJudge: Judge = textProvider === "anthropic" ? anthropicJudge(anthropicKey) : openAiJudge(openAiKey);
+  const textStructurer: Structurer = opts.voice?.structure ?? (textProvider === "anthropic" ? anthropicStructurer(anthropicKey) : openAiStructurer(openAiKey));
+  // the owner edits a red line (typed or a voice note, reworded by the same text model) or deletes it, from its slim
+  // row on top of Team home; docs/priorities.json, the root Red line lines and an Decisions row, one commit.
+  mountRedLineEdit(api, {
+    writer: spine,
+    reposRoot: read.reposRoot,
+    reword: opts.redLineReword ?? (textProvider === "anthropic" ? anthropicReworder(anthropicKey) : openAiReworder(openAiKey)),
+    who: () => ownerName(),
+    wrote: dropSpines,
+  });
+  // which provider the two text calls use, and one probe call of either on TEST text (and of the
+  // cross-world check, the voice spill check and the memory service ask wording) (writes nothing, files
+  // nothing, one call per 20 s): the proof that a call goes through the credit account, and a check after a rollback.
+  let textProbeAt = 0;
+  api.get("/text-model", (c) => c.json({ provider: textProvider, model: textProvider === "anthropic" ? ANTHROPIC_TEXT_MODEL : STRUCTURE_MODEL }));
+  api.post("/text-model/probe", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const str = (k: string) => (typeof b[k] === "string" ? (b[k] as string).slice(0, 4000) : "");
+    const kinds = ["structure", "settle", "cross", "spill", "ask"];
+    if (typeof b.kind !== "string" || !kinds.includes(b.kind)) return c.json({ error: { code: "validation_error", message: `kind is ${kinds.join(", ")}` } }, 400);
+    if (Date.now() - textProbeAt < 20_000) return c.json({ error: { code: "too_many", message: "one probe per 20 s" } }, 429);
+    textProbeAt = Date.now();
+    const t0 = Date.now();
+    const base = { provider: textProvider, model: b.kind === "ask" ? askModel : textProvider === "anthropic" ? ANTHROPIC_TEXT_MODEL : STRUCTURE_MODEL, kind: b.kind };
+    try {
+      if (b.kind === "cross") {
+        if (!str("words")) return c.json({ error: { code: "validation_error", message: "words is required" } }, 400);
+        const social = str("from") === socialProduct();
+        const side = (product: string) => ({ world: "TEST", product, url: "" });
+        const toMilestones = str("campaigns").split(";").map((t) => t.trim()).filter(Boolean);
+        const r = await textCrossJudge({ from: side(social ? socialProduct() : TEAM_HEAD.name), to: side(social ? TEAM_HEAD.name : socialProduct()), toMilestones, words: str("words") });
+        return c.json({ ...base, ms: Date.now() - t0, result: r });
+      }
+      if (b.kind === "spill") {
+        if (!str("words")) return c.json({ error: { code: "validation_error", message: "words is required" } }, 400);
+        const r = await textSpillJudge({ id: "text-model-probe", world: "TEST", where: str("where") || "TEST probe", words: str("words") });
+        return c.json({ ...base, ms: Date.now() - t0, result: r });
+      }
+      if (b.kind === "ask") {
+        if (!str("question")) return c.json({ error: { code: "validation_error", message: "question is required" } }, 400);
+        if (!textAsk) return c.json({ error: { code: "off", message: "this console has no memory helper (the services plug)" } }, 503);
+        const r = await textAsk.worder(str("question"), str("context") || "THE WORLD'S STATUS\nTEST probe: no context given.", []);
+        return c.json({ ...base, model: r.model, ms: Date.now() - t0, costUsd: r.costUsd, result: { answer: r.answer, refs: r.refs } });
+      }
+      if (b.kind === "structure") {
+        if (!str("transcript")) return c.json({ error: { code: "validation_error", message: "transcript is required" } }, 400);
+        const r = await textStructurer(str("transcript"), { who: str("who") || "TEST probe", product: str("product") || "TEST", campaign: str("campaign") || "TEST" });
+        return c.json({ ...base, ms: Date.now() - t0, costUsd: r.costUsd, result: r.structure });
+      }
+      if (!str("question") || !str("answer") || !str("openQuestion")) return c.json({ error: { code: "validation_error", message: "question, answer and openQuestion are required" } }, 400);
+      const src = { kind: "ask" as const, question: str("question"), answerKind: "answer" as const, words: str("answer"), label: "TEST probe" };
+      const cand = { id: "text-model-probe", source: "ask", question: str("openQuestion"), code: "TEST" } as unknown as WaitingItem;
+      const r = await ((typeof opts.settle === "object" && opts.settle.judge) || textJudge)(src, cand, [{ kind: "near-question", why: str("links") || "TEST probe" }]);
+      return c.json({ ...base, ms: Date.now() - t0, result: r });
+    } catch (e) {
+      return c.json({ ...base, ms: Date.now() - t0, error: { code: "model_failed", message: String((e as Error)?.message ?? e).slice(0, 300) } }, 502);
+    }
+  });
+  const inbox = mountInbox(api, { db, store, cycle, deps: inboxDeps, spine, attachments, recordAssignments: (s) => assignmentRecord.recorded(s),
+    ...(opts.answers?.ack ? { answerAck: opts.answers.ack } : {}), ...(opts.answers?.retryMs ? { answerRetryMs: opts.answers.retryMs } : {}),
+    onAnswerJob: (id, s) => presses.answerJob(id, s), // an answer's press follows its job
+    onAnswerUndone: (id) => void presses.undoRef(id, "brought back before it was written"),
+    // one answer closes many (index.ts turns it on; true = the model check on the console's OpenAI key)
+    ...(!opts.settle ? {} : { settle: opts.settle === true ? { judge: textJudge } : opts.settle }),
+    // his yes on an improvement request hands it to the builder world's desk (inbox/improvement.ts)
+    improvement: async (r) => {
+      const it = r.item;
+      if (!it.improvement || !it.code || !it.repo) return { ok: false, retry: false, error: "the improvement request has no code or repo" };
+      const mid = it.milestoneId ?? r.milestoneId;
+      const fromWorld = (mid ? store.worldOfMilestone?.(mid) : undefined) ?? DEFAULT_TENANT;
+      const worlds = db.prepare("SELECT id, skin, plan, owner_handle AS owner, paused FROM tenants").all() as WorldRow[];
+      const to = resolveImprovementTarget(it.improvement.to, fromWorld, worlds, parsePairs(crossOpt?.pairs ?? process.env.CONSOLE_DESK_PAIRS));
+      if (typeof to !== "string") return { ok: false, retry: false, error: to.error };
+      const target = worldHome(to);
+      if (!target) return { ok: false, retry: true, error: `the world ${to} has no home checkout on this host` };
+      const fromRepo = resolveRepo(read.reposRoot, it.repo);
+      const h = await handImprovement(
+        {
+          fromWorld,
+          replyTo: fromRepo?.remote ?? it.repo,
+          repo: it.repo,
+          code: it.code,
+          question: it.question ?? it.title ?? "",
+          improvement: it.improvement,
+          ...(it.unblocks ? { unblocks: it.unblocks } : {}),
+          ...(it.contextText ? { context: it.contextText } : {}),
+          answer: r.text,
+          approvedOn: r.createdAt.slice(0, 10),
+          toWorld: to,
+          ...(citeOf([it.question, it.contextText, it.whyYou, it.recommendation, it.detail]) ? { cites: citeOf([it.question, it.contextText, it.whyYou, it.recommendation, it.detail]) } : {}),
+        },
+        target,
+        spine,
+      );
+      if ("reason" in h) return { ok: false, retry: h.state === "failed", error: h.reason };
+      return { ok: true, note: `${target.name}:${h.rel}` };
+    },
+    invalidate: (dir) => dropSpines(dir), deskChat: desk, ...(readModel ? { readModel } : {}), ...(secretsArea ? { keys: secretsArea.keys } : {}),
+    milestoneChat: {
+      caller: chatScope.caller,
+      refusal: (callerId, item) => {
+        const m = item.milestoneId ? store.getMilestone(item.milestoneId) : undefined;
+        return chatScope.refusal(callerId, m, m?.path && item.path ? item.path : undefined);
+      },
+      jordiSaid: async (callerId, chat) => {
+        const want = chat.toLowerCase().replace(/\s+/g, " ").trim();
+        if (want.length < 2) return false;
+        return (await milestoneChats.chatFor(callerId).jordiMessages()).some((x) => x.text.toLowerCase().replace(/\s+/g, " ").includes(want));
+      },
+    },
+    ...(opts.secretPut ? { secretPut: opts.secretPut } : {}) });
+  opts.answers?.onJobs?.(inbox.jobs);
+  // presses a restart cut off are due again; the worker retries what has not landed.
+  pressWorker.resume();
+  if (opts.presses?.tickMs) pressWorker.start(opts.presses.tickMs);
+  opts.presses?.onWorker?.(pressWorker);
+  // one server-computed status per milestone (outcome, flow, pending items); GET /status, /milestones/:id/status.
+  // a big root tracked inside another milestone's spine is worked by that milestone's personas.
+  const coverOf = coverOfIn(store, (m) => treeFor(m, 1_500));
+  // a milestone's items come from the trees of every milestone of its world (asks it references), so a cold
+  // read of any of their repos makes its status loading.
+  const coldOf = (sf: NonNullable<typeof soft>) => ({
+    mark: sf.mark,
+    missed: (m: Milestone, mark: number) => {
+      const world = store.worldOfMilestone?.(m.id);
+      const dirs = new Set(store.listMilestones({ includeSettled: true }).filter((x) => x.id === m.id || store.worldOfMilestone?.(x.id) === world).map(locateDir));
+      return [...dirs].some((dir) => !!dir && sf.missedSince(dir, mark));
+    },
+  });
+  if (inbox.settle) {
+    const settle = inbox.settle;
+    settleApproved = (r) => {
+      if (r.by !== DEFAULT_OWNER) return; // the daily press test's presses settle nothing
+      const remote = resolveRepo(read.reposRoot, r.repo)?.remote;
+      void settle({
+        kind: "review",
+        repo: r.repo,
+        path: r.path,
+        row: r.ref,
+        question: r.title,
+        answerKind: "approve",
+        words: `Approved on his review card: ${r.title}`,
+        label: `review ${r.repo}/${r.ref}`,
+        ...(remote ? { link: `https://github.com/${remote}/blob/${r.sha ?? "HEAD"}/${r.path}` } : {}),
+        owner: DEFAULT_OWNER,
+      })
+        .then((x) => x.line && console.log(`review ${r.repo}/${r.ref}: one answer closes many: ${x.line}`))
+        .catch((e) => console.warn(`review ${r.repo}/${r.ref}: one answer closes many: ${(e as Error).message}`));
+    };
+  }
+  const status = createStatus({ db, store, milestoneInfo: withOutcome, treeFor: (m) => treeFor(m, 1_500), waiting: (f) => waitingAndDefects(inboxDeps, f), t3State: cycle.runT3State, coverOf, askLookup: monitorAskLookup, priorities: () => worldPriorities(store, read.reposRoot), ...(soft ? { cold: coldOf(soft) } : {}) });
+  mountStatus(api, status, store, readModel);
+  // a counted monitor alert's ask actions, relayed to the ask's own inbox route in its own world.
+  mountAlertActions(api, {
+    db,
+    store,
+    alertAsks: async (m) => {
+      const info = await withOutcome(m, 1_500);
+      const t = Date.now();
+      const refs = (info.monitoring ?? []).filter((x) => alertReasons(x, t).why.length).flatMap(askRefs);
+      return refs.length ? [...(await monitorAskLookup(m, refs)).values()] : [];
+    },
+    fetch: (r) => app.fetch(r),
+  });
+  // the pills (Team red + green, Chat unread, each sidebar milestone) in one small answer; unread from the live chats.
+  const chatUnread = cycleOpts.enabled
+    ? createChatUnread({
+        db,
+        detach: outsideRequest,
+        ...(opts.chatUnread?.staleMs !== undefined ? { staleMs: opts.chatUnread.staleMs } : {}),
+        chatOf: (key) => {
+          if (key === TEAM_KEY) return desk;
+          if (key.startsWith("milestone:")) return milestoneChats.chatFor(key.slice("milestone:".length));
+          if (key.startsWith("world-desk:")) return worldDesks.chatFor(key.slice("world-desk:".length));
+          return undefined;
+        },
+      })
+    : undefined;
+  mountCounts(api, {
+    store,
+    status: async () => {
+      const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+      if (!readModel) return status.all();
+      const v = await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>);
+      return { ...v.payload, asOf: v.asOf };
+    },
+    review,
+    ...(chatUnread ? { unread: chatUnread } : {}),
+    memberships: (userId) => auth.memberships(userId), // the world switcher
+  });
+  mountDeskInbox(api, { store, resolve: (repo) => resolveRepo(read.reposRoot, repo) }); // the world's desk-to-desk notes
+  /**
+   * a deploy restarts the console (49 restarts in 6 h on 2026-11-02) and the first tree read after it took
+   * 17-26 s on the main server (spines.py cold, then every tree of the world for the waiting list). After a start, read each
+   * unsettled milestone's tree the way GET /milestones/:id/tree does (spines.py output, tree, waiting list, summary),
+   * focus milestones first, one at a time so the main server is not flooded. A request meanwhile shares the build in flight
+   * (tree memo, spines.py cache); later changes are dropped by the usual invalidation (pull, write), never here.
+   */
+  const warmTrees = async () => {
+    const t0 = Date.now();
+    const ranks = milestoneRanks(store.listMilestones({ includeSettled: true }));
+    const ms = store
+      .listMilestones()
+      .filter((m) => !!m.path && !m.settledAt)
+      .sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity));
+    for (const m of ms) {
+      try {
+        await spinesFor(m, SPINES_TIMEOUT_MS); // the real spines.py output, so the stored tree is not the bare doc parse
+        await status.paintedTree(m, await treeFor(m));
+      } catch {
+        /* a milestone that fails here fails on its page too; the next one still warms */
+      }
+    }
+    return { milestones: ms.length, ms: Date.now() - t0 };
+  };
+  if (opts.warmTrees?.afterMs !== undefined) {
+    const onDone = opts.warmTrees.onDone ?? ((r) => console.log(`trees warm: ${r.milestones} milestones in ${(r.ms / 1000).toFixed(1)} s`));
+    setTimeout(() => void warmTrees().then(onDone, (e) => console.warn(`trees warm failed: ${e instanceof Error ? e.message : e}`)), opts.warmTrees.afterMs).unref();
+  }
+  // what waits on the owner (the badge's open items) and E48's review list also reach him on WhatsApp.
+  const homeStore = createStore(db, { tenant: DEFAULT_TENANT }); // the owner's world's review rows
+  // rows in review that are not cards (they close themselves, need evidence, or their card needs rewriting)
+  // wake their milestone's Delivery manager once each; the owner never sees them. Read for the owner's world, outside any request.
+  // with the read model, so the self-close each minute reads the stored review view as meant (it had none
+  // here, so every minute it re-read every spine on this thread: ~1.1 s on the main server, logged as a timer that did not yield).
+  const gateReview = createReview(db, { store: homeStore, reposRoot: read.reposRoot, writer: spine, wrote: dropSpines, ...(readModel ? { readModel } : {}), live: opts.review?.live ?? liveCheckDepsFromEnv({ port: Number(process.env.PORT || 8750), host: process.env.HOST, repoDir: resolveRepo(read.reposRoot, homeRepo())?.path }) });
+  const reviewGate = createAgentWake({ db, store: homeStore, agents: () => gateReview.list({ state: "agents", wait: true }), closeSelf: () => gateReview.closeSelf(), ...(cycle.enabled ? { cycle } : {}), log: (m) => console.warn(m) });
+  // a long note marks the cards in the owner's inbox it touches (rows in review, open asks) and wakes their owners.
+  const touchOpt = opts.noteTouch === true ? {} : opts.noteTouch || undefined;
+  if (touchOpt) {
+    const touchJudge: TouchJudge = touchOpt.judge ?? (onClaude ? anthropicTouchJudge(anthropicKey) : openAiTouchJudge(textOpenAiKey));
+    const oneLine = (t: string) => t.replace(/\s+/g, " ").trim();
+    noteTouch = createNoteTouch({
+      db,
+      judge: touchJudge,
+      // the owner's own inbox (world the home world): the review cards and his open asks
+      cards: async (world) => {
+        if (world !== DEFAULT_TENANT) return [];
+        const rows = (await gateReview.list({ state: "feed" }))
+          .filter((i) => i.kind !== "post" && i.verdict.kind === "card" && !i.test && !i.backlogSince)
+          .map((i): TouchCard => ({ kind: "row", ref: i.ref, title: i.face?.title || i.title, about: oneLine(i.face?.taskGoal ?? i.summary ?? "").slice(0, 300), repo: i.repo, path: i.path, ...(i.milestoneId ? { milestoneId: i.milestoneId } : {}), current: i.status, text: `${i.title} ${i.status} ${i.summary ?? ""}` }));
+        const asks = (await waitingAndDefects({ ...inboxDeps, store: homeStore }, { world: DEFAULT_TENANT }).catch(() => ({ items: [] as Awaited<ReturnType<typeof waitingAndDefects>>["items"] }))).items
+          .filter((a) => a.source === "ask" && a.state === "open" && !!a.code && !!a.repo && !!a.path && !a.snoozedUntil)
+          .map((a): TouchCard => ({ kind: "ask", ref: a.code!, title: oneLine(a.question ?? a.title).slice(0, 200), about: oneLine(a.title ?? "").slice(0, 200), repo: a.repo!, path: a.path!, ...(a.milestoneId ? { milestoneId: a.milestoneId } : {}), current: a.question ?? "", text: `${a.question ?? ""} ${a.title ?? ""} ${a.contextText ?? ""}` }));
+        return [...rows, ...asks];
+      },
+      mark: async (repo, rel, marks) => {
+        const dir = resolveRepo(read.reposRoot, repo)?.path;
+        if (!dir) return `no checkout for ${repo}`;
+        const refs = marks.map((m) => m.ref).join(", ");
+        const w = await spine.edit({
+          repoDir: dir,
+          path: rel,
+          label: `voice note marks ${refs}`,
+          edit: (text) => {
+            const r = addMarks(text, marks);
+            if (!r.added) return { skip: "already marked" };
+            const at = marks[0].at;
+            return {
+              text: r.text,
+              msg: `${ownerName()}'s voice note of ${at} marks ${refs} (${marks.map((m) => m.kind).join(", ")})`,
+              body: `His long voice note (${marks[0].note}) touches ${marks.length} card(s) in his inbox. The console added one Decisions line per card in ${rel}; each card shows "${marks.some((m) => m.kind === "stale") ? "stale" : "updated"}" until its owner moves the row or rewrites the ask (core/console/server/src/voice/touch.ts).`,
+            };
+          },
+        });
+        if (w.status === "written" || (w.status === "skipped" && w.reason === "already marked")) {
+          dropSpines(dir);
+          return true;
+        }
+        return `${w.status}: ${w.reason ?? ""}`.slice(0, 200);
+      },
+      ...(cycle.enabled
+        ? {
+            wake: async (mid: string, text: string, key: string) => {
+              const m = homeStore.getMilestone(mid);
+              if (!m || m.paused) return "milestone paused or gone";
+              const a = homeStore.listAssignments({ milestoneId: mid }).find((x) => x.enabled && !x.parkedAt && isDm(homeStore.getPersona(x.personaId)?.name));
+              if (!a) return "no Delivery manager on it";
+              await cycle.runNowRequest(a.id, { instructions: text, instructionsBy: "voice note" }, key);
+              return true as const;
+            },
+            tell: deskTell,
+          }
+        : {}),
+      log: (m) => console.warn(m),
+    });
+  }
+  if (opts.reviewGate?.everyMs) reviewGate.start(opts.reviewGate.everyMs, opts.reviewGate.closeEveryMs ?? 60_000);
+  // phone notifications from the installed app (Web Push): the Team desk's answers and's new items.
+  const webPush = createWebPush(db, {
+    vapid: opts.webPush?.vapid ?? (() => vapidFromEnv()),
+    ...(opts.webPush?.transport ? { transport: opts.webPush.transport } : {}),
+    ...(opts.webPush?.now ? { now: opts.webPush.now } : {}),
+    ...(opts.webPush?.deskGraceMs !== undefined ? { deskGraceMs: opts.webPush.deskGraceMs } : {}),
+    ...(chatUnread ? { desk: () => chatUnread.peek(TEAM_KEY) } : {}),
+  });
+  mountWebPush(api, webPush);
+  if (opts.webPush?.deskTickMs) setInterval(() => void outsideRequest(() => webPush.deskTick()), opts.webPush.deskTickMs).unref();
+  // WhatsApp to the owner and the skill's sends (hosted/services.ts); the one-team core sends none.
+  const whatsapp: Notifier = services?.whatsapp({
+    api,
+    push: (pending) => webPush.items(pending),
+    sources: async () => {
+      // the stored Team status (the worker keeps it current), never a fresh build on this thread every 2 min.
+      const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+      const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
+      return [
+        ...asksFrom(all.items, (id) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT, (id) => store.getMilestone(id)?.title),
+        ...reviewNotices(reviewItemsOf(db, homeStore, read.reposRoot)),
+      ];
+    },
+    options: opts.whatsapp,
+    store: homeStore,
+    setSkills: (id, skills) => recordFirst(() => personaRecord.recorded(homeStore).updatePersona(id, { skills })),
+  }) ?? { alert: async () => undefined, tick: async () => undefined };
+  // a console checkout ahead of or behind origin for over 5 min is an alert (log, /api/health, the Delivery
+  // Manager's wake and, in production, one WhatsApp per episode); it was silent while the main server's the code repo stayed diverged.
+  checkoutSync = createCheckoutSync({
+    dirs: () => [...new Set(store.listMilestones({ includeSettled: false }).flatMap((m) => resolveRepo(read.reposRoot, m.repo)?.path ?? []))],
+    git: gitOut(15_000),
+    ...(opts.checkoutSync?.afterMs !== undefined ? { afterMs: opts.checkoutSync.afterMs } : {}),
+    log: (m) => console.warn(m),
+    alert: (text) => {
+      if (opts.readModel?.drift?.alert) void whatsapp.alert("checkout-sync", `${text}\nConsole spine writes to it are refused until it matches. Details: ${teamLink()}/api/checkout-sync`);
+    },
+  });
+  mountCheckoutSync(api, () => checkoutSync!);
+  if (opts.checkoutSync?.everyMs) checkoutSync.start(opts.checkoutSync.everyMs);
+  // the worker server's home volume under 15% free is an alert (log, /api/health `vps3Disk`, the Delivery Manager's wake and,
+  // in production, one WhatsApp per episode); it filled to 99% on 2026-11-08 and broke new worktrees unseen.
+  if (opts.hostDisk?.probe && hostsArea) {
+    hostDisk = hostsArea.diskWatch({
+      probe: opts.hostDisk.probe,
+      ...(opts.hostDisk.minFreePct !== undefined ? { minFreePct: opts.hostDisk.minFreePct } : {}),
+      log: (m) => console.warn(m),
+      alert: (text) => {
+        if (opts.readModel?.drift?.alert) void whatsapp.alert(`${workerHost()}-disk`, `${text}\nDetails: ${teamLink()}/api/health`);
+      },
+    });
+    if (opts.hostDisk.everyMs) hostDisk.start(opts.hostDisk.everyMs);
+  }
+  hostsArea?.mountDisk(api, () => hostDisk);
+  // job servers (model A): box/provision.py's alerts reach the owner once each (production), every customer's
+  // status line and today's spend at GET /api/job-servers.
+  if (opts.jobServers?.dir) {
+    jobServers = createJobServers({
+      dir: opts.jobServers.dir,
+      log: (m) => console.warn(m),
+      alert: (kind, text) => {
+        if (opts.readModel?.drift?.alert) void whatsapp.alert(kind, `${text}\nDetails: ${teamLink()}/api/job-servers`);
+      },
+    });
+    if (opts.jobServers.everyMs) jobServers.start(opts.jobServers.everyMs);
+  }
+  mountJobServers(api, () => jobServers);
+  // the daily press test presses every review button kind on TEST rows (dailyTest.ts), as the console host
+  // through the app's own routes, so each press goes through the press log, the clone writer and the outbox like the owner's.
+  {
+    const hostCtx = () => {
+      const mode = opts.auth ?? authModeFromEnv();
+      return { mode, identity: { kind: "legacy" as const, tenant: DEFAULT_TENANT, peer: PRESS_TEST_RUN, host: true as const }, ...(mode === "on" ? { scope: DEFAULT_TENANT } : {}), via: "gateway" as const };
+    };
+    const call = (method: string, p: string, body?: unknown) =>
+      runWithAuth(hostCtx(), async () =>
+        app.fetch(new Request(`http://console.local/api${p}`, { method, headers: { "content-type": "application/json", "x-console-run": PRESS_TEST_RUN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })),
+      );
+    const testName = opts.pressTest?.repo ?? process.env.CONSOLE_PRESS_TEST_REPO ?? "e67-feedback-test";
+    const testRepo = () => {
+      const r = resolveRepo(read.reposRoot, testName);
+      return r ? { name: r.name, dir: r.path } : undefined;
+    };
+    const isTest = (repo: string | undefined, code: string | undefined) => (!!repo && TEST_REPO.test(repo)) || (!!code && TEST_ROW.test(code));
+    const getJson = async (p: string) => {
+      const r = await call("GET", p);
+      if (!r.ok) throw new Error(`GET ${p}: HTTP ${r.status}`);
+      return (await r.json()) as unknown;
+    };
+    pressTest = createPressTest({
+      presses,
+      writer: spine,
+      testRepo,
+      teamRepo: () => resolveRepo(read.reposRoot, homeRepo())?.path,
+      rowId: (rel, ref) => {
+        const t = testRepo();
+        return t ? computeReviewRows(homeStore, read.reposRoot).rows.find((r) => resolveRepo(read.reposRoot, r.repo)?.path === t.dir && r.path === rel && r.ref === ref)?.id : undefined;
+      },
+      goalKey: (rel) => {
+        const t = testRepo();
+        return t ? computeReviewRows(homeStore, read.reposRoot).closedGoals?.find((g) => resolveRepo(read.reposRoot, g.repo)?.path === t.dir && g.path === rel)?.key : undefined;
+      },
+      press: async (p, body) => {
+        const res = await call("POST", p, body);
+        let json: unknown;
+        try {
+          json = await res.json();
+        } catch {
+          json = undefined;
+        }
+        // the press id from the header, else from the 202 body (production's answer reached the test without the header)
+        const id = res.headers.get("x-press-id") ?? (json as { press?: { id?: unknown } } | undefined)?.press?.id;
+        return { status: res.status, ...(typeof id === "string" && id ? { pressId: id } : {}), json };
+      },
+      clones: () => cloneStatus() as { lagging?: unknown[]; fallbacks?: { at: string }[] },
+      // what the owner sees: the review list, the goals (open and closed) and the inbox, as the pages read them
+      leaks: async () => {
+        const out: ListLeak[] = [];
+        for (const i of (await getJson("/review-items")) as { repo?: string; ref?: string }[]) if (isTest(i.repo, i.ref)) out.push({ list: "review list", what: i.ref ?? "?" });
+        for (const g of (await getJson("/review-goals")) as { repo?: string; code?: string; key?: string }[]) if (isTest(g.repo, undefined)) out.push({ list: "goals", what: g.code ?? g.key ?? "?" });
+        for (const g of (await getJson("/review-goals/closed")) as { repo?: string; code?: string }[]) if (isTest(g.repo, undefined)) out.push({ list: "closed goals", what: g.code ?? "?" });
+        for (const a of (await getJson("/waiting-on-owner")) as { repo?: string; code?: string; state?: string }[])
+          if (a.state !== "done" && isTest(a.repo, a.code)) out.push({ list: "inbox", what: a.code ?? "?" });
+        return out;
+      },
+      invalidate: dropSpines,
+      raise: async (question) => {
+        const team = resolveRepo(read.reposRoot, homeRepo())?.path;
+        const m = team ? homeStore.listMilestones({}).find((x) => resolveRepo(read.reposRoot, x.repo)?.path === team) : undefined;
+        if (!m) return { status: "skipped", reason: `no ${homeRepo()} milestone on this console` };
+        const r = await raiseAsk({ db, store: homeStore, reposRoot: read.reposRoot, writer: spine, invalidate: dropSpines }, m, { question, askedBy: "the daily press test (console)", row: pressTestHome().row }, pressTestHome().spine);
+        return r.status === "written" ? { status: r.status, code: r.code } : { status: r.status, reason: r.reason };
+      },
+      ...(opts.pressTest?.now ? { now: opts.pressTest.now } : {}),
+      ...(opts.pressTest?.pollMs !== undefined ? { pollMs: opts.pressTest.pollMs } : {}),
+      ...(opts.pressTest?.landingLimitMs !== undefined ? { landingLimitMs: opts.pressTest.landingLimitMs } : {}),
+      ...(opts.pressTest?.recheckMs !== undefined ? { recheckMs: opts.pressTest.recheckMs } : {}),
+      ...(opts.pressTest?.sleep ? { sleep: opts.pressTest.sleep } : {}),
+    });
+    // GET: the last runs and whether today's is due; POST runs one now (202, in the background; ?wait=1 answers with the run)
+    api.get("/press-test", (c) => c.json({ running: pressTest!.running(), due: pressTest!.due(), health: pressTest!.health(), runs: pressTest!.runs() }));
+    api.post("/press-test/run", async (c) => {
+      if (c.req.query("wait") === "1") return c.json(await pressTest!.run("manual"));
+      const was = pressTest!.running();
+      void pressTest!.run("manual").catch(() => undefined);
+      return c.json({ started: !was, running: true }, 202);
+    });
+    if (opts.pressTest?.tickMs) pressTest.start(opts.pressTest.tickMs);
+  }
+  // drift between the cache and the repo reaches the owner on WhatsApp (the console's alert path), once per set of
+  // differing views a day; staging and dev copies only log (index.ts leaves `alert` off there).
+  {
+    let last: { sig: string; at: number } | undefined;
+    onDrift = (r) => {
+      if (r.ok || !opts.readModel?.drift?.alert) return;
+      const sig = r.error ? `error:${r.error}` : r.differ.map((x) => x.key).sort().join("|");
+      const t = Date.now();
+      if (last && last.sig === sig && t - last.at < 24 * 3600_000) return;
+      last = { sig, at: t };
+      void whatsapp.alert("drift", `Team console: ${driftLine(r)}\nThe repo is the source (root L-45); details: ${teamLink()}/api/read-model/drift`);
+    };
+  }
+  // Call the desk. The console mints a 1-minute OpenAI client key per call (caps, off switch), answers the
+  // voice's quick status from the stored Team status, relays its questions into the desk thread and meters the cost.
+  // every call starts briefed: the root tree (top-level milestones: code, one-line goal, status, priority order)
+  // and the Epic Book summary at the call's level (the desk: the root book; a milestone: its own page). Read from the
+  // stored book (never a build on the call's path beyond its soft wait; voice.ts drops a briefing slower than 3 s).
+  const builtBook = async () => (book ? (await book.get()).book : null);
+  const epicOf = (b: Book | null, m: Milestone): BookEpic | undefined => {
+    if (!b || !m.path) return undefined;
+    const loc = locate(read.reposRoot, m);
+    const repoName = "error" in loc ? loc.repo?.name ?? m.repo.split("/").pop()! : loc.repo.name;
+    return b.repos.find((r) => r.name === repoName)?.epics.find((e) => e.path === m.path);
+  };
+  const worldTree = (b: Book | null, world: string): TreeEntry[] =>
+    store
+      .listMilestones()
+      .filter((m) => milestoneWorld(db, m.id) === world)
+      .map((m) => {
+        const e = world === DEFAULT_TENANT ? epicOf(b, m) : undefined;
+        return { ...(e ? { code: e.code } : {}), title: m.titleSetAt || !e ? m.title : e.title, goal: e?.goal ?? null, status: e?.status ?? null, ...(m.bigRoot != null ? { rank: m.bigRoot } : {}) };
+      });
+  /** The Team desk's root book: the code repo's root spine (the desk's own repo). */
+  const deskBrief = async () => {
+    const b = await builtBook();
+    const repo = b?.repos.find((r) => r.name === DESK_BOOK_REPO);
+    const root = repo?.root ? repo.epics.find((e) => e.path === repo.root) : undefined;
+    return briefing([treeBrief(worldTree(b, DEFAULT_TENANT)), root ? bookBrief(root, { level: "the root (the whole team)" }) : null]);
+  };
+  const milestoneBrief = async (id: string, world: string) => {
+    if (world !== DEFAULT_TENANT) return briefing([treeBrief(worldTree(null, world), { who: "this world's", noun: "campaigns" })], "campaigns");
+    const b = await builtBook();
+    const m = store.getMilestone(id);
+    const e = m ? epicOf(b, m) : undefined;
+    return briefing([treeBrief(worldTree(b, world)), e ? bookBrief(e, { level: "this milestone", ...(m?.titleSetAt ? { title: m.title } : {}) }) : null]);
+  };
+  const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
+  const voice = createVoice({
+    db,
+    mint: voiceMint,
+    desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    onEnded: (id) => void memoryForward?.enqueueCall(id),
+    envOff: process.env.CONSOLE_VOICE === "off",
+    envModel: process.env.CONSOLE_VOICE_MODEL || undefined,
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+    brief: deskBrief,
+    quickStatus: async () => {
+      const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+      const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
+      const title = (id: string) => store.getMilestone(id)?.title;
+      const waiting = [...asksFrom(all.items, (id) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT, title), ...reviewNotices(reviewItemsOf(db, homeStore, read.reposRoot)).map((r) => ({ ...r, title: `review: ${r.title}` }))];
+      const stuck = [
+        ...all.milestones.filter((m) => m.flow.word === "stalled").map((m) => ({ title: "no one is moving it", milestone: title(m.milestoneId), why: m.flow.reason })),
+        ...all.items.filter((i) => i.kind === "stalled" || i.kind === "failed_run").map((i) => ({ title: i.title, milestone: title(i.milestoneId) })),
+      ];
+      const working = all.milestones.filter((m) => m.flow.word === "working").map((m) => ({ milestone: title(m.milestoneId) ?? m.milestoneId, what: m.flow.run?.summary?.slice(0, 120) || m.flow.reason }));
+      // the owner's milestones (his world) in priority order, big roots first, each with its state and what waits on him.
+      const ranks = milestoneRanks(store.listMilestones());
+      const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
+      const milestones = [...all.milestones].sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId)).flatMap((st) => {
+        const m = store.getMilestone(st.milestoneId);
+        if (!m || (store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT) !== DEFAULT_TENANT) return [];
+        const open = (st.items ?? []).filter((i) => i.state === "open");
+        return [{ title: m.title, word: st.flow.word, needsYou: open.length, waits: open.slice(0, 2).map((i) => (i.code ? `${i.code} ${i.title}` : i.title)), ...(m.bigRoot != null ? { bigRoot: m.bigRoot } : {}), ...(st.progress ? { pct: st.progress.pct } : {}) }];
+      });
+      return { text: quickStatusText({ milestones, waiting, stuck, working }), waiting: waiting.length, stuck: stuck.length, working: working.length, milestones: milestones.length };
+    },
+  });
+  // a campaign chat's Call (the social skin's desk; any world): the same call routes and engine, one Voice per milestone,
+  // scoped to its world (own month cap, one call at a time) and to that milestone (its calls, its chat, its world's quick status).
+  const campaignVoices = new Map<string, Voice>();
+  const worldVoices = new Map<string, Voice>();
+  const voiceBase = {
+    db,
+    mint: voiceMint,
+    onEnded: (id: string) => void memoryForward?.enqueueCall(id),
+    envOff: process.env.CONSOLE_VOICE === "off",
+    envModel: process.env.CONSOLE_VOICE_MODEL || undefined,
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  };
+  const noStatus = async () => ({ text: "", waiting: 0, stuck: 0, working: 0 });
+  /**
+   * The world's own voice without a campaign: its settings (its cap; what PUT /api/voice/settings {world} writes) and,
+   * the Call on its team desk (/api/tenants/:id/desk/voice): the Team desk's voice fenced to the world, relaying to its desk.
+   */
+  const worldVoice = (world: string) => {
+    let v = worldVoices.get(world);
+    if (!v) {
+      const name = () => store.getTenant(world)?.name || world;
+      worldVoices.set(
+        world,
+        (v =
+          world === DEFAULT_TENANT
+            ? createVoice({ ...voiceBase, scope: { world }, quickStatus: noStatus })
+            : createVoice({
+                ...voiceBase,
+                scope: { world },
+                instructions: () => (socialArea?.worldDeskCall ?? MILESTONE_CALL).instructions(name()),
+                tools: () => (socialArea?.worldDeskCall ?? MILESTONE_CALL).tools(name()),
+                desk: { send: (t, page, crid) => worldDesks.send(world, t, page, crid), view: () => worldDesks.view(world) },
+                quickStatus: () => worldDeskStatus(world),
+                brief: () => briefing([treeBrief(worldTree(null, world), { who: "this world's", noun: "campaigns" })], "campaigns"),
+              })),
+      );
+    }
+    return v;
+  };
+  /** quick status for a world desk's Call: the world's campaigns and jobs (pinned first), what waits, what is stuck. */
+  const worldDeskStatus = async (world: string) => {
+    const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+    const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
+    const mine = (id: string) => milestoneWorld(db, id) === world;
+    const title = (id: string) => store.getMilestone(id)?.title;
+    const ranks = milestoneRanks(store.listMilestones());
+    const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
+    const ms = all.milestones.filter((m) => mine(m.milestoneId)).sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId));
+    const milestones = ms.map((st) => {
+      const m = store.getMilestone(st.milestoneId);
+      const open = (st.items ?? []).filter((i) => i.state === "open");
+      return { title: m?.title ?? st.milestoneId, word: st.flow.word, needsYou: open.length, waits: open.slice(0, 2).map((i) => (i.code ? `${i.code} ${i.title}` : i.title)), ...(m?.bigRoot != null ? { bigRoot: m.bigRoot } : {}), ...(st.progress ? { pct: st.progress.pct } : {}) };
+    });
+    const waiting = all.items.filter((i) => i.state === "open" && mine(i.milestoneId)).map((i) => ({ title: i.title, ...(i.code ? { code: i.code } : {}), milestone: title(i.milestoneId) }));
+    const stuck = [
+      ...ms.filter((m) => m.flow.word === "stalled").map((m) => ({ title: "no one is moving it", milestone: title(m.milestoneId), why: m.flow.reason })),
+      ...all.items.filter((i) => (i.kind === "stalled" || i.kind === "failed_run") && mine(i.milestoneId)).map((i) => ({ title: i.title, milestone: title(i.milestoneId) })),
+    ];
+    const working = ms.filter((m) => m.flow.word === "working").map((m) => ({ milestone: title(m.milestoneId) ?? m.milestoneId, what: m.flow.run?.summary?.slice(0, 120) || m.flow.reason }));
+    const text = quickStatusText({ milestones, waiting, stuck, working })
+      .replace(new RegExp(String.raw`${ownerPattern()}'s focus milestones`, "g"), "pinned campaigns")
+      .replace(/focus milestones/g, "pinned campaigns")
+      .replace(new RegExp(String.raw`Waiting on ${ownerPattern()}`, "g"), "Waiting on you")
+      .replace(new RegExp(String.raw`waits on ${ownerPattern()}`, "g"), "waits on you");
+    return { text, waiting: waiting.length, stuck: stuck.length, working: working.length, milestones: milestones.length };
+  };
+  /** Quick status for a campaign's Call: this campaign first, then its world's others; only rows of the milestone's world. */
+  const campaignStatus = async (world: string, milestoneId: string, as: "campaign" | "milestone" = "campaign") => {
+    const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+    const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
+    const mine = (id: string) => milestoneWorld(db, id) === world;
+    const title = (id: string) => store.getMilestone(id)?.title;
+    const said = (st: (typeof all.milestones)[number]) => {
+      const open = (st.items ?? []).filter((i) => i.state === "open");
+      return { title: title(st.milestoneId) ?? st.milestoneId, word: st.flow.word, needsYou: open.length, waits: open.slice(0, 2).map((i) => (i.code ? `${i.code} ${i.title}` : i.title)), ...(st.progress ? { pct: st.progress.pct } : {}) };
+    };
+    // in priority order (focus milestones first, in the owner's order), as the briefing's root tree.
+    const ranks = milestoneRanks(store.listMilestones());
+    const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
+    const ms = all.milestones.filter((m) => mine(m.milestoneId)).sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId));
+    const self = ms.find((m) => m.milestoneId === milestoneId);
+    return campaignQuickStatus({
+      campaign: self ? said(self) : { title: title(milestoneId) ?? milestoneId, word: "nothing_to_do" },
+      others: ms.filter((m) => m.milestoneId !== milestoneId).map(said),
+      waiting: all.items.filter((i) => i.state === "open" && mine(i.milestoneId)).map((i) => ({ title: i.title, ...(i.code ? { code: i.code } : {}), milestone: title(i.milestoneId) })),
+      stuck: [
+        ...ms.filter((m) => m.flow.word === "stalled").map((m) => ({ title: "no one is moving it", milestone: title(m.milestoneId), why: m.flow.reason })),
+        ...all.items.filter((i) => (i.kind === "stalled" || i.kind === "failed_run") && mine(i.milestoneId)).map((i) => ({ title: i.title, milestone: title(i.milestoneId) })),
+      ],
+      working: ms.filter((m) => m.flow.word === "working").map((m) => ({ milestone: title(m.milestoneId) ?? m.milestoneId, what: m.flow.run?.summary?.slice(0, 120) || m.flow.reason })),
+    }, as);
+  };
+  const campaignVoice = (id: string): Voice | undefined => {
+    const m = store.getMilestone(id); // the request's world: another world's id is not found
+    if (!m) return undefined;
+    let v = campaignVoices.get(m.id);
+    if (!v) {
+      const world = milestoneWorld(db, m.id);
+      v = createVoice({
+        ...voiceBase,
+        scope: { world, milestoneId: m.id },
+        // one of the owner's own milestones (a Team home card's Call) is a milestone, not a campaign.
+        instructions: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(store.getMilestone(m.id)?.title ?? m.title),
+        tools: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).tools(store.getMilestone(m.id)?.title ?? m.title),
+        desk: { send: (t, page, crid) => milestoneChats.send(m.id, t, page, crid), view: () => milestoneChats.view(m.id) },
+        quickStatus: () => campaignStatus(world, m.id, world === DEFAULT_TENANT ? "milestone" : "campaign"),
+        brief: () => milestoneBrief(m.id, world),
+      });
+      campaignVoices.set(m.id, v);
+    }
+    return v;
+  };
+  mountVoice(api, voice, { world: () => store.tenant, worldVoice });
+  mountCampaignVoice(api, campaignVoice);
+  // Play on a desk reply speaks it in the team's local voice on the worker server (free); down = the browser's best voice.
+  mountReplyVoice(api, opts.voice?.speak);
+  // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
+  mountWorldDeskVoice(api, (c) => {
+    const w = c.req.param("id") ?? "";
+    return w !== DEFAULT_TENANT && store.getTenant(w) ? worldVoice(w) : undefined;
+  });
+  // rework (the owner's review): voice notes in every chat (the Team desk, a milestone's or campaign's chat): recorded in
+  // segments by the page, transcribed once each (gpt-4o-mini-transcribe), posted as his message; the cost is in the voice budget.
+  const notesDir = opts.voice?.notesDir ?? process.env.CONSOLE_VOICE_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "voice-notes");
+  const transcribe = opts.voice?.transcribe ?? openAiTranscriber(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
+  const notesOf = new WeakMap<Voice, VoiceNotes>();
+  // a posted Chat note also goes to the world's the memory service (made below, with the memory service connections); never awaited.
+  let memoryForward: MemoryArea["forward"];
+  let memoryConns: MemoryArea | undefined; // made below, with the voice note relay
+  // a note filed on one item hands what else he said to the world's Team desk (voice/spill.ts); off without the cycle.
+  const voiceSpill: VoiceSpill | undefined = spillOpt
+    ? createVoiceSpill({
+        db,
+        judge: textSpillJudge,
+        // a card note in a paired world: the other desk's part goes back to this desk with its relay call (L-55).
+        ...(deskCross
+          ? {
+              across: (w: string): SpillAcross | undefined => {
+                const p = deskCross.across(w);
+                if (!p) return undefined;
+                const base = cycle.publicUrl.replace(/\/+$/, "");
+                return {
+                  here: p.from.product,
+                  hereIs: productWork(p.from.product),
+                  there: p.to.product,
+                  thereIs: productWork(p.to.product),
+                  passUrl: w === DEFAULT_TENANT ? `${base}/api/desk/pass` : `${base}/api/tenants/${w}/desk/pass`,
+                  passHeader: `X-Console-Run: ${w === DEFAULT_TENANT ? "team-desk" : worldDesks.runHeader(w)}`,
+                  ...(w === DEFAULT_TENANT ? {} : deskBearer(w)),
+                };
+              },
+            }
+          : {}),
+        ...(cycleOpts.enabled
+          ? { tell: deskTell }
+          : {}),
+        ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+      })
+    : undefined;
+  if (voiceSpill && cycleOpts.enabled && (spillOpt?.sweepMs ?? 60_000) > 0) setInterval(() => void voiceSpill.sweep().catch((e) => console.error("voice spill sweep:", e)), spillOpt?.sweepMs ?? 60_000).unref();
+  // companies set on screen and a wheel's notes (the home world only): the tenancy plug's (hosted/tenancy.ts).
+  const companyNotes = tenancy?.mountCompanyWrites({
+    api,
+    reposRoot: read.reposRoot,
+    spine,
+    send: (mid, t, page, crid) =>
+      mid ? milestoneChats.send(mid, t, page, crid) : desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)),
+    hasMilestone: (id) => !!store.getMilestone(id),
+  });
+  const wheelFiled = (f: { id: string; world: string; milestoneId?: string; fill: boolean; page?: string; words: string; audio: string }) => {
+    if (f.fill || f.world !== DEFAULT_TENANT) return;
+    void companyNotes?.filedVoice(f).catch((e) => console.error("wheel note:", e));
+  };
+  /** `chat`: where a posted (not card) note lands is the world's Team desk itself, which reads all of it: no spill. */
+  const notesFor = (v: Voice, desk: Pick<DeskPort, "send">, chat: "team-desk" | "milestone") => {
+    let n = notesOf.get(v);
+    if (!n)
+      notesOf.set(
+        v,
+        (n = createVoiceNotes({
+          db,
+          voice: v,
+          desk,
+          transcribe,
+          dir: notesDir,
+          onPosted: (id) => void memoryForward?.enqueue(id),
+          ...(voiceSpill
+            ? {
+                onFiled: (f) => {
+                  wheelFiled(f);
+                  // a long note filed anywhere marks the cards it touches (the Team desk Chat's own reaches it through deskSaid too; one pass per note id)
+                  if (f.fill || chat !== "team-desk")
+                    void noteTouch?.heard({ id: f.id, world: f.world, words: f.words, where: f.fill ? `${f.page ?? "a card"}` : "a milestone chat", ref: f.id }).catch((e) => console.error("note touch:", e));
+                  if (!f.fill && chat === "team-desk") return;
+                  const title = f.milestoneId ? store.getMilestone(f.milestoneId)?.title : undefined;
+                  const where = f.fill ? `${f.page ?? "a card"}${title ? ` (in ${title})` : ""}` : `the ${title ?? "milestone"} chat`;
+                  void voiceSpill
+                    .filed({ id: f.id, world: f.world, ...(f.milestoneId ? { milestoneId: f.milestoneId } : {}), where, words: f.words, audio: f.audio })
+                    .catch((e) => console.error("voice spill:", e));
+                },
+              }
+            : { onFiled: wheelFiled }),
+          ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+        })),
+      );
+    return n;
+  };
+  mountVoiceNotesRec(api, "/voice", (c) =>
+    (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT
+      ? notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk")
+      : c.json({ error: { code: "world_scope", message: `the Team desk is only on ${ownerName()}'s own console` } }, 403),
+  );
+  // voice notes in a world's team desk.
+  mountVoiceNotesRec(api, "/tenants/:id/desk/voice", (c) => {
+    const w = c.req.param("id") ?? "";
+    if (w === DEFAULT_TENANT || !store.getTenant(w)) return c.json({ error: { code: "not_found", message: `no world desk ${w}` } }, 404);
+    return notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk");
+  });
+  mountVoiceNotesRec(api, "/milestones/:id/voice", (c) => {
+    const id = c.req.param("id") ?? "";
+    const v = campaignVoice(id);
+    if (!v) return c.json({ error: { code: "not_found", message: `milestone ${id} not found` } }, 404);
+    const mid = v.scope.milestoneId!;
+    return notesFor(v, { send: (t, page, crid) => milestoneChats.send(mid, t, page, crid) }, "milestone");
+  });
+  if (opts.whatsapp?.tickMs) setInterval(() => void whatsapp.tick(), opts.whatsapp.tickMs).unref();
+  // the owner marks the outcome (writes ## Outcome, Status, a Decisions row through the same spine writer).
+  mountMark(api, {
+    store,
+    spine,
+    locate: async (m) => {
+      const { loc, rel, spines } = await spinesFor(m, 4_000);
+      return { repoDir: loc?.repo.path, rel, outcome: spines && rel ? outcomeFor(spines, rel) : null };
+    },
+    invalidate: (dir) => dropSpines(dir),
+    status: (m) => status.one(m),
+    deskAsk: (chat) => desk.jordiAsk(chat), // the Team desk marks on the owner's own chat request
+    settle: (id) => recordedMilestones().setSettled(id, true),
+  });
+  // Repo-relative spine paths in a milestone's tree (a stamp or an Add on a child epic's node names its path).
+  const treePaths = async (m: Milestone) => {
+    const out = new Set<string>();
+    const visit = (n: { kind: string; path?: string; children: { kind: string; path?: string; children: unknown[] }[] }) => {
+      if (n.kind === "spine" && n.path) out.add(n.path.replace(/^\.\//, ""));
+      n.children.forEach((c) => visit(c as typeof n));
+    };
+    visit((await treeFor(m, 4_000)).root);
+    return out;
+  };
+  // the owner stamps a Planning epic ready for delivery (or moves it back): Status + a Decisions row, same writer and guard.
+  mountStamp(api, {
+    store,
+    spine,
+    locate: async (m) => {
+      const { loc, rel } = await spinesFor(m, 4_000);
+      return { repoDir: loc?.repo.path, rel };
+    },
+    treePaths,
+    invalidate: (dir) => dropSpines(dir),
+    deskAsk: (chat) => desk.jordiAsk(chat),
+    memory, // the stamp citing the owner's voice note reads it here
+  });
+  // Add on a tree node: a ledger row, Done-means line or child epic, through the same writer (the desk calls it too).
+  mountTreeAdd(api, {
+    store,
+    spine,
+    delivery: (id) => deliveryFor(store, id), // the answer says when the work will not be delivered
+    skillDir: read.skillDir,
+    locate: async (m) => {
+      const { loc, rel } = await spinesFor(m, 4_000);
+      return { repoDir: loc?.repo.path, rel };
+    },
+    treePaths,
+    invalidate: (dir) => dropSpines(dir),
+    // the desk's Add with the owner's words is his ask (ready); a ready Add wakes the DM as the Approvals tab does.
+    deskAsk: (chat) => desk.jordiAsk(chat),
+    chatSaid: async (header, chat) => {
+      const callerId = chatScope.caller(header);
+      const want = chat.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!callerId || want.length < 8) return false;
+      return (await milestoneChats.chatFor(callerId).jordiMessages()).some((x) => x.text.toLowerCase().replace(/\s+/g, " ").includes(want));
+    },
+    wake: (m, instructions) => wakeDeliveryManager({ store, cycle, homeThread: (id) => cycle.getLink(id)?.threadId }, m, instructions),
+    // An Add the desk makes is its placement (the delivered note follows it); the owner's own Add on the page is not.
+    onAdded: (a, header) => {
+      if ((header("x-console-run") ?? "").trim().toLowerCase() !== "team-desk") return;
+      try {
+        desk.placements.place({ repo: path.basename(a.repoDir), path: a.kind === "epic" ? (a.newPath ?? a.path) : a.path, kind: a.kind, ...(a.id ? { itemId: a.id } : {}), title: a.title });
+      } catch (e) {
+        console.error("desk placement not recorded:", e);
+      }
+    },
+  });
+  // ticket sessions; no launch any more, POST answers with the milestone chat about the row (the desk calls it too).
+  migrateTicketSessions(db);
+  ensureTenancy(db); // tenant_id on the side tables created above (idempotent)
+  mountTicketSessions(
+    api,
+    createTicketSessions({
+      db,
+      store,
+      publicUrl: cycle.publicUrl,
+      reposRoot: read.reposRoot,
+      locate: async (m) => {
+        const { loc, rel } = await spinesFor(m, 4_000);
+        return { repoDir: loc?.repo.path, rel };
+      },
+      treePaths,
+      environmentId: () => cycle.hostEnvironment(mainHost()),
+    }),
+  );
+  secretsArea?.mount(); // Secrets page, other worlds first (hosted/secrets.ts)
+  // the Team skills screen (library from the code repo skills/team-skills.json; add/remove: the owner, the home world, commit + push + sync).
+  const unscoped = createStore(db);
+  mountTeamSkills(api, {
+    repoDir: skillsRepo,
+    cli: skillsCli,
+    spine,
+    personas: () => store.listPersonas(),
+    allPersonas: () => unscoped.listPersonas(),
+    // through the persona's file first; a refused write leaves the persona as it was (logged)
+    detach: (id, skills) => personaRecord.recorded(unscoped).updatePersona(id, { skills }).catch((e) => console.warn(`team skills: detach from ${id}: ${(e as Error).message}`)),
+    worldRepo,
+    worldCheckouts,
+    ...(opts.teamSkills?.syncHosts ? { syncHosts: opts.teamSkills.syncHosts } : {}),
+  });
+  // Approvals tab: list / add / edit / revoke standing approvals (same spine writer and lock), then wake the DM.
+  mountApprovals(api, {
+    store,
+    cycle,
+    spine,
+    spinesFor: async (m, softMs) => {
+      const { loc, rel, spines } = await spinesFor(m, softMs);
+      return { repoDir: loc?.repo.path, rel, spines };
+    },
+    invalidate: (dir) => dropSpines(dir),
+    homeThread: (id) => cycle.getLink(id)?.threadId,
+  });
+
+  // Milestones
+  // nonGreen and verdict; short wait so the list stays fast. The list omits doctrine.
+  // settled milestones are hidden unless ?includeSettled=true; each row carries settledAt.
+  // ?tenant=<world> keeps one world's milestones (the Team desk acts only on the home world's; the rest are other worlds').
+  api.get("/milestones", async (c) =>
+    c.json(
+      await Promise.all(
+        store.listMilestones({ includeSettled: includeSettled(c) }).filter((m) => !c.req.query("tenant") || store.worldOfMilestone(m.id) === c.req.query("tenant")).map(async (m) => {
+          const { doctrine: _d, ...out } = await withOutcome(m, 1_500);
+          return out;
+        }),
+      ),
+    ),
+  );
+  // ?nodeKey= re-roots the tree at that node (node view) with its own counts; `tracked` maps spine paths in
+  // the milestone's repo to the milestone tracking each (Track as milestone / link).
+  api.get("/milestones/:id/tree", async (c) => {
+    const m = found(store.getMilestone(c.req.param("id")), "milestone", c.req.param("id"));
+    // colors from the pending items (a node with an open item is red; red count = open items).
+    const tree = await status.paintedTree(m, await treeFor(m));
+    const nodeKey = c.req.query("nodeKey");
+    const hit = nodeKey ? found(subtree(tree, nodeKey), "node", nodeKey) : undefined;
+    const out = hit ? { ...hit, counts: { ...hit.counts, red: redCount(hit.root) } } : tree;
+    const loc = m.path ? locate(read.reposRoot, m) : undefined;
+    const repo = loc && "repo" in loc ? loc.repo : undefined;
+    // `stale` while a newer tree (after a pull) is being built, `builtAt` when this one was.
+    const info = reads.treeInfo(m);
+    const fresh = info ? { builtAt: new Date(info.builtAt).toISOString(), ...(info.stale ? { stale: true } : {}) } : {};
+    return c.json({ ...out, ...fresh, ...(repo ? { repo: repo.name, ...(repo.remote ? { remote: repo.remote } : {}), tracked: trackedIn(read.reposRoot, store, repo) } : {}) });
+  });
+  // `world` (the milestone's tenant) lets the page offer the Epic Book only on the home world's own milestones.
+  api.get("/milestones/:id", async (c) => {
+    const m = await withOutcome(found(store.getMilestone(c.req.param("id")), "milestone", c.req.param("id")));
+    return c.json({ ...m, world: store.worldOfMilestone(m.id) ?? DEFAULT_TENANT });
+  });
+  // spine commits made during each run of the milestone (spine + its linked pages' dirs), keyed by run id.
+  api.get("/milestones/:id/run-commits", async (c) => {
+    const m = found(store.getMilestone(c.req.param("id")), "milestone", c.req.param("id"));
+    const { loc, rel, spines } = await spinesFor(m);
+    if (!loc || !rel) return c.json({} as Record<string, RunCommit[]>);
+    const pages = (spines && doctrineFor(spines, rel)?.pages) ?? [];
+    // A page in the spine's own folder counts by itself; a page elsewhere brings its folder (the linked docs dir).
+    const own = path.posix.dirname(rel);
+    const paths = [...new Set([rel, ...pages.map((p) => (path.posix.dirname(p.path) === own ? p.path : path.posix.dirname(p.path)))])].filter(
+      (p) => p && p !== ".",
+    );
+    // one log per milestone; each commit attributed to one run (Run: trailer > child ticket id > wake).
+    return c.json(await runCommits(loc.repo.path, paths, store.listRuns({ milestoneId: m.id, limit: 100 })));
+  });
+  // settle / unsettle: the spine and the derived status/verdict are untouched; the mark is in the team repo's
+  // state/milestones.json first (recordFirst), then console.db.
+  // settle only once the outcome is marked (accomplished, partially, superseded); unsettle always.
+  const settleOne = async (c: Context, id: string, settled: boolean) => {
+    const cur = found(store.getMilestone(id), "milestone", id);
+    if (settled && !cur.settledAt) {
+      const word = (await status.one(cur)).outcome.word;
+      if (!SETTLE_OK.has(word)) throw new ApiError(409, "not_accomplished", SETTLE_REFUSED, { outcome: word });
+    }
+    const { doctrine: _d, ...out } = await withOutcome(found(await recordFirst(() => recordedMilestones().setSettled(id, settled)), "milestone", id), 1_500);
+    return c.json(out);
+  };
+  // settling is the owner's verdict: a chat (the Team desk or a milestone chat) never settles by this route; the Team desk
+  // settles through POST /desk/settle on his own newest desk message, milestone chats not at all.
+  const chatSettle = (settled: boolean) => async (c: Context) => {
+    if ((c.req.header("x-console-run") ?? "").trim())
+      throw new ApiError(403, "jordi_only", `a chat cannot ${settled ? "settle" : "unsettle"} a milestone here: ${ownerName()} does it on the console page, or asks the Team desk (POST /api/desk/settle)`);
+    return settleOne(c, c.req.param("id")!, settled);
+  };
+  api.post("/milestones/:id/settle", chatSettle(true));
+  api.post("/milestones/:id/unsettle", chatSettle(false));
+  // the Team desk settles / unsettles on the owner's own chat request (same check as the desk stamp and mark).
+  api.post("/desk/settle", async (c) => {
+    const refused = deskOnly((n) => c.req.header(n));
+    if (refused) throw new ApiError(403, "desk_only", refused);
+    const b = ((await c.req.json().catch(() => undefined)) ?? undefined) as Record<string, unknown> | undefined;
+    if (!b) throw new ApiError(400, "invalid_json", "request body must be valid JSON");
+    if (typeof b.milestoneId !== "string") throw new ApiError(400, "validation_error", "milestoneId is required");
+    if (typeof b.chat !== "string") throw new ApiError(400, "validation_error", `chat (${ownerName()}'s words from his desk message, verbatim) is required`);
+    if (b.settled !== undefined && typeof b.settled !== "boolean") throw new ApiError(400, "validation_error", "settled must be true or false");
+    const settled = b.settled !== false;
+    found(store.getMilestone(b.milestoneId), "milestone", b.milestoneId);
+    const ask = await desk.jordiAsk(b.chat);
+    if (typeof ask === "string") throw new ApiError(403, "not_asked", `${ask}: the desk settles only on ${ownerName()}'s own newest message`);
+    if (!asksForSettle(ask.text, settled))
+      throw new ApiError(403, "not_asked", `${ownerName()}'s newest desk message does not ask to ${settled ? "settle" : "unsettle"}: he says it here, or does it in the milestone's Settings`);
+    return settleOne(c, b.milestoneId, settled);
+  });
+  /** a world names only one of its own checkouts; the home world keeps every repo it names. */
+  const ownRepo = (repo: string | undefined) => {
+    const why = repo === undefined ? undefined : milestoneRepoRefusal(db, read.reposRoot, store.tenant, repo);
+    if (why) throw new ApiError(404, "repo_not_found", why);
+  };
+  api.post("/milestones", async (c) => {
+    const input = await body(c, s.milestoneCreate);
+    ownRepo(input.repo);
+    const made = await recordFirst(() => recordedMilestones().createMilestone({ ...input, bigRoot: null }));
+    // a big root's position goes to state/big-roots.json first, then console.db.
+    let tw = {};
+    if (input.bigRoot != null && store.worldOfMilestone(made.id) === homeWorld()) {
+      tw = await bigRootsWrite(`${made.title} added at ${input.bigRoot}`, homeAfter({ ...made, bigRoot: input.bigRoot }));
+      store.updateMilestone(made.id, { bigRoot: input.bigRoot });
+    }
+    const { doctrine: _d, ...out } = await withOutcome(store.getMilestone(made.id)!, 1_500);
+    return c.json({ ...out, ...tw }, 201);
+  });
+  const patchMilestone = async (c: Context) => {
+    const id = c.req.param("id")!;
+    const { title, ...p } = await body(c, s.milestonePatch);
+    const cur = found(store.getMilestone(id), "milestone", id);
+    ownRepo(p.repo);
+    // a title that differs from the spine's own marks it explicit (it wins from then on); an empty title or
+    // the spine's title clears the mark (the stored title is kept, the spine's shows).
+    let titleP: { title?: string; titleSetAt?: string | null } = {};
+    if (title !== undefined) {
+      const { loc, rel, spines } = await spinesFor(cur, 1_500);
+      const doc = docTitleOf(spines, rel, loc);
+      if (!title) titleP = { titleSetAt: null };
+      else if (title === doc) titleP = { title, titleSetAt: null };
+      else if (title !== cur.title || !cur.titleSetAt) titleP = { title, titleSetAt: new Date().toISOString() };
+    }
+    // a reorder, add, removal or rename of a big root is written to the team repo's state/big-roots.json, and
+    // first, as is every other change (state/milestones.json); console.db changes only once both are written.
+    const after = { ...cur, ...p, ...(titleP.title !== undefined ? { title: titleP.title } : {}), ...(p.bigRoot !== undefined ? { bigRoot: p.bigRoot ?? undefined } : {}) } as Milestone;
+    const touched = (p.bigRoot !== undefined && (p.bigRoot ?? null) !== (cur.bigRoot ?? null)) || (after.title !== cur.title && (cur.bigRoot != null || after.bigRoot != null));
+    const tw = touched && store.worldOfMilestone(id) === homeWorld() ? await bigRootsWrite(`${after.title} ${after.bigRoot != null ? `at ${after.bigRoot}` : "made ordinary"}`, homeAfter(after)) : {};
+    const { doctrine: _d, ...out } = await withOutcome(found(await recordFirst(() => recordedMilestones().updateMilestone(id, { ...p, ...titleP })), "milestone", id), 1_500);
+    return c.json({ ...out, ...tw });
+  };
+  api.patch("/milestones/:id", patchMilestone);
+  api.put("/milestones/:id", patchMilestone);
+  /**
+   * the Team desk keeps the owner's priority order. One call puts every big root in a new order (positions 1..n)
+   * in ONE commit to state/big-roots.json, quoting his words in `why`; console.db follows only once the file is written (L-45).
+   * The same set as now, no pin or unpin here (that stays PATCH bigRoot). `line` is the one line the desk says back.
+   */
+  api.put("/big-roots/order", async (c) => {
+    const refused = deskOnly((n) => c.req.header(n));
+    if (refused) throw new ApiError(403, "desk_only", refused);
+    const b = ((await c.req.json().catch(() => undefined)) ?? undefined) as Record<string, unknown> | undefined;
+    if (!b) throw new ApiError(400, "invalid_json", "request body must be valid JSON");
+    const why = typeof b.why === "string" ? b.why.replace(/\s+/g, " ").trim() : "";
+    if (!why) throw new ApiError(400, "validation_error", `why (${ownerName()}'s words that changed the priority, verbatim) is required`);
+    if (!Array.isArray(b.order) || !b.order.every((x) => typeof x === "string")) throw new ApiError(400, "validation_error", "order must be a list of milestone ids, most pressing first");
+    const order = b.order as string[];
+    const all = createStore(db, { tenant: DEFAULT_TENANT }).listMilestones({ includeSettled: true });
+    const roots = all.filter((m) => m.bigRoot != null).sort((x, y) => x.bigRoot! - y.bigRoot! || x.createdAt.localeCompare(y.createdAt));
+    const ids = new Set(roots.map((m) => m.id));
+    const extra = order.filter((id) => !ids.has(id));
+    const missing = roots.filter((m) => !order.includes(m.id));
+    if (extra.length || missing.length || new Set(order).size !== order.length)
+      throw new ApiError(400, "not_same_roots", `order must list every big root once and nothing else${extra.length ? `; not a big root: ${extra.join(", ")}` : ""}${missing.length ? `; missing: ${missing.map((m) => `${m.id} (${m.title})`).join(", ")}` : ""} (pin or unpin with PATCH /api/milestones/<id> bigRoot)`);
+    const byId = new Map(roots.map((m) => [m.id, m]));
+    const next = order.map((id, i) => ({ ...byId.get(id)!, bigRoot: i + 1 }));
+    const line = `Priorities now: ${next.map((m) => `${m.bigRoot} ${m.title}`).join(", ")}.`;
+    const out = next.map((m) => ({ position: m.bigRoot, title: m.title, milestoneId: m.id }));
+    if (next.every((m) => byId.get(m.id)!.bigRoot === m.bigRoot)) return c.json({ changed: false, order: out, line });
+    const moved = order.filter((id, i) => roots[i]?.id !== id).length ? "reordered" : "renumbered";
+    const tw = await bigRootsWrite(`${moved} by the Team desk: ${next.map((m) => `${m.bigRoot} ${m.title}`).join(", ")} (${ownerName()}: "${why.slice(0, 200)}")`, [...all.filter((m) => !byId.has(m.id)), ...next]);
+    const a9 = createStore(db, { tenant: DEFAULT_TENANT });
+    for (const m of next) a9.updateMilestone(m.id, { bigRoot: m.bigRoot });
+    return c.json({ changed: true, order: out, line, ...tw });
+  });
+  api.delete("/milestones/:id", async (c) => {
+    const id = c.req.param("id");
+    const was = store.getMilestone(id);
+    const world = was ? store.worldOfMilestone(id) : undefined;
+    found(was, "milestone", id);
+    if (was?.bigRoot != null && world === homeWorld()) await bigRootsWrite(`${was.title} removed`, homeAfter(undefined, id)); // file first
+    await recordFirst(() => recordedMilestones().deleteMilestone(id));
+    return c.body(null, 204);
+  });
+
+  // Personas
+  api.get("/personas", (c) => c.json(store.listPersonas()));
+  // worlds (read-only; scoped like the store). S3 adds /api/me, S5 the second tenant.
+  api.get("/tenants", (c) => c.json(store.listTenants()));
+  api.get("/tenants/:id", (c) => c.json(found(store.getTenant(c.req.param("id")), "tenant", c.req.param("id"))));
+  //..S27,: the social routes and the one write API (hosted/social.ts).
+  socialArea?.mountRoutes({
+    api,
+    store,
+    skillDir: read.packSkillDir,
+    wake: cycleOpts.enabled ? async (id, note) => (await cycle.runNowRequest(id, { instructions: note, instructionsBy: ownerName() })).run : undefined,
+    recordAssignments: (s) => assignmentRecord.recorded(s), // a brief's cadence goes to the team repo first
+    teamDir: agentTeamDir,
+  });
+  // GET /tenants/:id/onboarding, the social product scorecard (six ticks read from live state,'s wizard).
+  const instanceWorld = (url: string) => browserArea?.worldOf(url);
+  const ownBrowser = (w: string) => browserArea?.own(w);
+  tenancy?.mountOnboarding({
+    api,
+    db,
+    store,
+    reposRoot: read.reposRoot,
+    social,
+    ownBrowser,
+    lentBrowsers: (w) => (browserArea?.urlsFor(w) ?? []).filter((u) => u !== ownBrowser(w)),
+    siteHeaders: (url) => {
+      const w = instanceWorld(url);
+      return w ? browserArea?.headersOfWorld(w) ?? {} : {};
+    },
+    // sign-in counts only on the product's customer site; the EpicTeam side reads the world's servers.
+    customerSites: () => customerHosts(process.env),
+    hosts: (w) => {
+      try {
+        return (db.prepare("SELECT id FROM hosts WHERE tenant_id = ? ORDER BY id").all(w) as { id: string }[]).map((h) => h.id);
+      } catch {
+        return [];
+      }
+    },
+  });
+  // the site numbers and the hourly KPI read, held posts as cards, campaigns, the digest (hosted/social.ts).
+  const sites = socialArea?.mountSites({
+    api,
+    store,
+    skillDir: read.packSkillDir,
+    codeViews: opts.siteCodeViews ?? null,
+    referrers: opts.siteReferrers ?? null,
+    kpiEveryMs: opts.kpiRecord?.everyMs,
+    browserUrls: (w) => browserArea?.urlsFor(w) ?? [],
+    browserHeaders: (url) => browserArea?.headersFor(url) ?? {},
+    record: { milestones: (ts) => milestoneRecord.recorded(ts), personas: (ts) => personaRecord.recorded(ts), assignments: (ts) => assignmentRecord.recorded(ts) },
+    socialUrl: process.env.CONSOLE_SOCIAL_URL || (process.env.CONSOLE_STAGING === "1" ? cycle.publicUrl : siteConfig().socialUrl),
+    digestBase: process.env.CONSOLE_SOCIAL_URL || cycle.publicUrl,
+    notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
+  });
+  postReview = sites?.postReview;
+  const campaigns = sites?.campaigns;
+  // the social product tester signup (public form on epicspine.dev → this db, a `[tester]` note to the owner's desk, /testers list).
+  // the Testers page (hosted/tenancy.ts).
+  tenancy?.mountTesters({ api, db, notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined });
+  // the "I'm on my laptop" switch (laptop.ts): Mac tasks first in the inbox while on, one Team desk line each way,
+  // and the runs held on egress:laptop woken when it goes on.
+  hostsArea?.mountLaptop(api, {
+    db,
+    notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
+    release: (egress) => releaseHeld(store, egress).woken.length,
+    // each task's step on its Mac ticket page, so the inbox card and the page show and write one state
+    stepOf: (t, step) => {
+      const p = (t.page ? stepsApi.byId(t.page) : undefined) ?? (t.url ? stepsApi.byUrl(t.url) : undefined);
+      return p ? stepsApi.stepView(p, step) : undefined;
+    },
+  });
+  // customer voice feedback by link (voiceFeedback.ts): transcribed only, structured, filed in the world's repo.
+  const feedback = createFeedback({
+    db,
+    transcribe,
+    structure: textStructurer,
+    budget: (w) => {
+      const st = worldVoice(w).state();
+      // a customer's feedback link follows the platform's switch, not the world's own voice switch (that is the owner's).
+      return { monthUsd: st.monthUsd, monthCapUsd: st.limits.monthCapUsd, enabled: st.enabled || !!st.worldOff };
+    },
+    repoOf: (w) => (w === DEFAULT_TENANT ? resolveRepo(read.reposRoot, homeRepo())?.path : worldRepo(w)),
+    writer: spine,
+    tell: cycleOpts.enabled ? (w, text, id) => (w === DEFAULT_TENANT ? desk.tell(text, id) : worldDesks.send(w, text, undefined, id).then(() => true as const)) : undefined,
+    pageBase: process.env.CONSOLE_TEAM_URL || teamLink(),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  mountFeedback(api, feedback, {
+    world: () => store.tenant ?? DEFAULT_TENANT,
+    by: () => (currentAuth()?.identity?.kind === "token" ? "an agent" : ownerName()),
+    repoOf: (w) => (w === DEFAULT_TENANT ? resolveRepo(read.reposRoot, homeRepo())?.path : worldRepo(w)),
+    ...(process.env.CONSOLE_FEEDBACK_URL ? { linkBase: process.env.CONSOLE_FEEDBACK_URL } : {}),
+  });
+  // steps pages with a Done switch per step (steps/steps.ts): a tick writes the owning spine, tells the desk, wakes the owner.
+  const stepsApi = createSteps({
+      db,
+      writer: spine,
+      repoDir: (name) => resolveRepo(read.reposRoot, name)?.path,
+      milestoneFor: spineMilestone,
+      wake: cycleOpts.enabled
+        ? async (id, note) => {
+            const m = store.getMilestone(id);
+            return m ? wakeDeliveryManager({ store, cycle, homeThread: (a) => cycle.getLink(a)?.threadId }, m, note) : undefined;
+          }
+        : undefined,
+      // a wake is tried until a run starts; these read and mark its runs.
+      runOf: (id) => store.getRun(id),
+      noteRun: (id, text) => {
+        const r = store.getRun(id);
+        if (r && !r.summary.includes(text)) store.updateRun(id, { summary: `${r.summary} ${text}` });
+      },
+      findRun: (mid, since, note) => store.listRuns({ milestoneId: mid, since, limit: 50 }).find((r) => r.instructions === note)?.id,
+      tell: cycleOpts.enabled ? (w, text, id) => (w === DEFAULT_TENANT ? desk.tell(text, id) : worldDesks.send(w, text, undefined, id).then(() => true as const)) : undefined,
+      invalidate: (dir) => dropSpines(dir),
+      // a step's private box stores through the ask card's own key path, and refuses a name already set.
+      pasteKey: inbox.pasteKey,
+      ...(secretsArea ? { addKey: secretsArea.addKey } : {}), // (hosted/secrets.ts)
+      hasKey: (world, app, name) => (world === DEFAULT_TENANT ? keyInIndex(app, name) : !!secretsArea?.hasWorldKey(world, app, name)),
+      // the copy-paste gate reads the page over the tailnet (5 s; not reachable = not checked yet)
+      fetchPage: async (url) => {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5_000), redirect: "follow" }).catch(() => undefined);
+        return r?.ok ? (await r.text()).slice(0, 2_000_000) : undefined;
+      },
+    });
+  mountSteps(api, stepsApi);
+  // the voice button of every step's note box (steps-kit.js opens this page on the console's https origin): the page
+  // token is the credential; the note is transcribed like a card answer (fill: the memory service once, the spill to the desk) and the
+  // page files the words as the step's note through the same ticks route.
+  const stepPage = (c: Context) => stepsApi.byToken(c.req.param("token") ?? "");
+  mountVoiceNotesRec(
+    api,
+    "/public/steps/:token/voice",
+    (c) => {
+      const p = stepPage(c);
+      if (!p) return c.json({ error: { code: "not_found", message: "no steps page has this token" } }, 404);
+      return p.world === DEFAULT_TENANT
+        ? notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk")
+        : notesFor(worldVoice(p.world), { send: (t, page, crid) => worldDesks.send(p.world, t, page, crid).then((r) => (deskSaid(p.world, t, crid, r.pending), r)) }, "team-desk");
+    },
+    { audioBase: "/api/voice/notes" },
+  );
+  api.get("/public/steps/:token/voice", (c) => {
+    const p = stepPage(c);
+    const step = (c.req.query("step") ?? "").trim();
+    const ok = p && /^[\w.-]{1,40}$/.test(step);
+    c.header("Cache-Control", "no-store");
+    return c.html(stepVoicePage({ ...(ok ? { page: { title: p.title } } : {}), step, stepTitle: (c.req.query("title") ?? "").replace(/\s+/g, " ").trim().slice(0, 120) }), ok ? 200 : 404);
+  });
+  if (process.env.CONSOLE_STAGING !== "1") setInterval(() => void feedback.tick().catch(() => undefined), 5 * 60_000).unref();
+  // one action on the Testers page turns a signup into a working world (world, credits, campaign, login, first draft).
+  const testerWorlds = tenancy?.mountTesterWorlds({
+    api,
+    db,
+    reposRoot: read.reposRoot,
+    campaigns,
+    socialUrl: process.env.CONSOLE_SOCIAL_URL || (process.env.CONSOLE_STAGING === "1" ? cycle.publicUrl : siteConfig().socialUrl),
+    wake: cycleOpts.enabled ? async (id, note) => (await cycle.runNowRequest(id, { instructions: note, instructionsBy: ownerName() })).run : undefined,
+    browser: browserArea?.forWorlds, // the tester worlds' own instances and keys (hosted/browser.ts)
+    consoleUrl: process.env.CONSOLE_PUBLIC_URL || cycle.publicUrl,
+    wakeHold: worldHold,
+    notify: cycleOpts.enabled ? (text) => void desk.tell(text, `signup-${Date.now()}`).catch(() => undefined) : undefined,
+  });
+  // Google and GitHub sign-up and sign-in on the customer sites (cloud.epicteam.app, app.social.app).
+  billingOf = testerWorlds?.billingOf;
+  mountOAuth(api, {
+    db,
+    auth,
+    signup: testerWorlds?.makeSignupWorld ?? (async () => { throw new Error("this console has one team: sign-ups make no new world"); }),
+    // the YouTube Allow stores its three keys the Secrets page way (store only, replacing an older Allow's)
+    ...(secretsArea
+      ? {
+          storeKey: async (name: string, value: string, note: string) => {
+            const r = await secretsArea.addKey({ app: "agent-team-console", name, value, note, replace: true });
+            return r.ok ? { ok: true as const } : { ok: false as const, message: `${r.code}: ${r.message}` };
+          },
+        }
+      : {}),
+  });
+  // the hosted layer's plugs (billing: tester link, team plan; plug/hosted.ts). One-team console
+  // (CONSOLE_ONE_TEAM=1) mounts none. Way back: the two mountStripe* calls inline here, as in hosted/billing.ts.
+  plugsMounted = mountPlugs(hostedPlugs, {
+    api,
+    db,
+    publicUrl: process.env.CONSOLE_PUBLIC_URL || cycle.publicUrl,
+    hasTenant: (id) => !!store.getTenant(id),
+    makeWorld: testerWorlds?.makeWorld,
+    notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
+  });
+  api.get("/persona-templates", (c) => c.json(listTemplates())); // templates for the New persona picker
+  api.get("/personas/:id", (c) => c.json(found(store.getPersona(c.req.param("id")), "persona", c.req.param("id"))));
+  // the persona's file in the team repo first (recordFirst), then console.db.
+  api.post("/personas", async (c) => {
+    const input = await body(c, s.personaCreate);
+    return c.json(await recordFirst(() => recordedPersonas().createPersona(input)), 201);
+  });
+  const patchPersona = async (c: Context) => {
+    const id = c.req.param("id")!;
+    const p = await body(c, s.personaPatch);
+    // exactly one persona of a world holds whatsapp-notify: ticking it here takes it off the others first.
+    const notifySkill = services?.notifySkill;
+    if (notifySkill && p.skills?.includes(notifySkill) && !store.getPersona(id)?.skills.includes(notifySkill))
+      for (const o of store.listPersonas()) if (o.id !== id && o.skills.includes(notifySkill)) await recordFirst(() => recordedPersonas().updatePersona(o.id, { skills: o.skills.filter((x) => x !== notifySkill) }));
+    return c.json(found(await recordFirst(() => recordedPersonas().updatePersona(id, p)), "persona", id));
+  };
+  api.patch("/personas/:id", patchPersona);
+  api.put("/personas/:id", patchPersona);
+  api.delete("/personas/:id", async (c) => {
+    const id = c.req.param("id");
+    found(store.getPersona(id), "persona", id);
+    await recordFirst(() => recordedPersonas().deletePersona(id));
+    return c.body(null, 204);
+  });
+
+  // Assignments
+  api.get("/assignments", (c) =>
+    c.json(
+      store.listAssignments({ milestoneId: c.req.query("milestoneId"), personaId: c.req.query("personaId") }),
+    ),
+  );
+  api.get("/assignments/:id", (c) =>
+    c.json(found(store.getAssignment(c.req.param("id")), "assignment", c.req.param("id"))),
+  );
+  // what the next cadence wake would see (fingerprint parts) and whether it would skip; read-only.
+  api.get("/assignments/:id/wake-check", async (c) => c.json(found(await cycle.wakeCheck(c.req.param("id")), "assignment", c.req.param("id"))));
+  // no cadence given → the persona's default (the Unblocker's 6 h backstop, otherwise 2 h).
+  api.post("/assignments", async (c) => {
+    const fill = (raw: unknown) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || (raw as { cadence?: unknown }).cadence !== undefined) return raw;
+      const personaId = (raw as { personaId?: unknown }).personaId;
+      return { ...raw, cadence: defaultCadenceFor(typeof personaId === "string" ? store.getPersona(personaId)?.name : undefined) };
+    };
+    const input = await body(c, s.assignmentCreate, fill);
+    return c.json(await recordFirst(() => recordedAssignments().createAssignment(input)), 201); // the team repo first
+  });
+  const patchAssignment = async (c: Context) => {
+    const id = c.req.param("id")!;
+    const p = await body(c, s.assignmentPatch);
+    // A manual toggle (either way) ends an auto-park: a hand-disabled assignment is never re-armed.
+    const unpark = p.enabled === undefined ? {} : { parkedAt: null, parkedReason: null };
+    const before = store.getAssignment(id);
+    const who = currentAuth()?.identity;
+    // a world's persona token switches its own world's assignments only with write there (rule 3 holds the world).
+    const refused = before && p.enabled !== undefined && p.enabled !== before.enabled ? worldToggleRefusal(db, who, id) : undefined;
+    if (refused) return c.json({ error: "toggle_refused", message: refused }, 403);
+    const after = found(await recordFirst(() => recordedAssignments().updateAssignment(id, { ...p, ...unpark })), "assignment", id);
+    if (before) logToggle(db, before, after, toggleActorFor(db, c.req.header("x-console-actor"), who));
+    return c.json(store.getAssignment(id) ?? after);
+  };
+  api.patch("/assignments/:id", patchAssignment);
+  api.put("/assignments/:id", patchAssignment);
+  api.delete("/assignments/:id", async (c) => {
+    const id = c.req.param("id");
+    found(store.getAssignment(id), "assignment", id);
+    await recordFirst(() => recordedAssignments().deleteAssignment(id)); // the team repo first
+    return c.body(null, 204);
+  });
+  // POST /assignments/:id/run-now and /wake live in cycle/routes.ts.
+
+  // Runs
+  /**
+   * does this run's `blocked` cite an open ask (spine ask code), or did the run raise an ask through the API that is
+   * still open in the spine (the raise log names its code; open or not is the spine's)? Fails open if the spines
+   * cannot be read.
+   */
+  const blockedHasAsk = async (run: { id: string; assignmentId: string; milestoneId?: string }, summary: string) => {
+    const milestoneId = run.milestoneId ?? store.getAssignment(run.assignmentId)?.milestoneId;
+    if (!milestoneId) return true;
+    const raised = store
+      .listNeedsJordi({ milestoneId })
+      .filter((n) => n.runId === run.id && n.supersededBy && n.supersededBy !== "moot")
+      .map((n) => n.supersededBy!.split("/").pop()!.toUpperCase());
+    const cited = [...new Set([...citedAskCodes(summary), ...raised])];
+    if (!cited.length) return false;
+    try {
+      const items = await waitingOnJordi(inboxDeps, { milestoneId });
+      return items.some((i) => i.source === "ask" && i.state === "open" && i.code && cited.includes(i.code.toUpperCase()));
+    } catch {
+      return true;
+    }
+  };
+  /** a running run carries `t3`, the last thread state the reconciler read (no extra T3 read per request). */
+  const withT3 = <R extends { id: string; outcome: string }>(r: R) => {
+    const t3 = r.outcome === "running" ? cycle.runT3State(r.id) : undefined;
+    const u = r.outcome === "running" ? undefined : usageOf(r.id);
+    const live = r.outcome === "running" ? liveUsageOf(r.id) : undefined; // tokens so far
+    const steers = cycle.steersOf(r.id);
+    return { ...r, ...(t3 ? { t3 } : {}), ...(u ? { usage: u } : {}), ...(live ? { usageLive: live } : {}), ...(steers ? { steers } : {}) };
+  };
+  const runsQuery = (c: Context) => {
+    const limitQ = c.req.query("limit");
+    const limit = limitQ === undefined ? undefined : Number(limitQ);
+    if (limit !== undefined && !(Number.isInteger(limit) && limit > 0 && limit <= 5000))
+      throw new ApiError(400, "validation_error", "limit must be an integer between 1 and 5000");
+    // `since` = runs started at or after it, every one (no 500-row cap unless `limit` is given).
+    const sinceQ = c.req.query("since");
+    if (sinceQ !== undefined && Number.isNaN(Date.parse(sinceQ))) throw new ApiError(400, "validation_error", "since must be an ISO date-time");
+    return {
+      milestoneId: c.req.query("milestoneId"),
+      assignmentId: c.req.query("assignmentId"),
+      parentRunId: c.req.query("parentRunId"),
+      since: sinceQ === undefined ? undefined : new Date(sinceQ).toISOString(),
+      limit,
+    };
+  };
+  api.get("/runs", (c) => {
+    // `?top=20|50|all` (optionally with milestoneId): the newest wakes with their child runs and the wake
+    // count, `{ runs, total }`, so the Runs page's Show 20 / 50 / all loads only what it shows. Without it, as before.
+    const topQ = c.req.query("top");
+    if (topQ !== undefined) {
+      const top = movingLimit(topQ);
+      const r = store.listRunsTop({ top, milestoneId: c.req.query("milestoneId") });
+      return c.json({ runs: r.runs.map(withT3), total: r.total });
+    }
+    return c.json(store.listRuns(runsQuery(c)).map(withT3));
+  });
+  // the Team home's wake counts (per milestone card, per persona) from the same newest 500 runs `GET /api/runs`
+  // sends, and its footer's "n of m wakes in 24 h did something" from every run of the last 24 h (`?since=`), without
+  // sending either list (~935 KB + ~685 KB → a few KB): only the numbers and each latest wake.
+  api.get("/runs/stats", (c) => {
+    const now = new Date();
+    const s = runStats(store.listRuns(), store.listAssignments(), now);
+    const last = <T extends { last?: Run }>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.last ? { ...v, last: withT3(v.last) } : v]));
+    // `?milestones=a,b` (the social skin's selected project) counts the footer over those milestones' runs only.
+    const only = c.req.query("milestones")?.split(",").filter(Boolean);
+    const day = store.listRuns({ since: new Date(now.getTime() - 86_400_000).toISOString() });
+    const wakes24h = wakesDidSomething(runsOfMilestones(day, store.listAssignments(), only), now);
+    return c.json({ milestones: last(s.milestones), personas: last(s.personas), wakes24h });
+  });
+  // the Runs page's Active agents chart for one day in the viewer's timezone (`?day=YYYY-MM-DD&tz=Area/City`,
+  // default today in UTC; `bucket=1|5|10|15` minutes, default 1): one number per bucket and the peak, never the runs.
+  // World-scoped like /runs: the social skin charts its own world's runs only.
+  api.get("/runs/active", (c) => {
+    const tz = c.req.query("tz") || "UTC";
+    if (!validTimeZone(tz)) throw new ApiError(400, "validation_error", `unknown timezone ${tz}`);
+    const now = new Date();
+    const day = c.req.query("day") || localDay(now, tz);
+    const bucket = Number(c.req.query("bucket") ?? 1);
+    if (!(BUCKETS as readonly number[]).includes(bucket)) throw new ApiError(400, "validation_error", `bucket must be one of ${BUCKETS.join(", ")}`);
+    let bounds: { start: number; end: number };
+    try {
+      bounds = dayBounds(day, tz);
+    } catch (e) {
+      throw new ApiError(400, "validation_error", (e as Error).message);
+    }
+    const runs = store.listRunsActiveBetween(new Date(bounds.start).toISOString(), new Date(bounds.end).toISOString());
+    return c.json(activeSeries(runs, { day, tz, now, bucketMinutes: bucket }));
+  });
+  hostsArea?.mountRunHosts(api, store); // GET /runs/hosts: live runs by host (hosted/hosts.ts)
+  // one world's own lists by path, scoped to the path's world in every auth mode (a store for that tenant, not
+  // the request's): what a world's personas, DM and checks read with its token (the shadow logged /tenants/a social world repo/
+  // assignments|runs, 2026-10-31T22:53Z). Rule 3 404s a caller of another world; an unknown world is a 404.
+  const worldStore = (c: Context) => {
+    const id = c.req.param("id")!;
+    if (!store.getTenant(id)) throw new ApiError(404, "not_found", `tenant ${id} not found`);
+    return createStore(db, { tenant: id });
+  };
+  api.get("/tenants/:id/milestones", (c) => c.json(worldStore(c).listMilestones({ includeSettled: includeSettled(c) })));
+  api.get("/tenants/:id/personas", (c) => c.json(worldStore(c).listPersonas()));
+  api.get("/tenants/:id/assignments", (c) =>
+    c.json(worldStore(c).listAssignments({ milestoneId: c.req.query("milestoneId"), personaId: c.req.query("personaId") })),
+  );
+  api.get("/tenants/:id/runs", (c) => c.json(worldStore(c).listRuns(runsQuery(c)).map(withT3)));
+  // the platform's lookup of which world owns the id an API path names (rule 3's own query), so check-curl.sh sends
+  // that world's token or refuses the call. the home world-only (not TENANT_SAFE): another world never learns of ids not its own.
+  api.get("/owner", (c) => {
+    const p = c.req.query("path");
+    if (!p || !p.startsWith("/api/")) throw new ApiError(400, "validation_error", "path must be an /api/ path");
+    return c.json({ path: p, owner: ownerOfPath(db, p.split("?")[0]) ?? null });
+  });
+  api.get("/runs/:id", (c) => c.json(withT3(found(store.getRun(c.req.param("id")), "run", c.req.param("id")))));
+  /**
+   * `blocked` means the owner must act, so it needs an open ask code in the summary (or an open
+   * Needs the owner item of the run). A `blocked` citing none (or only answered codes) is a wait on a time or condition: it is
+   * stored as `monitoring`, next check = its retryAt, and the reported word kept in `reportedOutcome`.
+   */
+  const asMonitoring = <P extends { outcome?: string; retryAt?: string | null; nextCheckAt?: string | null }>(p: P, retryAt?: string | null) => ({
+    ...p,
+    outcome: "monitoring" as const,
+    reportedOutcome: "blocked",
+    nextCheckAt: p.nextCheckAt ?? p.retryAt ?? retryAt ?? null,
+  });
+  /**
+   * a report that ends in `monitoring` with a date ahead puts it in the spine: the milestone's
+   * Current State `Monitoring:` line (written through the spine writer unless a current one is there). Status reads
+   * monitoring from that line only. A line that cannot be written refuses the report (409), and nothing is recorded.
+   */
+  const monitoringInSpine = async (
+    milestoneId: string | undefined,
+    after: { outcome?: string; summary?: string; nextCheckAt?: string | null; retryAt?: string | null; until?: string | null; heldOn?: string | null },
+    runId?: string,
+  ) => {
+    if (after.outcome !== "monitoring" || !milestoneId) return;
+    const what = after.heldOn ? heldWhat(after.heldOn) : monitorWhat(after.summary);
+    const report = datedReport({ what, nextCheckAt: after.nextCheckAt ?? after.retryAt ?? undefined, until: after.until ?? undefined });
+    const at = report && spineOfMilestone(milestoneId);
+    if (!report || !at) return; // no date ahead (status shows no monitoring either), or no spine on this host
+    const w = await writeMonitoring({ writer: spine, dir: at.dir, path: at.path, runId }, report);
+    if (w.status === "written") {
+      if (w.sha) dropSpines(at.dir);
+      return;
+    }
+    throw new ApiError(
+      409,
+      "monitoring_not_in_spine",
+      `the report says monitoring, but ${at.path} has no current \`Monitoring:\` line and the console could not write it (${w.reason ?? w.status}). ` +
+        `Write \`Monitoring: ${monitorValue(report)}\` in its Current State, commit and push per the repo's Integration policy, then resend this report (root L-45).`,
+      { path: at.path },
+    );
+  };
+  // a client that timed out and retries with the same clientRequestId gets the first run (200), never a second one.
+  api.post("/runs", async (c) => {
+    const p = await body(c, s.runCreate);
+    const foreign = threadRefusal(db, worldOfAssignment(db, p.assignmentId) ?? DEFAULT_TENANT, p.threadId); // (audit N3)
+    if (foreign) throw new ApiError(403, "foreign_thread", foreign);
+    const replay = () => (p.clientRequestId ? store.getRunByClientRequest(p.assignmentId, p.clientRequestId) : undefined);
+    const seen = replay();
+    if (seen) return c.json(withT3(seen), 200);
+    const milestoneId = store.getAssignment(p.assignmentId)?.milestoneId;
+    const blockedOk = p.outcome !== "blocked" || (await blockedHasAsk({ id: "", assignmentId: p.assignmentId, milestoneId }, p.summary));
+    const created = blockedOk ? p : asMonitoring(p);
+    await monitoringInSpine(milestoneId, created);
+    const raced = replay(); // a repeat that arrived during the await above (no await between this check and the insert)
+    if (raced) return c.json(withT3(raced), 200);
+    return c.json(store.createRun(created), 201);
+  });
+  api.patch("/runs/:id", async (c) => {
+    const id = c.req.param("id");
+    // `review: {url, title?, ref?, commit?}` from older briefs is only a hint now (the card is the spine row).
+    const { review: liveResult, ...reported } = await body(c, s.runPatch.extend({ review: runReview.optional() }));
+    const run = store.getRun(id);
+    const foreign = run && threadRefusal(db, worldOfRun(db, id), reported.threadId); // (audit N3)
+    if (foreign) throw new ApiError(403, "foreign_thread", foreign);
+    if (run) cycle.touchRun(id); // the worker is alive, whatever the reconciler can read of its thread
+    // a report (outcome or summary) for a wake that is no longer running, while a newer wake of the same assignment
+    // runs, belongs to that newer wake: refused, so one turn's report is never written onto two wakes (run_5064482d + run_b5d76a14).
+    // An asking run is exempt (blocked, or a Needs the owner item names it): the owner's answer may finish it (consumed).
+    // "names it" = the run raised an ask through the API (the raise log, ops; the ask itself is in the spine).
+    const asking = (r: Run) => r.outcome === "blocked" || !!db.prepare("SELECT 1 FROM needs_jordi WHERE run_id = ? LIMIT 1").get(r.id);
+    if (run && run.kind === "wake" && !run.parentRunId && run.outcome !== "running" && (reported.outcome !== undefined || reported.summary !== undefined)) {
+      const newer = store
+        .listRuns({ assignmentId: run.assignmentId, limit: 50 })
+        .find((r) => r.id !== run.id && r.kind === "wake" && !r.parentRunId && r.outcome === "running" && r.startedAt > run.startedAt);
+      if (newer && !asking(run))
+        throw new ApiError(409, "superseded_wake", `run ${id} ended (${run.outcome}); wake ${newer.id} of this assignment is running now: PATCH that run with this report, not ${id}`, {
+          runId: newer.id,
+        });
+    }
+    const p =
+      run && reported.outcome === "blocked" && !(await blockedHasAsk(run, reported.summary ?? run.summary)) ? asMonitoring(reported, run.retryAt) : reported;
+    const milestoneId = run?.milestoneId ?? (run ? store.getAssignment(run.assignmentId)?.milestoneId : undefined);
+    // ready rows are for a persona that dispatches; a standing-duty (pack-role) persona's wake neither books a
+    // follow-up for them nor is flagged for leaving them (a social world repo's Writer got a follow-up for a recruit-testers row).
+    const runPersona = run && store.getPersona(run.personaId ?? store.getAssignment(run.assignmentId)?.personaId ?? "");
+    const dispatches = !runPersona || !hasStandingDuty(runPersona);
+    const ready = async () => {
+      if (!dispatches) return [];
+      const m = milestoneId ? store.getMilestone(milestoneId) : undefined;
+      if (!m?.path) return undefined;
+      const { rel, spines } = await spinesFor(m, 1_500);
+      if (spines && rel && runStateFor(spines, rel)?.runnable === false) return []; // not runnable: idle is the honest word
+      return readySteps(await treeFor(m, 1_500, spines));
+    };
+    // monitoring needs a date; idle only when no step is ready; a non-ending word is failed.
+    const ending = await wakeEnding(p, run, ready);
+    if ("error" in ending) throw new ApiError(400, "validation_error", ending.error);
+    // a wake ending progressed with steps still ready books one follow-up wake (enabled, 1 per hour, depth 1).
+    if (run?.outcome === "running" && ending.patch.outcome === "progressed" && run.kind === "wake" && !run.parentRunId) {
+      const f = followUp({
+        run,
+        outcome: ending.patch.outcome,
+        assignment: store.getAssignment(run.assignmentId),
+        milestone: milestoneId ? store.getMilestone(milestoneId) : undefined,
+        runs: store.listRuns({ assignmentId: run.assignmentId, limit: 50 }),
+        ready: (await ready().catch(() => undefined)) ?? [],
+        now: Date.now(),
+      });
+      if (f.note) ending.patch = { ...ending.patch, summary: `${ending.patch.summary ?? run.summary} ${f.note}`.trim(), ...(f.book ? { retryAt: f.at } : {}) };
+    }
+    // an Unblocker's finishing PATCH reports every ask that was open when its wake prompt was built.
+    const finishing = (p.outcome !== undefined && p.outcome !== "running") || !!p.endedAt;
+    // only the asks new or changed at wake time must be reported; carried ones get their remembered `left`.
+    const unblockerFinish = !!run?.openAsks && finishing && (p.outcome ?? run!.outcome) !== "failed" && isUnblocker(store.getPersona(run!.personaId ?? "")?.name);
+    if (unblockerFinish) {
+      const assessed = run!.openAsks!.filter((a) => !a.carriedFrom);
+      const own = p.checks !== undefined ? p.checks : run!.checks;
+      const problem = unblockerChecksProblem(assessed, own);
+      if (problem) throw new ApiError(400, "checks_incomplete", problem, { openAsks: assessed.map((a) => a.code) });
+      // each assessed ask carries its rubric scores; an answer stands only when it clears the rubric (outside the hard floor).
+      const rubric = rubricOfRun(db, run!.id, milestoneId);
+      const broken = rubricProblem(assessed, own, rubric);
+      if (broken) throw new ApiError(400, "rubric", broken, { threshold: rubric.threshold, minFactor: rubric.minFactor, weights: rubric.weights });
+      const stamped = stampRubric(own ?? [], rubric);
+      ending.patch = {
+        ...ending.patch,
+        ...(own ? { checks: stamped } : {}),
+        ...(run!.openAsks!.some((a) => a.carriedFrom) ? { checks: withCarriedChecks(run!.openAsks!, stamped, milestoneId ? readAskMemory(db, milestoneId) : []) } : {}),
+      };
+    }
+    const noteAckPatch: { noteAck?: string } = {};
+    // a run that carried a note must say what it did about it (`note: done|not done: <why>`) before it finishes.
+    if (run?.instructions && finishing && !run.endedAt && (p.outcome ?? run.outcome) !== "failed") {
+      const ack = noteAck(p.summary ?? run.summary);
+      if (!ack)
+        throw new ApiError(400, "note_unacknowledged", `this run carried ${run.instructionsBy ?? ownerName()}'s note: ${NOTE_ACK_RULE} The note: ${run.instructions}`);
+      noteAckPatch.noteAck = ack;
+    }
+    // NO_SELF_READY: a finished run whose commits turned a spine or row from draft to ready is flagged (background).
+    if (run && finishing && milestoneId) {
+      const m = store.getMilestone(milestoneId);
+      if (m?.path)
+        void spinesFor(m, 4_000)
+          .then(async ({ loc }) => (loc ? selfReadied(loc.repo.path, run.id, run.startedAt) : []))
+          .then((lines) => lines.length && store.updateRun(id, { selfReadied: lines }))
+          .catch(() => undefined);
+    }
+    // in a pack repo, each commit of the run is validated as the persona's pack role; a failure marks it rule broken (never a revert).
+    if (run && finishing && !run.endedAt && read.skillDir) {
+      const m = milestoneId ? store.getMilestone(milestoneId) : undefined;
+      const dir = m ? (locateDir(m) ?? resolveRepo(read.reposRoot, m.repo)?.path) : undefined;
+      const persona = store.getPersona(run.personaId ?? store.getAssignment(run.assignmentId)?.personaId ?? "");
+      if (dir && persona)
+        void (opts.packCheck ?? socialArea?.packCheck)?.({ skillDir: read.skillDir, repoDir: dir, runId: run.id, since: run.startedAt, persona })
+          .then((rb) => rb && store.updateRun(id, { ruleBroken: rb }))
+          .catch(() => undefined);
+    }
+    // a wake ending with the same report as the wakes before it is marked repeating (n in a row, since when).
+    const repeatPatch: { repeating?: number | null; repeatSince?: string | null } = {};
+    if (run && finishing && run.kind === "wake" && !run.parentRunId) {
+      const ended = { ...run, ...ending.patch, outcome: ending.patch.outcome ?? run.outcome, summary: ending.patch.summary ?? run.summary } as Run;
+      const streak = repeatStreak(ended, store.listRuns({ assignmentId: run.assignmentId, limit: 50 }));
+      repeatPatch.repeating = streak?.n ?? null;
+      repeatPatch.repeatSince = streak?.since ?? null;
+    }
+    // a Delivery manager wake that launched nothing while unclaimed rows read ready names its one blocker, else it is flagged stalled.
+    const stalledPatch: { stalled?: string | null } = {};
+    if (run && finishing && !run.endedAt && run.kind === "wake" && !run.parentRunId) {
+      const persona = store.getPersona(run.personaId ?? store.getAssignment(run.assignmentId)?.personaId ?? "")?.name;
+      if (isDeliveryManager(persona)) {
+        const m = milestoneId ? store.getMilestone(milestoneId) : undefined;
+        const claimed = new Set(m ? claimsFor(store, m).map((x) => x.ticket) : []);
+        const steps = ((await ready().catch(() => undefined)) ?? []).filter((x) => !claimed.has(x));
+        const why = stalledWake({
+          persona,
+          outcome: ending.patch.outcome ?? run.outcome,
+          summary: ending.patch.summary ?? run.summary,
+          ready: steps,
+          launched: store.listRuns({ parentRunId: id, limit: 50 }).length,
+        });
+        stalledPatch.stalled = why ?? null;
+      }
+    }
+    if (run && ending.patch.outcome === "monitoring")
+      await monitoringInSpine(
+        milestoneId,
+        {
+          outcome: "monitoring",
+          summary: ending.patch.summary ?? run.summary,
+          nextCheckAt: ending.patch.nextCheckAt !== undefined ? ending.patch.nextCheckAt : run.nextCheckAt,
+          retryAt: ending.patch.retryAt !== undefined ? ending.patch.retryAt : run.retryAt,
+          until: ending.patch.until !== undefined ? ending.patch.until : run.until,
+          heldOn: ending.patch.heldOn !== undefined ? ending.patch.heldOn : run.heldOn,
+        },
+        id,
+      );
+    const updated = found(store.updateRun(id, { ...ending.patch, ...noteAckPatch, ...repeatPatch, ...stalledPatch }), "run", id);
+    if (unblockerFinish && milestoneId) rememberChecks(db, updated, milestoneId); // the per-ask memory
+    // a report naming a live result is a hint that its row changed: the spines are re-read; nothing is stored.
+    if (liveResult) review.hint(updated.milestoneId ?? milestoneId);
+    return c.json(updated);
+  });
+
+  // the Team Browser says an egress is back (offline → online); wake the personas held on it (switched-off ones stay off).
+  api.post("/egress/:name/online", (c) => {
+    const name = c.req.param("name");
+    if (!/^[a-z0-9_-]{1,40}$/.test(name)) throw new ApiError(400, "validation_error", "egress name must be [a-z0-9_-]");
+    return c.json(releaseHeld(store, name));
+  });
+
+  // Needs the owner (root L-45): an ask raised through the API is written into the asker's spine as a coded
+  // `[ask <code>: …]` line (inbox/raise.ts, through the one spine writer); the inbox reads it from the spine like any other
+  // ask. The needs_jordi table is only the log of what was raised (ops): the read path never reads it.
+  const raiseDeps = (): RaiseDeps => ({ db, store, reposRoot: read.reposRoot, writer: spine, invalidate: dropSpines });
+  api.get("/needs-owner", (c) => {
+    const status = c.req.query("status");
+    if (status !== undefined && !s.needsJordiFilterStatus.safeParse(status).success)
+      throw new ApiError(400, "validation_error", "status must be open, approved, denied or superseded");
+    return c.json(store.listNeedsJordi({ status, milestoneId: c.req.query("milestoneId") }));
+  });
+  api.get("/needs-owner/:id", (c) =>
+    c.json(found(store.getNeedsJordi(c.req.param("id")), "needs-owner item", c.req.param("id"))),
+  );
+  api.post("/needs-owner", async (c) => {
+    const p = await body(c, s.needsJordiCreate);
+    // an ask never hands the owner terminal lines to copy
+    const copyPaste = copyPasteProblem(copyPasteInText(p.question));
+    if (copyPaste) throw new ApiError(422, "copy_paste_steps", `the ask was not raised: ${copyPaste}`);
+    const m = found(store.getMilestone(p.milestoneId), "milestone", p.milestoneId);
+    const run = p.runId ? found(store.getRun(p.runId), "run", p.runId) : undefined;
+    const a = run ? store.getAssignment(run.assignmentId) : undefined;
+    const persona = a ? store.getPersona(a.personaId)?.name : undefined;
+    // an ask that does not name what of the owner's it answers, re-states his answer or carries a go-live
+    // date he did not set is refused before anything is written; the reason goes back to the persona, never to him.
+    const gate = askGateProblem(parseAsks(`## Waiting on\n${askLine("X-A1", { question: p.question, proposedAction: p.proposedAction, askedBy: "a persona", ...(p.kind ? { kind: p.kind } : {}) }, "2000-01-01")}`).map(({ since: _old, ...x }) => x)[0] ?? { ask: "unknown", question: p.question });
+    if (gate) {
+      console.log(`ask gate: refused an ask from ${persona ?? (run ? `run ${run.id}` : "an API caller")} on ${m.id}: ${gate.slice(0, 120)}`);
+      throw new ApiError(422, "ask_not_his", `the ask was not raised: ${gate}. Nothing was written and ${ownerName()} sees nothing.`);
+    }
+    const r = await raiseAsk(
+      raiseDeps(),
+      m,
+      { question: p.question, proposedAction: p.proposedAction, askedBy: persona ?? (run ? `run ${run.id}` : "an API caller"), ...(run ? { runId: run.id } : {}), ...(p.row ? { row: p.row } : {}), ...(p.kind ? { kind: p.kind } : {}) },
+      p.path,
+    );
+    if (r.status !== "written")
+      throw new ApiError(409, "spine_write_refused", `the ask was not raised: the console could not write it into ${r.repo && r.path ? `${r.repo}/${r.path}` : "a spine"} (${r.reason}). Nothing was recorded. Write the coded ask line under \`## Waiting on\` of your spine yourself, or call again once that is fixed.`, { reason: r.reason, ...(r.repo ? { repo: r.repo } : {}), ...(r.path ? { path: r.path } : {}) });
+    const log = store.logRaisedAsk({ runId: run?.id ?? null, milestoneId: m.id, question: p.question, proposedAction: p.proposedAction, by: `${r.repo}/${r.code}` });
+    return c.json({ ...log, ask: { code: r.code, repo: r.repo, path: r.path, line: r.line, ...(r.sha ? { sha: r.sha } : {}), ...(r.reason ? { note: r.reason } : {}) } }, 201);
+  });
+  // the raiser takes its own ask out once it is moot (the Team Browser: the site reads signed in again). Only an
+  // ask line the console wrote and still open; anything else answers 409 with the reason. the home world / host only.
+  api.post("/needs-owner/retire", async (c) => {
+    const p = await body(c, s.needsJordiRetire);
+    const m = found(store.getMilestone(p.milestoneId), "milestone", p.milestoneId);
+    const w = await retireAsk(raiseDeps(), m, p.path, p.code, p.why, true);
+    if (w.status !== "written") throw new ApiError(409, "not_retired", `${p.code} was not taken out: ${w.reason ?? w.status}`);
+    return c.json({ status: w.status, code: p.code, path: p.path, ...(w.sha ? { sha: w.sha } : {}) });
+  });
+  // carry-over (once per console): open Needs the owner rows go into their spines as coded asks, then the table is a log.
+  // `{"dry":true}` says what it would write. the home world / host only (not TENANT_SAFE).
+  api.post("/needs-owner/carry", async (c) => {
+    const raw = (await c.req.text()).trim();
+    let dry = false;
+    try {
+      dry = raw ? JSON.parse(raw)?.dry === true : false;
+    } catch {
+      throw new ApiError(400, "invalid_json", "send {} or {\"dry\":true}");
+    }
+    const lines = await carryNeedsJordi({ db, store, deps: inboxDeps, raise: raiseDeps() }, { dry });
+    const counts = lines.reduce<Record<string, number>>((a, l) => ({ ...a, [l.action]: (a[l.action] ?? 0) + 1 }), {});
+    console.log(`needs-owner carry${dry ? " (dry)" : ""}: ${JSON.stringify(counts)}`);
+    return c.json({ dry, counts, lines });
+  });
+  // carry-over (once per console): each world's assignments and access into state/assignments.json and
+  // state/access.json. `{"dry":true}` says what it would write. the home world / host only (not TENANT_SAFE).
+  api.post("/e62s7/carry", async (c) => {
+    const raw = (await c.req.text()).trim();
+    let dry = false;
+    try {
+      dry = raw ? JSON.parse(raw)?.dry === true : false;
+    } catch {
+      throw new ApiError(400, "invalid_json", "send {} or {\"dry\":true}");
+    }
+    const lines = await assignmentRecord.carry({ dry });
+    console.log(`e62s7 carry${dry ? " (dry)" : ""}: ${JSON.stringify(lines)}`);
+    return c.json({ dry, lines });
+  });
+  // carry-over (once per console): each world's personas as files in its team repo (state/personas/), one commit
+  // per world. `{"dry":true}` says what it would write. the home world / host only (not TENANT_SAFE).
+  api.post("/e62s6/carry", async (c) => {
+    const raw = (await c.req.text()).trim();
+    let dry = false;
+    try {
+      dry = raw ? JSON.parse(raw)?.dry === true : false;
+    } catch {
+      throw new ApiError(400, "invalid_json", "send {} or {\"dry\":true}");
+    }
+    const lines = await personaRecord.carry({ dry });
+    console.log(`e62s6 carry${dry ? " (dry)" : ""}: ${JSON.stringify(lines)}`);
+    return c.json({ dry, lines });
+  });
+  // carry-over (once per console): each world's tracked milestones and their marks into its team repo's
+  // state/milestones.json. `{"dry":true}` says what it would write. the home world / host only (not TENANT_SAFE).
+  api.post("/e62s5/carry", async (c) => {
+    const raw = (await c.req.text()).trim();
+    let dry = false;
+    try {
+      dry = raw ? JSON.parse(raw)?.dry === true : false;
+    } catch {
+      throw new ApiError(400, "invalid_json", "send {} or {\"dry\":true}");
+    }
+    const lines = await milestoneRecord.carry({ dry });
+    console.log(`e62s5 carry${dry ? " (dry)" : ""}: ${JSON.stringify(lines)}`);
+    return c.json({ dry, lines });
+  });
+  // carry-over (once per console): rubric rows → repo, monitoring reports → spine lines, placement state columns
+  // dropped (read from the spine). `{"dry":true}` says what it would do. the home world / host only (not TENANT_SAFE).
+  api.post("/e62s8/carry", async (c) => {
+    const raw = (await c.req.text()).trim();
+    let dry = false;
+    try {
+      dry = raw ? JSON.parse(raw)?.dry === true : false;
+    } catch {
+      throw new ApiError(400, "invalid_json", "send {} or {\"dry\":true}");
+    }
+    const lines = await carryE62s8({ db, store, writer: spine, spineOf: spineOfMilestone, placements: desk.placements, invalidate: dropSpines }, { dry });
+    const counts = lines.reduce<Record<string, number>>((a, l) => ({ ...a, [`${l.part}: ${l.action}`]: (a[`${l.part}: ${l.action}`] ?? 0) + 1 }), {});
+    console.log(`e62s8 carry${dry ? " (dry)" : ""}: ${JSON.stringify(counts)}`);
+    return c.json({ dry, counts, lines });
+  });
+  // a raised ask is answered (or retired) at its spine line, never on this table.
+  const gone = (c: Context) =>
+    c.json({ error: { code: "gone", message: `Needs ${ownerName()} items are spine asks now: answer one with POST /api/waiting-on-owner/<item id>/respond; retire one by editing its line in the spine` } }, 410);
+  api.patch("/needs-owner/:id", gone);
+  api.post("/needs-owner/:id/supersede", gone);
+
+  // Books are the home world's: another world's milestone has none (its id answers 404 on /book/:key, as a missing one does).
+  const homeMilestones = () =>
+    store.listMilestones({ includeSettled: true }).filter((x) => (store.worldOfMilestone(x.id) ?? DEFAULT_TENANT) === DEFAULT_TENANT);
+  /** The milestone's book cut from the built Epic Book, with's last-updated (the last good daily refresh). */
+  const bookOf = (b: Book, m: Milestone) => {
+    const loc = locate(read.reposRoot, m);
+    const repoName = "error" in loc ? loc.repo?.name ?? m.repo.split("/").pop()! : loc.repo.name;
+    // The console's name rule: a title saved in Settings wins, else the spine's own title.
+    return milestoneBook(b, { id: m.id, ...(m.titleSetAt ? { title: m.title } : {}), repoName, path: m.path }, { refreshedAt: bookRefresh?.lastOkAt() ?? null, now: (opts.bookRefresh?.now ?? Date.now)(), links });
+  };
+  /** books none of whose sources moved in 2 days: stuck items on /book (the owner's radar). */
+  const staleBooks = (b: Book) =>
+    homeMilestones()
+      .filter((m) => m.path && !m.settledAt)
+      .flatMap((m) => {
+        const mb = bookOf(b, m);
+        return mb && mb.updated.stale ? [{ milestoneId: m.id, title: mb.milestone.title, repo: mb.repo.name, updatedAt: mb.updated.at }] : [];
+      });
+
+  // Epic Book: GET /book, every repo's spines as one "where are we" (the home world only: auth/routeScope.ts denies by default).
+  api.get("/book", compress(), async (c) => {
+    if (!book) return c.json({ error: { code: "spines_unavailable", message: "EpicSpine spines.py is not installed on the console host" } }, 503);
+    const v = await book.get();
+    // rework: refreshedAt = the newest of the last daily refresh and the last rebuild (spine/git change, timer);
+    // dailyRefreshAt keeps the daily pull + probe on its own.
+    const daily = bookRefresh?.lastOkAt() ?? null;
+    const refreshedAt = [daily, v.book?.builtAt ?? null].filter((x): x is string => !!x).sort().pop() ?? null;
+    return c.json(v.book ? { ...v, book: bookWithChecks(slimOf(v.book), links), staleBooks: staleBooks(v.book), refreshedAt, dailyRefreshAt: daily } : v);
+  });
+  // the books' daily refresh: GET its last runs and whether today's is due; POST runs one now (202, in the background).
+  api.get("/book-refresh", (c) => {
+    if (!bookRefresh) return c.json({ error: { code: "spines_unavailable", message: "EpicSpine spines.py is not installed on the console host" } }, 503);
+    return c.json({ running: bookRefresh.running(), due: bookRefresh.due(), lastOkAt: bookRefresh.lastOkAt() ?? null, runs: bookRefresh.list(10) });
+  });
+  api.post("/book-refresh", (c) => {
+    if (!bookRefresh) return c.json({ error: { code: "spines_unavailable", message: "EpicSpine spines.py is not installed on the console host" } }, 503);
+    const was = bookRefresh.running();
+    void bookRefresh.run("manual").catch(() => undefined);
+    return c.json({ started: !was, running: true }, 202);
+  });
+  // Epic Book per milestone: GET /book/<milestone id, or the repo's name for its root milestone>, the human page's
+  // data (narrative from Goal, Done means and Current State; the plan tree), cut from the same cached book (the home world only).
+  api.get("/book/:key", compress(), async (c) => {
+    if (!book) return c.json({ error: { code: "spines_unavailable", message: "EpicSpine spines.py is not installed on the console host" } }, 503);
+    const key = c.req.param("key");
+    const all = homeMilestones();
+    const byRepo = all.filter((x) => x.path && (sameRepo(x.repo, key) || sameRepo(x.repo.split("/").pop(), key)));
+    const m = all.find((x) => x.id === key) ?? byRepo.find((x) => /(^|\/)(root\.md|EPIC-0[^/]*\.md)$/i.test(x.path)) ?? byRepo[0];
+    if (!m) throw new ApiError(404, "not_found", `milestone ${key} not found`);
+    const v = await book.get();
+    if (!v.book) return c.json({ book: null, building: v.building, milestoneId: m.id });
+    const mb = bookOf(v.book, m);
+    if (!mb) throw new ApiError(404, "not_found", `no spine ${m.path} in ${m.repo.split("/").pop()}'s book yet`);
+    return c.json({ book: mb, building: v.building });
+  });
+
+  // the epic decks and the big rocks board, cut from the same cached book (the home world only).
+  const teamRepoDir = () => resolveRepo(read.reposRoot, homeRepo())?.path;
+  const rocksNow = () => readBigRocks(teamRepoDir());
+  const repoNameOf = (m: Milestone) => {
+    const loc = locate(read.reposRoot, m);
+    return "error" in loc ? loc.repo?.name ?? m.repo.split("/").pop()! : loc.repo.name;
+  };
+  const bigRootsNow = () =>
+    homeMilestones()
+      .filter((m) => m.path && !m.settledAt && m.bigRoot != null)
+      .sort((a, b) => a.bigRoot! - b.bigRoot! || a.createdAt.localeCompare(b.createdAt))
+      .map((m) => ({ id: m.id, repoName: repoNameOf(m), path: m.path!, ...(m.titleSetAt ? { title: m.title } : {}) }));
+  /** The console milestone that tracks a spine (its Epic Book), when one does. */
+  const milestoneOfSpine = (repoName: string, p: string) => homeMilestones().find((m) => m.path === p && repoNameOf(m) === repoName)?.id;
+  const deckOf = (b: Book, ref: DeckRef, notify?: { trend(r: DeckRef): DeckTrendPoint[] }): EpicDeck | null => {
+    const repo = b.repos.find((r) => r.name === ref.repo);
+    const e = repo && findEpic(repo, ref.code);
+    if (!repo || !e) return null;
+    const canonical = { repo: repo.name, code: deckCode(e) };
+    return epicDeck(b, canonical, {
+      rocks: rocksNow()?.rocks ?? [],
+      trend: notify?.trend(canonical) ?? [],
+      milestoneId: milestoneOfSpine(repo.name, e.path),
+      refreshedAt: bookRefresh?.lastOkAt() ?? null,
+      now: (opts.bookRefresh?.now ?? Date.now)(),
+      links,
+    });
+  };
+  const deckNotify: DeckNotify | undefined = book
+    ? createDeckNotify({
+        db,
+        repoDir: teamRepoDir,
+        writer: spine,
+        ...(opts.deckNotify?.now ? { now: opts.deckNotify.now } : {}),
+        decks: async (): Promise<EpicDeck[]> => {
+          const v = await book.get();
+          if (!v.book) return [];
+          return deckList(v.book, bigRootsNow(), { rocks: rocksNow()?.rocks ?? [] }).flatMap((d) => deckOf(v.book!, d.ref, deckNotify) ?? []);
+        },
+      })
+    : undefined;
+  if (deckNotify && opts.deckNotify?.tickMs) deckNotify.start(opts.deckNotify.tickMs);
+  const noBook = (c: Context) => c.json({ error: { code: "spines_unavailable", message: "EpicSpine spines.py is not installed on the console host" } }, 503);
+  // who keeps each page, from the repo (the board's `Kept by:` line, the team repo's personas and assignments).
+  const teamNow = () => {
+    const milestones = homeMilestones();
+    const ids = new Set(milestones.map((m) => m.id));
+    return { personas: store.listPersonas(), assignments: store.listAssignments().filter((a) => ids.has(a.milestoneId)), milestones };
+  };
+  const deckAbout = (b: Book, d: EpicDeck): DeckAbout => {
+    const repo = b.repos.find((r) => r.name === d.ref.repo);
+    const chain: string[] = [];
+    for (let p: string | null = d.path; p && !chain.includes(p); p = repo?.epics.find((e) => e.path === p)?.parent ?? null) chain.push(p);
+    const team = teamNow();
+    const rocks = rocksNow();
+    return {
+      repo: d.ref.repo,
+      spinePath: d.path,
+      ...deckWorkers(chain, (p) => team.milestones.find((m) => m.path === p && repoNameOf(m) === d.ref.repo), team),
+      refresh: { at: utcHourText(REFRESH_HOUR_UTC, (opts.bookRefresh?.now ?? Date.now)()), lastOkAt: bookRefresh?.lastOkAt() ?? null },
+      rocks: rocks ? rocksAbout(rocks, team) : null,
+    };
+  };
+  // GET /milestones/:id/arc: the project's three-phase plan (docs/arcs.md of the code repo), each phase with its epic's
+  // status and deck from the book; null when the project has no arc.
+  api.get("/milestones/:id/arc", async (c) => {
+    const m = found(store.getMilestone(c.req.param("id")), "milestone", c.req.param("id"));
+    const arcs = readArcs(teamRepoDir());
+    if (!arcs || !m.path) return c.json({ arc: null });
+    const v = book ? await book.get() : undefined;
+    return c.json({ arc: arcFor(arcs, repoNameOf(m), m.path, v?.book?.repos ?? []) });
+  });
+  // GET /rocks: the big rocks board (docs/big-rocks.md), each rock with the decks it sits on.
+  api.get("/rocks", async (c) => {
+    const rocks = rocksNow();
+    if (!rocks) return c.json({ rocks: null, file: BIG_ROCKS_FILE });
+    const v = book ? await book.get() : undefined;
+    const decks = v?.book ? deckList(v.book, bigRootsNow(), { rocks: rocks.rocks }) : [];
+    return c.json({
+      rocks: { ...rocks, rocks: rocks.rocks.map((r) => ({ ...r, decks: decks.filter((d) => d.rocks.includes(r.id)).map((d) => ({ ref: d.ref, href: d.href, title: d.title, kind: d.kind })) })) },
+      file: BIG_ROCKS_FILE,
+      about: rocksAbout(rocks, teamNow()),
+    });
+  });
+  // GET /decks: the high-level epics with a deck (the owner's focus milestones, then the big lanes) and the cards now.
+  api.get("/decks", async (c) => {
+    if (!book) return noBook(c);
+    const v = await book.get();
+    if (!v.book) return c.json({ decks: [], cards: [], building: v.building });
+    const rocks = rocksNow();
+    const about = { refresh: { at: utcHourText(REFRESH_HOUR_UTC, (opts.bookRefresh?.now ?? Date.now)()), lastOkAt: bookRefresh?.lastOkAt() ?? null }, rocks: rocks ? rocksAbout(rocks, teamNow()) : null };
+    return c.json({ decks: deckList(v.book, bigRootsNow(), { rocks: rocks?.rocks ?? [] }), cards: deckCardsOf(v.book), building: v.building, updatesFile: DECK_UPDATES_FILE, about });
+  });
+  const deckCardsOf = (b: Book) =>
+    (deckNotify?.cards() ?? []).map((l) => {
+      const repo = b.repos.find((r) => r.name === l.ref.repo);
+      const e = repo && findEpic(repo, l.ref.code);
+      return { ref: l.ref, href: deckHref(l.ref), title: e ? e.title.replace(/^\s*(EPIC-\d+|M\d+)\s*[:—–-]\s*/i, "") : `${l.ref.repo}/${l.ref.code}`, date: l.date, text: l.text, goals: { met: l.goalsMet, total: l.goalsTotal } };
+    });
+  // GET /deck-cards: the Team home's "Epic decks changed" cards (each deck's newest unseen line in deck-updates.md).
+  api.get("/deck-cards", async (c) => {
+    if (!book) return noBook(c);
+    const v = await book.get();
+    return c.json({ cards: v.book ? deckCardsOf(v.book) : [] });
+  });
+  // POST /deck-cards/seen {repo, code, date}: the owner saw a card; `· seen <date>` goes on its line (spine writer, L-45).
+  api.post("/deck-cards/seen", async (c) => {
+    if (!deckNotify) return noBook(c);
+    const b = ((await c.req.json().catch(() => undefined)) ?? {}) as Record<string, unknown>;
+    const repo = typeof b.repo === "string" ? b.repo : "";
+    const code = typeof b.code === "string" ? b.code : "";
+    const date = typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : "";
+    if (!repo || !code || !date) throw new ApiError(400, "invalid_body", "send {repo, code, date}");
+    const w = await deckNotify.seen({ repo, code }, date);
+    if (w.status !== "written") return c.json({ error: { code: w.status === "failed" ? "git_failed" : "conflict", message: `not marked seen: ${w.reason ?? w.status}` } }, w.status === "failed" ? 502 : 409);
+    dropSpines(teamRepoDir() ?? "");
+    return c.json({ ok: true, sha: "sha" in w ? w.sha : undefined });
+  });
+  // POST /decks/check: compare the decks with their last lines now (the timer does it every 10 min); 202.
+  api.post("/decks/check", async (c) => {
+    if (!deckNotify) return noBook(c);
+    const r = await deckNotify.tick();
+    return c.json(r, 202);
+  });
+  // GET /deck/:repo/:code: one epic deck (stable URL `/deck/<repo>/<code>`; code =, M6, or the spine's file name).
+  api.get("/deck/:repo/:code", compress(), async (c) => {
+    if (!book) return noBook(c);
+    const v = await book.get();
+    if (!v.book) return c.json({ deck: null, building: v.building });
+    const d = deckOf(v.book, { repo: c.req.param("repo"), code: c.req.param("code") }, deckNotify);
+    if (!d) throw new ApiError(404, "not_found", `no epic ${c.req.param("code")} in ${c.req.param("repo")}'s book`);
+    // a product's deck (its Epic Book) links the page where its numbers live, the numbers read now (hourly cache).
+    const repo = v.book.repos.find((r) => r.name === d.ref.repo);
+    const live = await socialArea?.livePage(repo?.remote ?? d.ref.repo);
+    return c.json({ deck: d, about: deckAbout(v.book, d), ...(live ? { live } : {}), building: v.building });
+  });
+  // GET /deck-of/<milestone id, or a repo's name>, the deck of
+  // that milestone's spine, so every old /book/<key> link opens its deck (the web's /book/:key redirects through it).
+  api.get("/deck-of/:key", async (c) => {
+    if (!book) return noBook(c);
+    const key = c.req.param("key");
+    const all = homeMilestones();
+    const byRepo = all.filter((x) => x.path && (sameRepo(x.repo, key) || sameRepo(x.repo.split("/").pop(), key)));
+    const m = all.find((x) => x.id === key) ?? byRepo.find((x) => /(^|\/)(root\.md|EPIC-0[^/]*\.md)$/i.test(x.path)) ?? byRepo[0];
+    if (!m?.path) throw new ApiError(404, "not_found", `milestone ${key} not found`);
+    const v = await book.get();
+    if (!v.book) return c.json({ href: null, building: v.building });
+    const repoName = repoNameOf(m);
+    const e = v.book.repos.find((r) => r.name === repoName)?.epics.find((x) => x.path === m.path);
+    if (!e) throw new ApiError(404, "not_found", `no spine ${m.path} in ${repoName}'s book yet`);
+    return c.json({ href: deckHref({ repo: repoName, code: deckCode(e) }), repo: repoName, building: v.building });
+  });
+
+  // Spines page + ad hoc node view (any spine, untracked).
+  api.route("/", spinesRoutes({ reposRoot: read.reposRoot, store, run: read.spines, treeFor: (m) => treeFor(m) }));
+
+  // read adapters: repos/docs pickers, backlog, threads, tickets, seats
+  api.route("/", readRoutes(read, store, () => cycle.hostEnvironment(mainHost())));
+
+  // M4 browser auth (hosted/browser.ts): forwarded to the Team Browser service, one instance per world.
+  browserArea?.mount({ auth, onSitesChanged: testerWorlds?.onSitesChanged });
+
+
+  mountRubric(api, db, (id) => !!store.getMilestone(id)); // GET/PUT /rubric-settings: the Unblocker's confidence rubric
+  mountAskMemory(api, db); // GET /ask-memory: the Unblocker's per-ask memory (read by..S27)
+  mountUnblockerStats(api, db, store); // GET /unblocker-stats: the Unblocker's numbers per milestone and window
+  mountWakeStats(api, store); // GET /wake-stats?days=1: skipped / real / wasted wakes per assignment per UTC day (the home world only)
+  mountUsage(api, db, () => store.tenant); // GET /usage totals (the caller's world)
+  mountProviders(api, { db, store, record: (ts) => personaRecord.recorded(ts) }); // provider + model per persona, world default, price per provider; file first
+  credits?.mount(api); // credits: GET balance/ledger (world-scoped), grant + gate (platform) (hosted/billing.ts)
+
+  // the team mailbox: the owner's mail to the team address reaches the Team desk thread as his message (hosted/services.ts).
+  services?.mail({
+    // a reply whose subject names a row lands on it: the spines of the owner's world's checkouts (the code repo first) say
+    // where the row is, the milestone whose tree holds that spine has its Delivery manager woken with his words.
+    repos: () => {
+      const names = new Set([homeRepo()]);
+      for (const m of store.listMilestones({ includeSettled: true })) if ((store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT) === DEFAULT_TENANT && m.path) names.add(resolveRepo(read.reposRoot, m.repo)?.name ?? "");
+      return [...names].flatMap((n) => {
+        const r = n ? resolveRepo(read.reposRoot, n) : undefined;
+        return r ? [{ name: r.name, dir: r.path }] : [];
+      });
+    },
+    spineMilestone,
+    wake: cycleOpts.enabled
+      ? async (id, note) => {
+          const m = store.getMilestone(id);
+          if (!m) return undefined;
+          const a = await wakeDeliveryManager({ store, cycle, homeThread: (x) => cycle.getLink(x)?.threadId }, m, note);
+          return a && "error" in a ? { error: a.error } : a;
+        }
+      : undefined,
+    post: async (text, page, crid) => {
+      try {
+        await desk.send(text, page, crid);
+        return true;
+      } catch (e) {
+        return (e as Error).message.slice(0, 200);
+      }
+    },
+  });
+  // the owner's WhatsApp voice notes in the memory service reach the Team desk thread as his message (once per note).
+  const voiceNotes = createVoiceNoteRelay({
+    db,
+    list: opts.mcp?.voiceNoteList ?? services?.voiceNotes ?? (async () => ({ error: NO_MEMORY })),
+    read: memory,
+    post: async (text, page, crid) => {
+      try {
+        const r = await desk.send(text, page, crid);
+        deskSaid(DEFAULT_TENANT, text, crid, r.pending); // a part of his WhatsApp note for his other desk crosses too
+        return true;
+      } catch (e) {
+        return (e as Error).message.slice(0, 200);
+      }
+    },
+    ...(opts.voiceNotes?.now ? { now: opts.voiceNotes.now } : {}),
+    ...(opts.voiceNotes?.hookRetryMs ? { hookRetryMs: opts.voiceNotes.hookRetryMs } : {}),
+    // each note's transcript also goes to the owner's team repo (voice/<day>.md); no checkout = nothing copied.
+    archive: (notes) => team.writeVoice(notes),
+    // the status tells the truth about the push: the home world's connection, if live, and each world's path.
+    connection: () => memoryConns?.summary(DEFAULT_TENANT),
+    worlds: () => {
+      const ws = memoryConns?.worlds() ?? [];
+      return [DEFAULT_TENANT, ...ws.filter((w) => w !== DEFAULT_TENANT)].map((w) => {
+        const conn = memoryConns?.summary(w);
+        return { world: w, team: teamName(w), ...(conn ? { connection: conn } : {}) };
+      });
+    },
+  });
+  mountVoiceNotes(api, voiceNotes);
+  // the latest long-note passes (which cards each marked, whose owner was woken), newest first.
+  api.get("/desk/voice-touches", (c) => c.json({ on: !!noteTouch, passes: noteTouch?.recent(Number(c.req.query("limit") ?? 20) || 20) ?? [] }));
+  // run the pass on one WhatsApp note the relay already posted (a note that came before the pass, or whose pass
+  // failed). The words come from the memory service, never from the caller; one pass per note, so a repeat answers its first result.
+  api.post("/desk/voice-touches/run", async (c) => {
+    if (!noteTouch) return c.json({ error: { code: "off", message: "the long-note pass is off on this console" } }, 503);
+    const b = (await c.req.json().catch(() => ({}))) as { ref?: unknown };
+    const ref = typeof b.ref === "string" ? b.ref.trim() : "";
+    if (!/^Log\/[\w.-]+#\^[\w-]+$/.test(ref)) return c.json({ error: { code: "bad_request", message: `ref: a ${memoryName()} evidence ref (Log/<day>.md#^e-…)` } }, 400);
+    if (!db.prepare("SELECT 1 FROM desk_voice_notes WHERE evidence_ref = ? AND state = 'posted'").get(ref)) return c.json({ error: { code: "not_found", message: "not a WhatsApp voice note the Team desk got" } }, 404);
+    const got = await memory(ref);
+    if ("error" in got) return c.json({ error: { code: "memory", message: got.error } }, 502);
+    const state = await noteTouch.heard({ world: DEFAULT_TENANT, words: voiceNoteMessage(ref, got.entry), where: "WhatsApp", id: ref, ref, ...(got.entry.capturedAt ? { at: got.entry.capturedAt } : {}) });
+    return c.json({ state: state ?? "short", pass: noteTouch.get(ref) ?? null });
+  });
+  // the memory service pushes each new voice note here (signed); once it has, the minute timer polls only as a 20-min safety net.
+  mountVoiceHook(api, voiceNotes, {
+    secret: opts.voiceNotes?.hookSecret ?? secretFromFile(defaultMemoryHookSecretFile()),
+    ...(opts.voiceNotes?.hookNowSec ? { nowSec: opts.voiceNotes.hookNowSec } : {}),
+  });
+  const teamName = (world: string): string => {
+    if (world === DEFAULT_TENANT) return "EpicTeam";
+    const t = db.prepare("SELECT name, skin, plan FROM tenants WHERE id = ?").get(world) as { name: string | null; skin: string | null; plan: string | null } | undefined;
+    return t?.skin === "social" && t.plan === "internal" ? socialProduct() : t?.name || world;
+  };
+  const worldMilestones = (world: string) =>
+    db.prepare("SELECT id, title FROM milestones WHERE tenant_id = ? AND settled_at IS NULL AND paused = 0 ORDER BY title").all(world) as { id: string; title: string }[];
+  /**
+   * the `📞 Call with the desk` post of a call from before its transcript was stored, read back from the
+   * chat it went to (a milestone's, the Team desk, or a world's desk): the whole chat once, every call post in it kept for
+   * a minute, so a back-fill of many calls reads each chat once and a retry reads it afresh.
+   */
+  const callPosts = new Map<string, { at: number; posts: Map<string, string> }>();
+  const callChatCopy = async (c: { id: string; world: string; milestoneId: string | null }): Promise<string | undefined> => {
+    const key = c.milestoneId ? `milestone:${c.milestoneId}` : `world:${c.world}`;
+    let k = callPosts.get(key);
+    if (!k || Date.now() - k.at > 60_000) {
+      const chat = c.milestoneId ? milestoneChats.chatFor(c.milestoneId) : c.world === DEFAULT_TENANT ? desk : worldDesks.chatFor(c.world);
+      const posts = new Map<string, string>();
+      const keep = (ms: DeskMessage[]) => {
+        for (const m of ms) {
+          if (!m.text?.startsWith(CALL_TRANSCRIPT_HEAD)) continue;
+          const id = /\b(call_[0-9a-f]+)\s*$/.exec(m.text.split("\n")[0] ?? "")?.[1];
+          if (id) posts.set(id, m.text);
+        }
+      };
+      const v = await chat.view();
+      if (v.available === false) throw new Error("the chat is not reachable");
+      keep(v.messages);
+      let page: { messages: DeskMessage[]; hasEarlier: boolean } = v;
+      for (let i = 0; i < 200 && page.hasEarlier && page.messages.length; i++) {
+        page = await chat.earlier(Math.min(...page.messages.map((m) => m.position ?? 0)), 100);
+        keep(page.messages);
+      }
+      callPosts.set(key, (k = { at: Date.now(), posts }));
+    }
+    return k.posts.get(c.id);
+  };
+  // the memory service's helpers ask the Team desk one read-only question per run (a hosted services module). The answer is read from the
+  // world's status and the spines of its milestones' repos (each epic's goal, state, next step, ready and review rows).
+  const askContext = async (world: string): Promise<AskContext> => {
+    const status = (await worldDeskStatus(world)).text;
+    const b = await builtBook();
+    const names = new Set<string>(world === DEFAULT_TENANT ? [DESK_BOOK_REPO] : []);
+    const dirs = new Map<string, string>();
+    for (const m of store.listMilestones().filter((x) => milestoneWorld(db, x.id) === world)) {
+      const r = resolveRepo(read.reposRoot, m.repo);
+      if (r) {
+        names.add(r.name);
+        dirs.set(r.name, r.path);
+      }
+    }
+    for (const n of names) if (!dirs.has(n)) dirs.set(n, resolveRepo(read.reposRoot, n)?.path ?? "");
+    const epics = (b?.repos ?? [])
+      .filter((r) => names.has(r.name))
+      .flatMap((r) =>
+        r.epics
+          .filter((e) => e.state !== "done")
+          .map((e) => ({
+            code: e.code,
+            title: e.title,
+            goal: e.goal,
+            status: e.status,
+            next: e.next,
+            waitingOn: e.waitingOn,
+            rows: () => {
+              const dir = dirs.get(r.name);
+              if (!dir) return [];
+              try {
+                return readyAndReviewRows(fs.readFileSync(path.join(dir, e.path), "utf8"));
+              } catch {
+                return [];
+              }
+            },
+          })),
+      );
+    return { status, milestones: worldMilestones(world).map((m) => ({ title: m.title })), epics };
+  };
+  // the memory service per world, the Chat notes' forward, the memory service helper (hosted/services.ts).
+  memoryConns = services?.memoryArea({
+    teamName,
+    worldMilestones,
+    onPosted: (world, ref, capturedAt, via) => {
+      if (world === DEFAULT_TENANT) voiceNotes.postedElsewhere(ref, capturedAt, via as Parameters<typeof voiceNotes.postedElsewhere>[2]);
+    },
+    post: async (world, deskId, text, page, crid) => {
+      try {
+        if (deskId === "team") {
+          const r = world === DEFAULT_TENANT ? await desk.send(text, page, crid) : await worldDesks.send(world, text, page, crid);
+          deskSaid(world, text, crid, r.pending); // his voice note on a world's Team desk crosses like a typed message
+        } else {
+          const id = deskId.startsWith("ms:") ? deskId.slice(3) : "";
+          if (!worldMilestones(world).some((m) => m.id === id)) return `that desk is gone (${deskId}): pick another on Connections`;
+          await milestoneChats.send(id, text, page, crid);
+        }
+        return true;
+      } catch (e) {
+        return (e as Error).message.slice(0, 200);
+      }
+    },
+    callChat: callChatCopy,
+    askContext,
+    ...(opts.memoryAsk?.worder && textAsk ? { askWorder: textAsk.worder } : {}),
+    pollSearches: (w) => (w === DEFAULT_TENANT ? voiceNotes.pollSearchesToday() : undefined),
+    connections: opts.memoryConnections,
+    forward: opts.memoryForward,
+  });
+  memoryForward = memoryConns?.forward;
+  // The global minute poll on our own the memory service token stops once the home world's world is connected (its notes then come by push,
+  // each connection running its own 20-minute safety check).
+  if (opts.voiceNotes?.tickMs && cycleOpts.enabled && memoryConns)
+    setInterval(() => {
+      if (!memoryConns?.connected(DEFAULT_TENANT)) void voiceNotes.timerTick().catch((e) => console.error("voice notes:", e));
+      void memoryConns?.tick().catch((e) => console.error("memory connections:", e));
+    }, opts.voiceNotes.tickMs).unref();
+  // the Services page, the services hub, the mail settings and poll, the Gmail MCP (hosted/services.ts).
+  services?.mountRoutes({ recordAccess: (k, p, v, set) => assignmentRecord.access(k, p, v, set), recordCap: (p, cap, set) => assignmentRecord.mailCap(p, cap, set) }); // access file first
+
+  hostsArea?.mountReleases(app, api); // GET /releases and /api/releases, production and staging revisions and the release log
+  api.all("*", (c) => c.json({ error: { code: "not_found", message: `no route ${c.req.method} ${c.req.path}` } }, 404));
+  app.route("/api", api);
+  ensureWorldStamps(db); // rows written outside the scoped store take their milestone's world (after every side table exists)
+  browserArea?.mountScript(app); // M4 the Mac's sync script (hosted/browser.ts)
+
+  // the voice-note landing reports, served from the repo (landing.ts).
+  mountLanding(app, () => {
+    const repo = opts.landingDir ? undefined : resolveRepo(read.reposRoot, homeRepo());
+    return opts.landingDir ?? (repo && path.join(repo.path, "docs", "landing"));
+  });
+
+  // Static UI (core/console/web/dist) with SPA fallback to index.html, if it has been built.
+  const staticDir = opts.staticDir && path.resolve(opts.staticDir);
+  // the social hosts get the social product's violet icon set at the usual icon paths (another origin, so no cache clash),
+  // before any script runs and on the server's login page too; web/public holds both sets.
+  const iconHosts = socialHosts();
+  if (staticDir) {
+    app.get("*", (c) => {
+      const onSocial = iconHosts.has(requestHost((n) => c.req.header(n)) ?? "");
+      const socialIcon = onSocial ? SOCIAL_ICONS[c.req.path] : undefined;
+      if (socialIcon && fs.existsSync(path.join(staticDir, socialIcon))) return c.body(fs.readFileSync(path.join(staticDir, socialIcon)), 200, { "Content-Type": contentType(socialIcon) });
+      const index = path.join(staticDir, "index.html");
+      if (!fs.existsSync(index)) return c.text("console UI not built (core/console/web/dist missing)", 404);
+      let rel: string;
+      try {
+        rel = decodeURIComponent(c.req.path);
+      } catch {
+        return c.text("bad path", 400);
+      }
+      const file = path.resolve(staticDir, "." + rel);
+      const inside = file === staticDir || file.startsWith(staticDir + path.sep);
+      const target = inside && fs.existsSync(file) && fs.statSync(file).isFile() ? file : index;
+      // the 1 MB bundle went out uncompressed with no cache headers, read from disk on every app open. Hashed
+      // /assets/ files are immutable (cached a year); index.html is revalidated (a deploy changes it); text is gzipped once.
+      // the app page on a social host names the social product in its head (title, link-preview tags, share image).
+      // the app page carries the identity (owner, home world, home repo) before the bundle, so its first paint names them.
+      // the steps kit's voice page opens on this console's https address (the kit names the neutral one)
+      const base = target === index ? identityIndex(staticFile(target)) : target === path.join(staticDir, "steps-kit.js") ? originFile(staticFile(target)) : staticFile(target);
+      const f = target === index && onSocial ? socialIndex(base) : base;
+      const gz = f.gzip && /\bgzip\b/.test(c.req.header("accept-encoding") ?? "");
+      const immutable = rel.startsWith("/assets/") && target !== index;
+      if (!immutable && c.req.header("if-none-match") === f.etag) return c.body(null, 304, { ETag: f.etag, "Cache-Control": "no-cache" });
+      return c.body((gz ? f.gzip! : f.raw) as Uint8Array<ArrayBuffer>, 200, {
+        "Content-Type": contentType(target),
+        "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+        ETag: f.etag,
+        Vary: "Accept-Encoding",
+        ...(gz ? { "Content-Encoding": "gzip" } : {}),
+      });
+    });
+  }
+
+  return app;
+}

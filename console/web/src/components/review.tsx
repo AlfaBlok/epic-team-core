@@ -1,0 +1,1214 @@
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { OwnerPriorityTag } from "./ownerPriority";
+import { NoteMarkBand } from "./noteMark";
+import { ACTION, PRESS, pressProps, type Pressing } from "@/components/cardActions";
+import { Link } from "react-router-dom";
+import { Check, Loader2, X } from "lucide-react";
+import { api, type ReviewItem } from "@/api";
+import type { CardFace, ClosedCardRef, ClosedGoal, PostCardInfo, TreeLine } from "@/api/review-types";
+import { mutate, useQuery } from "@/lib/data";
+import { milestoneBookHref } from "@/lib/book";
+import { deckHref } from "@/lib/deck";
+import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
+import { onPress, PressUndone } from "@/lib/press";
+import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
+import { cardBody, cardHeading } from "@/lib/askLead";
+import { cn } from "@/lib/utils";
+import { useProject } from "@/lib/project";
+import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Empty, ErrorBox, PHONE_TAP, RelTime } from "@/components/common";
+import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
+import { useChatAttach } from "@/components/ChatAttach";
+import { WordsBox } from "@/components/WordsBox";
+
+/** A voice note's press the card did not take (the card says why). */
+const refused = (): never => {
+  throw new Error("the card did not take it, open the card to see why");
+};
+import { FoldSection, SkeletonCards, useSectionOpen } from "@/components/homeSection";
+import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
+import { HOLD_MS, SnoozeDate, SnoozeDropdown, SnoozingLinesFor } from "@/components/waiting";
+import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/postBasics";
+import { keepPlace } from "@/lib/keepPlace";
+
+/** the server adds the milestone's title to each card it lists. */
+type Listed = ReviewItem & { milestoneTitle?: string };
+
+/**
+ * (the owner 2026-11-03, approved mockup docs/status/e48-s26/real-feed-mockup.html, spec docs/status/e48-s26-card-spec.md):
+ * "Done, waiting for your review" is one flat list, every card fully shown: no goal groups, folding, progress bars or
+ * Show 20/50/all. The server lists only rows that passed the gate (review/rows.ts verdict `card`), so the count here is
+ * the badge's and the sidebar's. A pressed card slides away and the count drops at once; every press writes the spine
+ * first and a refused write changes nothing and shows why, with Retry.
+ */
+export function WaitingForReview({ fold }: { fold?: string } = {}) {
+  // tagged "inbox", so a snooze refreshes this list and the green pill (counts) together.
+  // the cards are `useReviewCards`, the list the green pills count (one fetch, this browser's snoozes and presses
+  // applied the same way), so the header, the sidebar and the phone top bar never show a card the list does not.
+  const project = useProject();
+  const { data: fetchedAll, error, cards } = useReviewCards({ keep: project.keep });
+  const { data: fetchedSnoozedAll } = useQuery(() => api.listReviewItems({ state: "snoozed" }) as Promise<Listed[]>, [], { tag: "inbox" });
+  // the selected project's review cards only.
+  const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId));
+  const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId));
+  // the Team home's section header folds like every section (L-39, remembered); the cards in it are never folded
+  const [open, setOpen] = useSectionOpen(fold);
+  const [snoozedOpen, setSnoozedOpen] = useState(false);
+  const [snoozedLimit, setSnoozedLimit] = useListLimit("review-snoozed");
+  // a pressed card: `leaving` slides it out, then it is gone from every list and count (lib/inbox) until the refetch no longer has it
+  const [leaving, setLeaving] = useState<Set<string>>(new Set());
+  const { entries: snoozing, back } = useSnoozes();
+  const data = cards as Listed[] | undefined;
+  const snoozed = [
+    ...(fetched ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
+    ...(fetchedSnoozed ?? []).filter((i) => !back.has(i.id) && !fetched?.some((x) => x.id === i.id)),
+  ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
+  const items = data ?? [];
+  // tasks just marked here are no longer open, before the list refetches (a goal's confirm never names them)
+  // what a pressed card is doing once it has left: "Saved · writing it to the project… 3 s", then "Done ✓ … in 6.1 s"
+  const progress = usePressProgress((id) => fetched?.find((i) => i.id === id));
+  const pressedRefs = new Set((fetched ?? []).filter((i) => leaving.has(i.id)).map((i) => `${i.repo}:${i.path}#${i.ref}`));
+  const pressed = (id: string) => {
+    setLeaving((s) => new Set(s).add(id));
+    markReviewGoneAfter(id, 320);
+  };
+  // a card leaves on its 202; a press that then fails for good brings it back, saying why
+  const [failed, setFailed] = useState<Map<string, string>>(new Map());
+  const comeBack = (id: string, why: string) => {
+    setLeaving((s) => new Set([...s].filter((x) => x !== id)));
+    unmarkReviewGone(id);
+    setFailed((m) => new Map(m).set(id, why));
+  };
+  // Bring it back: the card is in the list again, fresh (its buttons back), with no error line
+  const [backs, setBacks] = useState<Map<string, number>>(new Map());
+  const broughtBack = (id: string) => {
+    setLeaving((s) => new Set([...s].filter((x) => x !== id)));
+    unmarkReviewGone(id);
+    setFailed((m) => (m.has(id) ? new Map([...m].filter(([k]) => k !== id)) : m));
+    setBacks((m) => new Map(m).set(id, (m.get(id) ?? 0) + 1));
+  };
+  // under CONSOLE_AUTH=on a world other than the home world is refused this list (403 world_scope): no section.
+  // a slid-out card that a later fetch lists again (the console's rescan lags a press, or the row was reopened) shows
+  // as a card, never as an invisible card-sized gap (the owner 2026-11-12, "look at all this space"): once off the list,
+  // its slide-out is dropped when it comes back.
+  const offList = useRef(new Set<string>());
+  const listed = items.map((i) => i.id).join(" ");
+  useEffect(() => {
+    const on = new Set(listed.split(" "));
+    const back = [...leaving].filter((id) => on.has(id) && offList.current.has(id));
+    leaving.forEach((id) => !on.has(id) && offList.current.add(id));
+    back.forEach((id) => offList.current.delete(id));
+    if (back.length) setLeaving((s) => new Set([...s].filter((id) => !back.includes(id))));
+  }, [listed, leaving]);
+  if ((error as { status?: number } | undefined)?.status === 403) return null;
+  return (
+    <>
+      <FoldSection
+        title="Done, waiting for your review"
+        count={data ? items.length : fold && !error ? undefined : 0}
+        hideZero={!fold}
+        tone="review"
+        testId="waiting-for-review"
+        open={open}
+        onToggle={fold ? setOpen : undefined}
+      >
+        <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
+        {error && <ErrorBox error={error} muted />}
+        {!data && !error && <SkeletonCards count={undefined} testId="waiting-for-review-loading" />}
+        {data && items.length === 0 && <Empty>Nothing finished waiting for your review.</Empty>}
+        {items.length > 0 && (
+          <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="review-feed">
+            {items.map((i) => (
+              <li
+                key={i.id}
+                className="min-w-0 transition-all duration-300 ease-in"
+                style={leaving.has(i.id) ? { opacity: 0, transform: "translateX(-40px)" } : undefined}
+                data-testid="review-feed-item"
+                data-inbox-card={`review:${i.id}`}
+              >
+                {i.kind === "post" && i.post ? (
+                  <PostReviewCard key={failed.get(i.id)} item={i} onDone={() => pressed(i.id)} onFailed={(why) => comeBack(i.id, why)} failed={failed.get(i.id)} />
+                ) : (
+                  <ReviewCard key={`${failed.get(i.id) ?? ""}:${backs.get(i.id) ?? 0}`} item={i} onDone={() => pressed(i.id)} onFailed={(why) => comeBack(i.id, why)} onBack={() => broughtBack(i.id)} failed={failed.get(i.id)} closedRefs={pressedRefs} />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </FoldSection>
+      <PressProgress lines={progress} />
+      <ClosedGoalsFold />
+      {/* snoozed reviews, folded under the section with their own count and Unsnooze (as Snoozed asks). */}
+      {snoozed.length > 0 && (
+        <FoldSection
+          title="Snoozed reviews"
+          count={snoozed.length}
+          testId="review-snoozed"
+          bodyTestId="review-snoozed-section"
+          open={snoozedOpen}
+          onToggle={setSnoozedOpen}
+          actions={<LimitControl limit={snoozedLimit} onChange={setSnoozedLimit} total={snoozed.length} testId="review-snoozed" />}
+        >
+          <p className="mb-2 text-xs text-muted-foreground">Done, waiting for your review, hidden until the time shown.</p>
+          <ListPane shown={limitList(snoozed, snoozedLimit).length} total={snoozed.length} testId="review-snoozed" className="grid-cols-1">
+            {limitList(snoozed, snoozedLimit).map((i) => (
+              <SnoozedReviewRow key={i.id} item={i} />
+            ))}
+          </ListPane>
+        </FoldSection>
+      )}
+    </>
+  );
+}
+
+/**
+ * Q3: goals you closed with items still open. Those items show nowhere else until you reopen the goal here;
+ * nothing was deleted.
+ */
+function ClosedGoalsFold() {
+  const { data } = useQuery(() => api.listClosedGoals().catch(() => [] as ClosedGoal[]), [], { tag: "inbox" });
+  const [open, setOpen] = useState(false);
+  const items = (data ?? []).filter((g) => g.hidden.length > 0);
+  if (!items.length) return null;
+  return (
+    <FoldSection title="Closed goals with open items" count={items.length} testId="review-closed-goals" bodyTestId="review-closed-goals-section" open={open} onToggle={setOpen}>
+      <p className="mb-2 text-xs text-muted-foreground">You closed these goals while items were still open. Those items show nowhere else until you reopen the goal. Nothing was deleted.</p>
+      <ul className="grid gap-2">
+        {items.map((g) => (
+          <ClosedGoalRow key={g.key} goal={g} />
+        ))}
+      </ul>
+    </FoldSection>
+  );
+}
+
+function ClosedGoalRow({ goal }: { goal: ClosedGoal }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  const reopen = async () => {
+    setBusy(true);
+    setErr(undefined);
+    try {
+      await mutate(() => api.reopenGoal(goal.key));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const book = goal.milestoneId ? `${milestoneBookHref(goal.milestoneId)}#${encodeURIComponent(goal.code)}` : undefined;
+  return (
+    <li className="grid gap-1 text-sm" data-testid="review-closed-goal" data-goal={goal.code}>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 truncate" title={goal.title}>
+          {book ? <Link className="underline-offset-2 hover:underline" to={book}>{goal.title}</Link> : goal.title}
+        </span>
+        <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} disabled={busy} pending={busy} pendingLabel="Reopening…" onClick={reopen} data-testid="review-reopen-goal">
+          ↺ Reopen the goal
+        </Button>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {goal.hidden.length} open {goal.hidden.length === 1 ? "item is" : "items are"} hidden until you reopen it.
+      </div>
+      {err && <div className="text-xs text-destructive">{err}</div>}
+    </li>
+  );
+}
+
+/** "the code repo · the code repo" (repo · spine title, the same word) reads once. */
+export function milestoneLabel(title?: string): string | undefined {
+  if (!title) return title;
+  const parts = title.split(" · ").map((p) => p.trim());
+  return parts.filter((p, i) => i === 0 || p.toLowerCase() !== parts[i - 1].toLowerCase()).join(" · ");
+}
+
+/** one snoozed review: its title (one line, full on a click), until when, Unsnooze (the card is back). */
+function SnoozedReviewRow({ item }: { item: Listed }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [full, setFull] = useState(false);
+  const snoozing = useSnoozes().entries.get(item.id);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setTimeout(() => setBusy(false), HOLD_MS);
+    return () => clearTimeout(t);
+  }, [busy]);
+  const unsnooze = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await unsnoozeReview(item);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+  const title = item.face?.title ?? item.title;
+  return (
+    <li className="min-w-0 text-sm" data-testid="review-snoozed-row" data-review-id={item.id}>
+      <div className="flex min-w-0 items-center gap-x-2 whitespace-nowrap" title={title}>
+        <button type="button" className={cn("min-w-[4rem] flex-1 text-left", full ? "whitespace-normal break-words" : "truncate")} aria-expanded={full} onClick={() => setFull(!full)}>
+          {title}
+        </button>
+        {item.snoozedUntil && (
+          <Badge variant="outline" className="shrink-0">
+            <SnoozeDate until={item.snoozedUntil} />
+          </Badge>
+        )}
+        {snoozing && !snoozing.done ? (
+          <span className="shrink-0 text-xs text-muted-foreground">Snoozing…</span>
+        ) : (
+          <Button size="sm" variant="outline" className={cn("h-7 shrink-0 text-xs", PHONE_TAP)} disabled={busy} pending={busy} pendingLabel="Unsnoozing…" onClick={unsnooze} data-testid="review-unsnooze">
+            Unsnooze
+          </Button>
+        )}
+      </div>
+      {error && <div className="text-xs text-red-700 dark:text-red-400">{error}</div>}
+    </li>
+  );
+}
+
+// ---------- links: nothing on a card looks like a link without being one ----------
+
+/** A row code, a URL or a repo path in card text. */
+const TOKEN = /\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"')\]]+)|((?:[\w.-]+\/)+[\w.-]+\.(?:md|ts|tsx|js|mjs|json|py|sh|ya?ml|html|txt|log|png|jpe?g|css)\b)|(\b[A-Z][A-Z0-9]*-[A-Z]{0,3}\d+[a-z]?\b)/g;
+
+/** A short label for a URL (never the raw URL): host and a short path. */
+export function urlLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    const p = u.pathname.replace(/\/$/, "");
+    return `${u.hostname.replace(/^www\./, "")}${p && p.length <= 24 ? p : ""}`;
+  } catch {
+    return "Open it";
+  }
+}
+
+const githubFile = (github: string | undefined, rel: string) => (github ? `https://github.com/${github}/blob/main/${rel.split("/").map(encodeURIComponent).join("/")}` : undefined);
+
+/** The mockup's link blue. */
+// links are ink with a thin underline, never blue.
+const LINK = "underline decoration-foreground/25 underline-offset-[3px] [overflow-wrap:anywhere] hover:decoration-current";
+
+function A({ href, children, testId }: { href: string; children: ReactNode; testId?: string }) {
+  if (href.startsWith("/")) return <Link className={LINK} to={href} data-testid={testId}>{children}</Link>;
+  return (
+    <a className={LINK} href={href} target="_blank" rel="noreferrer" data-testid={testId}>
+      {children}
+    </a>
+  );
+}
+
+/**
+ * Card text with every markdown link and URL as a real link, and (the gate keeps them off the card, this is the safety
+ * net) any row code or file path linked to its file in the repo. the owner 2026-11-03: "DON'T GIVE ME A LINK I CAN'T CLICK".
+ */
+export function CardText({ text, item }: { text: string; item: Pick<ReviewItem, "github" | "path" | "milestoneId" | "face"> }) {
+  const out: ReactNode[] = [];
+  let last = 0;
+  const codeHref = item.github && item.path ? githubFile(item.github, item.path) : item.milestoneId ? milestoneBookHref(item.milestoneId) : "/";
+  for (const m of text.matchAll(TOKEN)) {
+    const at = m.index ?? 0;
+    let tok = m[0];
+    if (m[3]) tok = tok.replace(/[.,;:!?]+$/, "");
+    out.push(text.slice(last, at));
+    last = at + tok.length;
+    if (m[1]) out.push(<A key={at} href={m[2]}>{m[1]}</A>);
+    else if (m[3]) out.push(<A key={at} href={tok}>{urlLabel(tok)}</A>);
+    else if (m[4]) out.push(<A key={at} href={githubFile(item.github, tok) ?? codeHref ?? "/"}>{tok}</A>);
+    else out.push(<A key={at} href={codeHref ?? "/"}>{tok}</A>);
+  }
+  out.push(text.slice(last));
+  return (
+    <>
+      {out.map((n, i) => (
+        <Fragment key={i}>{n}</Fragment>
+      ))}
+    </>
+  );
+}
+
+// ---------- the card ----------
+
+/** the buttons by case, each with its sub-line (the mockup's words; "approve" never appears). */
+export function cardButtons(face: Pick<CardFace, "closesGoal" | "next" | "after">, start: boolean[]): { label: string; sub: string; how: "switches" | "park"; go: boolean }[] {
+  const next = face.next ?? [];
+  const n = start.filter(Boolean).length;
+  const close = face.closesGoal;
+  const stays = face.after ? `The goal stays open. ${face.after}` : "The goal stays open. The team goes on with its next task.";
+  if (!next.length)
+    return [
+      close
+        ? { label: "✓ Mark this task complete and close the goal", sub: "This is the last open part of the goal, so the goal closes.", how: "switches", go: true }
+        : { label: "✓ Mark this task complete", sub: stays, how: "switches", go: true },
+    ];
+  // follow-ups for other goals (a persona's switches): one button sends every On and Off
+  if (next.some((s) => s.target)) {
+    const off = next.length - n;
+    // a proposer's card offers new goals: on starts the goal, off parks it
+    const goals = next.every((s) => s.kind === "new");
+    const onWords = goals
+      ? `${n === 1 ? "The goal you switched on starts" : `The ${n} goals you switched on start`}, and a Delivery Manager is sent to ${n === 1 ? "it" : "them"}. `
+      : `${n === 1 ? "The one you switched on becomes a task" : `The ${n} you switched on become tasks`} in ${n === 1 ? "its goal" : "their goals"}, and the team starts ${n === 1 ? "it" : "them"}. `;
+    return [
+      {
+        label: `✓ Send my choices: ${n} on, ${off} off`,
+        sub: `${n ? onWords : ""}${off ? `${off === 1 ? "The one switched off is" : `The ${off} switched off are`} ${goals ? "parked" : "dropped"} with your reason and not suggested again.` : ""}`.trim(),
+        how: "switches",
+        go: true,
+      },
+    ];
+  }
+  const started = next.filter((_, i) => start[i]).map((s) => s.title);
+  const parked = next.length - n;
+  return [
+    ...(n > 0
+      ? [
+          {
+            label: `✓ Mark this task complete${close ? ", close the goal" : ""} and start ${n} next ${n === 1 ? "step" : "steps"}`,
+            sub: `The team starts: ${started.join(", ")}.${parked ? ` ${parked === 1 ? "The other next step is" : `The other ${parked} next steps are`} parked on the goal.` : ""}`,
+            how: "switches" as const,
+            go: true,
+          },
+        ]
+      : []),
+    {
+      label: `✓ Mark this task complete${close ? ", close the goal" : ""}, don't start anything`,
+      sub: `${next.length === 1 ? "The next step is" : next.length === 2 ? "Both next steps are" : `All ${next.length} next steps are`} parked on the goal. Nothing new starts.`,
+      how: "park" as const,
+      go: n === 0,
+    },
+  ];
+}
+
+const MARK: Record<TreeLine["mark"], string> = { done: "✓", progress: "◐", this: "●", next: "○" };
+
+function Label({ children }: { children: ReactNode }) {
+  return <div className="mb-[3px] text-[13px] font-bold text-muted-foreground">{children}</div>;
+}
+
+/**
+ * a card a persona sent on its own names it, says in one line what it does, where it runs (its level, the
+ * milestone its assignment sits on, cadence and repo) and links its settings.
+ */
+function FromBand({ from }: { from: NonNullable<CardFace["from"]> }) {
+  return (
+    <section className="mx-[18px] mt-3 rounded-[10px] border border-dashed px-3 py-2 text-[13px]" data-testid="review-from">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="font-bold">From the {from.name}</span>
+        {/* its own page first, then its schedule and its instructions. */}
+        {from.page && (
+          <A href={from.page} testId="review-from-page">
+            All its runs ↗
+          </A>
+        )}
+        {from.url && (
+          <A href={from.url} testId="review-from-settings">
+            Its settings ↗
+          </A>
+        )}
+        {from.file && (
+          <A href={from.file} testId="review-from-file">
+            Its instructions ↗
+          </A>
+        )}
+      </div>
+      {from.line && <div className="text-muted-foreground">{from.line}</div>}
+      {from.runs && <div className="text-muted-foreground">{from.runs}</div>}
+      {from.stores && <div className="text-muted-foreground" data-testid="review-from-stores">{from.stores}</div>}
+      {from.readers && <div className="text-muted-foreground" data-testid="review-from-readers">{from.readers}</div>}
+    </section>
+  );
+}
+
+/** what a card says once its press is saved, and once it is in the repo (L-48: plain words). */
+export const SAVED_LINE = "Saved ✓ It is being written to the project now.";
+export const LANDED_LINE = "Done ✓ It is in the project.";
+
+type Progress = { id: string; title: string; state: "writing" | "done"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number> };
+
+/**
+ * every review press the console saved (its 202) gets a line at the bottom of the screen while it is written to
+ * the project in the background (seconds counting), then "Done" with how long it took, for PRESS.doneShowMs. A press that
+ * fails for good drops its line: its card comes back saying why.
+ */
+function usePressProgress(itemOf: (id: string) => Listed | undefined): Progress[] {
+  const [lines, setLines] = useState<Progress[]>([]);
+  const [, tick] = useState(0);
+  const of = useRef(itemOf);
+  of.current = itemOf;
+  useEffect(
+    () =>
+      onPress((n) => {
+        const m = /\/review-items\/([^/]+)\//.exec(n.path);
+        if (!m) return;
+        const id = decodeURIComponent(m[1]);
+        if (n.state === "landing") {
+          const i = of.current(id);
+          const title = i?.face?.title ?? i?.post?.title ?? i?.title ?? "Your press";
+          setLines((l) => [...l.filter((x) => x.id !== id), { id, title, state: "writing", at: Date.now() }]);
+        } else if (n.state === "landed") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "done", doneAt: Date.now(), ms: n.ms ?? Date.now() - x.at, steps: n.steps } : x)));
+        else setLines((l) => l.filter((x) => x.id !== id));
+      }),
+    [],
+  );
+  // the seconds count while a line is writing; a done line goes after PRESS.doneShowMs
+  useEffect(() => {
+    if (!lines.length) return;
+    const t = setInterval(() => {
+      tick((n) => n + 1);
+      setLines((l) => (l.some((x) => x.doneAt && Date.now() - x.doneAt > PRESS.doneShowMs) ? l.filter((x) => !x.doneAt || Date.now() - x.doneAt <= PRESS.doneShowMs) : l));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [lines.length]);
+  return lines;
+}
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+/** Where the seconds went, for the line's tooltip: waiting for the project, getting the latest, saving, sending. */
+const STEP_WORDS: Record<string, string> = { lock: "waiting its turn", fetch: "getting the latest", commit: "saving", push: "sending", rebase: "catching up", guards: "checks" };
+const stepsText = (s?: Record<string, number>) =>
+  s ? Object.entries(s).filter(([k, v]) => STEP_WORDS[k] && v >= 50).map(([k, v]) => `${STEP_WORDS[k]} ${secs(v)}`).join(", ") : undefined;
+
+function PressProgress({ lines }: { lines: Progress[] }) {
+  // the floating "Saved" note stands at the bottom; these lines go above it while it shows
+  const note = useClosedNote();
+  if (!lines.length) return null;
+  return (
+    <div className={cn("pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-1.5 px-3", note ? "bottom-40" : "bottom-3")} role="status" aria-live="polite" data-testid="press-progress">
+      {lines.slice(-3).map((l) => (
+        <div
+          key={l.id}
+          className={cn(
+            "pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
+            l.state === "done" ? "border-emerald-600/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "bg-card text-card-foreground",
+          )}
+          data-testid="press-progress-line"
+          data-state={l.state}
+          title={l.state === "done" ? stepsText(l.steps) : undefined}
+        >
+          {l.state === "done" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+          <span className="min-w-0">
+            <b>{l.state === "done" ? `${PRESS.done} in ${secs(l.ms ?? 0)}.` : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
+            <span className="block truncate text-xs opacity-80">{l.title}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type CardProps = { item: Listed; onDone?: () => void; onFailed?: (why: string) => void; failed?: string; /** Bring it back put the card back in the list */ onBack?: () => void };
+
+/** what the floating note says a review card's press did. */
+const SAID: Record<string, string> = { close: "Closed", decline: "Declined", changes: "Changes sent to the team" };
+/** the row a review card is on (its spine), for Add a last thought and Bring it back; undefined when unknown. */
+const cardOf = (item: ReviewItem): ClosedCardRef | undefined =>
+  item.repo && item.path && item.ref ? { kind: "review", repo: item.repo, path: item.path, ref: item.ref, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } : undefined;
+const saidOf = (key: string) => SAID[key] ?? (key.startsWith("complete:") ? "Closed" : undefined);
+
+/**
+ * one press on a review or post card. The pressed button spins with "Sending…" in the frame of the
+ * tap and the card's other buttons wait; on the console's answer (the 202 once the press is saved) the button says
+ * "Saved ✓" and the card leaves PRESS.savedMs later, while the press is written in the background. A failure before that
+ * gives the buttons back with the reason (Retry); a press that fails for good after the card left brings it back
+ * (`onFailed`). Before, the card waited for the press to land (6 to 13 s) and the spinner showed for one 202 (a few ms).
+ */
+function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
+  const [pressing, setPressing] = useState<Pressing>();
+  const [err, setErr] = useState<string | undefined>(failed && `It was not written: ${failed}. Press again.`);
+  // the failed action, so Retry runs it again (a refused spine write changed nothing).
+  const [last, setLast] = useState<{ key: string; fn: () => Promise<unknown> }>();
+  const [landing, setLanding] = useState<string>();
+  const running = useRef(false);
+  /** True when the console took the press (a voice note's Send needs to know). */
+  const act = async (key: string, fn: () => Promise<unknown>): Promise<boolean> => {
+    if (running.current) return false; // a second tap while the first is on its way
+    running.current = true;
+    // when the card leaves, the next card's top lands where this one's was
+    keepPlace(`review:${item.id}`);
+    setPressing({ key, phase: "sending" });
+    setErr(undefined);
+    setLanding(undefined);
+    let saved = false;
+    let gone = false;
+    let leave: ReturnType<typeof setTimeout> | undefined;
+    let pressId: string | undefined;
+    let backed = false;
+    // Bring it back on the floating note: the press taken back while it waits out its window (nothing written),
+    // else the row his press closed set back to review; either way the card is in the list again.
+    const back = async (): Promise<BackResult> => {
+      clearTimeout(leave);
+      const again = () => {
+        backed = true;
+        setPressing(undefined);
+        setLanding(undefined);
+        onBack?.();
+      };
+      if (pressId) {
+        try {
+          await api.undoPress(pressId);
+          again();
+          return { back: true, line: "It is back in your inbox. Nothing was written." };
+        } catch (e) {
+          if ((e as { status?: number }).status !== 409) throw e; // being written or landed: reopen it below
+        }
+      }
+      const row = cardOf(item);
+      if (!row) return { back: false, line: "It is in the project already, and this card does not say which row it was." };
+      // L-1: answered once the console has saved it (its 202); the card is back when the row is written
+      const reopened = mutate(() => api.reopenReviewRow({ ...row, title: item.face?.title ?? item.title, id: item.id }), "inbox");
+      const saved = new Promise<void>((ok) => {
+        const off = onPress((n) => n.path === "/review-items/reopen" && n.state === "landing" && (off(), ok()));
+        void reopened.then(() => (off(), ok()), () => off());
+      });
+      await Promise.race([saved, reopened]);
+      again();
+      void reopened.catch(() => undefined);
+      return { back: true, line: "It is coming back to your inbox. The team was told to hold." };
+    };
+    const said = item.kind === "post" ? undefined : saidOf(key.replace(/^retry$/, last?.key ?? "retry"));
+    const onSaved = () => {
+      if (saved) return;
+      saved = true;
+      if (said)
+        showClosed({
+          said,
+          title: item.face?.title ?? item.title,
+          ...(cardOf(item) ? { card: cardOf(item) } : {}),
+          back,
+        });
+      setPressing({ key, phase: "saved" });
+      leave = setTimeout(() => {
+        if (!onDone) return (setPressing(undefined), setLanding(SAVED_LINE));
+        gone = true;
+        onDone();
+        // the list and every count refetch (after the slide)
+        setTimeout(() => void mutate(async () => undefined).catch(() => undefined), 330);
+      }, PRESS.savedMs);
+    };
+    const off = onPress((n) => {
+      if (!n.path.includes(`/review-items/${encodeURIComponent(item.id)}/`)) return;
+      if (n.state === "landing" && n.id) pressId ??= n.id;
+      if (n.state === "landing") onSaved();
+      if (n.state === "landed" && !onDone) setLanding(LANDED_LINE);
+    });
+    try {
+      await fn();
+      onSaved();
+      setLast(undefined);
+      return true;
+    } catch (e) {
+      // brought back before it was written: nothing to report, the card is in the list again
+      if (e instanceof PressUndone || backed) return false;
+      const why = e instanceof Error ? e.message : String(e);
+      clearTimeout(leave);
+      if (gone) onFailed?.(why);
+      else {
+        setPressing(undefined);
+        setLanding(undefined);
+        setErr(why);
+        setLast({ key, fn });
+      }
+      return false;
+    } finally {
+      off();
+      running.current = false;
+    }
+  };
+  return { act, pressing, busy: !!pressing, err, last, landing, props: (key: string, disabled = false) => pressProps(pressing, key, disabled) };
+}
+
+export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: Set<string> }) {
+  const { item } = card;
+  const face = item.face;
+  const [denyOpen, setDenyOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const { act, pressing, busy, err, last, landing, props } = useCardPress(card);
+  /** More (opened by the heading), the note shown by Not yet, a Not yet pressed with no words. */
+  const [open, setOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [needWords, setNeedWords] = useState(false);
+  const files = useChatAttach({ enabled: true, disabled: busy });
+  // a spoken note goes with Not yet, with what is typed before it
+  const voice = useAnswerVoice({
+    origin: `review:${item.id}:changes`,
+    to: shortTo(item.face?.title ?? item.title),
+    page: cardPage(item.ref ?? item.id, item.face?.title ?? item.title),
+    typed: feedback,
+    deliver: (reply) => act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, reply, files.ids) : api.relaunchReviewItem(item.id, reply))).then((ok) => (ok ? (setFeedback(""), files.clear()) : refused())),
+    disabled: busy,
+  });
+  const [confirmClose, setConfirmClose] = useState<{ start: number[]; park: number[]; why?: string[] }>();
+  const next = face?.next ?? [];
+  // a Start now / Park switch per next step, preset to the team's recommendation
+  const [start, setStart] = useState<boolean[]>(() => next.map((s) => s.recommend === "start"));
+  // the one-line reason of each switch turned off
+  const [offWhy, setOffWhy] = useState<string[]>(() => next.map(() => ""));
+  const switches = next.some((s) => s.target);
+  if (!face) return <OldCard item={item} />;
+  const pickOf = (how: "switches" | "park") => {
+    const idx = next.map((_, i) => i);
+    if (how === "park") return { start: [], park: idx };
+    return { start: idx.filter((i) => start[i]), park: idx.filter((i) => !start[i]), ...(switches ? { why: next.map((_, i) => (start[i] ? "" : offWhy[i].trim())) } : {}) };
+  };
+  const complete = (how: "switches" | "park") => {
+    const pick = pickOf(how);
+    // case C: closing the goal while other parts are open names them first
+    if (face.closesGoal && stillOpen.length && !confirmClose) return setConfirmClose(pick);
+    setConfirmClose(undefined);
+    void act(`complete:${how}`, () => api.completeReviewItem(item.id, pick));
+  };
+  const stillOpen = face.openInGoal.filter((o) => !closedRefs?.has(`${item.repo}:${item.path}#${o.ref}`));
+  const goalHref = item.milestoneId ? `${milestoneBookHref(item.milestoneId)}#${encodeURIComponent(face.goal.code)}` : undefined;
+  const goal = goalHref ? <A href={goalHref}>{face.goal.text}</A> : <span>{face.goal.text}</span>;
+  const tasks = `${face.tasks.done} of ${face.tasks.total} tasks done`;
+  const buttons = cardButtons(face, start);
+  const spine = githubFile(item.github, item.path ?? "");
+  // Review,
+  // the project and the age; a short heading; the goal as the Why; what was delivered; Mark complete or Not yet; one foot.
+  const heading = cardHeading({ title: face.title });
+  const body = cardBody({ title: face.title }, heading);
+  const mainHow = buttons[0].how;
+  const mainLabel = switches ? "Send my choices" : start.some(Boolean) ? `Mark complete, start ${start.filter(Boolean).length}` : "Mark complete";
+  const notYet = () => {
+    if (!noteOpen && !open) {
+      setNoteOpen(true);
+      setTimeout(() => document.getElementById(`note-review-${item.id}`)?.querySelector("textarea")?.focus(), 0);
+      return;
+    }
+    const words = feedback.trim();
+    if (!words && !files.ids.length) return setNeedWords(true);
+    void act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, words, files.ids) : api.relaunchReviewItem(item.id, words))).then((ok) => ok && (setFeedback(""), files.clear()));
+  };
+  return (
+    <article className="min-w-0 rounded-xl border bg-card p-4 text-card-foreground [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="review-crumb">
+        <span className="font-medium text-foreground">Review</span>
+        {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
+        {item.createdAt && <RelTime iso={item.createdAt} />}
+        {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}
+        {item.state === "review" && (
+          <SnoozeDropdown
+            id={item.id}
+            className="ml-auto"
+            title="Hide it for a while; it stays waiting for your review"
+            onPick={(c) => {
+              void snoozeReview(item, c, face.title);
+              // the same floating note; Bring it back unsnoozes it
+              showClosed({
+                said: "Snoozed",
+                title: face.title,
+                ...(cardOf(item) ? { card: cardOf(item) } : {}),
+                back: async () => (await unsnoozeReview(item), { back: true, line: "It is back in your inbox." }),
+              });
+            }}
+          />
+        )}
+      </div>
+      {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
+      {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
+      <button
+        type="button"
+        className="mt-1.5 text-left text-[15px] font-medium leading-snug text-foreground hover:underline hover:decoration-foreground/30 hover:underline-offset-[3px]"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        data-testid="review-title"
+      >
+        {heading}
+      </button>
+      {body && (
+        <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="review-body">
+          <CardText text={body} item={item} />
+        </p>
+      )}
+      <p className="mt-1 text-sm leading-relaxed text-muted-foreground" data-testid="review-task-goal">
+        Why: <CardText text={face.taskGoal} item={item} />
+      </p>
+      <ul className="m-0 mt-2 list-none p-0 text-sm text-foreground/85" data-testid="review-delivered">
+        {face.delivered.map((d, i) => (
+          <li key={i} className="flex gap-2 py-0.5" data-ok={d.ok}>
+            <span className={cn("mt-[3px] shrink-0", d.ok ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")} data-mark={d.ok ? "done" : "not-done"}>
+              {d.ok ? <Check className="h-4 w-4" aria-label="done" /> : <X className="h-4 w-4" aria-label="not done" />}
+            </span>
+            <span className="min-w-0">
+              <CardText text={d.text} item={item} />
+            </span>
+          </li>
+        ))}
+      </ul>
+      {next.length > 0 && (
+        <section className="mt-3" data-testid="review-next">
+          <div className="mb-1 text-xs text-muted-foreground">{switches ? (next.every((s) => s.kind === "new") ? "New goals it proposes, each on or off" : "Follow-ups it suggests, each on or off") : "Next steps the team suggests"}</div>
+          {switches ? (
+            <ul className="grid list-none grid-cols-1 p-0 text-sm" data-testid="review-switches">
+              {next.map((s, i) => (
+                <li key={i} className={cn("grid min-w-0 gap-1 py-2", i > 0 && "border-t")} data-testid="review-switch-item" data-on={start[i] ? "yes" : "no"}>
+                  <div className="flex min-w-0 flex-wrap items-start gap-2">
+                    <span className="min-w-0 flex-1 basis-56 text-foreground/85">
+                      <CardText text={s.title} item={item} />
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={start[i]}
+                      aria-label={`${s.title}: ${start[i] ? "on" : "off"}`}
+                      className={cn("inline-flex h-7 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium", PHONE_TAP, start[i] ? "bg-foreground text-background" : "text-muted-foreground")}
+                      onClick={() => setStart(start.map((x, j) => (j === i ? !x : x)))}
+                      data-testid="review-switch"
+                    >
+                      {start[i] ? "On" : "Off"}
+                    </button>
+                  </div>
+                  {s.why && <div className="text-[13px] text-muted-foreground">{s.why}</div>}
+                  {s.quote && <div className="text-[13px] text-muted-foreground">You said {s.quote}</div>}
+                  {s.also?.length ? <div className="text-xs text-muted-foreground" data-testid="review-switch-also">Also proposed by the {s.also.join(" and the ")}</div> : null}
+                  {s.kind === "new" && s.target && item.repo ? (
+                    <div className="text-xs text-muted-foreground" data-testid="review-switch-goal">
+                      {start[i] ? "Starts as a new goal" : "Stays parked"}
+                      {s.targetName ? `: ${s.targetName}` : ""}.{" "}
+                      <Link className={LINK} to={`${deckHref(item.repo, s.target)}?from=home`} data-testid="review-switch-open">
+                        Open the proposed goal
+                      </Link>
+                    </div>
+                  ) : (
+                    s.targetName && <div className="text-xs text-muted-foreground">{start[i] ? "Becomes a task in" : "Would go to"}: {s.targetName}</div>
+                  )}
+                  {!start[i] && (
+                    <input
+                      className="mt-0.5 w-full rounded-md border bg-background px-2 py-1 text-sm"
+                      placeholder="Why not? One line, so it is not suggested again"
+                      maxLength={300}
+                      value={offWhy[i] ?? ""}
+                      onChange={(e) => setOffWhy(offWhy.map((x, j) => (j === i ? e.target.value : x)))}
+                      aria-label={`Why ${s.title} is off`}
+                      data-testid="review-switch-why"
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="grid list-none grid-cols-1 p-0 text-sm">
+              {next.map((s, i) => (
+                <li key={i} className={cn("flex min-w-0 flex-wrap items-center gap-2 py-1.5", i > 0 && "border-t")} data-testid="review-suggestion">
+                  <span className="min-w-0 flex-1 basis-56 text-foreground/85">
+                    <CardText text={s.title} item={item} />
+                  </span>
+                  <span className="inline-flex overflow-hidden rounded-md border text-xs" role="group" aria-label={`${s.title}: start now or park`}>
+                    {(["start", "park"] as const).map((w) => (
+                      <button
+                        key={w}
+                        type="button"
+                        aria-pressed={start[i] === (w === "start")}
+                        className={cn("px-2 py-1", PHONE_TAP, start[i] === (w === "start") ? "bg-foreground text-background" : "bg-transparent text-muted-foreground")}
+                        onClick={() => setStart(start.map((x, j) => (j === i ? w === "start" : x)))}
+                        data-testid={`review-switch-${w}`}
+                      >
+                        {w === "start" ? "Start now" : "Park"}
+                      </button>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+      {open && (
+        <div className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-sm" data-testid="review-more">
+          {face.from && <FromBand from={face.from} />}
+          <a className="relative block overflow-hidden rounded-lg border" href={face.evidence.url} target="_blank" rel="noreferrer" data-testid="review-evidence">
+            {face.screenshot ? (
+              <img className="block h-[170px] w-full object-cover object-top sm:h-[200px]" src={`/api/review-items/${encodeURIComponent(item.id)}/screenshot`} alt="Screenshot of the evidence. Click to open it." loading="lazy" />
+            ) : (
+              <div className="h-[120px] w-full bg-muted" />
+            )}
+          </a>
+          <div className="text-[13px] text-foreground/85" data-testid="review-tree">
+            <div>
+              {goal} <span className="text-muted-foreground">· goal open, {tasks}</span>
+            </div>
+            {face.tree.map((l, i) => (
+              <div key={i} className={cn("pl-5", l.mark === "this" ? "text-foreground" : "text-muted-foreground")} data-mark={l.mark}>
+                {MARK[l.mark]} {l.mark === "this" ? `This task: ${l.text}` : l.text}
+                {l.mark !== "this" && l.sub ? ` · ${l.sub}` : ""}
+              </div>
+            ))}
+          </div>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs text-muted-foreground" data-testid="review-details">
+            <dt>Task</dt>
+            <dd>{spine ? <A href={spine}>{item.ref}</A> : goalHref ? <A href={goalHref}>{item.ref}</A> : null}</dd>
+            {spine && (
+              <>
+                <dt>Plan file</dt>
+                <dd>
+                  <A href={spine}>{item.path}</A>
+                </dd>
+              </>
+            )}
+            {item.cardPath && githubFile(item.github, item.cardPath) && (
+              <>
+                <dt>Card file</dt>
+                <dd>
+                  <A href={githubFile(item.github, item.cardPath)!}>{item.cardPath}</A>
+                </dd>
+              </>
+            )}
+            <dt>Evidence</dt>
+            <dd>
+              <A href={face.evidence.url}>{urlLabel(face.evidence.url)}</A>
+              {item.checkedAt && (
+                <>
+                  {" "}
+                  · checked <RelTime iso={item.checkedAt} />
+                </>
+              )}
+            </dd>
+            {(item.iteration ?? 1) > 1 && (
+              <>
+                <dt>Round</dt>
+                <dd>{item.iteration}</dd>
+              </>
+            )}
+          </dl>
+          {/* closing it as a no stays one tap away, under the card's details (two buttons on the card). */}
+          {denyOpen ? (
+            <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.face?.title ?? item.title)} page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)} onCancel={() => setDenyOpen(false)} onDeny={(why, f) => act("decline", () => (f.length ? api.denyReviewItem(item.id, why, f) : api.denyReviewItem(item.id, why)))} sub={ACTION.decline.hint} />
+          ) : (
+            <button type="button" className="w-max text-xs text-muted-foreground underline decoration-foreground/25 underline-offset-[3px] hover:text-foreground" disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
+              Decline it instead: it closes as a no
+            </button>
+          )}
+        </div>
+      )}
+      {(open || noteOpen || !!feedback) && (
+        <div className="mt-3 grid gap-1" id={`note-review-${item.id}`} data-testid="review-note">
+          <WordsBox label="Your note" rows={1} boxClassName="min-h-10" placeholder="What should change? It goes with Not yet" value={feedback} onChange={(v) => (setFeedback(v), setNeedWords(false))} files={files} voice={voice} />
+          {needWords && <span className="text-xs text-muted-foreground">Say what should change, then press Not yet.</span>}
+        </div>
+      )}
+      {confirmClose ? (
+        <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border p-3 text-sm" data-testid="review-close-confirm">
+          <span>
+            Other parts of this goal are still open:{" "}
+            {stillOpen.map((o, i) => (
+              <Fragment key={o.ref}>
+                {i > 0 && ", "}
+                {o.name ?? <A href={spine ?? goalHref ?? "/"}>{o.ref}</A>}
+              </Fragment>
+            ))}
+            . Closing the goal hides them until you reopen it. Nothing is deleted.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" className={PHONE_TAP} {...props("close")} onClick={() => void act("close", () => api.completeReviewItem(item.id, confirmClose))} data-testid="review-close-confirm-yes">
+              Close the goal
+            </Button>
+            <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy} onClick={() => setConfirmClose(undefined)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3.5 flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons">
+          <Button size="sm" className={cn("flex-1 sm:flex-none", PHONE_TAP)} {...props(`complete:${mainHow}`)} onClick={() => complete(mainHow)} title={buttons[0].sub} data-testid={mainHow === "park" && next.length ? "review-complete-park" : "review-complete"}>
+            {mainLabel}
+          </Button>
+          <Button size="sm" variant="outline" className={cn("flex-1 sm:flex-none", PHONE_TAP)} {...props("changes", voice.busy || !files.ready)} onClick={notYet} data-testid="review-iteration">
+            Not yet
+          </Button>
+          <a className="ml-1 text-[13px] font-medium text-emerald-700 hover:underline dark:text-emerald-400" href={face.evidence.url} target="_blank" rel="noreferrer" data-testid="review-go">
+            {face.evidence.label} ↗
+          </a>
+        </div>
+      )}
+      {landing && !err && (
+        <div className="mt-2 text-sm text-muted-foreground" data-testid="review-landing">
+          {landing}
+        </div>
+      )}
+      {err && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive" data-testid="review-error">
+          <span className="min-w-0 flex-1">Nothing was changed. {err}</span>
+          {last && (
+            <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
+      <div className="mt-3 text-xs text-muted-foreground" data-testid="review-foot">
+        {face.project.name} · {face.goal.text} · {tasks}
+      </div>
+    </article>
+  );
+}
+
+/** A card from a server without the face (older release): its title and the live link, never a row code as text. */
+function OldCard({ item }: { item: Listed }) {
+  return (
+    <article className="min-w-0 rounded-[14px] border bg-card p-4 [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
+      <div className="font-medium">
+        <CardText text={item.title} item={item} />
+      </div>
+      {item.liveUrl && (
+        <div className="mt-2 text-sm">
+          <A href={item.liveUrl}>{urlLabel(item.liveUrl)} ↗</A>
+        </div>
+      )}
+    </article>
+  );
+}
+
+// ----------: a held post, the same card in the post's own words ----------
+
+/** When the post goes out, in words: its slot (UTC), or that its time has passed. */
+export function slotWords(slot: string | undefined, now = Date.now()): string | undefined {
+  if (!slot) return undefined;
+  const t = Date.parse(/Z$/.test(slot) ? slot : `${slot.replace(" ", "T")}Z`);
+  if (Number.isNaN(t)) return undefined;
+  if (t <= now) return "its time has passed";
+  // the post page's words: "Thursday 5 Nov, 14:00 UTC"
+  return slotUtc(slot);
+}
+
+/**
+ * the buttons of a held post's card, each with its sub-line. A held post never has Post now. When its time has passed, Schedule names the next free slot
+ * within the campaign's limits (`nextSlot`, the server's) and Pick a new time sits beside it.
+ */
+export function postButtons(p: Pick<PostCardInfo, "kind" | "slot" | "nextSlot">, now = Date.now()): { label: string; sub: string; how: "schedule" | "pick"; go: boolean; slot?: string }[] {
+  const reply = p.kind === "outreach";
+  const when = slotWords(p.slot, now);
+  if (reply) return [{ label: "✓ Schedule this reply", sub: "The team sends this reply in the thread, inside today's limits.", how: "schedule", go: true }];
+  // its time has passed and nothing is free in the next 3 days: no Schedule (it would send now), he picks a time.
+  if (!p.nextSlot && when === "its time has passed")
+    return [{ label: "Pick a new time", sub: "Its time has passed and nothing is free in the next 3 days within the campaign's limits. You choose when it goes out, in UTC.", how: "pick", go: false }];
+  if (p.nextSlot)
+    return [
+      { label: `✓ Schedule for ${slotShort(p.nextSlot)}`, sub: `${p.slot ? "Its own time has passed. " : ""}This is the next free time within the campaign's limits.`, how: "schedule", go: true, slot: p.nextSlot },
+      { label: "Pick a new time", sub: "You choose when it goes out, in UTC.", how: "pick", go: false },
+    ];
+  return [{ label: "✓ Schedule", sub: when && when !== "its time has passed" ? `It goes out ${when}.` : "It goes out at the next free time.", how: "schedule", go: true }];
+}
+
+export function PostReviewCard(card: CardProps) {
+  const { item } = card;
+  const p = item.post!;
+  const { act, pressing, busy, err, last, landing, props } = useCardPress(card);
+  const [relaunchOpen, setRelaunchOpen] = useState(false);
+  const [denyOpen, setDenyOpen] = useState(false);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [slot, setSlot] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const campaignHref = item.milestoneId ? `/milestones/${encodeURIComponent(item.milestoneId)}` : undefined;
+  const where = [p.platform, p.community].filter(Boolean).join(", ");
+  const when = slotWords(p.slot);
+  const BTN = cn("h-auto min-h-10 justify-start whitespace-normal px-4 py-2.5 text-left text-[15px] font-bold", PHONE_TAP);
+  return (
+    <article className={cn("min-w-0 rounded-[14px] border bg-card text-card-foreground [overflow-wrap:anywhere]")} data-testid="review-card" data-review-id={item.id} data-kind="post">
+      <div className="px-[18px] pb-1 pt-4 text-[13px] text-muted-foreground" data-testid="review-crumb">
+        {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>} › {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>} › <b className="text-foreground">Waiting for you</b>
+      </div>
+      <section className="px-[18px] pb-1 pt-2.5">
+        <Label>{p.kind === "outreach" ? "The reply waiting for you" : "The post waiting for you"}</Label>
+        <h3 className="text-lg font-bold leading-snug sm:text-xl" data-testid="review-title">
+          {/* the post page's reading: the writer's notes (topic, idea codes) stay off the title */}
+          <A href={p.pageUrl}>{splitTitle(p.title || item.title).title}</A>
+        </h3>
+      </section>
+      <section className="px-[18px] pb-1 pt-2.5">
+        <Label>Where it goes</Label>
+        <div data-testid="review-post-where">
+          {p.kind === "outreach" && p.thread ? (
+            <>
+              A reply in the thread {p.thread.link ? <A href={p.thread.link}>“{p.thread.title}”</A> : <>“{p.thread.title}”</>}
+              {where ? ` on ${where}` : ""}.{p.thread.numbers ? ` ${p.thread.numbers}.` : ""}
+            </>
+          ) : (
+            <>
+              {where || "Its platform"}
+              {when ? `, ${when === "its time has passed" ? "its time has passed" : when}` : ""}.
+            </>
+          )}
+        </div>
+      </section>
+      <section className="px-[18px] pb-1 pt-2.5">
+        <Label>What it says</Label>
+        <div className="grid gap-2 rounded-[10px] border bg-muted/30 px-3 py-2" data-testid="review-post-text">
+          {paragraphs(p.text ?? "").map((t, i) => (
+            <p key={i} className="m-0 whitespace-pre-wrap">
+              <CardText text={t} item={item} />
+            </p>
+          ))}
+        </div>
+      </section>
+      {p.revisedFor && (
+        <section className="px-[18px] pb-1 pt-2.5">
+          <div className="-mx-2 rounded-md bg-yellow-100 px-2 py-1 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-200" data-testid="review-post-revised">
+            A new version after your words: “<CardText text={p.revisedFor} item={item} />”
+          </div>
+        </section>
+      )}
+      {p.images.length > 0 && (
+        <section className="px-[18px] pb-1 pt-2.5">
+          <Label>The picture</Label>
+          <div className="grid grid-cols-1 gap-2">
+            {p.images.map((im) => (
+              <a key={im.id} className="block overflow-hidden rounded-[10px] border" href={im.url} target="_blank" rel="noreferrer">
+                <img className="block w-full" src={im.url} alt="The picture that goes out with the post. Click to open it." loading="lazy" />
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="mt-3.5 border-t px-[18px] pb-4 pt-3.5">
+        {denyOpen ? (
+          <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.title)} page={`post ${item.ref ?? item.id}`} onCancel={() => setDenyOpen(false)} onDeny={() => act("decline", () => api.denyReviewItem(item.id, ""))} sub="The post is not sent. You can undo it from the campaign's posts." label={`✕ ${ACTION.decline.label}`} words={false} />
+        ) : pickOpen ? (
+          <div className="grid gap-2" data-testid="review-pick-time">
+            <label className="text-sm font-medium" htmlFor={`slot-${item.id}`}>
+              New time (UTC)
+            </label>
+            <input id={`slot-${item.id}`} type="datetime-local" aria-label="New time (UTC)" className="w-fit rounded-md border bg-background px-2 py-1 text-sm" value={slot} onChange={(e) => setSlot(e.target.value)} />
+            <span className="text-xs text-muted-foreground">It moves to Scheduled and goes out at this time.</span>
+            <div className="flex flex-wrap items-start gap-2">
+              <Button size="sm" className={PHONE_TAP} {...props("pick-schedule", !slot)} onClick={() => void act("pick-schedule", () => api.completeReviewItem(item.id, { slot: `${slot.slice(0, 16)}Z` }))} data-testid="review-pick-schedule">
+                ✓ Schedule it
+              </Button>
+              <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy} onClick={() => (setSlot(""), setPickOpen(false))}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : relaunchOpen ? (
+          <ChangesPanel
+            pressing={pressing}
+            origin={`review:${item.id}:changes`}
+            to={shortTo(item.face?.title ?? item.title)}
+            page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)}
+            value={feedback}
+            onChange={setFeedback}
+            placeholder="What should change? Your words go to the writer."
+            hint="The writer makes a new version. It comes back here."
+            onSend={(words, files) => act("changes", () => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words)))}
+            onCancel={() => setRelaunchOpen(false)}
+          />
+        ) : (
+          <div className="flex min-w-0 flex-wrap items-start gap-3" data-testid="review-buttons">
+            {postButtons(p).map((b) => (
+              <div key={b.label} className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
+                <Button
+                  className={cn(BTN, b.go && "bg-green-600 text-white hover:bg-green-700")}
+                  variant={b.go ? "default" : "outline"}
+                  {...props(`schedule:${b.label}`)}
+                  onClick={() => (b.how === "pick" ? setPickOpen(true) : void act(`schedule:${b.label}`, () => api.completeReviewItem(item.id, b.slot ? { slot: b.slot } : {})))}
+                  data-testid={b.how === "pick" ? "review-pick" : "review-schedule"}
+                >
+                  {b.label}
+                </Button>
+                <span className="text-xs text-muted-foreground">{b.sub}</span>
+              </div>
+            ))}
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
+              <Button variant="secondary" className={BTN} disabled={busy} onClick={() => setRelaunchOpen(true)} data-testid="review-iteration">
+                ↻ {ACTION.changes.label}
+              </Button>
+              <span className="text-xs text-muted-foreground">The writer makes a new version with your words. It comes back to you.</span>
+            </div>
+            {/* the third outcome: the held post is not sent. */}
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
+              <Button variant="outline" className={BTN} disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
+                ✕ {ACTION.decline.label}
+              </Button>
+              <span className="text-xs text-muted-foreground">The post is not sent.</span>
+            </div>
+          </div>
+        )}
+        {landing && !err && (
+          <div className="mt-2 text-sm text-muted-foreground" data-testid="review-landing">
+            {landing}
+          </div>
+        )}
+        {err && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive" data-testid="review-error">
+            <span className="min-w-0 flex-1">Nothing was changed. {err}</span>
+            {last && (
+              <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
+                Retry
+              </Button>
+            )}
+          </div>
+        )}
+        <details className="mt-3 text-xs text-muted-foreground" data-testid="review-details">
+          <summary className="cursor-pointer select-none">Details</summary>
+          <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+            <dt>Post</dt>
+            <dd>
+              <A href={p.pageUrl}>{p.id}</A>
+            </dd>
+            <dt>Campaign files</dt>
+            <dd>{p.repo}</dd>
+          </dl>
+        </details>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Changes wanted on a review or post card: his words, then one press. Or a voice note, its words in the box
+ * (he edits them, then presses); the words sent name the note and keep its recording's link.
+ */
+function ChangesPanel(p: { pressing?: Pressing; origin: string; to: string; page: string; value: string; onChange: (v: string) => void; placeholder: string; hint: string; onSend: (words: string, files: string[]) => Promise<boolean>; onCancel: () => void }) {
+  const busy = !!p.pressing;
+  // the same box as Chat: a pasted or dropped screenshot goes with his words (their links follow them).
+  const files = useChatAttach({ enabled: true, disabled: busy });
+  const send = (words: string) => p.onSend(words, files.ids).then((ok) => (ok && files.clear(), ok));
+  // the voice note's Send presses Send what should change itself, with what is typed before the spoken words.
+  const voice = useAnswerVoice({ origin: p.origin, to: p.to, page: p.page, typed: p.value, deliver: (reply) => send(reply).then((ok) => (ok ? p.onChange("") : refused())), disabled: busy });
+  return (
+    <div className="grid gap-2">
+      <WordsBox label="Your feedback" boxClassName="min-h-20" placeholder={p.placeholder} value={p.value} onChange={p.onChange} files={files} voice={voice} />
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="grid gap-0.5">
+          <Button size="sm" className={PHONE_TAP} {...pressProps(p.pressing, "changes", voice.busy || !files.ready || (!p.value.trim() && !files.ids.length))} onClick={() => void send(p.value.trim())} data-testid="review-iteration-start">
+            ↻ {ACTION.changes.send}
+          </Button>
+          <span className="text-xs text-muted-foreground">{p.hint}</span>
+        </div>
+        <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy || voice.busy} onClick={p.onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Decline on a review card: an optional reason, then one press that closes it as a no. The reason can be spoken. */
+function DenyPanel({ pressing, origin, to, page, onCancel, onDeny, sub, label = `✕ ${ACTION.decline.label}`, words = true }: { pressing?: Pressing; origin: string; to: string; page: string; onCancel: () => void; onDeny: (why: string, files: string[]) => Promise<boolean>; sub: string; label?: string; words?: boolean }) {
+  const busy = !!pressing;
+  const [why, setWhy] = useState("");
+  // the reason's box is the same as Chat's (a screenshot can go with it).
+  const files = useChatAttach({ enabled: words, disabled: busy });
+  const deny = (reason: string) => onDeny(reason, files.ids).then((ok) => (ok && files.clear(), ok));
+  // the spoken reason's Send presses Decline itself.
+  const voice = useAnswerVoice({ origin, to, page, typed: why, deliver: (reply) => deny(reply).then((ok) => (ok ? setWhy("") : refused())), disabled: busy || !words });
+  return (
+    <div className="grid gap-2" data-testid="review-deny-panel">
+      {words && <WordsBox label="Why you decline it" boxClassName="min-h-16" placeholder={ACTION.decline.placeholder} value={why} onChange={setWhy} files={files} voice={voice} />}
+      <div className="flex flex-wrap items-start gap-2">
+        <div className="grid gap-0.5">
+          <Button size="sm" variant="destructive" className={PHONE_TAP} {...pressProps(pressing, "decline", voice.busy || !files.ready)} onClick={() => void deny(why.trim())} data-testid="review-deny-confirm">
+            {label}
+          </Button>
+          <span className="text-xs text-muted-foreground">{sub}</span>
+        </div>
+        <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy || voice.busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}

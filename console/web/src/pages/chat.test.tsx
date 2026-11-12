@@ -1,0 +1,563 @@
+// @vitest-environment jsdom
+import { forgetWorld as forgetWorldE33 } from "@/lib/useSocial";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { api, type DeskChat, type DeskMessage } from "@/api";
+import { ChatPage, chatHref, forgetChats, chatScroll, CHAT_POLL_FAST_MS, CHAT_POLL_IDLE_MS, CHAT_POLL_STALE_MS, formatElapsed, sendsOnKey } from "@/pages/Chat";
+import { blocks, chatLinkHref } from "@/lib/chatMarkdown";
+import { SidebarNav } from "@/components/Layout";
+
+// jsdom has no ResizeObserver (Radix) nor matchMedia.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+beforeEach(() => {
+  forgetChats();
+  Element.prototype.scrollIntoView = vi.fn();
+});
+
+const msg = (over: Partial<DeskMessage> & Pick<DeskMessage, "id" | "role" | "text">): DeskMessage => ({ kind: "message", status: "completed", at: new Date().toISOString(), ...over });
+const chat = (over: Partial<DeskChat> = {}): DeskChat => ({
+  available: true,
+  threadId: "th_desk",
+  environmentId: "env_1",
+  session: 1,
+  status: "idle",
+  working: false,
+  sending: 0,
+  hasEarlier: false,
+  messages: [
+    { id: "s1", role: "user", kind: "seed", text: "", status: "completed", session: 1 },
+    msg({ id: "a1", role: "assistant", text: "Team desk ready." }),
+  ],
+  ...over,
+});
+
+const renderChat = (entry = "/chat") => {
+  const loc = { search: "" };
+  const Spy = () => {
+    loc.search = useLocation().search;
+    return null;
+  };
+  render(
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/chat" element={<><ChatPage /><Spy /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return loc;
+};
+
+// each test is its own tab (a tab remembers its world)
+beforeEach(() => forgetWorldE33());
+
+describe("T18-S2 Chat page", () => {
+  it("shows the transcript read from the desk thread: user text with its page chip, assistant Markdown, a divider for the seed", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(
+      chat({
+        messages: [
+          { id: "s1", role: "user", kind: "seed", text: "", status: "completed", session: 1 },
+          msg({ id: "u1", role: "user", text: "what is open?", page: "M5 · Milestone page" }),
+          msg({ id: "a1", role: "assistant", text: "Two things:\n\n- **T18-S1** is running\n- see [the epic](https://github.com/x/y/blob/main/e.md) and `spines.py`" }),
+        ],
+      }),
+    );
+    renderChat();
+    const t = await screen.findByTestId("chat-transcript");
+    expect(within(t).getByTestId("chat-divider").textContent).toContain("Chat started");
+    expect(within(t).getByTestId("chat-page-chip").textContent).toBe("M5 · Milestone page"); // a chip, no "about:"
+    expect(within(t).getByTestId("chat-user").textContent).toContain("what is open?");
+    const a = within(t).getByTestId("chat-assistant");
+    expect(a.querySelectorAll("li")).toHaveLength(2);
+    expect(a.querySelector("strong")?.textContent).toBe("T18-S1");
+    const link = within(a).getByRole("link", { name: "the epic" }) as HTMLAnchorElement;
+    expect(link.href).toBe("https://github.com/x/y/blob/main/e.md");
+    expect(link.rel).toContain("noopener");
+    expect(a.querySelector("code")?.textContent).toBe("spines.py");
+  });
+
+  it("T19-S2: the since-your-last-message block shows folded as an updates chip, never as Sam's text", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ messages: [msg({ id: "u1", role: "user", text: "what's new?", since: "Since 2026-10-25 20:00Z:\nCommits (1):\n- abc T19-S1 done" })] }));
+    renderChat();
+    const u = await screen.findByTestId("chat-user");
+    const chip = within(u).getByTestId("chat-since-chip");
+    expect(chip.tagName).toBe("DETAILS");
+    expect((chip as HTMLDetailsElement).open).toBe(false);
+    expect(chip.querySelector("summary")?.textContent).toBe("updates sent along");
+    expect(chip.textContent).toContain("abc T19-S1 done");
+    expect(u.querySelector("p.whitespace-pre-wrap:not(details p)")?.textContent).toBe("what's new?");
+  });
+
+  it("a later session's divider says the earlier chat was gone", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ session: 2, messages: [{ id: "s2", role: "user", kind: "seed", text: "", status: "completed", session: 2 }] }));
+    renderChat();
+    expect((await screen.findByTestId("chat-divider")).textContent).toContain("New session");
+  });
+
+  it("links to the desk thread (t3code:// with the environment) and opens t3code / t3-thread links from replies", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(
+      chat({ messages: [msg({ id: "a1", role: "assistant", text: "Ticket: [S3](t3-thread://v1/thread:abc) and [run](t3code://threads/env_1/th_9)" })] }),
+    );
+    renderChat();
+    const t = await screen.findByTestId("chat-transcript");
+    expect((within(t).getByRole("link", { name: "S3" }) as HTMLAnchorElement).href).toBe("t3code://threads/env_1/thread%3Aabc");
+    expect((within(t).getByRole("link", { name: "run" }) as HTMLAnchorElement).href).toBe("t3code://threads/env_1/th_9");
+    expect((screen.getByRole("link", { name: /Open in T3/ }) as HTMLAnchorElement).href).toBe("t3code://threads/env_1/th_desk");
+  });
+
+  it("never turns an unsafe link or markup into a link or element", async () => {
+    expect(chatLinkHref("javascript:alert(1)")).toBeUndefined();
+    expect(chatLinkHref("data:text/html,x")).toBeUndefined();
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ messages: [msg({ id: "a1", role: "assistant", text: "[x](javascript:alert(1)) <img src=x onerror=alert(1)> <b>hi</b>" })] }));
+    renderChat();
+    const a = await screen.findByTestId("chat-assistant");
+    expect(a.querySelector("a")).toBeNull();
+    expect(a.querySelector("img, b")).toBeNull();
+    expect(a.textContent).toContain("<b>hi</b>");
+  });
+
+  it("splits Markdown into blocks (code fences keep their lines)", () => {
+    expect(blocks("# T\n\ntext a\ntext b\n\n```\nx = 1\n\ny = 2\n```\n1. one\n2. two")).toEqual([
+      { kind: "h", text: "T", level: 1 },
+      { kind: "p", text: "text a\ntext b" },
+      { kind: "code", text: "x = 1\n\ny = 2" },
+      { kind: "ol", items: [{ text: "one" }, { text: "two" }] },
+    ]);
+  });
+
+  it("says working… while the desk's turn runs and polls fast; idle polls slowly", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ working: true, status: "running" }));
+    renderChat();
+    expect((await screen.findByTestId("chat-working")).textContent).toContain("working");
+    const n = get.mock.calls.length;
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_FAST_MS * 2 + 10)));
+    expect(get.mock.calls.length).toBeGreaterThanOrEqual(n + 2);
+    get.mockResolvedValue(chat({ working: false }));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_FAST_MS + 10)));
+    await waitFor(() => expect(screen.queryByTestId("chat-working")).toBeNull());
+    const m = get.mock.calls.length;
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_FAST_MS * 3)));
+    expect(get.mock.calls.length).toBe(m); // idle: no fast polling
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_IDLE_MS)));
+    expect(get.mock.calls.length).toBeGreaterThan(m);
+  });
+
+  it("sends the typed text; the page hint from 'Chat about this' goes along once, then is gone", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: false });
+    const loc = renderChat(chatHref("M5 · Milestone page"));
+    expect((await screen.findByTestId("chat-hint")).textContent).toContain("About: M5 · Milestone page");
+    const box = screen.getByLabelText("Message to the Team desk") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "  add dark mode idea  " } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("add dark mode idea", "M5 · Milestone page", expect.stringMatching(/^chat-/)));
+    await waitFor(() => expect(box.value).toBe(""));
+    expect(screen.queryByTestId("chat-hint")).toBeNull();
+    expect(loc.search).toBe("");
+    fireEvent.change(box, { target: { value: "second" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith("second", undefined, expect.any(String)));
+  });
+
+  it("the hint can be dropped; an empty message cannot be sent", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
+    renderChat(chatHref("Runs"));
+    fireEvent.click(await screen.findByLabelText("Drop the page hint"));
+    expect(screen.queryByTestId("chat-hint")).toBeNull();
+    expect((screen.getByRole("button", { name: /Send/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("a failed send keeps the text and says why; messages T3 still holds show as waiting", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ sending: 1 }));
+    vi.spyOn(api, "sendDeskMessage").mockRejectedValue(new Error("no seat available: all seats busy"));
+    renderChat();
+    expect((await screen.findByTestId("chat-sending")).textContent).toContain("1 message waiting for T3");
+    const box = screen.getByLabelText("Message to the Team desk") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    expect((await screen.findByTestId("chat-send-error")).textContent).toContain("no seat available");
+    expect(box.value).toBe("hello");
+  });
+
+  it("shows why the chat is unavailable instead of a broken page", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue({ available: false, reason: "The Team desk needs T3.", working: false, sending: 0, messages: [], hasEarlier: false });
+    renderChat();
+    expect(await screen.findByText("The Team desk needs T3.")).toBeTruthy();
+    expect(screen.queryByLabelText("Message to the Team desk")).toBeNull();
+  });
+
+  it("surfaces a server error (e.g. no seat for the first launch)", async () => {
+    vi.spyOn(api, "getDeskChat").mockRejectedValue(new Error("no seat available: busy"));
+    renderChat();
+    expect(await screen.findByText("no seat available: busy")).toBeTruthy();
+  });
+});
+
+describe("T18-S2 Chat at 412 px", () => {
+  it("composer: 16 px text and a 44 px Send below sm (the E917 answer-box pattern); transcript cannot widen the page", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(
+      chat({ messages: [msg({ id: "a1", role: "assistant", text: "https://example.com/" + "a".repeat(200) + "\n\n```\n" + "x".repeat(300) + "\n```" })] }),
+    );
+    renderChat();
+    const box = await screen.findByLabelText("Message to the Team desk");
+    expect(box.className).toMatch(/max-sm:text-base/);
+    expect(box.className).toContain("min-w-0");
+    const send = screen.getByRole("button", { name: /Send/ });
+    expect(send.className).toMatch(/max-sm:min-h-11/);
+    // on the Team desk page Send sits beside the box, so the bottom dock (call bar + box) stays short on a phone.
+    expect(send.className).not.toMatch(/max-sm:w-full/);
+    const a = screen.getByTestId("chat-assistant");
+    expect(a.firstElementChild!.className).toMatch(/min-w-0/);
+    expect(screen.getByTestId("chat-md").className).toContain("[overflow-wrap:anywhere]");
+    expect(a.querySelector("pre")!.className).toContain("overflow-x-auto");
+    expect(screen.getByTestId("chat-page").className).toContain("min-w-0");
+  });
+});
+
+describe("T18-S2 entry points", () => {
+  it("the sidebar has a global Chat entry (one chat for every repo)", async () => {
+    render(
+      <MemoryRouter>
+        <SidebarNav />
+      </MemoryRouter>,
+    );
+    const link = (await screen.findByRole("link", { name: "Chat" })) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/chat");
+  });
+
+  it("'Chat about this' on a Milestone page opens that milestone's Chat tab (T19-S6)", async () => {
+    const { MilestonePage } = await import("@/pages/Milestone");
+    const m = await api.createMilestone({ title: "Treeish", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam" });
+    render(
+      <MemoryRouter initialEntries={[`/milestones/${m.id}`]}>
+        <Routes>
+          <Route path="/milestones/:id" element={<MilestonePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const link = (await screen.findByTestId("chat-about-this")) as HTMLAnchorElement;
+    const url = new URL(link.getAttribute("href")!, "http://x");
+    expect(url.pathname).toBe(`/milestones/${m.id}`);
+    expect(url.searchParams.get("tab")).toBe("chat");
+  });
+});
+
+describe("T49-S1 composer keys", () => {
+  const setup = async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: false });
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "hello desk" } });
+    return { box, send };
+  };
+
+  it("Enter sends and clears the box", async () => {
+    const { box, send } = await setup();
+    const ev = fireEvent.keyDown(box, { key: "Enter" });
+    expect(ev).toBe(false); // default (newline) prevented
+    await waitFor(() => expect(send).toHaveBeenCalledWith("hello desk", undefined, expect.stringMatching(/^chat-/)));
+    await waitFor(() => expect(box.value).toBe(""));
+  });
+
+  it("Shift+Enter is a newline, never a send", async () => {
+    const { box, send } = await setup();
+    expect(fireEvent.keyDown(box, { key: "Enter", shiftKey: true })).toBe(true); // default kept: the browser inserts the newline
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("Cmd+Enter and Ctrl+Enter still send", async () => {
+    const { box, send } = await setup();
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    fireEvent.change(box, { target: { value: "again" } });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(send).toHaveBeenLastCalledWith("again", undefined, expect.any(String)));
+  });
+
+  it("never sends while an IME is composing (isComposing or keyCode 229)", async () => {
+    const { box, send } = await setup();
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(send).not.toHaveBeenCalled();
+    expect(box.value).toBe("hello desk");
+  });
+
+  it("the rule: touch keyboards keep Enter as a newline (Send button sends), Cmd/Ctrl+Enter sends there too", () => {
+    expect(sendsOnKey({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }, false)).toBe(true);
+    expect(sendsOnKey({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }, true)).toBe(false);
+    expect(sendsOnKey({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: true, altKey: false }, true)).toBe(true);
+    expect(sendsOnKey({ key: "a", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }, false)).toBe(false);
+  });
+
+  it("on a phone (touch keyboard) Enter does not send and the Send button does", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((q: string) => ({ matches: q.includes("coarse"), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false }) as unknown as MediaQueryList);
+    const { box, send } = await setup();
+    expect(fireEvent.keyDown(box, { key: "Enter" })).toBe(true);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("hello desk", undefined, expect.any(String)));
+  });
+});
+
+describe("T49-S1 follows the latest line", () => {
+  it("scrolls to the bottom on open, on a new message and when working… appears, while Sam is at the bottom", async () => {
+    const bottom = vi.spyOn(chatScroll, "toBottom").mockImplementation(() => {});
+    vi.spyOn(chatScroll, "atBottom").mockReturnValue(true);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    await waitFor(() => expect(bottom).toHaveBeenCalled());
+    const n = bottom.mock.calls.length;
+    get.mockResolvedValue(chat({ working: true, status: "running" }));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_IDLE_MS + 10)));
+    await screen.findByTestId("chat-working");
+    expect(bottom.mock.calls.length).toBeGreaterThan(n);
+    const k = bottom.mock.calls.length;
+    get.mockResolvedValue(chat({ working: true, status: "running", messages: [...chat().messages, msg({ id: "a2", role: "assistant", text: "on it" })] }));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_FAST_MS + 10)));
+    await screen.findByText("on it");
+    expect(bottom.mock.calls.length).toBeGreaterThan(k);
+    expect(screen.queryByTestId("chat-jump-latest")).toBeNull();
+  });
+
+  it("T18-S18: the history has no frame of its own, and the latest pill is small on its bottom edge", async () => {
+    vi.spyOn(chatScroll, "toBottom").mockImplementation(() => {});
+    const at = vi.spyOn(chatScroll, "atBottom").mockReturnValue(true);
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    const sc = screen.getByTestId("chat-scroll");
+    expect(sc.className).toMatch(/\bflex-1\b/);
+    expect(sc.className).not.toMatch(/\bborder\b|rounded-lg|bg-muted/);
+    at.mockReturnValue(false);
+    act(() => void sc.dispatchEvent(new Event("scroll")));
+    const pill = await screen.findByTestId("chat-jump-latest");
+    expect(pill.className).toMatch(/\bh-7\b/);
+    expect(pill.className).toMatch(/-top-3\.5/);
+    expect(pill.className).not.toMatch(/min-h-11/);
+  });
+
+  it("scrolled up: a new message does not yank him down; Jump to latest shows and brings him back", async () => {
+    const bottom = vi.spyOn(chatScroll, "toBottom").mockImplementation(() => {});
+    const at = vi.spyOn(chatScroll, "atBottom").mockReturnValue(true);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    at.mockReturnValue(false);
+    act(() => void screen.getByTestId("chat-scroll").dispatchEvent(new Event("scroll")));
+    expect((await screen.findByTestId("chat-jump-latest")).textContent).toContain("Latest");
+    const n = bottom.mock.calls.length;
+    get.mockResolvedValue(chat({ messages: [...chat().messages, msg({ id: "a2", role: "assistant", text: "news" })] }));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(CHAT_POLL_IDLE_MS + 10)));
+    await screen.findByText("news");
+    expect(bottom.mock.calls.length).toBe(n); // not yanked
+    expect(screen.getByTestId("chat-jump-latest").textContent).toContain("New messages");
+    fireEvent.click(screen.getByTestId("chat-jump-latest"));
+    expect(bottom.mock.calls.length).toBe(n + 1);
+    expect(screen.queryByTestId("chat-jump-latest")).toBeNull();
+  });
+
+  it("scrolled up: his own send brings him to the bottom", async () => {
+    const bottom = vi.spyOn(chatScroll, "toBottom").mockImplementation(() => {});
+    const at = vi.spyOn(chatScroll, "atBottom").mockReturnValue(true);
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    let release!: () => void;
+    vi.spyOn(api, "sendDeskMessage").mockImplementation(() => new Promise((r) => (release = () => r({ threadId: "th_desk", pending: false }))));
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    at.mockReturnValue(false);
+    act(() => void screen.getByTestId("chat-scroll").dispatchEvent(new Event("scroll")));
+    await screen.findByTestId("chat-jump-latest");
+    const n = bottom.mock.calls.length;
+    fireEvent.change(box, { target: { value: "mine" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await screen.findByTestId("chat-posting");
+    expect(bottom.mock.calls.length).toBeGreaterThan(n);
+    expect(screen.queryByTestId("chat-jump-latest")).toBeNull();
+    await act(async () => release());
+  });
+});
+
+describe("T49-S1 working timer", () => {
+  it("formats elapsed time as m:ss under an hour, h:mm:ss after", () => {
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(42_000)).toBe("0:42");
+    expect(formatElapsed(195_000)).toBe("3:15");
+    expect(formatElapsed(3_730_000)).toBe("1:02:10");
+    expect(formatElapsed(-5_000)).toBe("0:00");
+  });
+
+  it("counts live from the server's turn start, so a reload shows the true elapsed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ working: true, status: "running", workingSince: "2026-11-01T11:56:45Z" }));
+    renderChat();
+    const el = await screen.findByTestId("chat-working-elapsed");
+    expect(screen.getByTestId("chat-working").textContent).toBe("Team desk is working… 3:15");
+    await act(async () => void (await vi.advanceTimersByTimeAsync(1_000)));
+    expect(el.textContent).toBe("3:16");
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3_600_000)));
+    expect(screen.getByTestId("chat-working-elapsed").textContent).toBe("1:03:16");
+  });
+
+  it("without a server start it counts from when the page first saw the desk working", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ working: true, status: "running" }));
+    renderChat();
+    expect((await screen.findByTestId("chat-working-elapsed")).textContent).toBe("0:00");
+    await act(async () => void (await vi.advanceTimersByTimeAsync(42_000)));
+    expect(screen.getByTestId("chat-working-elapsed").textContent).toBe("0:42");
+  });
+});
+
+describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends", () => {
+  it("t3: restarting keeps the transcript and shows 'T3 is restarting, reconnecting…', never the raw error", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));
+    renderChat();
+    expect((await screen.findByTestId("chat-t3-down")).textContent).toBe("T3 is restarting, reconnecting…");
+    expect(screen.getByTestId("chat-t3-down").getAttribute("role")).toBe("status");
+    expect(within(screen.getByTestId("chat-transcript")).getByTestId("chat-assistant").textContent).toContain("Team desk ready.");
+    expect(document.body.textContent).not.toMatch(/ECONNREFUSED|fetch failed/);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("t3: maintenance says planned maintenance; T3 up shows no line", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "maintenance" }));
+    renderChat();
+    expect((await screen.findByTestId("chat-t3-down")).textContent).toBe("T3 is down for planned maintenance, reconnecting…");
+    cleanup();
+    get.mockResolvedValue(chat());
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    expect(screen.queryByTestId("chat-t3-down")).toBeNull();
+  });
+
+  it("a send queued while T3 is down shows as its own bubble: 'queued, sends when T3 is back'", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true, queued: true });
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    get.mockResolvedValue(chat({ t3: "restarting", queued: [{ id: "queued-1", text: "move it to PLAN-17", at: new Date().toISOString() }] }));
+    fireEvent.change(box, { target: { value: "move it to PLAN-17" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    const q = await screen.findByTestId("chat-queued");
+    expect(q.textContent).toContain("move it to PLAN-17");
+    expect(q.textContent).toContain("queued, sends when T3 is back");
+    expect(box.value).toBe("");
+    expect(screen.queryByTestId("chat-send-error")).toBeNull();
+  });
+});
+
+describe("T33-S10 Chat opens in under 1 s", () => {
+  /** Messages at positions from..to (step 2), alternating the owner / desk. */
+  const range = (from: number, to: number) => {
+    const out: DeskMessage[] = [];
+    for (let p = from; p <= to; p += 2) out.push(msg({ id: `m${p}`, role: p % 4 ? "assistant" : "user", text: `line ${p}`, position: p }));
+    return out;
+  };
+
+  it("asks for the newest 30 messages, and Show older messages puts the next older page on top", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockImplementation(async (read) =>
+      read?.before !== undefined ? chat({ messages: range(100, 158), hasEarlier: false }) : chat({ messages: range(160, 218), hasEarlier: true }),
+    );
+    renderChat();
+    const t = await screen.findByTestId("chat-transcript");
+    expect(get).toHaveBeenCalledWith({ limit: 30 });
+    expect(within(t).getAllByRole("listitem").length).toBe(30);
+    fireEvent.click(screen.getByTestId("chat-older"));
+    await waitFor(() => expect(get).toHaveBeenCalledWith({ before: 160, limit: 30 }));
+    await waitFor(() => expect(within(t).getAllByText(/^line \d+$/).length).toBe(60));
+    const lines = within(t).getAllByText(/^line \d+$/).map((e) => e.textContent);
+    expect(lines[0]).toBe("line 100");
+    expect(lines.at(-1)).toBe("line 218");
+    expect(screen.queryByTestId("chat-older")).toBeNull(); // the chat's start is reached
+  });
+
+  it("without positions (an older console) the note about the T3 thread stays", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ hasEarlier: true }));
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    expect(screen.queryByTestId("chat-older")).toBeNull();
+    expect(screen.getByText(/Older messages are in the desk's T3 thread/)).toBeTruthy();
+  });
+
+  it("an answer from the console's last good read (stale) is read again within a second", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValueOnce(chat({ stale: true })).mockResolvedValue(chat({ messages: [msg({ id: "a2", role: "assistant", text: "fresh reply" })] }));
+    renderChat();
+    await screen.findByTestId("chat-transcript");
+    expect(await screen.findByText("fresh reply", undefined, { timeout: CHAT_POLL_STALE_MS + 1500 })).toBeTruthy();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("opening Chat again shows the last read at once, before the console answers", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ messages: [msg({ id: "a1", role: "assistant", text: "remembered line" })] }));
+    renderChat();
+    await screen.findByText("remembered line");
+    cleanup();
+    vi.spyOn(api, "getDeskChat").mockImplementation(() => new Promise(() => undefined)); // the console is slow this time
+    renderChat();
+    expect(await screen.findByText("remembered line", undefined, { timeout: 300 })).toBeTruthy();
+  });
+
+  it("lines that slide out of the newest 30 while the chat is open stay shown", async () => {
+    let n = 0;
+    vi.spyOn(api, "getDeskChat").mockImplementation(async () => (n++ === 0 ? chat({ messages: range(100, 158), hasEarlier: true }) : chat({ messages: range(104, 162), hasEarlier: true })));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderChat();
+    await screen.findByText("line 100");
+    await act(async () => {
+      vi.advanceTimersByTime(CHAT_POLL_IDLE_MS + 10);
+    });
+    await screen.findByText("line 162");
+    const lines = within(screen.getByTestId("chat-transcript")).getAllByText(/^line \d+$/).map((e) => e.textContent);
+    expect(lines[0]).toBe("line 100");
+    expect(lines).toHaveLength(32);
+  });
+});
+
+describe("T33-S10 Chat does not wait for /api/me again", () => {
+  it("a tab that already knows its world opens the desk while /api/me is still out", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ messages: [msg({ id: "a1", role: "assistant", text: "desk line" })] }));
+    renderChat();
+    await screen.findByText("desk line");
+    cleanup();
+    vi.spyOn(api as Required<typeof api>, "getMe").mockImplementation(() => new Promise(() => undefined)); // the console stalls
+    renderChat();
+    expect(await screen.findByTestId("chat-transcript", undefined, { timeout: 500 })).toBeTruthy();
+  });
+});
+
+describe("T33-S10 a reload paints the last chat from this browser", () => {
+  it("a new page (memory gone) shows the kept chat while the console is slow", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ messages: [msg({ id: "a1", role: "assistant", text: "kept line" })] }));
+    renderChat();
+    await screen.findByText("kept line");
+    cleanup();
+    const { chatCache } = await import("@/pages/Chat");
+    chatCache.clear(); // a reload: only localStorage is left
+    vi.spyOn(api, "getDeskChat").mockImplementation(() => new Promise(() => undefined));
+    renderChat();
+    expect(await screen.findByText("kept line", undefined, { timeout: 300 })).toBeTruthy();
+  });
+});

@@ -1,0 +1,511 @@
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Play, SendHorizontal, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { PHONE_TAP } from "@/components/common";
+import { cn } from "@/lib/utils";
+import { outbox, outboxState, startOutbox, subscribeOutbox } from "./outbox";
+import { browserNoteMedia, fetchNotesApi, KEPT_FAILED_TEXT, KEPT_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
+
+/**
+ * Like a call (
+ * L-42), a voice note is the tab's, never a page's: this owner sits above the router and holds one NoteEngine per origin (a
+ * chat's note route, or one card's box), so its microphone and recorder live across page changes. A page's voice control
+ * (useNote) is a view onto it; while a note is on and no page shows it, NoteWidget floats the controls on every page, and back
+ * on that page the same note (same vn_ id) goes on. The tab's pagehide and visibility are hooked once here.
+ *
+ * the controls, on the page and in the floating pill: a pulsing red dot (steady with reduced motion), the time, Send
+ * (stops and sends in one tap) and Cancel (a note of a minute or more asks once before it is thrown away).
+ *
+ * a note carries its origin. A chat note posts itself (the console's finish). A card's note is written out
+ * (`fill`) and then handed to the card's own press (`deliver`: Answer, Changes wanted, Decline, the path), here in the
+ * tab, so it lands on that card even when the card is not on screen. The pill says where it goes ("to: Chat").
+ */
+export interface HeldNote {
+  /** The origin: a chat's note route (`/api/voice`), or `card:<id>` for a card's box. */
+  key: string;
+  base: string;
+  engine: NoteEngine;
+  /** The api a page passed (tests); production passes none. */
+  given?: NotesApi;
+  /** Where Send lands it, for the pill: "Chat", or the card's title. */
+  to: string;
+  /** The page (path + query) the note was started on: the pill's link back. */
+  route?: string;
+  /** Controls showing this note now (0: the pill shows it). */
+  docks: number;
+  /** A card's note: send the written-out note through the card's own press. Absent: the note posts itself (a chat). */
+  deliver?: (note: SentNote) => Promise<unknown>;
+  /** A delivered note's way out (cards): sending, landed, nothing heard, or failed (Send again). */
+  out?: { state: "sending" | "done" | "empty" | "failed"; error?: string; note?: SentNote };
+}
+
+/** The pill shows a note in these phases (sent: a few seconds, then it goes). */
+const SHOWN: NotePhase[] = ["starting", "recording", "paused", "sending", "failed", "sent"];
+export const noteOn = (p: NotePhase) => p === "starting" || p === "recording" || p === "paused";
+/** A note this long (seconds) asks once before Cancel throws it away. */
+export const CONFIRM_CANCEL_S = 60;
+/** A sent note says so this long, then its line and the pill go. */
+export const SENT_SHOW_MS = 4000;
+const ROUTE_KEY = (key: string) => `voice-note-route:${key}`;
+const OPEN_KEY = "voice-note-open:";
+
+export interface NoteOpts {
+  base?: string;
+  /** The note's words come back (a card's) instead of being posted to a chat. */
+  fill?: boolean;
+  to?: string;
+  api?: NotesApi;
+  media?: NoteMedia;
+  clock?: NoteClock;
+  store?: NoteStore;
+}
+
+export class NoteTab {
+  private held = new Map<string, HeldNote>();
+  private listeners = new Set<() => void>();
+  private unhook?: () => void;
+  private version = 0;
+
+  constructor(private win: Window | undefined = typeof window === "undefined" ? undefined : window) {}
+
+  /** The tab's pagehide (finish what is recorded) and visibility (lock and unlock), for every note at once. */
+  hook(): () => void {
+    if (!this.unhook && this.win) {
+      const doc = this.win.document;
+      const hide = () => this.held.forEach((h) => h.engine.pageHide());
+      const seen = () => this.held.forEach((h) => void h.engine.pageVisible(doc.visibilityState === "visible"));
+      const online = () => this.held.forEach((h) => h.engine.online());
+      this.win.addEventListener("pagehide", hide);
+      this.win.addEventListener("online", online);
+      doc.addEventListener("visibilitychange", seen);
+      this.unhook = () => {
+        this.win?.removeEventListener("pagehide", hide);
+        this.win?.removeEventListener("online", online);
+        doc.removeEventListener("visibilitychange", seen);
+        this.unhook = undefined;
+      };
+    }
+    return () => this.unhook?.();
+  }
+
+  /** After a reload: every chat note kept in this browser is offered again, paused, whatever page opens first. */
+  restore() {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k?.startsWith(OPEN_KEY)) this.note(k.slice(OPEN_KEY.length));
+      }
+    } catch {
+      /* storage off */
+    }
+  }
+
+  /** The note held for `key`, if any (a card's control looks before it makes one). */
+  get(key: string, api?: NotesApi): HeldNote | undefined {
+    const h = this.held.get(key);
+    return h && h.given === api ? h : undefined;
+  }
+
+  /** The tab's note for `key` (made on first use; a chat's kept note is offered again). */
+  note(key: string, o: NoteOpts = {}): HeldNote {
+    const had = this.get(key, o.api);
+    if (had) return had;
+    const base = o.base ?? (key.startsWith("/") ? key : "/api/voice");
+    // A chat's open note is kept in browser storage; a card's answer is short and kept in memory. Tests: memory.
+    const store = o.store ?? (o.api || o.fill ? memoryNoteStore() : localNoteStore(base));
+    let route: string | undefined;
+    if (!o.api)
+      try {
+        route = localStorage.getItem(ROUTE_KEY(key)) ?? undefined;
+      } catch {
+        /* storage off */
+      }
+    const api = o.api ?? fetchNotesApi(base, undefined, o.fill ? { fill: true } : {});
+    const h: HeldNote = { key, base, given: o.api, to: o.to ?? "Chat", docks: 0, route, engine: new NoteEngine(api, o.media ?? browserNoteMedia(), o.clock, store, o.api ? undefined : { store: outbox(), base, ...(o.fill ? { fill: true } : {}), ...(o.to ? { to: o.to } : {}) }) };
+    h.engine.subscribe((v) => this.seen(h, v));
+    this.held.set(key, h); // no change event: this may run while a page renders
+    if (!o.fill) void h.engine.recover();
+    return h;
+  }
+
+  private phases = new WeakMap<HeldNote, NotePhase>();
+  /** A note changed: a card's note that was just written out goes to its card. Each control follows its own note's ticks. */
+  private seen(h: HeldNote, v: NoteView) {
+    const was = this.phases.get(h);
+    this.phases.set(h, v.phase);
+    if (v.phase === "sent" && v.note && h.deliver && !h.out) {
+      const n = v.note;
+      h.engine.dismiss();
+      if (n.state === "empty" || !n.transcript?.trim()) h.out = { state: "empty" };
+      else void this.send(h, n);
+      this.later(h);
+    }
+    if (was !== v.phase) this.changed();
+  }
+
+  /** Hand a written-out note to its card's press; a failure stays on the control with Send again. */
+  async send(h: HeldNote, n: SentNote) {
+    h.out = { state: "sending", note: n };
+    this.changed();
+    try {
+      await h.deliver!(n);
+      h.out = { state: "done", note: n };
+      this.later(h);
+    } catch (e) {
+      h.out = { state: "failed", error: (e as Error).message || "The answer was not sent.", note: n };
+    }
+    this.changed();
+  }
+
+  /** A landed or empty card note says so for a few seconds, then its line goes. */
+  private later(h: HeldNote) {
+    if (h.out?.state !== "done" && h.out?.state !== "empty") return;
+    const was = h.out;
+    setTimeout(() => {
+      if (h.out === was) this.forget(h);
+    }, SENT_SHOW_MS);
+  }
+
+  /** Done with a note: its line goes (and a card's holder with it, if no control shows it). */
+  forget(h: HeldNote) {
+    h.out = undefined;
+    if (h.engine.view().phase === "sent" || h.engine.view().phase === "failed") h.engine.dismiss();
+    if (h.deliver && h.docks === 0 && h.engine.view().phase === "idle" && this.held.get(h.key) === h) this.held.delete(h.key);
+    this.changed();
+  }
+
+  /** A control shows `h` while mounted. */
+  dock(h: HeldNote): () => void {
+    h.docks++;
+    this.changed();
+    return () => {
+      h.docks--;
+      if (h.deliver && h.docks === 0 && h.engine.view().phase === "idle" && !h.out && this.held.get(h.key) === h) this.held.delete(h.key);
+      this.changed();
+    };
+  }
+  /** The note was started on `route`: the pill links back there. */
+  started(h: HeldNote, route: string | undefined) {
+    h.route = route;
+    h.out = undefined;
+    if (route && !h.given && !h.deliver)
+      try {
+        localStorage.setItem(ROUTE_KEY(h.key), route);
+      } catch {
+        /* storage off */
+      }
+    this.changed();
+  }
+
+  /** Notes on that no page shows: the floating pill's. */
+  floating(): HeldNote[] {
+    return [...this.held.values()].filter((h) => h.docks === 0 && (!!h.out || SHOWN.includes(h.engine.view().phase)));
+  }
+
+  /** a note is recording, paused, sending or failed (its words not yet landed) somewhere in the tab: a new build waits. */
+  busy(): boolean {
+    return [...this.held.values()].some((h) => {
+      const p = h.engine.view().phase;
+      return noteOn(p) || p === "sending" || p === "failed" || h.out?.state === "sending" || h.out?.state === "failed";
+    });
+  }
+
+  subscribe = (fn: () => void) => {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  };
+  snapshot = () => this.version;
+  private changed() {
+    this.version++;
+    for (const l of this.listeners) l();
+  }
+}
+
+/** Pages rendered without the app (tests, one page alone) share this one. */
+let fallback: NoteTab | undefined;
+const fallbackTab = () => {
+  if (!fallback) {
+    fallback = new NoteTab();
+    fallback.hook();
+  }
+  return fallback;
+};
+
+const Ctx = createContext<NoteTab | undefined>(undefined);
+
+/** The app's voice-note owner: wraps the router (App.tsx), so no page change ever stops a note. */
+export function NoteProvider(props: { children: ReactNode; tab?: NoteTab }) {
+  const [tab] = useState(() => props.tab ?? new NoteTab());
+  useEffect(() => {
+    const off = tab.hook();
+    if (!props.tab) tab.restore();
+    // notes kept on this phone (a reload, a closed tab, a console restart) are sent now, once each.
+    const offOut = props.tab ? undefined : startOutbox();
+    return () => {
+      off();
+      offOut?.();
+    };
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <Ctx.Provider value={tab}>{props.children}</Ctx.Provider>;
+}
+
+export function useNoteTab(): NoteTab {
+  return useContext(Ctx) ?? fallbackTab();
+}
+
+export const clockOf = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** The live dot: pulsing red while recording (steady with reduced motion), grey when paused. */
+export function LiveDot({ phase }: { phase: NotePhase }) {
+  const rec = phase === "recording";
+  return (
+    <span className="relative flex size-2.5 shrink-0" aria-hidden data-testid="note-dot">
+      {rec && <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500/70 motion-reduce:hidden" />}
+      <span className={cn("relative inline-flex size-2.5 rounded-full", rec ? "bg-red-600" : "bg-muted-foreground")} />
+    </span>
+  );
+}
+
+const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * the live level of the note's microphone, a small bar that fills 0 to 100 with the number beside it.
+ * It reads the engine's AnalyserNode (the recording's own stream) about 12 times a second: up at once, down slowly, so a word
+ * shows. With reduced motion the bar goes and the number alone changes, twice a second. The strip and the floating pill use it.
+ */
+export function LevelMeter({ engine, phase, value = 0, tid = "note" }: { engine?: Pick<NoteEngine, "readLevel">; phase: NotePhase; value?: number; tid?: string }) {
+  const [reduce] = useState(reducedMotion);
+  // what the meter last sampled; until its first sample (and in tests, whose clock is fake) the engine's own tick
+  const [sampled, setSampled] = useState<number>();
+  const rec = phase === "recording";
+  useEffect(() => {
+    setSampled(undefined);
+    if (!rec || !engine) return;
+    let shown = 0;
+    const t = setInterval(
+      () => {
+        const now = Math.round(engine.readLevel() * 100);
+        shown = now >= shown ? now : Math.max(now, Math.floor(shown * 0.82));
+        setSampled(shown);
+      },
+      reduce ? 500 : 80,
+    );
+    return () => clearInterval(t);
+  }, [engine, rec, reduce]);
+  const lv = rec ? (sampled ?? Math.round(value * 100)) : 0;
+  return (
+    <span
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={lv}
+      aria-label={`input level ${lv}%`}
+      title="How loud the microphone hears you, 0 to 100"
+      className="flex shrink-0 items-center gap-1.5"
+      data-testid={`${tid}-level`}
+      data-level={lv}
+    >
+      {!reduce && (
+        <span className="relative h-1.5 w-14 overflow-hidden rounded-full bg-muted-foreground/25" aria-hidden data-testid={`${tid}-level-bar`}>
+          <span className={cn("absolute inset-y-0 left-0 rounded-full", lv >= 85 ? "bg-amber-500" : "bg-red-600")} style={{ width: `${lv}%` }} />
+        </span>
+      )}
+      <span className="w-6 text-right text-[11px] tabular-nums text-muted-foreground" data-testid={`${tid}-level-num`}>
+        {lv}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Cancel: throws the note away. A note of a minute or more asks once ("Throw away 1:12?" Discard / Keep), so a stray tap never
+ * loses a long note; the question goes after 5 s.
+ */
+export function CancelNote({ engine, elapsedS }: { engine: NoteEngine; elapsedS: number }) {
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!asking) return;
+    const t = setTimeout(() => setAsking(false), 5000);
+    return () => clearTimeout(t);
+  }, [asking]);
+  if (asking)
+    return (
+      <span className="flex shrink-0 items-center gap-1.5" role="group" aria-label="Throw away this voice note?">
+        <span className="text-xs">Throw away {clockOf(elapsedS)}?</span>
+        <Button type="button" size="sm" variant="destructive" className={cn(PHONE_TAP, "h-7")} data-testid="note-discard-confirm" onClick={() => void engine.discard()}>
+          Discard
+        </Button>
+        <Button type="button" size="sm" variant="outline" className={cn(PHONE_TAP, "h-7")} data-testid="note-discard-keep" onClick={() => setAsking(false)}>
+          Keep
+        </Button>
+      </span>
+    );
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className={cn(PHONE_TAP, "h-7 shrink-0 gap-1 text-muted-foreground")}
+      aria-label="Cancel: throw this voice note away"
+      data-testid="note-discard"
+      onClick={() => (elapsedS >= CONFIRM_CANCEL_S ? setAsking(true) : void engine.discard())}
+    >
+      <X /> Cancel
+    </Button>
+  );
+}
+
+/** What a delivered (card) note's line says on its way out. */
+export const outText = (out: NonNullable<HeldNote["out"]>, to: string) =>
+  out.state === "sending" ? `Sending your answer to ${to}…` : out.state === "done" ? `Sent to ${to}${/[.?!…]$/.test(to) ? "" : "."}` : out.state === "empty" ? "Nothing was heard, so nothing was sent." : `Not sent: ${out.error}`;
+
+/** One floating note: live dot, where it goes, the time, Send, Cancel, and the link back to the page it was started on. */
+function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
+  const sub = useMemo(() => (fn: () => void) => h.engine.subscribe(fn), [h]);
+  const v: NoteView = useSyncExternalStore(sub, h.engine.view, h.engine.view);
+  const on = noteOn(v.phase);
+  const out = h.out;
+  // A chat note sent from the pill says so for a few seconds, then the pill goes.
+  useEffect(() => {
+    if (v.phase !== "sent" || h.deliver) return;
+    const t = setTimeout(() => h.engine.dismiss(), SENT_SHOW_MS);
+    return () => clearTimeout(t);
+  }, [v.phase, h]);
+  const label = out
+    ? outText(out, h.to)
+    : v.phase === "starting"
+      ? "Opening the microphone…"
+      : v.phase === "paused"
+        ? "Paused"
+        : v.phase === "sending"
+          ? h.deliver
+            ? "Saved on this phone. Writing out what you said…"
+            : "Saved on this phone, sending…"
+          : v.phase === "sent"
+            ? v.note?.state === "empty"
+              ? "Nothing was heard, nothing posted"
+              : `✓ Voice note sent to ${h.to}`
+            : v.phase === "failed"
+              ? v.error === MIC_BUSY_TEXT
+                ? v.error
+                : v.info === KEPT_FAILED_TEXT
+                  ? KEPT_TEXT
+                  : v.error?.startsWith("Not sent")
+                    ? v.error
+                    : `Not sent: ${v.error ?? ""}`
+              : "Recording";
+  const back = h.route ?? "/chat";
+  // a note the console has not confirmed yet is kept on this device and goes by itself: never shown as lost.
+  const kept = !out && v.phase === "failed" && v.info === KEPT_FAILED_TEXT;
+  const failed = (out?.state === "failed" || v.phase === "failed") && !kept;
+  return (
+    <div
+      role="region"
+      aria-label="Voice note"
+      data-testid="note-widget"
+      data-phase={out ? `out-${out.state}` : kept ? "kept" : v.phase}
+      data-key={h.key}
+      className={cn(
+        "flex items-center gap-2 rounded-full border bg-card/95 py-1.5 pl-3 pr-1.5 text-sm shadow-lg backdrop-blur max-sm:flex-wrap max-sm:rounded-2xl max-sm:p-2.5",
+        on ? "border-red-500/50" : "border-border",
+      )}
+    >
+      <LiveDot phase={v.phase} />
+      <Link to={back} data-testid="note-widget-back" className="min-w-0 flex-1 underline-offset-2 hover:underline max-sm:font-medium" title="Back to where you started this voice note">
+        <span className={cn("block", kept ? "whitespace-normal font-medium text-amber-700 dark:text-amber-400" : "truncate", failed && "text-destructive")} title={kept ? KEPT_FAILED_TEXT : undefined}>
+          {label}
+        </span>
+        {!out && v.phase !== "sent" && (
+          <span className="block truncate text-xs font-normal text-muted-foreground" data-testid="note-widget-to">
+            to: {h.to}
+          </span>
+        )}
+      </Link>
+      {on && v.phase !== "starting" && <LevelMeter engine={h.engine} phase={v.phase} value={v.level} tid="note-widget" />}
+      {!out && (
+        <span className="shrink-0 tabular-nums text-muted-foreground" data-testid="note-widget-time">
+          {clockOf(v.phase === "sent" && v.note ? v.note.seconds : v.elapsedS)}
+        </span>
+      )}
+      {(on || v.phase === "sending" || failed || kept || out?.state === "sending") && (
+        <div className="flex shrink-0 items-center gap-1.5 max-sm:ml-auto">
+          {v.phase === "paused" && (
+            <Button size="sm" variant="outline" className={cn(PHONE_TAP, "h-8 gap-1 rounded-full")} data-testid="note-widget-resume" onClick={() => void h.engine.resume()}>
+              <Play /> Resume
+            </Button>
+          )}
+          {(on || v.phase === "failed") && v.phase !== "starting" && <CancelNote engine={h.engine} elapsedS={v.elapsedS} />}
+          {out?.state === "failed" && (
+            <Button size="sm" variant="ghost" className={cn(PHONE_TAP, "h-8")} data-testid="note-widget-close" onClick={() => tab.forget(h)}>
+              <X /> Close
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="destructive"
+            className={cn(PHONE_TAP, "h-8 gap-1 rounded-full max-sm:min-w-24")}
+            data-testid="note-widget-send"
+            disabled={v.phase === "starting"}
+            pending={v.phase === "sending" || out?.state === "sending"}
+            pendingLabel="Sending…"
+            onClick={() => (out?.state === "failed" && out.note ? void tab.send(h, out.note) : void h.engine.finish())}
+          >
+            <SendHorizontal /> {kept ? "Send now" : failed ? "Send again" : "Send"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Every page (inside the router): the notes on that no page shows, floating at the bottom in the thumb's reach, clear of the
+ * top bar's pills and the Chat icon; on a computer bottom centre, clear of a call's widget (bottom right).
+ */
+export function NoteWidget() {
+  const tab = useNoteTab();
+  useSyncExternalStore(tab.subscribe, tab.snapshot, tab.snapshot);
+  const notes = tab.floating();
+  const kept = useKeptLine();
+  if (!notes.length && !kept) return null;
+  return (
+    <div className="pointer-events-none fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex max-w-[calc(100vw-1.5rem)] flex-col gap-2 max-sm:inset-x-3 max-sm:items-stretch sm:left-1/2 sm:-translate-x-1/2 sm:items-center">
+      {kept && <div className="pointer-events-auto max-w-full">{kept}</div>}
+      {notes.map((h) => (
+        <div key={h.key} className="pointer-events-auto max-w-full">
+          <Floating h={h} tab={tab} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * notes kept on this phone that no control shows (recorded before a reload, a closed tab or a console restart) say
+ * so in one small line until the console confirms them: "1 voice note saved on this phone, sending…", then "✓ Sent" a few
+ * seconds.
+ */
+export function useKeptLine(): ReactNode {
+  const st = useSyncExternalStore(subscribeOutbox, outboxState, outboxState);
+  const [, tick] = useState(0);
+  const fresh = !!st.sentAt && Date.now() - st.sentAt < SENT_SHOW_MS;
+  useEffect(() => {
+    if (!fresh) return;
+    const t = setTimeout(() => tick((x) => x + 1), SENT_SHOW_MS);
+    return () => clearTimeout(t);
+  }, [fresh, st.sentAt]);
+  if (!st.waiting && !fresh) return null;
+  const many = (n: number) => (n === 1 ? "1 voice note" : `${n} voice notes`);
+  return (
+    <div
+      role="status"
+      data-testid="note-kept"
+      data-state={st.waiting ? "waiting" : "sent"}
+      className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur max-sm:rounded-2xl"
+    >
+      <span className={cn("relative inline-flex size-2.5 shrink-0 rounded-full", st.waiting ? "bg-amber-500" : "bg-emerald-600")} aria-hidden />
+      <span className="min-w-0 truncate">{st.waiting ? `${many(st.waiting)} saved on this phone, sending…` : `✓ Sent: ${many(st.sent)} confirmed by the console`}</span>
+    </div>
+  );
+}

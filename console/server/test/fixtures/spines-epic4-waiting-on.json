@@ -1,0 +1,355 @@
+{
+ "root": "docs/EPIC-900-OPERATING-SYSTEM.md",
+ "nodes": [
+  {
+   "id": "epicspine-operating-system",
+   "path": "docs/EPIC-900-OPERATING-SYSTEM.md",
+   "title": "EPIC-900: EpicSpine operating system",
+   "parent": null,
+   "type": "root",
+   "status": "active",
+   "rollup_status": "active",
+   "dod": [
+    {
+     "id": "DOD-1",
+     "text": "A cold agent binds in three hops (AGENTS.md \u2192 this root spine \u2192 the branch matching its task), reading \u2272 100 lines before acting.",
+     "done": false
+    },
+    {
+     "id": "DOD-2",
+     "text": "The lean SKILL.md kernel and its Default Behaviors card are landed and installed copies re-synced.",
+     "done": false
+    },
+    {
+     "id": "DOD-3",
+     "text": "Strict graph validation and `python3 -B -m unittest discover -s tests` are green on main.",
+     "done": false
+    }
+   ],
+   "outcome": null,
+   "current_state": {
+    "status": "active",
+    "last_attempted": "2026-10-19 EPIC-904 major finding: console personas got no doctrine (tests leak CLAUDE_CONFIG_DIR; installer pinned the global pointer to a worktree); fix is EPIC-904 step 9, home_repo reinstalling seat1 and ~/.claude from the canonical checkout. Root swap done (ef15cfa).",
+    "result": "seat1 and ~/.claude both point at the canonical checkout; E3-2 merged (release 2026.10.19.3, 7f9643c), wt/living-tree removed",
+    "evidence": "EPIC-904 Decisions \"Personas lost the doctrine\" (845e6ff)",
+    "waiting_on": "Sam's EPIC-904 approval page; EPIC-904 step 9 (wt/config-isolation)",
+    "next_action": "E3-2 live proof (3 fresh sessions); step 3 tools on Sam's approval; poly-maker migration; bring this root to Doctrine 2 (EPIC-904 step 6).",
+    "verified_at": "2026-10-19"
+   },
+   "waiting_on": [],
+   "children": [
+    "docs/EPIC-901-COORDINATION-SIMPLIFICATION.md",
+    "docs/EPIC-902-AUDIT-REMEDIATION.md",
+    "docs/EPIC-903-EPIC-LOG.md",
+    "docs/EPIC-904-DOCTRINE-2.md"
+   ],
+   "superseded_by": null
+  },
+  {
+   "id": "epicspine-coordination-simplification",
+   "path": "docs/EPIC-901-COORDINATION-SIMPLIFICATION.md",
+   "title": "EPIC-901: Compact state and trustworthy rollups",
+   "parent": "docs/EPIC-900-OPERATING-SYSTEM.md",
+   "type": "branch",
+   "status": "done",
+   "rollup_status": "done",
+   "dod": [
+    {
+     "id": "DOD-1",
+     "text": "One authoritative current-state block with compatible legacy conflict detection and a compact active profile.",
+     "done": true
+    },
+    {
+     "id": "DOD-2",
+     "text": "Explicit GitHub and local ticket references without competing mutable ledgers.",
+     "done": true
+    },
+    {
+     "id": "DOD-3",
+     "text": "Deterministic direct-child rollup checks/previews, truthful freshness and authority-aware apply/proposal behavior.",
+     "done": true
+    },
+    {
+     "id": "DOD-4",
+     "text": "Strict validation rejects objective defects and unresolved required data; prose guidance remains advisory.",
+     "done": true
+    },
+    {
+     "id": "DOD-5",
+     "text": "Synthetic examples, focused regression suite, independent review and reviewable PR pass on a named revision.",
+     "done": true
+    }
+   ],
+   "outcome": {
+    "verdict": "accomplished",
+    "sentence": "Compact authoritative state, explicit ticket backends, freshness-aware rollups and structural strict validation were delivered and merged to main via PR #22 with 85 combined tests and independent review passing.",
+    "evidence": [
+     {
+      "done_means": "DOD-1 One authoritative current-state block with compatible legacy conflict detection and a compact active profile.",
+      "links": [
+       "17b2a81",
+       "fe91d3b"
+      ]
+     },
+     {
+      "done_means": "DOD-2 Explicit GitHub and local ticket references without competing mutable ledgers.",
+      "links": [
+       "54c44e1"
+      ]
+     },
+     {
+      "done_means": "DOD-3 Deterministic direct-child rollup checks/previews, truthful freshness and authority-aware apply/proposal behavior.",
+      "links": [
+       "fe6a638"
+      ]
+     },
+     {
+      "done_means": "DOD-4 Strict validation rejects objective defects and unresolved required data; prose guidance remains advisory.",
+      "links": [
+       "5d840a3",
+       "465d27c"
+      ]
+     },
+     {
+      "done_means": "DOD-5 Synthetic examples, focused regression suite, independent review and reviewable PR pass on a named revision.",
+      "links": [
+       "619bf81",
+       "https://github.com/Acme/epicspine-skill/pull/22",
+       "e94aa91"
+      ]
+     }
+    ],
+    "risk": "Installed-skill rollout and production adoption were out of scope; the document stays usable for reference and is reopened only if delivery scope resumes.",
+    "closed_at": "2026-10-09",
+    "closed_by": "/root delivery manager (user decision)"
+   },
+   "current_state": {
+    "status": "done",
+    "last_attempted": null,
+    "result": null,
+    "evidence": null,
+    "waiting_on": null,
+    "next_action": null,
+    "verified_at": null
+   },
+   "waiting_on": [],
+   "children": [],
+   "superseded_by": null
+  },
+  {
+   "id": "epicspine-audit-remediation",
+   "path": "docs/EPIC-902-AUDIT-REMEDIATION.md",
+   "title": "EPIC-902: Audit remediation",
+   "parent": "docs/EPIC-900-OPERATING-SYSTEM.md",
+   "type": "branch",
+   "status": "done",
+   "rollup_status": "done",
+   "dod": [
+    {
+     "id": "DOD-1",
+     "text": "Malformed Markdown rows cannot disappear from validation; empty values cannot consume following fields.",
+     "done": true
+    },
+    {
+     "id": "DOD-2",
+     "text": "Explicit dialect selection preserves strict legacy compatibility and enforces the selected acceptance surface.",
+     "done": true
+    },
+    {
+     "id": "DOD-3",
+     "text": "Non-draft issue references and ledger statuses are checked with regressions.",
+     "done": true
+    },
+    {
+     "id": "DOD-4",
+     "text": "Workflow rules use bounded relevant discovery and surface-appropriate personal verification.",
+     "done": true
+    },
+    {
+     "id": "DOD-5",
+     "text": "A complete example and quickstart validate locally; CI runs the regression suite.",
+     "done": true
+    },
+    {
+     "id": "DOD-6",
+     "text": "Independent tester verifies the integrated commit; final PR and residual risks are reported.",
+     "done": true
+    }
+   ],
+   "outcome": {
+    "verdict": "accomplished",
+    "sentence": "All six audit work packages were remediated and merged to main via PR #16; an independent tester passed 34/34 tests on Python 3.10 and 3.14 plus strict CLI checks at df3908e.",
+    "evidence": [
+     {
+      "done_means": "DOD-1 Malformed Markdown rows cannot disappear from validation; empty values cannot consume following fields.",
+      "links": [
+       "4414018"
+      ]
+     },
+     {
+      "done_means": "DOD-2 Explicit dialect selection preserves strict legacy compatibility and enforces the selected acceptance surface.",
+      "links": [
+       "037df98"
+      ]
+     },
+     {
+      "done_means": "DOD-3 Non-draft issue references and ledger statuses are checked with regressions.",
+      "links": [
+       "55642bc"
+      ]
+     },
+     {
+      "done_means": "DOD-4 Workflow rules use bounded relevant discovery and surface-appropriate personal verification.",
+      "links": [
+       "b1ce6d2"
+      ]
+     },
+     {
+      "done_means": "DOD-5 A complete example and quickstart validate locally; CI runs the regression suite.",
+      "links": [
+       "bfbc261",
+       "42e7e14"
+      ]
+     },
+     {
+      "done_means": "DOD-6 Independent tester verifies the integrated commit; final PR and residual risks are reported.",
+      "links": [
+       "df3908e",
+       "https://github.com/Acme/epicspine-skill/pull/16",
+       "a8ea607"
+      ]
+     }
+    ],
+    "risk": "Validation checks recorded structure and uses keyword heuristics for some prose contracts; it does not prove execution or verify remote issue existence. Installed-skill rollout was a separate step.",
+    "closed_at": "2026-10-09",
+    "closed_by": "/root delivery manager (user decision)"
+   },
+   "current_state": {
+    "status": "done",
+    "last_attempted": null,
+    "result": null,
+    "evidence": null,
+    "waiting_on": null,
+    "next_action": "none; closed by user decision 2026-10-09. Reopen only if delivery scope resumes.",
+    "verified_at": null
+   },
+   "waiting_on": [],
+   "children": [],
+   "superseded_by": null
+  },
+  {
+   "id": "epicspine-epic-log",
+   "path": "docs/EPIC-903-EPIC-LOG.md",
+   "title": "EPIC-903: Epic log",
+   "parent": "docs/EPIC-900-OPERATING-SYSTEM.md",
+   "type": "branch",
+   "status": "active",
+   "rollup_status": "active",
+   "dod": [
+    {
+     "id": "E3-1",
+     "text": "The skill ships it: the definition, `spine_new.py`, `spines.py --json` and the commit check are released on main with tests green.",
+     "done": true
+    },
+    {
+     "id": "E3-2",
+     "text": "Agents keep it true: every new ask is answered with a `Goal: EPIC-<n>` line and lands in the tree; done or replaced goals close; goals active but untouched 14 days are flagged. Measured by tests plus 3 fresh sessions in different repos.",
+     "done": false
+    },
+    {
+     "id": "E3-3",
+     "text": "Every repo conforms: `spines.py --json` on each repo on main shows 0 orphans and 0 mismatches, or each exception is recorded in that repo; repos without a root were offered one and the answer is recorded. Proof: a published before/after table.",
+     "done": false
+    },
+    {
+     "id": "E3-4",
+     "text": "The console sees it: the home_repo milestone picker lists poly-maker E4, read from `spines.py --json`.",
+     "done": false
+    },
+    {
+     "id": "E3-5",
+     "text": "\"On latest EpicSpine\" means installed and conforming (E3-3 green): an Operating Learning in EPIC-900, and no current instruction says otherwise.",
+     "done": false
+    }
+   ],
+   "outcome": null,
+   "current_state": {
+    "status": "active",
+    "last_attempted": "2026-10-19 E3-2 merged (c320d91..61d7e03, release 2026.10.19.3): EPIC codes in spine_new, --active, stale goals via the 15-min background sync (SessionStart stays scan-free), Superseded by:, lean Current State warning, rule 6 Record; scripts handed to EPIC-904",
+    "result": "main @ 61d7e03, full suite with CLAUDE_CONFIG_DIR/CODEX_HOME/XDG_CONFIG_HOME isolated: 517 tests, 516 OK; only test_url_gate localhost (pre-existing load flake, also red on main before E3-2)",
+    "evidence": "docs/handoffs/2026-10-19-spine-conformance.md",
+    "waiting_on": "none",
+    "next_action": "watch the poly-maker migration thread (mcp:766a969a; run 1 cancelled by a T3 restart with no changes, restarted 2026-10-19); full isolated suite on main rerunning (first run killed by the restart); E3-2 live proof: 3 fresh sessions in different repos; home_repo reports E3-4; then launch the memo migration",
+    "verified_at": "2026-10-19"
+   },
+   "waiting_on": [],
+   "children": [],
+   "superseded_by": null
+  },
+  {
+   "id": "epicspine-doctrine-2",
+   "path": "docs/EPIC-904-DOCTRINE-2.md",
+   "title": "EPIC-904: Doctrine 2 semantic goal tree",
+   "parent": "docs/EPIC-900-OPERATING-SYSTEM.md",
+   "type": "branch",
+   "status": "active",
+   "rollup_status": "active",
+   "dod": [
+    {
+     "id": "E4-1",
+     "text": "New epics follow the doctrine by default: `spine_new.py` writes Goal, Serves and Done means, and adds a \"contributes\" sentence for the child in its parent's Spine Map; the commit check blocks a newly added epic without them (existing epics keep passing). Released on main, tests green.",
+     "done": false
+    },
+    {
+     "id": "E4-2",
+     "text": "The doctrine is written down, unversioned: `references/spine-model.md` holds one current definition with the L-16 vocabulary (tree from EPIC-900; leaf = epic or page; only epics have required structure; intent or goal must be an epic; learning L-<n>; step = testable mid-outcome closed with evidence; unlinked = orphan). It is one short page a newcomer reads, replaces skill text rather than adding to it (net skill size does not grow), and everything it requires is enforced at the trackable level or dropped. `spines.py --json` returns `goal`, `serves`, `done_means`, each child's `contributes`, each epic's pages, orphan pages, and `missing_sections`. Sam has approved the text.",
+     "done": false
+    },
+    {
+     "id": "E4-3",
+     "text": "home_repo reads it: the console Overview of a Doctrine 2 spine shows Goal, the Serves chain up to the root, the children with their contributes sentences, and Done means above the tickets, read from `spines.py --json`. Checked on a live spine with a screenshot.",
+     "done": false
+    },
+    {
+     "id": "E4-4",
+     "text": "The compliance test passes: a fresh poly-maker session, asked only \"make Epic 4 compliant with the latest EpicSpine doctrine\", brings poly-maker E4 to Doctrine 2 without further instructions, and the console shows the result. Where poly-maker E4's \"why\" is not written anywhere in the repo, the agent asks Sam rather than inventing one (one question about the why is a good result).",
+     "done": false
+    },
+    {
+     "id": "E4-5",
+     "text": "A fresh agent can pick up a spine cold: launched against a Doctrine 2 spine with no other brief, it states the goal, what done means, its next action and where its context lives, without asking. Tested on EPIC-904 itself and on poly-maker E4 after migration.",
+     "done": false
+    }
+   ],
+   "outcome": null,
+   "current_state": {
+    "status": "active",
+    "last_attempted": "2026-10-21 steps 10+11 verified done (2026.10.20.2); step 12 human asks placed and contract published; step 9 worker resumed",
+    "result": "10, 11, 12 done (12 released 2026.10.21.1); 9 in progress (WIP 6439309); steps 1+2 still awaiting Sam since 2026-10-19",
+    "evidence": "21adcba (release 2026.10.20.2); [human-asks.md](doctrine/human-asks.md)",
+    "waiting_on": "Sam (1 ask, see Waiting on)",
+    "next_action": "verify and merge step 9 (release 2026.10.21.2); on Sam's approval merge wt/doctrine-2 and dispatch step 3",
+    "verified_at": "2026-10-21"
+   },
+   "waiting_on": [
+    {
+     "who": "Sam",
+     "ask": "approve",
+     "question": "Approve the doctrine page and enforcement plan (steps 1+2) as one?",
+     "options": [],
+     "recommend": "approve, with both small answers yes",
+     "context": "http://main.tail.example:36879/index.html",
+     "since": "2026-10-19",
+     "row": "1",
+     "state": "open",
+     "answer": null
+    }
+   ],
+   "children": [],
+   "superseded_by": null
+  }
+ ],
+ "orphans": [],
+ "mismatches": [],
+ "stale": []
+}

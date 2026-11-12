@@ -1,0 +1,66 @@
+/* the steps-page kit (Done switch, then three states and a note box) (paper style: one ink, one deep green). Override the colours with
+   --sk-accent / --sk-line / --sk-muted on the page. */
+.sk-done { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .9rem; margin-top: .9rem; padding: .65rem .75rem; border: 1px dashed var(--sk-accent, #1f4d3a); border-radius: 10px; }
+.sk-switch { display: inline-flex; align-items: center; gap: .65rem; cursor: pointer; font-weight: 600; min-height: 2.2rem; }
+.sk-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sk-track { position: relative; width: 3.1rem; height: 1.8rem; border-radius: 999px; background: var(--sk-line, #c9c1ae); transition: background .15s; flex: none; }
+.sk-knob { position: absolute; top: .2rem; left: .2rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.sk-switch input:checked + .sk-track { background: var(--sk-accent, #1f4d3a); }
+.sk-switch input:checked + .sk-track .sk-knob { transform: translateX(1.3rem); }
+.sk-switch input:focus-visible + .sk-track { outline: 2px solid var(--sk-accent, #1f4d3a); outline-offset: 2px; }
+.sk-switch input:disabled + .sk-track { opacity: .55; }
+.sk-done.is-busy .sk-state::before { content: ""; display: inline-block; width: .8em; height: .8em; margin-right: .4em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -.1em; animation: sk-spin .8s linear infinite; }
+.sk-state { color: var(--sk-muted, #4a554e); font-size: .9rem; }
+.sk-state.ok { color: var(--sk-accent, #1f4d3a); }
+.sk-state.err { color: #9b2c1f; }
+.sk-banner { background: #f8e5df; border: 1px solid #9b2c1f; color: #5c1a12; border-radius: 9px; padding: .55rem .75rem; font-size: .92rem; }
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+/* three states and a note box per step. */
+.sk-done { flex-direction: column; align-items: stretch; }
+.sk-seg { display: flex; border: 1px solid var(--sk-accent, #1f4d3a); border-radius: 9px; overflow: hidden; }
+.sk-seg button { flex: 1; font: 600 .95rem system-ui, sans-serif; padding: .6rem .3rem; min-height: 2.6rem; border: 0; border-left: 1px solid var(--sk-accent, #1f4d3a); background: transparent; color: var(--sk-accent, #1f4d3a); cursor: pointer; }
+.sk-seg button:first-child { border-left: 0; }
+.sk-seg button[aria-pressed="true"] { background: var(--sk-accent, #1f4d3a); color: #fff; }
+.sk-seg button[data-s="stuck"][aria-pressed="true"] { background: #9b2c1f; }
+.sk-seg button:disabled { opacity: .6; cursor: default; }
+.sk-note { display: flex; gap: .5rem; align-items: flex-end; }
+.sk-note textarea { flex: 1; font: 400 .95rem system-ui, sans-serif; padding: .45rem .55rem; border: 1px solid var(--sk-line, #c9c1ae); border-radius: 8px; background: #fff; resize: vertical; min-height: 2.6rem; }
+.sk-send { font: 600 .9rem system-ui, sans-serif; padding: .55rem .9rem; border: 1px solid var(--sk-accent, #1f4d3a); border-radius: 8px; background: var(--sk-accent, #1f4d3a); color: #fff; cursor: pointer; }
+.sk-send:disabled { opacity: .45; cursor: default; }
+.sk-notes { margin: 0; padding-left: 1.1rem; color: var(--sk-muted, #4a554e); font-size: .9rem; }
+[data-step].is-stuck { border-color: #9b2c1f; }
+/* a step's private box (write-only key paste) above its buttons. */
+.sk-key { display: flex; flex-direction: column; gap: .45rem; padding: .65rem .7rem; border: 1px solid var(--sk-accent, #1f4d3a); border-radius: 9px; background: #f3f6f2; }
+.sk-key-head { display: flex; align-items: center; gap: .45rem; font-size: .95rem; color: var(--sk-accent, #1f4d3a); }
+.sk-key-head code { font: 600 .85rem ui-monospace, monospace; color: var(--sk-muted, #4a554e); overflow-wrap: anywhere; }
+.sk-key-lock { width: .8rem; height: .65rem; border: 2px solid currentColor; border-radius: 2px; position: relative; margin-top: .3rem; flex: none; }
+.sk-key-lock::before { content: ""; position: absolute; left: .08rem; top: -.55rem; width: .45rem; height: .45rem; border: 2px solid currentColor; border-bottom: 0; border-radius: .4rem .4rem 0 0; }
+.sk-key-row { display: flex; gap: .5rem; }
+.sk-key-row input { flex: 1; min-width: 0; font: 400 1rem ui-monospace, monospace; padding: .55rem .6rem; border: 1px solid var(--sk-line, #c9c1ae); border-radius: 8px; background: #fff; }
+.sk-key-save { font: 600 .92rem system-ui, sans-serif; padding: .55rem .85rem; border: 0; border-radius: 8px; background: var(--sk-accent, #1f4d3a); color: #fff; cursor: pointer; white-space: nowrap; }
+.sk-key-save:disabled { opacity: .45; cursor: default; }
+.sk-key-note { margin: 0; font-size: .85rem; color: var(--sk-muted, #4a554e); }
+.sk-key.is-set { background: transparent; }
+.sk-key.is-set .sk-key-note { color: var(--sk-accent, #1f4d3a); font-weight: 600; }
+/* a file box (a JSON key file): the picker looks like the paste box, its file name is never shown. */
+.sk-file-pick { flex: 1 1 11rem; min-width: 0; position: relative; display: flex; align-items: center; padding: .55rem .6rem; border: 1px dashed var(--sk-accent, #1f4d3a); border-radius: 8px; background: #fff; cursor: pointer; font: 600 .95rem system-ui, sans-serif; color: var(--sk-accent, #1f4d3a); }
+.sk-key-row .sk-file-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; flex: none; padding: 0; border: 0; }
+.sk-file-pick:focus-within { outline: 2px solid var(--sk-accent, #1f4d3a); outline-offset: 2px; }
+.sk-file-pick[hidden] { display: none; }
+.sk-file-missing { color: #8a3b12; font-weight: 600; }
+/* on a phone the box wraps (button under the input) and never pushes the step's buttons past the card. */
+.sk-done > * { min-width: 0; }
+.sk-key-row { flex-wrap: wrap; }
+.sk-key-row input { flex: 1 1 11rem; width: 0; }
+.sk-key-save { flex: 1 0 auto; }
+/* the voice button of a step's note box (it opens the console's recorder) */
+.sk-voice { font: 600 .9rem system-ui, sans-serif; padding: .55rem .8rem; border: 1px solid var(--sk-accent, #1f4d3a); border-radius: 8px; background: #fff; color: var(--sk-accent, #1f4d3a); cursor: pointer; white-space: nowrap; }
+.sk-voice:hover { background: #eef3ef; }
+/* a command the owner must still run says where, in large words, above it (`data-runs-on` on its pre or code) */
+.sk-where { font: 700 1.35rem/1.25 system-ui, sans-serif; margin: 1rem 0 .35rem; padding: .55rem .8rem; border-left: 6px solid var(--sk-accent, #1f4d3a); background: #eef3ef; color: #12241b; }
+.sk-where small { display: block; font: 500 .9rem/1.4 system-ui, sans-serif; color: #4a554e; }
+/* on a phone the note row wraps (box on its own line, Voice and Send under it) and never pushes Stuck or Send past the card. */
+.sk-note { flex-wrap: wrap; }
+.sk-note textarea { flex: 1 1 100%; min-width: 0; width: 0; }
+.sk-voice, .sk-send { flex: 1 1 auto; }
+@media (min-width: 560px) { .sk-note { flex-wrap: nowrap; } .sk-note textarea { flex: 1 1 auto; } .sk-voice, .sk-send { flex: none; } }
