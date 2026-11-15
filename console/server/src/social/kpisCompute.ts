@@ -1,11 +1,22 @@
 import type { Post as FullPost } from "./types.js";
 
 /** The fields of a posts-ledger row the numbers read (the web's sample rows have the same). */
-type Post = Pick<FullPost, "id" | "date" | "kind" | "platform" | "status" | "replies" | "metrics" | "link" | "title" | "community">;
+type Post = Pick<FullPost, "id" | "date" | "kind" | "platform" | "status" | "replies" | "metrics" | "link" | "title" | "community"> & { text?: string | null };
 /** What the numbers are computed from: the export's posts and messages (the server's export or the web mock's sample). */
 export interface KpiInput {
   posts?: Post[] | null;
   messages?: { chats: { id: string | null; platform: string | null }[]; messages: { chat: string | null; at: string | null; from: string | null }[] } | null;
+  /** counted visits (tests left out) per day, site host and source (a post id from `?s=`), from console.db site_visits. */
+  visits?: TracedRow[] | null;
+  /** sign-ups (tests left out) with their day, site host and the source of the visit that led to them. */
+  signups?: TracedRow[] | null;
+}
+/** One traced visit or sign-up row: its UTC day, the site's host, its source (a post id, a referring host, direct), how many. */
+export interface TracedRow {
+  day: string;
+  site: string | null;
+  source: string;
+  n: number;
 }
 
 /**
@@ -27,7 +38,7 @@ export interface KpiInput {
 export const KPI_FILE = "data/kpi-daily.md";
 export const PLATFORMS = ["x", "reddit"] as const;
 export type KpiPlatform = (typeof PLATFORMS)[number];
-export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions", "likes", "postReplies", "views"] as const;
+export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions", "likes", "postReplies", "views", "leads"] as const;
 export type SeriesKey = (typeof SERIES)[number];
 
 export interface KpiPoint {
@@ -334,6 +345,43 @@ function viewsLostSince(live: Post[]): string | null {
   return m[0] ?? null;
 }
 
+// -------------------------------------------------------------------------------------------------------------------- leads
+
+/** "app.example.com", "www.example.org" → "example.com", "example.org": a site and its sub-sites count as one. */
+export const domainOf = (host: string | null | undefined): string => (host ?? "").trim().toLowerCase().replace(/\.$/, "").split(".").slice(-2).join(".");
+
+/**
+ * Leads: the traced links of a campaign's live rows: every address in a row's text or link that carries `?s=<its post id>`
+ * (`https://example.com/testers?s=P-0042`), as `<domain>|<ID>`, so two campaigns that number their posts alike never mix.
+ */
+export function tracedLinks(posts: Post[]): Set<string> {
+  const out = new Set<string>();
+  for (const p of posts) {
+    if (!p.id) continue;
+    for (const m of `${p.text ?? ""} ${p.link ?? ""}`.matchAll(/https?:\/\/([^\s/?#)|\]]+)[^\s)|\]]*?[?&]s=([A-Za-z0-9._-]{1,40})/g)) {
+      if (m[2].toUpperCase() === p.id.toUpperCase()) out.add(`${domainOf(m[1])}|${p.id.toUpperCase()}`);
+    }
+  }
+  return out;
+}
+
+/** Leads of one platform: visits to our sites that came through a traced link of its live rows, per day; sign-ups in the note. */
+export function leadsSeries(live: Post[], data: KpiInput, today: string): KpiSeries {
+  const links = tracedLinks(live);
+  const hit = (r: TracedRow) => links.has(`${domainOf(r.site)}|${String(r.source ?? "").toUpperCase()}`);
+  const by = new Map<string, number>();
+  for (const r of data.visits ?? []) if (hit(r)) add(by, r.day, r.n);
+  const signed = (data.signups ?? []).filter(hit).reduce((a, r) => a + r.n, 0);
+  const ids = new Set([...links].map((k) => k.split("|")[1]));
+  const firstTraced = live.filter((p) => ids.has((p.id ?? "").toUpperCase())).map((p) => dayOf(p.date)).filter((d): d is string => !!d).sort()[0];
+  const linked = ids.size;
+  const how = `Visits to our sites through a link in our posts, traced by the post's id. ${linked} of ${live.length} live posts carry one.`;
+  const src = `${signed} ${signed === 1 ? "sign-up" : "sign-ups"} came from these links. Our own counter on each site and our sign-up records.`;
+  if (!firstTraced && !by.size) return { key: "leads", since: null, points: [], kind: "count", note: `No live post carries a traced link yet.`, source: src };
+  const since = [firstTraced, ...by.keys()].filter((d): d is string => !!d).sort()[0];
+  return { key: "leads", since, points: daysBetween(since, today).map((date) => ({ date, value: by.get(date) ?? 0 })), kind: "count", note: how, source: src };
+}
+
 export function computeKpis(data: KpiInput, snapshots: SnapshotRow[], today: string, listed?: Partial<Record<KpiPlatform, string[]>>): Omit<SocialKpisBody, "tenantId" | "repo"> {
   const platforms: PlatformKpis[] = PLATFORMS.map((platform) => {
     const label = platform === "x" ? "X" : "Reddit";
@@ -391,6 +439,7 @@ export function computeKpis(data: KpiInput, snapshots: SnapshotRow[], today: str
       postReplies: countsSeries("postReplies", snaps, listed?.[platform] ?? [], "Public replies"),
       // X views of our live posts from the same daily free read (the page shows it once it has a reading).
       views: countsSeries("views", snaps, listed?.[platform] ?? [], "Views"),
+      leads: leadsSeries(live, data, today),
     };
     return { platform, label, account: (listed?.[platform]?.length ?? 0) > 1 ? listed![platform]!.join(" and ") : snaps.length ? snaps[snaps.length - 1].account : null, series, best: bestPost(data.posts ?? [], platform) };
   });
