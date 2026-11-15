@@ -49,7 +49,7 @@ describe("his objectives first", () => {
     const line = objectivesOneLine(body, words);
     expect(line).toBe("1. Five teams use Acme every week (2 of 3 key results green; moved today: 1 turned green) ; 2. Five teams use Widget (1 of 2 key results green; not moved today)");
     const rules = workerBriefRules(line);
-    expect(rules).toHaveLength(10);
+    expect(rules).toHaveLength(11);
     expect(rules[0]).toBe(objectivesRule(line));
     expect(rules[0]).toContain('"which objective does this move?"');
     expect(rules[0]).toContain(`His objectives now: ${line}.`);
@@ -66,7 +66,7 @@ describe("his objectives first", () => {
       objectivesLine: "1. Acme (2 of 3)",
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these ten rules");
+    expect(brief).toContain("these eleven rules");
     expect(brief).toContain("His objectives now: 1. Acme (2 of 3).");
   });
 });

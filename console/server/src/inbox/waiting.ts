@@ -92,6 +92,11 @@ export interface WaitingItem {
   /** on the stored answer: where the console handed it (`<repo>:<note path>`), or why it could not. */
   improvementHanded?: string;
   improvementError?: string;
+  /** a priority ask (`label: priority`): the objective his Yes puts first; pinned above everything in his inbox. */
+  putFirst?: { objective: string };
+  /** on the stored answer: the pursuits.json commit his Yes made (or why it could not). */
+  priorityMoved?: string;
+  priorityError?: string;
   /** Asks: the answer written back in the spine. */
   answer?: string;
   who?: string;
@@ -690,6 +695,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             // Mac list (T9-A10, labelled needs Mac agent, sat folded under Needs Mac agent and the owner never saw its box).
             ...(a.state === "open" && a.doneAt === undefined && a.macAgent && !a.secret ? { macAgent: true as const } : {}),
             ...(a.improvement ? { improvement: a.improvement } : {}),
+            ...(a.putFirst ? { putFirst: a.putFirst } : {}),
             repo: repo.name,
             ...(a.code ? { code: a.code } : {}),
             ...(a.steps ? { steps: a.steps } : {}),

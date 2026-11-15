@@ -6,6 +6,7 @@ import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { proseLines, stripInline } from "../adapters/markdown.js";
 import { IMPROVEMENT_QUESTION, isImprovementLabel, type Improvement } from "./improvement.js";
+import { isPriorityLabel, OBJECTIVE_SEG, priorityAskRule } from "./priorityAsk.js";
 import { DEFAULT_OWNER, ownerPatterns } from "../tenancy/owner.js";
 import { deployerName, homeRepo, mainHost, opsRepo, ownerName, sites } from "../identity.js";
 
@@ -330,6 +331,7 @@ export const ASK_TYPE_RULES = [
   "Irreversible, data-deleting, access-widening or production-config steps in the ask tier are an `approve` ask: say what it does, why, and the rollback;",
   `after ${ownerName()} approves, YOU run it and record the result. Use \`do\` only for what only ${ownerName()} can physically do (his face or voice, his phone, payments, his identity); a form, a sign-up or a sign-in goes to the Team Browser or the server browser first, and only what they cannot do reaches him, its \`why ${ownerName()}:\` saying what stopped them.`,
   ASK_GATE_RULE,
+  priorityAskRule(ownerName()),
 ];
 
 export type AskKind = "decide" | "approve" | "provide" | "do" | "unknown";
@@ -400,6 +402,12 @@ export interface HumanAsk {
   macAgent?: true;
   /** `— label: improvement request` with `— to: <world>`, `— campaign: …`, `— done means: …` (inbox/improvement.ts). */
   improvement?: Improvement;
+  /**
+   * `— label: priority` with `— objective: <pursuit id>` (the owner, vn_cdcf1208): one of his notes named a new first
+   * thing, so the team asks one line, "Put X first in your objectives?". The inbox pins it above everything; his Yes moves
+   * that objective to the top of docs/pursuits.json (inbox/priorityAsk.ts), his No closes it.
+   */
+  putFirst?: { objective: string };
   /**
    * who approves the answer (`approve by @Marta`): the row stays blocked until they do.
    * `aware`: who hears the outcome without acting (`aware @the owner, @Sofia`). `escalatedBy`: who passed it up (`escalated
@@ -619,6 +627,7 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
     };
     if (MAC_QUESTION.test(ask.question)) ask.macAgent = true;
     const improve: { label: boolean; to?: string; campaign?: string; doneMeans?: string; raw: string[] } = { label: IMPROVEMENT_QUESTION.test(ask.question), raw: [] };
+    const prio: { label: boolean; objective?: string; raw?: string } = { label: false };
     for (const seg of segs.slice(1)) {
       const snooze = SNOOZE_SEG.exec(seg);
       if (snooze) {
@@ -632,6 +641,16 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
       }
       if (label && isImprovementLabel(label[1])) {
         improve.label = true;
+        continue;
+      }
+      if (label && isPriorityLabel(label[1])) {
+        prio.label = true;
+        continue;
+      }
+      const obj = OBJECTIVE_SEG.exec(seg);
+      if (obj) {
+        prio.objective = stripInline(obj[1]).trim();
+        prio.raw = stripInline(seg);
         continue;
       }
       // the improvement request's own fields (kept aside; an ask without the label keeps them as text).
@@ -684,6 +703,8 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
     }
     if (improve.label && improve.to) ask.improvement = { to: improve.to, ...(improve.campaign ? { campaign: improve.campaign } : {}), ...(improve.doneMeans ? { doneMeans: improve.doneMeans } : {}) };
     else if (improve.raw.length) ask.question = [ask.question, ...improve.raw].join(" — ");
+    if (prio.label && prio.objective) ask.putFirst = { objective: prio.objective };
+    else if (prio.raw) ask.question = `${ask.question} — ${prio.raw}`;
     if (ask.question) out.push(ask);
   });
   return out;
@@ -892,6 +913,8 @@ export function asksFor(repoDir: string, rel: string, spinesWaitingOn?: unknown)
           // the Mac label, from the file as it is now when the twin is found.
           ...((twin ? twin.macAgent : macFromSpines) ? { macAgent: true as const } : {}),
           // spines.py glues the improvement fields onto the field before them: the markdown twin reads them apart.
+          // the same for a priority ask: its objective and plain fields from the file.
+          ...(twin?.putFirst ? { putFirst: twin.putFirst, question: twin.question, unblocks: twin.unblocks, recommend: twin.recommend, context: twin.context, contextText: twin.contextText, impact: twin.impact, risk: twin.risk, why: twin.why, answer: a.answer ?? twin.answer } : {}),
           ...(twin?.improvement ? { improvement: twin.improvement, question: twin.question, unblocks: twin.unblocks, recommend: twin.recommend, context: twin.context, contextText: twin.contextText, impact: twin.impact, risk: twin.risk, why: twin.why, answer: a.answer ?? twin.answer } : {}),
         };
       });

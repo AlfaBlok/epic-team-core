@@ -1572,6 +1572,32 @@ function runHref(i: WaitingItem): { href: string; label: string; internal?: bool
 export const AS_OF_QUIET_MS = 2 * 60_000;
 export const staleAsOf = (asOf: string, now = Date.now()) => now - Date.parse(asOf) > AS_OF_QUIET_MS;
 
+/** an open priority ask (the owner, vn_cdcf1208: "if the question reaches me 10 notifications deep ... we've defeated the purpose"). */
+export const isPinnedPriority = (i: WaitingItem) => !!i.putFirst && i.state === "open" && !i.snoozedUntil && !i.macAgent;
+
+/**
+ * the one-line question on his order of work, "Put X first in your objectives?", sits first in his Inbox,
+ * above every section and every pressing item, until he answers it (Yes puts X first in his objectives, No closes it).
+ * The same card as everywhere (L-2): no new colour, no new box.
+ */
+export function PinnedPriorityAsks() {
+  const { data } = useWaitingList();
+  const project = useProject();
+  const { entries: snoozes } = useSnoozes();
+  const list = (withSnoozes(data, snoozes) ?? []).filter((i) => isPinnedPriority(i) && (!project.current || project.keep(i.milestoneId)));
+  const qualify = new Set(list.map((i) => i.repo).filter(Boolean)).size > 1;
+  if (!list.length) return null;
+  return (
+    <div className="mb-4 grid gap-3" data-testid="pinned-priority">
+      {list.map((i) => (
+        <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective}>
+          <WaitingCard item={i} showMilestone qualify={qualify} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function WaitingOnYou({
   milestoneId,
   nodeKey,
@@ -1681,9 +1707,12 @@ export function WaitingOnYou({
   // the open items are `blockedItems`, the function the red pills count with: one row per item, a card when this
   // list has one for it, else its status row, so the count and the rows are the same list (before, an item with a list
   // entry but no card, a guessed line, was counted and shown nowhere).
-  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && (!hits || hits.has(st.id))) : undefined;
+  // an open priority ask ("Put X first in your objectives?") is pinned above every section of the Inbox
+  // (PinnedPriorityAsks), so the world-wide list leaves it out instead of showing it twice.
+  const pinned = !milestoneId && !spine ? new Set((data ?? []).filter(isPinnedPriority).map((i) => i.id)) : new Set<string>();
+  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && !pinned.has(st.id) && (!hits || hits.has(st.id))) : undefined;
   const blockedIds = blocked && new Set(blocked.map((i) => i.id));
-  const isOpen = (i: WaitingItem) => (blockedIds ? blockedIds.has(i.id) : pending(i));
+  const isOpen = (i: WaitingItem) => (blockedIds ? blockedIds.has(i.id) : pending(i) && !pinned.has(i.id));
   // a Mark ready item (the owner's ready stamp) is the status row with the stamp button, never a guessed card.
   const stampItem = (i: WaitingItem) => i.signal === "stamp_ready";
   const cards = new Map(items.filter((i) => isStructured(i) && !stampItem(i)).map((i) => [i.id, i]));

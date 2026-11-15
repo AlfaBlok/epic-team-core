@@ -26,7 +26,7 @@ describe("T8-S10 finish the job (root L-16)", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these ten rules");
+    expect(brief).toContain("these eleven rules");
     expect(brief).toContain(`"${FINISH_THE_JOB_RULE}"`);
   });
 

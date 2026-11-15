@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ownerName } from "../identity.js";
 import { objectiveLines, type ObjectivesInput } from "../objectives.js";
+import { priorityAskRule } from "../inbox/priorityAsk.js";
 
 /**
  * His objectives, read against each message he sends the Team desk. Nothing here is a list of its
@@ -139,6 +140,7 @@ export function objectivesContext(f: HisWordsFile | undefined, input: Objectives
     CONTEXT_MARKER,
     `His ${lines.length} objectives live from the objectives screen (his order) and ${worlds.length ? `the other world${worlds.length > 1 ? "s" : ""} he names` : "no other world"}; his words from ${WORDS_FILE} (his voice notes${stale ? ", STALE: run scripts/his_words.py refresh" : ""}). Console context, not ${ownerName()}'s words.`,
     "Read his message against his objectives first, keep to them not the details; unsure which pursuit or what it changes: ask him one open question.",
+    priorityAskRule(ownerName()),
   ];
   // 2 = the message fully names it, 1 = it names its subject only, 0 = not named
   type Row = { touched: number; order: number; full: string; short: string };
@@ -157,7 +159,7 @@ export function objectivesContext(f: HisWordsFile | undefined, input: Objectives
   const body = sorted.map((r) => (r.touched ? r.full : r.short));
   if (sorted.some((r) => r.touched)) head.push(`His message names the first ${sorted.filter((r) => r.touched).length} (with his words); the rest follow in his order.`);
   let out = [...head, ...body, CONTEXT_END].join("\n");
-  if (out.length > CONTEXT_MAX_CHARS) out = [...head, ...body.map((l) => cut(l, Math.floor((CONTEXT_MAX_CHARS - 600) / body.length))), CONTEXT_END].join("\n");
+  if (out.length > CONTEXT_MAX_CHARS) out = [...head, ...body.map((l) => cut(l, Math.floor((CONTEXT_MAX_CHARS - 800) / body.length))), CONTEXT_END].join("\n");
   return out;
 }
 

@@ -96,14 +96,25 @@ export const WORKER_TIER_RULE =
   ASK_WRITING_RULE;
 
 /**
- * the ten rules every worker brief carries verbatim, in order, as one list: the wake's dispatch step prints
+ * the eleven rules every worker brief carries verbatim, in order, as one list: the wake's dispatch step prints
  * them and `GET /api/worker-rules` serves them, so a manager's own brief helper never copies a stale set (one such
  * helper kept a copy a day old and missed the visual-first rule in every brief after). The first is the owner's
  * objectives with their live list ("which objective does this move?" opens every plan and report).
  */
 export function workerBriefRules(objectivesLine?: string): string[] {
-  return [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE];
+  return [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
 }
+
+/**
+ * the X links the owner sends: each is one entry in the home repo's docs/tool-scout/tools.json with topic tags and the
+ * nodes of the data graph it informs; every worker reads the ones on its row's nodes or sharing its row's tags before
+ * it plans, so none is lost.
+ */
+export const X_LINKS_RULE =
+  `Before you plan, read the X links ${ownerName()} sent that touch your row: \`python3 ~/github/${homeRepo()}/scripts/x_links.py for <your row> [--repo <your checkout>]\` ` +
+  "prints each one on your row's place in the data graph (its product, objective, campaign) or sharing its topic tags, with its lesson; " +
+  "use what applies and name it in your plan. Search more with `x_links.py search <words>`. " +
+  `When ${ownerName()} sends a new X link, its entry gets tags and nodes the same day (AGENTS.md).`;
 
 /** a child-run create that times out may still have created the run; the retry must not make a second one. */
 export const CHILD_RUN_RETRY_RULE =
@@ -201,7 +212,7 @@ export function wakeProtocol(o: {
         ...(o.deckUrl
           ? [`      Its brief opens with the line \`${deckBriefLine(o.deckUrl)}\` and, when it names a Bound epic, \`This epic's deck: ${o.deckUrl}&epic=<that epic's EPIC-n>\`.`]
           : []),
-        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, these ten rules:",
+        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, these eleven rules:",
         ...workerBriefRules(o.objectivesLine).map((r) => `      "${r}"`),
         `      A brief helper of your own (a script, a rules file) reads them fresh each wake from \`${base}/api/worker-rules\` (plain text, one quoted rule a line), never a copy kept from an earlier wake.`,
         ...(grants.length ? [`      ${GRANT_BRIEF_RULE}`] : []),

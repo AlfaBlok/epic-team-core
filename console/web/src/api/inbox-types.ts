@@ -202,6 +202,8 @@ export interface WaitingItem {
   macAgent?: true;
   /** an improvement request from the social product: which world builds it, for which campaign, what done means. */
   improvement?: { to: string; campaign?: string; doneMeans?: string };
+  /** a priority ask: "Put X first in your objectives?"; pinned above everything in his inbox, his Yes puts X first. */
+  putFirst?: { objective: string };
   state: "open" | "answered" | "done" | "superseded";
   /** the spine line is `[feedback …]`: the owner asked for changes; the work is reopened. */
   feedback?: boolean;

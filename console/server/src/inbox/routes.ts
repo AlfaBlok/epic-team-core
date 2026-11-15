@@ -1,3 +1,4 @@
+import { saysYes } from "./priorityAsk.js";
 import { HIS_WORDS_MAX } from "../hisWords.js";
 import { addGrant, grantPrefix } from "../approvals.js";
 import { listView, wantsListView } from "./slimList.js";
@@ -461,7 +462,9 @@ export function mountInbox(
      * an approved improvement request goes to the world that builds it (inbox/improvement.ts): one desk note in its
      * repo, after his answer is in the spine. `retry` = worth trying again (git, a checkout not there yet).
      */
-    improvement?: (r: JordiResponse) => Promise<{ ok: true; note: string } | { ok: false; retry: boolean; error: string }> },
+    improvement?: (r: JordiResponse) => Promise<{ ok: true; note: string } | { ok: false; retry: boolean; error: string }>;
+    /** his Yes on a priority ask puts its objective first in docs/pursuits.json (inbox/priorityAsk.ts). */
+    priority?: (r: JordiResponse) => Promise<{ ok: true; note: string } | { ok: false; retry: boolean; error: string }> },
 ): { jobs: AnswerJobs; pasteKey: PasteKey; searchSources: () => Promise<{ waiting: Record<string, unknown>[]; responses: Record<string, unknown>[] }>; settle?: (src: SettleSource) => Promise<Settled> } {
   const { db, store, cycle } = o;
   const spineWriter = o.spine ?? createSpineWriter();
@@ -1100,6 +1103,19 @@ export function mountInbox(
       } else if (h.retry && !last) return { state: "retry", error: `improvement request hand-off: ${h.error}` };
       else {
         setItem(id, { ...r.item, improvementError: h.error });
+        r = getResponse(id)!;
+      }
+    }
+    // his Yes on a priority ask puts the objective first (one commit in the objectives file, never twice);
+    // the asker's wake waits for it, so the persona reads the new order.
+    if (o.priority && r.spine?.status === "written" && r.item.putFirst && !r.item.priorityMoved && saysYes(r.kind, r.text)) {
+      const h = await o.priority(r).catch((e: Error) => ({ ok: false as const, retry: true, error: e.message }));
+      if (h.ok) {
+        setItem(id, { ...r.item, priorityMoved: h.note, priorityError: undefined });
+        r = getResponse(id)!;
+      } else if (h.retry && !last) return { state: "retry", error: `priority ask: ${h.error}` };
+      else {
+        setItem(id, { ...r.item, priorityError: h.error });
         r = getResponse(id)!;
       }
     }

@@ -22,7 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
-import { WaitingOnYou } from "@/components/waiting";
+import { PinnedPriorityAsks, WaitingOnYou } from "@/components/waiting";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
@@ -406,6 +406,8 @@ export function TeamPage({
           {/* the social product world's own asks and cards, then blocked, then finished work to review, and only then the
               inbox's history (Mac agent, snoozed, decided for you, coming up, answered), as on the console's Inbox. */}
           {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
+          {/* (vn_cdcf1208): a question on what comes first sits first, above every section and pressing item. */}
+          {only !== "goals" && <PinnedPriorityAsks />}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
           {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
           {only !== "goals" && <LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
@@ -473,6 +475,9 @@ export function TeamPage({
           <InboxSearchProvider>
           {/* the owner ("land with everything collapsed, and then I expand where I want to look at"). */}
           <LandFolded.Provider value>
+          {/* (vn_cdcf1208): "if the question reaches me 10 notifications deep ... we've defeated the purpose":
+              a question on what comes first (Put X first in your objectives?) sits first, above every section and pressing item. */}
+          <PinnedPriorityAsks />
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
           <InboxSearchBox />
           {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}

@@ -18,6 +18,7 @@ import * as s from "./schemas.js";
 import { logToggle, toggleActorFor, worldToggleRefusal } from "./assignmentToggle.js";
 import { locate } from "./adapters/milestone.js";
 import { listRepos, resolveRepo } from "./adapters/repos.js";
+import { pursuitsDirFor, putFirst } from "./inbox/priorityAsk.js";
 import { doorSession } from "./auth/owner.js";
 import { mountLanding, mountLandingMarks } from "./landing.js";
 import { ownerSeatFree, readSeats, seatBlockerFor } from "./adapters/seats.js";
@@ -1997,6 +1998,16 @@ export function createApp(
       );
       if ("reason" in h) return { ok: false, retry: h.state === "failed", error: h.reason };
       return { ok: true, note: `${target.name}:${h.rel}` };
+    },
+    // his Yes on a priority ask puts its objective first in the objectives file (inbox/priorityAsk.ts)
+    priority: async (r) => {
+      const it = r.item;
+      if (!it.putFirst) return { ok: false, retry: false, error: "not a priority ask" };
+      const own = it.repo ? resolveRepo(read.reposRoot, it.repo)?.path : undefined;
+      const dir = pursuitsDirFor(own, pursuits.homeDir());
+      const h = await putFirst({ dir, objective: it.putFirst.objective, ...(it.code ? { code: it.code } : {}), by: ownerName(), words: r.text }, spine);
+      if (h.ok && dir) (pursuits.clear(), dropSpines(dir));
+      return h;
     },
     invalidate: (dir) => dropSpines(dir), deskChat: {
       // a world's own desk answers from its own thread (his typed words and voice-note transcripts alike).
