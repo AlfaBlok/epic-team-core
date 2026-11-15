@@ -159,6 +159,8 @@ export interface Sites {
   replyVoiceUrl: string;
   /** who web push services may contact about this console (a mailto: URL) */
   contact: string;
+  /** the mail sending account (Cloudflare Email Sending) for sign-up and reset mail (auth/emailAccess.ts); none by default = no mail */
+  mailAccount: string;
   /** the YouTube channel handles the YouTube Allow link may store keys for (auth/youtubeConnect.ts); none by default */
   youtubeChannels: string;
   /** one-button connects (auth/connects.ts ConnectSpec): an account its owner connects with one tap; none by default */
@@ -196,6 +198,7 @@ export const NEUTRAL_SITES: Sites = {
   tailnetNames: {},
   replyVoiceUrl: "http://127.0.0.1:18940",
   contact: "mailto:owner@example.com",
+  mailAccount: "",
   youtubeChannels: "",
   connects: [],
   stateDir: "team_console",

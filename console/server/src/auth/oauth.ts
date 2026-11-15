@@ -7,6 +7,7 @@ import { AuthError, outsideRequest, SESSION_COOKIE, SESSION_DAYS, type Auth } fr
 import { customerHosts, platformBlocked, PLATFORM_PRIVATE, productOf, requestHost, type DoorKey, type Product } from "./gate.js";
 import { keyFile, sites } from "../identity.js";
 import { scopeName, validConnects, type ConnectSpec, type ConnectView } from "./connects.js";
+import { mountEmailAccess, type MailSender } from "./emailAccess.js";
 import { ENABLE_SCOPE, expectedChannels, projectNumberOf, resultPage, YOUTUBE_KEY_NAMES, YOUTUBE_SCOPES, youtubeGoogle, type StoreKey } from "./youtubeConnect.js";
 
 /**
@@ -75,7 +76,8 @@ export interface SignupInput {
   email: string;
   name: string;
   product: Product;
-  provider: ProviderId;
+  /** `email`: the email sign-up's confirm link (auth/emailAccess.ts) */
+  provider: ProviderId | "email";
   host: string;
   /** `TEST` for a test sign-up (`?s=TEST` on start): stored and counted as TEST, never a note to the owner. */
   visitSource?: string;
@@ -96,6 +98,8 @@ export interface OAuthOptions {
   hasKey?: (name: string) => Promise<boolean>;
   /** the one-button connects (auth/connects.ts); default sites().connects */
   connects?: ConnectSpec[];
+  /** the sign-up and reset mail sender (auth/emailAccess.ts); default Cloudflare Email Sending */
+  mail?: { send: MailSender; ready?: () => Promise<boolean> };
 }
 
 /**
@@ -566,7 +570,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   }
   const linkedTo = (p: ProviderId, u: ProviderUser) =>
     (db.prepare("SELECT user_id FROM oauth_identities WHERE provider = ? AND subject = ?").get(p, u.subject) as Row | undefined)?.user_id as string | undefined;
-  const link = (p: ProviderId, u: ProviderUser, userId: string, signupWorld?: string) => {
+  const link = (p: ProviderId | "email", u: ProviderUser, userId: string, signupWorld?: string) => {
     const at = new Date(now()).toISOString();
     db.prepare(
       `INSERT INTO oauth_identities (provider, subject, user_id, email, created_at, last_used_at, signup_world) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -585,6 +589,20 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   };
   const signupsToday = () =>
     (db.prepare("SELECT COUNT(*) AS n FROM oauth_identities WHERE signup_world IS NOT NULL AND created_at >= ?").get(new Date(now() - 86400_000).toISOString()) as Row).n as number;
+
+  // sign-up by email (a confirm link) and password reset, the same identity and daily cap as Google and GitHub.
+  mountEmailAccess(api, {
+    db,
+    auth,
+    signup: o.signup,
+    customers,
+    signupsToday,
+    startSession,
+    linkSignup: (email, userId, world) => link("email", { subject: `email:${email}`, email, name: "" }, userId, world),
+    ...(o.mail ? { send: o.mail.send, ready: o.mail.ready } : {}),
+    env,
+    now,
+  });
 
   api.get("/access/oauth/:provider/callback", async (c) => {
     sweep();

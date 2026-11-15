@@ -51,6 +51,9 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   p.err{color:#c62828;font-size:14px;min-height:1em;overflow-wrap:anywhere}
   .brand{display:flex;align-items:center;gap:10px;margin:0 0 20px;font-size:18px;font-weight:600;letter-spacing:-0.02em}
   [hidden]{display:none}
+  p.links{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;font-size:14px}
+  p.links a{color:inherit}
+  p.note.ok{color:CanvasText;background:color-mix(in srgb,#16a34a 12%,transparent);border-radius:8px;padding:10px;margin-top:12px}
   a.oauth{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;padding:10px;border-radius:8px;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);color:CanvasText;text-decoration:none;font-weight:500}
   a.oauth:hover{background:color-mix(in srgb,CanvasText 6%,transparent)}
   p.note{font-size:14px;margin:4px 0 0;color:color-mix(in srgb,CanvasText 70%,transparent)}
@@ -70,7 +73,28 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
     <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
     <label for="tenant" hidden id="tenantLabel">World</label><select id="tenant" name="tenant" hidden></select>
     <button type="submit">Log in</button><p class="err" id="err"></p>
+    <p class="links" id="emailLinks" hidden><a href="#" id="toForgot">Forgot your password?</a><a href="#" id="toSignup">New here? Sign up with email</a></p>
   </form>
+  <form id="signup" hidden><h1>Sign up with email</h1>
+    <label for="suEmail">Email</label><input id="suEmail" type="email" autocomplete="email" required>
+    <label for="suName">Your name (optional)</label><input id="suName" autocomplete="name" maxlength="120">
+    <label for="suPw">Password (12+ characters)</label><input id="suPw" type="password" autocomplete="new-password" minlength="12" required>
+    <button type="submit" id="suGo">Send me a confirm link</button><p class="err" id="errSu"></p><p class="note ok" id="okSu" hidden></p>
+    <p class="links"><a href="/login" class="toLogin">I have an account: log in</a></p>
+  </form>
+  <form id="forgot" hidden><h1>Reset your password</h1>
+    <label for="fgEmail">Email</label><input id="fgEmail" type="email" autocomplete="email" required>
+    <button type="submit" id="fgGo">Send me a reset link</button><p class="err" id="errFg"></p><p class="note ok" id="okFg" hidden></p>
+    <p class="links"><a href="/login" class="toLogin">Back to log in</a></p>
+  </form>
+  <form id="reset" hidden><h1>Set a new password</h1>
+    <label for="rsPw1">New password (12+ characters)</label><input id="rsPw1" type="password" autocomplete="new-password" minlength="12" required>
+    <label for="rsPw2">Again</label><input id="rsPw2" type="password" autocomplete="new-password" minlength="12" required>
+    <button type="submit">Save new password</button><p class="err" id="errRs"></p>
+  </form>
+  <section id="confirm" hidden><h1>Confirming your email</h1><p class="note" id="cfNote">One moment…</p><p class="err" id="errCf"></p>
+    <p class="links" id="cfBack" hidden><a href="/login" class="toLogin">Back to log in</a></p>
+  </section>
   <form id="handoff" hidden><h1>Switch world</h1>
     <p id="hoWho">Checking the switch link…</p>
     <button type="submit" id="hoGo" hidden>Continue</button><p class="err" id="err3"></p>
@@ -190,6 +214,58 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
       history.replaceState(null, "", "/login");
       $("setup").hidden = true; $("login").hidden = false; $("email").value = j.email; $("password").focus();
     } catch (err) { $("err2").textContent = err.message; }
+  };
+  // sign-up by email (a confirm link) and password reset, on the customer sites when mail is set up.
+  // The links' one-time tokens ride in the fragment (#confirm=…, #reset=…), never sent to a server by the browser.
+  const show = (id) => { for (const f of ["oauth", "login", "pick", "handoff", "setup", "signup", "forgot", "reset", "confirm"]) $(f).hidden = f !== id; };
+  for (const a of document.querySelectorAll("a.toLogin")) a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "/login"); location.reload(); };
+  const frag = new URLSearchParams(location.hash.slice(1));
+  fetch("/api/access/email/status").then((r) => r.ok ? r.json() : null).then((j) => {
+    if (!j || !j.email) return;
+    $("emailLinks").hidden = false;
+    if (!j.signup) $("toSignup").hidden = true;
+    $("toForgot").onclick = (e) => { e.preventDefault(); show("forgot"); $("fgEmail").value = $("email").value; $("fgEmail").focus(); };
+    $("toSignup").onclick = (e) => { e.preventDefault(); show("signup"); $("suEmail").value = $("email").value; $("suEmail").focus(); };
+    if (q.get("signup") === "email") show("signup");
+  }).catch(() => {});
+  $("signup").onsubmit = async (e) => {
+    e.preventDefault();
+    $("errSu").textContent = ""; $("suGo").disabled = true;
+    try {
+      const j = await post("/api/access/email/signup", { email: $("suEmail").value, name: $("suName").value, password: $("suPw").value, next, ...(q.get("s") === "TEST" ? { s: "TEST" } : {}) });
+      $("okSu").textContent = "Check your inbox: we sent a confirm link to " + $("suEmail").value + ". It works once, for 60 minutes.";
+      $("okSu").hidden = false; $("suPw").value = "";
+    } catch (err) { $("errSu").textContent = err.message; }
+    $("suGo").disabled = false;
+  };
+  $("forgot").onsubmit = async (e) => {
+    e.preventDefault();
+    $("errFg").textContent = ""; $("fgGo").disabled = true;
+    try {
+      await post("/api/access/email/reset", { email: $("fgEmail").value });
+      $("okFg").textContent = "If " + $("fgEmail").value + " has an account here, a reset link is on its way. It works once, for 30 minutes.";
+      $("okFg").hidden = false;
+    } catch (err) { $("errFg").textContent = err.message; }
+    $("fgGo").disabled = false;
+  };
+  const confirmToken = frag.get("confirm");
+  if (confirmToken) {
+    history.replaceState(null, "", "/login");
+    show("confirm");
+    post("/api/access/email/confirm", { token: confirmToken })
+      .then((j) => { $("cfNote").textContent = "Confirmed. Opening your account…"; location.replace(okNext(j.next) ? j.next : "/"); })
+      .catch((err) => { $("cfNote").hidden = true; $("errCf").textContent = err.message; $("cfBack").hidden = false; });
+  }
+  const resetToken = frag.get("reset");
+  if (resetToken) { history.replaceState(null, "", "/login"); show("reset"); }
+  $("reset").onsubmit = async (e) => {
+    e.preventDefault();
+    if ($("rsPw1").value !== $("rsPw2").value) { $("errRs").textContent = "the two passwords differ"; return; }
+    try {
+      const j = await post("/api/access/email/reset/finish", { token: resetToken, password: $("rsPw1").value });
+      show("login"); $("email").value = j.email; $("err").textContent = ""; $("password").focus();
+      $("loginTitle").hidden = false; $("loginTitle").textContent = "Password saved: log in";
+    } catch (err) { $("errRs").textContent = err.message; }
   };
   $("login").onsubmit = async (e) => {
     e.preventDefault();
