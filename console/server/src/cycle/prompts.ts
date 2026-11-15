@@ -8,7 +8,7 @@ import { LEFT_READY_RULE } from "./followUp.js";
 import { GRANT_BRIEF_RULE, grantsSection, type Grant } from "./grants.js";
 import { effectiveWrite, type Assignment, type Milestone, type Persona, type Run } from "../store.js";
 import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, deckBriefLine, WORKER_PAUSE_S, dispatchRule, hasStandingDuty, queuedCeiling, queuedNoSeat } from "../wakePrompt.js";
-import { homeRepo, mainHost, opsRepo, ownerName, workerHost } from "../identity.js";
+import { homeRepo, mainHost, memoryName, opsRepo, ownerName, workerHost } from "../identity.js";
 
 const wakeCurl = (base: string, assignmentId: string, clientRequestId?: string) =>
   `curl -sS -X POST ${base}/api/assignments/${assignmentId}/wake -H 'content-type: application/json' -d '${clientRequestId ? JSON.stringify({ clientRequestId }) : "{}"}'`;
@@ -106,6 +106,17 @@ export function workerBriefRules(objectivesLine?: string): string[] {
 }
 
 /**
+ * how a worker gets the owner's whole view on a topic from the memory service in one step: a fresh agent took 24
+ * calls and ~113 s re-mining every note; with a `<owner>'s view: <topic>` entry (his words and an evidence reference
+ * per line) it took 1 call and ~37 s and found the same wants.
+ */
+export const hisViewRecipe = (): string =>
+  `Before you plan anything that rests on what ${ownerName()} wants (a place, a product, a person, a taste), get his whole view from ${memoryName()} first: ` +
+  `\`python3 ~/github/${homeRepo()}/scripts/his_view.py <topic words>\` (or ${memoryName()} \`search_memory\` with \`view <topic>\`) gives the ` +
+  `\`${ownerName()}'s view: <topic>\` entry (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. ` +
+  "No view yet: mine his notes once (`--facets`), then store one with `store_memory` (his words and reference per line, the team's numbers marked as the team's, `mined <ISO UTC>`) so the next agent starts there.";
+
+/**
  * the X links the owner sends: each is one entry in the home repo's docs/tool-scout/tools.json with topic tags and the
  * nodes of the data graph it informs; every worker reads the ones on its row's nodes or sharing its row's tags before
  * it plans, so none is lost.
@@ -114,7 +125,8 @@ export const X_LINKS_RULE =
   `Before you plan, read the X links ${ownerName()} sent that touch your row: \`python3 ~/github/${homeRepo()}/scripts/x_links.py for <your row> [--repo <your checkout>]\` ` +
   "prints each one on your row's place in the data graph (its product, objective, campaign) or sharing its topic tags, with its lesson; " +
   "use what applies and name it in your plan. Search more with `x_links.py search <words>`. " +
-  `When ${ownerName()} sends a new X link, its entry gets tags and nodes the same day (AGENTS.md).`;
+  `When ${ownerName()} sends a new X link, its entry gets tags and nodes the same day (AGENTS.md). ` +
+  hisViewRecipe();
 
 /** a child-run create that times out may still have created the run; the retry must not make a second one. */
 export const CHILD_RUN_RETRY_RULE =
