@@ -107,6 +107,16 @@ export function nextCode(text: string, ref: string, taken: string[] = []): strin
   return `${prefix}${max + 1}`;
 }
 
+/**
+ * The code a follow-up row's number counts from : a row of epic n always takes the epic's next S number
+ * (`E907-G20261113` → `E907-S0`, so its follow-ups are E907-S<next>, never the Gap finder's next daily-card id);
+ * any other code keeps its own prefix as before.
+ */
+export function followupBase(ref: string): string {
+  const e = /^E(\d+)-[A-Za-z]/.exec(ref);
+  return e ? `E${e[1]}-S0` : ref;
+}
+
 export interface FollowupPick {
   title: string;
   why?: string;
@@ -149,7 +159,7 @@ export function writeFollowups(text: string, ref: string, picks: FollowupPick[],
   const made: FollowupRow[] = [];
   const lines: string[] = [];
   for (const p of picks) {
-    const code = nextCode(text, ref, made.map((r) => r.ref));
+    const code = nextCode(text, followupBase(ref), made.map((r) => r.ref));
     const status = p.start ? ("ready" as const) : ("draft" as const);
     const title = cellText(`${p.title}${p.why ? ` (${p.why})` : ""}: follow-up of ${ref}`);
     const cells = headers.map((h, i) => {

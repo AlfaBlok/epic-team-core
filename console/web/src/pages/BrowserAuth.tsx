@@ -206,7 +206,7 @@ function SyncDialog({ token, initialPatterns, target, onClose, onToken }: {
         <DialogHeader>
           <DialogTitle>{target ? `Re-sync ${target.name}` : "Sync browser auth"}</DialogTitle>
           <DialogDescription>
-            Copies your logged-in cookies for these sites from a browser profile on your Mac into the central store on
+            Copies your logged-in cookies for these sites from a browser profile on your Mac into the central store on{" "}
             {mainHost()}. Every agent on {mainHost()} can then browse them as you.
           </DialogDescription>
         </DialogHeader>
