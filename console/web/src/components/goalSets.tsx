@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Link, NavLink, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api, type ChatRead, type DeskChat, type PendingItem, type ReviewItem } from "@/api";
@@ -94,8 +95,9 @@ export const STATE_FILL: Record<ScorecardRowState, string> = {
 };
 const STATE_WORD: Record<ScorecardRowState, string> = { green: "green", amber: "amber", red: "red", unknown: "no data yet" };
 
-/** the set as a wheel: one segment per row, in its colour (a wheel is a circle); greens of rows inside. */
-export function SetWheel({ rows, size = 40, testId = "set-wheel" }: { rows: Pick<ScorecardRow, "state">[]; size?: number; testId?: string }) {
+/** the set as a wheel: one segment per row, in its colour, reds then ambers then greens (a wheel is a circle); greens of rows inside. */
+export function SetWheel({ rows: given, size = 40, testId = "set-wheel" }: { rows: Pick<ScorecardRow, "state">[]; size?: number; testId?: string }) {
+  const rows = byRingColour(given); // each colour one continuous arc
   const r = (size - 6) / 2;
   const c = 2 * Math.PI * r;
   const n = rows.length;
@@ -356,11 +358,11 @@ export function keyResultsOf(node: ScorecardNode): ScorecardRow[] {
   return node.rows.filter((r) => TAKES_WORK.has(r.kind));
 }
 
-/** one block per key result, in its colour: the objective's strip (the sidebar and the all list). */
+/** one block per key result, in its colour, each colour together: the objective's strip (the sidebar and the all list). */
 export function KrStrip({ rows, className }: { rows: Pick<ScorecardRow, "state" | "label">[]; className?: string }) {
   return (
     <span className={cn("flex flex-wrap gap-[3px]", className)} role="img" aria-label={`${rows.filter((r) => r.state === "green").length} of ${rows.length} key results green`} data-testid="kr-strip">
-      {rows.map((r, i) => (
+      {byRingColour(rows).map((r, i) => (
         <i key={i} className="block h-1.5 w-5 rounded-[1px]" style={{ background: STATE_FILL[r.state] }} title={`${r.label}: ${STATE_WORD[r.state]}`} data-state={r.state} />
       ))}
     </span>

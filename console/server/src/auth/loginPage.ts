@@ -53,6 +53,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   [hidden]{display:none}
   p.links{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;font-size:14px}
   p.links a{color:inherit}
+  p.links[hidden]{display:none}
   p.note.ok{color:CanvasText;background:color-mix(in srgb,#16a34a 12%,transparent);border-radius:8px;padding:10px;margin-top:12px}
   a.oauth{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;padding:10px;border-radius:8px;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);color:CanvasText;text-decoration:none;font-weight:500}
   a.oauth:hover{background:color-mix(in srgb,CanvasText 6%,transparent)}
