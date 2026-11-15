@@ -108,7 +108,13 @@ export function workerBriefRules(objectivesLine?: string, matchingViews: HisView
 }
 
 /** one `<owner>'s view: <topic>` entry in the memory service, as listed in the home repo's docs/his-views.json. */
-export type HisView = { id: string; title: string; topic: string; mined?: string; worlds?: string[]; tags?: string[] };
+export type HisView = { id: string; title: string; topic: string; mined?: string; worlds?: string[]; tags?: string[]; three?: HisViewBullet[] };
+/** one of a view's three bullets: the point, his own words, their memory references (the owner: "too much context is just as bad as too little"). */
+export type HisViewBullet = { line: string; words: string; refs?: string[] };
+
+/** a view's three bullets as one line each: the point, his words, the references. */
+const threeOf = (v: HisView): string =>
+  (v.three ?? []).map((b) => `- ${b.line}: ${b.words}${b.refs?.length ? ` (${b.refs.join(", ")})` : ""}`).join(" ");
 
 /**
  * the views a row touches (the owner: "does every agent need to read this, or is it like agents
@@ -130,11 +136,12 @@ export function hisViewsFor(row: { repo?: string; title?: string }, views: HisVi
 export const hisViewRecipe = (views: HisView[] = []): string =>
   views.length === 0
     ? ""
-    : `${ownerName()}'s view on your row's topic is in ${memoryName()}: ${views.map((v) => `\`${v.title}\``).join(", ")}. ` +
-      `Before you plan anything that rests on what he wants, read it: ` +
+    : `${ownerName()}'s view on your row's topic, in three bullet points in his own words (plan on these first): ` +
+      views.map((v) => `\`${v.title}\`: ${threeOf(v) || "(no three bullets yet: write them first)"}`).join(" ") +
+      ` The full view stays in ${memoryName()} as the source, read only when the three are not enough: ` +
       views.map((v) => `\`python3 ~/github/${homeRepo()}/scripts/his_view.py ${v.topic}\``).join(", ") +
-      ` (or ${memoryName()} \`search_memory\` with \`view <topic>\`) gives the view (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. ` +
-      "A new wish of his on the topic: add it to the view with `store_memory` (his words and reference per line, `mined <ISO UTC>`).";
+      " prints it (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. " +
+      "A new wish of his on the topic: add it to the view with `store_memory` (his words and reference per line, `mined <ISO UTC>`), and to its three when it changes what matters most.";
 
 /** the scoped pointer every brief carries: whether one of the owner's views touches this row (most rows: none). */
 export const HIS_VIEW_POINTER =
