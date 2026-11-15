@@ -11,6 +11,9 @@ import { mutate, useQuery } from "@/lib/data";
 import { nameProblem, NAME_MAX, proposeName } from "@/lib/pageName";
 import { cn } from "@/lib/utils";
 import { PAGES_PATH } from "@/lib/routePaths";
+import type { ScorecardsBody } from "@/api/pursuit-types";
+import { indexScorecards, scorecardHref, SET_NAME } from "@/lib/scorecards";
+import { placePages, wheelCounts, type PlacedPage } from "@/lib/wheelPages";
 export { PAGES_PATH };
 
 /**
@@ -131,7 +134,37 @@ export function NameForm({ p, onDone, label }: { p: PageView; onDone: () => void
   );
 }
 
-function PageRow({ p }: { p: PageView }) {
+/**
+ * Every page sits in the wheel it was made for (vn_dad96778): one line per objective in his order with its pages,
+ * opening that objective's Pages tab, then the pages no objective holds. The list below still holds them all together.
+ */
+function ByWheel({ placed, nodes }: { placed: PlacedPage[]; nodes: ScorecardsBody["nodes"] }) {
+  const wheels = wheelCounts(placed, nodes);
+  const loose = placed.filter((p) => !p.wheel).length;
+  if (!placed.length) return null;
+  return (
+    <section className="grid gap-1.5" data-testid="pages-by-wheel" aria-label={`By ${SET_NAME.one.toLowerCase()}`}>
+      <h2 className="text-sm font-semibold text-foreground">By {SET_NAME.one.toLowerCase()}</h2>
+      <ul className="divide-y rounded-xl border bg-card">
+        {wheels.map((w) => (
+          <li key={w.id} data-testid="pages-wheel" data-wheel={w.id}>
+            <Link to={scorecardHref(w.id, "pages")} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2 hover:bg-accent">
+              <span className="min-w-0 flex-1 text-sm text-foreground [overflow-wrap:anywhere]">{w.name}</span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(w.count, "page")}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            </Link>
+          </li>
+        ))}
+        <li className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2" data-testid="pages-not-placed">
+          <span className="min-w-0 flex-1 text-sm text-muted-foreground">Not placed: its row sits in no {SET_NAME.one.toLowerCase()}</span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(loose, "page")}</span>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function PageRow({ p, wheel }: { p: PageView; wheel?: PlacedPage["wheel"] | null }) {
   const [naming, setNaming] = useState(false);
   return (
     <li className="grid min-w-0 text-sm" data-testid="pages-page">
@@ -139,6 +172,11 @@ function PageRow({ p }: { p: PageView }) {
         <a href={p.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate py-1 text-foreground underline-offset-2 hover:underline" title={p.url}>
           {p.name || p.title || p.url}
         </a>
+        {wheel !== undefined && (
+          <span className="hidden max-w-[12rem] shrink-0 truncate text-xs text-muted-foreground sm:inline" data-testid="pages-page-wheel" title={wheel ? `Made for ${wheel.name}` : "Not placed in an objective"}>
+            {wheel ? <Link to={scorecardHref(wheel.id, "pages")} className="underline-offset-2 hover:text-foreground hover:underline">{wheel.name}</Link> : "Not placed"}
+          </span>
+        )}
         <span className="shrink-0 text-xs text-muted-foreground" title="The row that made this page keeps its link">
           {p.row}
         </span>
@@ -160,7 +198,7 @@ function PageRow({ p }: { p: PageView }) {
   );
 }
 
-function Group({ g, open, onToggle }: { g: PageGroup; open: boolean; onToggle: () => void }) {
+function Group({ g, open, onToggle, wheelOf }: { g: PageGroup; open: boolean; onToggle: () => void; wheelOf?: Map<string, PlacedPage["wheel"] | null> }) {
   return (
     <section id={g.id} className="scroll-mt-16 grid gap-0.5" data-testid="pages-group" data-group={g.id} data-open={open ? "true" : "false"}>
       <div className="flex min-w-0 items-center gap-2">
@@ -180,7 +218,7 @@ function Group({ g, open, onToggle }: { g: PageGroup; open: boolean; onToggle: (
       {open && (
         <ul className="ml-6 grid gap-0.5 border-l border-border pb-2 pl-3">
           {g.pages.map((p) => (
-            <PageRow key={p.url} p={p} />
+            <PageRow key={p.url} p={p} wheel={wheelOf?.get(p.url)} />
           ))}
         </ul>
       )}
@@ -294,6 +332,10 @@ function PinnedPages({ pages }: { pages: PageView[] }) {
 
 export function PagesIndexPage() {
   const { data, error, loading } = usePages();
+  // where each page sits: the objective its row (or its epic) is in, from the objectives' tree.
+  const sets = useQuery<ScorecardsBody>(() => api.listScorecards(), []);
+  const placed = useMemo(() => (data && sets.data ? placePages(data, sets.data, indexScorecards(sets.data)) : undefined), [data, sets.data]);
+  const wheelOf = useMemo(() => (placed ? new Map(placed.map((p) => [p.url, p.wheel ?? null])) : undefined), [placed]);
   const { hash } = useLocation();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Set<string>>(readOpen);
@@ -348,10 +390,11 @@ export function PagesIndexPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4" data-testid="pages-index">
-      <PageHeader title="Pages" description="Every one-off page the team made, by repo, then by epic. Each page links back here and to its epic." />
+      <PageHeader title="Pages" description="Every page the team made, together: by objective, then by repo and epic. Each objective has its own Pages tab." />
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the page list…</div>}
       {error && <div className="text-sm text-destructive">Could not read the page list: {error.message}</div>}
       {data && !searching && <PinnedPages pages={data.pinned ?? []} />}
+      {placed && !searching && <ByWheel placed={placed} nodes={sets.data?.nodes ?? []} />}
       {data && data.total === 0 && <div className="text-sm text-muted-foreground">No pages yet: docs/pages/registry.json names them.</div>}
       {data && data.total > 0 && (
         <div className="grid gap-2">
@@ -392,7 +435,7 @@ export function PagesIndexPage() {
               {repoOpen && (
                 <div className="ml-3 grid gap-0.5">
                   {r.groups.map((g) => (
-                    <Group key={g.id} g={g} open={searching || open.has(g.id)} onToggle={() => toggle(g.id)} />
+                    <Group key={g.id} g={g} open={searching || open.has(g.id)} onToggle={() => toggle(g.id)} wheelOf={wheelOf} />
                   ))}
                 </div>
               )}

@@ -87,6 +87,7 @@ describe("the goal lines on a touch screen", () => {
     const css = (await import("node:fs")).readFileSync(new URL("../polish.css", import.meta.url), "utf8");
     expect(css).toMatch(/li > a:only-child:not\(\[data-line\]\)/);
     const src = (await import("node:fs")).readFileSync(new URL("./campaignGoals.tsx", import.meta.url), "utf8");
-    expect(src.match(/data-line=""/g)?.length).toBe(4);
+    // E948-S110: the goal questions are cards now, not lines (3 lines left: campaign, pursuit, since yesterday)
+    expect(src.match(/data-line=""/g)?.length).toBe(3);
   });
 });

@@ -277,33 +277,6 @@ export function useGoalTalk() {
   return { talk: goalTalk(campaignRows(data?.worlds)).filter((t) => saysNeedle(needle, t.name, t.text)), ready: !!data || !!error, needle };
 }
 
-export function GoalTalkLines({ talk }: { talk: ReturnType<typeof goalTalk> }) {
-  if (!talk.length) return null;
-  return (
-    <ul className="grid gap-1.5" data-testid="goal-talk">
-      {talk.map((t) => (
-        <li key={t.openUrl} data-testid="goal-talk-line">
-          <a href={t.openUrl} target="_blank" rel="noreferrer" data-line="" className="block rounded-md bg-card px-3 py-2 text-sm hover:bg-muted/60">
-            <span className="font-semibold">{t.name}.</span> {t.text}
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** a question per campaign whose goal number is not his yet, as its own section (a goal set's page). */
-export function GoalTalk() {
-  const { talk, needle } = useGoalTalk();
-  const [open, setOpen] = useSectionOpen("goal-talk");
-  if (!talk.length) return null;
-  return (
-    <FoldSection title="Goals to set" count={talk.length} tone="needs-you" testId="goal-talk-section" open={open || !!needle} onToggle={setOpen}>
-      <GoalTalkLines talk={talk} />
-    </FoldSection>
-  );
-}
-
 /** a few lines: what moved today and the newest reports. */
 export function SinceYesterday() {
   const { data } = useOtherWorlds();

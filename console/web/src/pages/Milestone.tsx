@@ -56,13 +56,15 @@ import { useBlocked, useMilestoneStatus } from "@/lib/inbox";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
 import { InlineMd } from "@/components/inlineMd";
+import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
+import { pagesOfMilestone } from "@/lib/wheelPages";
 import type { ScorecardNode } from "@/api/pursuit-types";
 import { productHref, scorecardHref } from "@/lib/scorecards";
 export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
 const CAMPAIGN_TABS = ["pipeline", "brief", "history"] as const;
-const TABS = [...CAMPAIGN_TABS, "summary", "waiting", "tree", "chat", "deck", "activity", "personas", "approvals", "backlog", "definitions", "settings"] as const;
+const TABS = [...CAMPAIGN_TABS, "summary", "waiting", "tree", "chat", "deck", "activity", "personas", "pages", "approvals", "backlog", "definitions", "settings"] as const;
 type Tab = (typeof TABS)[number];
 /** each tab's name in the More menu (the Waiting and Tree tabs carry counts on the strip). */
 const TAB_LABEL: Record<Tab, string> = {
@@ -76,6 +78,7 @@ const TAB_LABEL: Record<Tab, string> = {
   deck: "Deck",
   activity: "Activity",
   personas: "Personas",
+  pages: "Pages",
   approvals: "Approvals",
   backlog: "Backlog",
   definitions: "Definitions",
@@ -170,6 +173,8 @@ function MilestoneScreen() {
   const { data: waiting } = useQuery(() => api.listWaitingOnOwner({ milestoneId: id, nodeKey: node }), [id, node], { tag: "inbox" });
   // one tree fetch feeds the Tree tab's label pills, the Summary tile and the Tree tab.
   const treeQuery = useQuery(() => api.getTree(id), [id]);
+  // the pages made for it (vn_dad96778): a milestone no objective holds (the house) keeps its pages in its own tab.
+  const pagesList = useWheelPages();
   // the server's status (flow, outcome, pending items): header strip, outcome chip, Settle, Waiting on box.
   // the same fetch its Waiting on you list reads (one per milestone), so the tab and the list never disagree.
   const { data: status } = useMilestoneStatus(id);
@@ -206,8 +211,8 @@ function MilestoneScreen() {
   }, [item, waiting]);
   // the tabs stay on one line; what does not fit folds under More (a campaign's More is always there).
   const tabIds: Tab[] = card
-    ? ["pipeline", "brief", "history", "chat", "summary", "waiting", "tree", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "settings"]
-    : ["summary", "waiting", "tree", "chat", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "approvals", "backlog", "definitions", "settings"];
+    ? ["pipeline", "brief", "history", "chat", "summary", "waiting", "tree", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "pages", "settings"]
+    : ["summary", "waiting", "tree", "chat", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "pages", "approvals", "backlog", "definitions", "settings"];
   const { ref: tabsRef, folded } = useTabFold(tabIds, tab, !!card);
   const fold = (v: Tab, className?: string) => ({ "data-tab-id": v, className: cn(className, folded.has(v) && "hidden") });
 
@@ -335,6 +340,10 @@ function MilestoneScreen() {
           )}
           <TabsTrigger value="activity" {...fold("activity")}>Activity</TabsTrigger>
           <TabsTrigger value="personas" {...fold("personas")}>Personas</TabsTrigger>
+          <TabsTrigger value="pages" {...fold("pages", "gap-1.5")} data-testid="tab-pages">
+            Pages
+            {pagesList.data && <span className="rounded-full bg-background px-1.5 text-[11px] leading-5 text-muted-foreground">{pagesOfMilestone(pagesList.data, m.repo).length}</span>}
+          </TabsTrigger>
           {!card && (
             <>
               <TabsTrigger value="approvals" {...fold("approvals")}>Approvals</TabsTrigger>
@@ -388,6 +397,9 @@ function MilestoneScreen() {
         </TabsContent>
         <TabsContent value="personas">
           <PersonasTab m={m} />
+        </TabsContent>
+        <TabsContent value="pages">
+          {tab === "pages" && <WheelPagesTab pages={pagesOfMilestone(pagesList.data, m.repo)} loading={pagesList.loading} what={w.milestone} />}
         </TabsContent>
         <TabsContent value="approvals">
           <ApprovalsTab m={m} />

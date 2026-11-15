@@ -101,6 +101,31 @@ describe("the Inbox has a few clear sections, all folded when it opens", () => {
     expect(within(goals).getAllByTestId("team-card")).toHaveLength(1);
   });
 
+  // E948-S110 (the owner 2026-11-15, vn_43d1c51e: "Goals to set should just be cards like everybody else. I don't understand
+  // why there is like an entry or like an entry list"): every goal to set is one card, the same shape as a decision card.
+  it("every goal to set is a card: card frame, Your decision, a row of answer buttons, Give feedback and the feedback box", async () => {
+    inbox();
+    const goals = await screen.findByTestId("inbox-goals-to-set");
+    fireEvent.click(screen.getByTestId("inbox-goals-to-set-toggle"));
+    await waitFor(() => expect(within(goals).getAllByTestId("team-card")).toHaveLength(1));
+    const cards = [...goals.querySelectorAll("li > [data-card-shell]")];
+    expect(cards).toHaveLength(2);
+    for (const c of cards) {
+      expect(c.querySelector("[data-testid=goal-decision]")?.textContent).toMatch(/^Your decision/);
+      expect(c.querySelector("[data-card-answer] [data-card-feedback] [data-feedback-send]")).toBeTruthy();
+    }
+    // the team's goal card: its options are buttons in one row, the team's pick filled, never a stacked list
+    const card = within(goals).getByTestId("team-card");
+    const row = within(card).getByTestId("goal-options");
+    expect(row.getAttribute("data-card-buttons")).toBe("decision");
+    expect(row.className).toContain("flex-wrap");
+    expect(row.className).not.toContain("grid");
+    expect(within(row).getAllByTestId("goal-option").length).toBeGreaterThanOrEqual(2);
+    expect(within(row).getByText("Give feedback")).toBeTruthy();
+    expect(within(card).getByTestId("goal-source").textContent).toMatch(/^Came from: /);
+    expect(goals.querySelector("[data-testid=goal-talk]")).toBeNull();
+  });
+
   it("the team's ideas and digests are one list, counted green for his review; no count on the Inbox is grey", async () => {
     inbox();
     const team = await screen.findByTestId("inbox-team-cards");

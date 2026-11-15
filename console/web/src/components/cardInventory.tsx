@@ -4,7 +4,7 @@ import { FyiCard, MonitorAlertCard, StatusItemRow, WaitingCard } from "@/compone
 import { PostReviewCard, ReviewCard } from "@/components/review";
 import { AskSet } from "@/components/askSet";
 import { LaptopCard, MacCards, type LaptopRow } from "@/components/laptopSwitch";
-import { AdvisorSetCard, GoalTalkCard, TeamDigestCard, TeamIdeaCard } from "@/components/teamCards";
+import { AdvisorSetCard, CampaignGoalCard, GoalTalkCard, TeamDigestCard, TeamIdeaCard } from "@/components/teamCards";
 import type { TeamCard } from "@/api/teamcard-types";
 import { ConnectCard } from "@/components/connectCards";
 import type { ConnectCard as ConnectItem } from "@/api/types";
@@ -23,7 +23,7 @@ export interface CardType {
   name: string;
   /** where he meets it */
   where: string;
-  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamIdeaCard" | "GoalTalkCard" | "AdvisorSetCard" | "ConnectCard";
+  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamIdeaCard" | "GoalTalkCard" | "CampaignGoalCard" | "AdvisorSetCard" | "ConnectCard";
   /**
    * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "understand the different types of cards that we have ... and have clarity
    * over the buttons"): what the card asks of him. A `decision` card's buttons are its options, each named by what happens
@@ -375,6 +375,7 @@ export const CARD_TYPES: CardType[] = [
   { id: "team-advisor", kind: "decision", buttons: "Accept all on top, then Accept · Decline per suggestion. Give feedback on each.", name: "Senior advisor: the week's suggestions as one set", where: "Inbox, From the Senior advisor", component: "AdvisorSetCard", render: () => <AdvisorSetCard card={sampleAdvisor()} /> },
   { id: "connect", kind: "do", buttons: "Connect with Google, in this browser. Give feedback.", name: "Connect: one tap to let the team use a Google account", where: "Inbox, top (and the Connections page)", component: "ConnectCard", render: () => <ConnectCard c={sampleConnect()} /> },
   { id: "team-goal", kind: "decision", buttons: "One button per goal, the recommended one marked. Park. Give feedback.", name: "Goal: a goal that is not set, two or three to pick from", where: "Inbox, Goals to set", component: "GoalTalkCard", render: () => <GoalTalkCard card={sampleGoal()} /> },
+  { id: "campaign-goal", kind: "answer", buttons: "Open the campaign. Give feedback: his number in words or by voice.", name: "Goal: a campaign with no goal number of his yet", where: "Inbox, Goals to set", component: "CampaignGoalCard", render: () => <CampaignGoalCard t={{ name: "Testers campaign", app: "social", openUrl: "https://social.example/campaigns/testers", text: "It has no number yet. What number would tell you it worked?" }} /> },
 ];
 
 /**
@@ -390,6 +391,7 @@ export const NO_PARK: Record<string, string> = {
   "mac-ticket": "a Mac ticket waits on the Mac list until you run it",
   "mac-no-page": "a Mac ticket waits on the Mac list until you run it",
   connect: "it stays until the account is connected, and the connect list lives on the server, not on a task line to park",
+  "campaign-goal": "the question lives in the campaign's own world until its number is set: nothing here to park it on",
   "team-advisor": "the week's suggestions close with the week; Park per suggestion is a follow-up",
 };
 

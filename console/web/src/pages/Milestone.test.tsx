@@ -146,7 +146,7 @@ describe("Milestone page layout (M2-16)", () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
     await renderPage();
     const tabs = await screen.findAllByRole("tab");
-    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Summary", "Waiting on you", "Tree", "Chat", "Deck", "Activity", "Personas", "Approvals", "Backlog", "Definitions", "Settings"]);
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Summary", "Waiting on you", "Tree", "Chat", "Deck", "Activity", "Personas", "Pages", "Approvals", "Backlog", "Definitions", "Settings"]);
     expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true");
   });
 

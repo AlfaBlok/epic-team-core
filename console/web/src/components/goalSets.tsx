@@ -32,6 +32,8 @@ import {
 } from "@/lib/scorecards";
 import { cn } from "@/lib/utils";
 import { lazyPage } from "@/lib/lazyPage";
+import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
+import { pagesOfObjective } from "@/lib/wheelPages";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
 const ChatView = lazyPage(() => import("@/pages/Chat"), "ChatView");
@@ -798,6 +800,8 @@ const TABS = [
   { id: "chat", label: "Chat desk" },
   { id: "context", label: "Context" },
   { id: "personas", label: "Personas" },
+  // the pages made for it (vn_dad96778): pages live inside the wheel they belong to; the Pages list still shows all.
+  { id: "pages", label: "Pages" },
   // the set's social kit (only on a set that has one): the owner reaches "these totems" from the set.
   { id: SET_KIT_TAB, label: "Social kit" },
 ] as const;
@@ -1126,6 +1130,8 @@ export function GoalSetPage() {
   const kitId = pursuit ? kitPursuitOf(pursuitsBody?.pursuits, pursuit.id) : undefined;
   const pursuitP = pursuit ? pursuitsBody?.pursuits.find((x) => x.id === pursuit.id) : undefined;
   const tabs = kitId ? TABS : TABS.filter((t) => t.id !== SET_KIT_TAB);
+  const pagesList = useWheelPages();
+  const myPages = useMemo(() => (node ? pagesOfObjective(pagesList.data, data, inbox.ix, node.id) : []), [pagesList.data, data, inbox.ix, node]);
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-3" data-testid="goal-set-page" data-set={id}>
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the {SET_NAME.many.toLowerCase()}…</div>}
@@ -1158,7 +1164,7 @@ export function GoalSetPage() {
               )}
             </div>
           </header>
-          <TabStrip tabs={tabs} tab={tab} counts={{ inbox: mine.length, kanban: queueOf(data, node).length + counts.review }} />
+          <TabStrip tabs={tabs} tab={tab} counts={{ inbox: mine.length, kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
           {tab === "table" && (
             <div className="grid gap-4">
               <KeyResultSheet krs={krs} setId={pursuit.id} open={kr} onOpen={openKr} />
@@ -1192,6 +1198,7 @@ export function GoalSetPage() {
           {tab === "chat" && <SetChat node={node} />}
           {tab === "context" && <Context node={node} pursuit={pursuit} />}
           {tab === "personas" && <Personas node={node} />}
+          {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
           {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
         </>
       )}

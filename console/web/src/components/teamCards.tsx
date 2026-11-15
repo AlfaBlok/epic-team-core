@@ -12,7 +12,7 @@ import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { RelTime } from "@/components/common";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { useSlotReady } from "@/components/slot";
-import { GoalTalkLines, useGoalTalk } from "@/components/campaignGoals";
+import { useGoalTalk } from "@/components/campaignGoals";
 import { cn } from "@/lib/utils";
 
 /**
@@ -44,7 +44,7 @@ function answerWords(c: TeamCard): string {
 }
 
 /** the meta line: the kind word, the scorecard, who made it, its age. */
-function Meta({ card }: { card: TeamCard }) {
+function Meta({ card, noBy }: { card: TeamCard; noBy?: boolean }) {
   const href = scorecardHref(card);
   return (
     <CardMeta kind={TEAM_KIND_WORD[card.kind]} data-testid="team-card-meta">
@@ -58,7 +58,7 @@ function Meta({ card }: { card: TeamCard }) {
           <span>{card.scorecardName ?? card.scorecard}</span>
         )
       ) : null}
-      <span>by {card.by}</span>
+      {noBy ? null : <span>by {card.by}</span>}
       {card.world ? <span data-testid="team-card-world">from {card.world}</span> : null}
       <RelTime iso={card.at} />
     </CardMeta>
@@ -247,58 +247,125 @@ export function TeamIdeaCard({ card, onAnswered }: { card: TeamCard; onAnswered?
   );
 }
 
-/** a goal conversation: the goal that is unset, two or three proposed goals with numbers; pick one, or his words. */
+/** the recommended option in plain words for the decision line ("the first one"). */
+const ORDINAL = ["first", "second", "third", "fourth"];
+/** the one question a goal card asks: which goal, and the team's pick. */
+export function goalQuestion(g: NonNullable<TeamCard["goal"]>): string {
+  const rec = g.recommend !== undefined && g.options[g.recommend] ? ORDINAL[g.recommend] : undefined;
+  return `Which goal do we set?${rec ? ` We recommend the ${rec} one.` : ""}`;
+}
+
+/** Give feedback beside the buttons, as on every other card: it takes him to the feedback box under them. */
+function GiveFeedback({ box }: { box: string }) {
+  return (
+    <CardButton
+      variant="outline"
+      onClick={() => document.getElementById(box)?.querySelector<HTMLTextAreaElement>("textarea")?.focus()}
+      data-testid="goal-feedback"
+    >
+      Give feedback
+    </CardButton>
+  );
+}
+
+/** the "Your decision" box every decision card ends with, right above the buttons that answer it. */
+export function DecisionBox({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-700/40 bg-emerald-50/60 px-3 py-2 dark:border-emerald-400/40 dark:bg-emerald-950/30" data-testid="goal-decision">
+      <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300">Your decision</div>
+      <div className="text-[15px] font-medium leading-snug text-foreground">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * a goal conversation: the goal that is unset, two or three proposed goals with numbers; pick one, or his words.
+ * E948-S110 (the owner 2026-11-15, vn_43d1c51e: "Goals to set should just be cards like everybody else. I don't understand
+ * why there is like an entry or like an entry list"): the card has the shape of every decision card in his inbox: where it
+ * came from, what is not set, the link to check, Your decision, then one row of answer buttons (the team's pick filled),
+ * Park and Give feedback, then the same feedback box with its microphone. No stacked list of options.
+ */
 export function GoalTalkCard({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   const g = card.goal!;
   const st = useAnswer(card, onAnswered);
+  const box = `goal-feedback-${card.id}`;
   return (
     <CardShell kind="goal" className="text-sm" data-testid="team-card" data-team-kind="goal">
-      <Meta card={card} />
+      <Meta card={card} noBy />
       <div className={CARD_TITLE}>{card.title}</div>
-      <p className="mt-1 text-sm text-foreground/85">
-        <span className="text-muted-foreground">Not set yet: </span>
-        {g.unset}
+      <p className="mt-2 text-[13px] leading-snug text-foreground/80" data-testid="goal-source">
+        <span className="font-medium text-foreground">Came from: </span>
+        {card.by}, reading {card.scorecardName ? `the ${card.scorecardName} goal` : "this goal"}.
+      </p>
+      <p className="mt-1 text-sm leading-relaxed text-muted-foreground" data-testid="goal-unset">
+        Not set yet: {g.unset}
       </p>
       {/* the links to check before the answer, never between its buttons and the feedback */}
-      {g.links && (
-        <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs">
-          {g.links.map((l) => (
-            <A key={l.url} href={l.url}>
-              {l.label}
-            </A>
-          ))}
+      {g.links?.map((l) => (
+        <div key={l.url} className="flex">
+          {l.url.startsWith("/") ? (
+            <Link to={l.url} className={CARD_LINK} data-testid="goal-link">
+              Open the {l.label.toLowerCase()}
+            </Link>
+          ) : (
+            <a href={l.url} target="_blank" rel="noreferrer" className={CARD_LINK} data-testid="goal-link">
+              Open the {l.label.toLowerCase()} ↗
+            </a>
+          )}
         </div>
-      )}
-      <div className="mt-3 grid gap-2" data-testid="goal-options">
-        {g.options.map((o, n) => (
-          <CardButton
-            key={n}
-            variant="outline"
-            className={cn("h-auto min-h-11 justify-start whitespace-normal py-2 text-left", st.done !== undefined && card.answer?.pick === n && "border-foreground")}
-            disabled={!!st.busy || st.done !== undefined}
-            pending={st.busy === `pick${n}`}
-            pendingLabel="Saving…"
-            onClick={() => void st.answer(`pick${n}`, { pick: n, text: "", via: "button" }).catch(() => {})}
-            data-testid="goal-option"
-          >
-            <span className="min-w-0">
+      ))}
+      <DecisionBox>{goalQuestion(g)}</DecisionBox>
+      <div className="mt-3.5 grid min-w-0 gap-2" data-card-answer="">
+        <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="goal-options" data-card-buttons="decision">
+          {g.options.map((o, n) => (
+            <CardButton
+              key={n}
+              variant={g.recommend === n ? "default" : "outline"}
+              className={cn("h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]", st.done !== undefined && card.answer?.pick === n && "ring-2 ring-foreground/40")}
+              disabled={!!st.busy || st.done !== undefined}
+              pending={st.busy === `pick${n}`}
+              pendingLabel="Saving…"
+              title={`${o.number}${g.recommend === n ? ", we recommend this one" : ""}`}
+              onClick={() => void st.answer(`pick${n}`, { pick: n, text: "", via: "button" }).catch(() => {})}
+              data-testid="goal-option"
+              data-recommended={g.recommend === n ? "yes" : "no"}
+            >
               {o.goal}
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {o.number}
-                {g.recommend === n ? " · we recommend this one" : ""}
-              </span>
-            </span>
-          </CardButton>
-        ))}
-      </div>
-      {st.done === undefined && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <TeamPark st={st} />
+            </CardButton>
+          ))}
+          {st.done === undefined && <TeamPark st={st} />}
+          <GiveFeedback box={box} />
         </div>
-      )}
-      <Feedback card={card} answer={st.answer} />
+        <div id={box}>
+          <Feedback card={card} answer={st.answer} />
+        </div>
+      </div>
       <Answered text={st.done} />
       {st.error && <div className="mt-1 text-xs text-destructive">{st.error}</div>}
+    </CardShell>
+  );
+}
+
+/**
+ * E948-S110: a campaign whose goal number is not his yet, as the same goal card (no line in a list): its question in the
+ * Your decision box, the campaign to open, and the one feedback box; his words go to the Team desk, which tells the campaign.
+ */
+export function CampaignGoalCard({ t }: { t: { name: string; openUrl: string; app: string; text: string } }) {
+  return (
+    <CardShell kind="goal" className="text-sm" data-testid="goal-talk-line" data-team-kind="goal">
+      <CardMeta kind={TEAM_KIND_WORD.goal}>
+        <span>{t.name}</span>
+      </CardMeta>
+      <div className={CARD_TITLE}>{t.name} has no goal number of yours yet.</div>
+      <div className="flex">
+        <a href={t.openUrl} target="_blank" rel="noreferrer" className={CARD_LINK} data-testid="goal-link">
+          Open the campaign ↗
+        </a>
+      </div>
+      <DecisionBox>{t.text}</DecisionBox>
+      <div className="mt-3.5 grid min-w-0 gap-2" data-card-answer="">
+        <CardFeedback origin={`campaign-goal:${t.openUrl}`} title={`${t.name} goal`} refName={t.name} className="mt-0" />
+      </div>
     </CardShell>
   );
 }
@@ -521,16 +588,19 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
   if (!count) return null;
   return (
     <FoldSection title={INBOX_SECTION_TITLE.goal} count={count} tone="needs-you" testId="inbox-goals-to-set" open={open || !!needle} onToggle={setOpen}>
-      <GoalTalkLines talk={lines} />
-      {cards.length > 0 && (
-        <ul className={cn("grid min-w-0 grid-cols-1 gap-[18px]", lines.length && "mt-[18px]")} data-testid="team-cards-goal-list">
-          {cards.map((c) => (
-            <li key={c.id} className="min-w-0">
-              <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
+      <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="team-cards-goal-list">
+        {lines.map((t) => (
+          <li key={t.openUrl} className="min-w-0">
+            <CampaignGoalCard t={t} />
+          </li>
+        ))}
+        {cards.map((c) => (
+          <li key={c.id} className="min-w-0">
+            <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
+          </li>
+        ))}
+      </ul>
     </FoldSection>
   );
 }
