@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ClipboardPaste, Image as ImageIcon, Paperclip } from "lucide-react";
+import { ClipboardPaste, FileText, Image as ImageIcon, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AnswerTextarea, PHONE_TAP } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { readClipboard, showsPasteButton, type ChatAttach } from "@/components/ChatAttach";
+import { onPhone, readClipboard, showsPasteButton, type ChatAttach } from "@/components/ChatAttach";
 
 /** how long the paste note shows as a toast. */
 export const PASTE_TOAST_MS = 4_000;
@@ -57,6 +57,8 @@ export function WordsBox({
   // bubble), a screenshot joins the files above the box, words go into it. It lives in the
   // paperclip's menu (Paste a screenshot, Choose a photo or file), and what it says comes as a toast that goes by itself.
   const [paste] = useState(showsPasteButton);
+  // every phone gets the menu, so photos open the photo picker (several in one go) and files the file chooser
+  const [phone] = useState(onPhone);
   const [menu, setMenu] = useState(false);
   const [pasteNote, setPasteNote] = useState<string>();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,7 +89,7 @@ export function WordsBox({
   };
   const item = "flex w-full items-center gap-2 rounded px-3 py-2.5 text-left text-sm hover:bg-accent";
   const clip =
-    files.button && paste ? (
+    files.button && (paste || phone) ? (
       // one paperclip on a phone; its menu holds Paste (the box's own row stays short: paperclip, mic, send)
       <div className="relative shrink-0" ref={menuRef}>
         {files.input}
@@ -99,7 +101,7 @@ export function WordsBox({
           aria-label="Attach a screenshot or file"
           aria-haspopup="menu"
           aria-expanded={menu}
-          title="Paste a screenshot, or choose a photo or file"
+          title="Paste a screenshot, or choose photos or files, several at once"
           data-testid="chat-attach"
           onClick={() => setMenu((m) => !m)}
         >
@@ -107,8 +109,22 @@ export function WordsBox({
         </Button>
         {menu && (
           <div role="menu" className="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg" data-testid="chat-attach-menu">
-            <button type="button" role="menuitem" className={item} data-testid="words-paste" onClick={() => void pasteNow()}>
-              <ClipboardPaste className="h-4 w-4 shrink-0" aria-hidden /> Paste a screenshot
+            {paste && (
+              <button type="button" role="menuitem" className={item} data-testid="words-paste" onClick={() => void pasteNow()}>
+                <ClipboardPaste className="h-4 w-4 shrink-0" aria-hidden /> Paste a screenshot
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className={item}
+              data-testid="chat-attach-pick-photos"
+              onClick={() => {
+                setMenu(false);
+                files.pickPhotos();
+              }}
+            >
+              <ImageIcon className="h-4 w-4 shrink-0" aria-hidden /> Choose photos
             </button>
             <button
               type="button"
@@ -120,7 +136,7 @@ export function WordsBox({
                 files.pick();
               }}
             >
-              <ImageIcon className="h-4 w-4 shrink-0" aria-hidden /> Choose a photo or file
+              <FileText className="h-4 w-4 shrink-0" aria-hidden /> Choose files
             </button>
           </div>
         )}

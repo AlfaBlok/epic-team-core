@@ -28,6 +28,12 @@ export const ATTACH_ACCEPT = [
   ".md",
   ".json",
 ].join(",");
+/**
+ * the phone's photo picker. With images and documents in one accept list Android's Chrome opens its general
+ * chooser, where a second file needs a long press (three screenshots came in three picks); with only pictures
+ * and videos it opens the system photo picker, where each tap adds one (several at once, as on an iPhone's Photos).
+ */
+export const ATTACH_PHOTOS_ACCEPT = "image/*,video/*";
 const TAKEN = /^(image\/(png|jpe?g|webp|gif|heic|heif)|video\/(mp4|quicktime|webm)|application\/(pdf|json)|text\/(plain|csv|markdown)|application\/vnd\.openxmlformats-officedocument\.)/i;
 const TAKEN_EXT = /\.(png|jpe?g|webp|gif|heic|heif|mp4|mov|webm|pdf|docx|xlsx|pptx|txt|csv|md|json)$/i;
 /** Does Chat take this file (the console checks again, bytes included)? */
@@ -98,6 +104,8 @@ export interface ChatAttach {
   /** the paperclip's hidden file input alone, and what opens its picker, for a box that draws its own paperclip (a phone's menu). */
   input?: ReactNode;
   pick: () => void;
+  /** opens the photo picker (pictures and videos only), where several are chosen in one go. */
+  pickPhotos: () => void;
   /** another file may be added now (not sending, under the limit). */
   canAdd: boolean;
   /** The thumbnails above the box, while there are files. */
@@ -119,6 +127,7 @@ export interface ChatAttach {
 export function useChatAttach({ enabled, disabled }: { enabled: boolean; disabled?: boolean }): ChatAttach {
   const [files, setFiles] = useState<PendingFile[]>([]);
   const input = useRef<HTMLInputElement>(null);
+  const photos = useRef<HTMLInputElement>(null);
   const live = useRef(files);
   live.current = files;
   useEffect(() => () => live.current.forEach((f) => dropUrl(f.preview)), []);
@@ -165,13 +174,15 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
     setFiles([]);
   }, []);
 
-  if (!enabled) return { ready: true, ids: [], files: [], clear, pick: () => undefined, canAdd: false, add: () => undefined, onPaste: () => undefined, dropProps: { onDragOver: () => undefined, onDrop: () => undefined } };
+  if (!enabled) return { ready: true, ids: [], files: [], clear, pick: () => undefined, pickPhotos: () => undefined, canAdd: false, add: () => undefined, onPaste: () => undefined, dropProps: { onDragOver: () => undefined, onDrop: () => undefined } };
 
   const ready = files.every((f) => f.state !== "uploading");
   const ids = files.flatMap((f) => (f.state === "ready" && f.attachment ? [f.attachment.id] : []));
   const canAdd = !disabled && files.length < ATTACH_MAX_FILES;
   const pick = () => input.current?.click();
+  const pickPhotos = () => photos.current?.click();
   const fileInput = (
+    <>
       <input
         ref={input}
         type="file"
@@ -184,6 +195,19 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
           e.target.value = "";
         }}
       />
+      <input
+        ref={photos}
+        type="file"
+        multiple
+        accept={ATTACH_PHOTOS_ACCEPT}
+        className="hidden"
+        data-testid="chat-attach-photos"
+        onChange={(e) => {
+          add(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </>
   );
   const button = (
     <>
@@ -194,7 +218,7 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
         className={cn(PHONE_TAP, "shrink-0 max-sm:size-11 max-sm:px-0")}
         disabled={!canAdd}
         aria-label="Attach a screenshot or file"
-        title="Attach screenshots, photos or files (you can also paste or drop them here)"
+        title="Attach screenshots, photos or files, several at once (you can also paste or drop them here)"
         data-testid="chat-attach"
         onClick={pick}
       >
@@ -241,6 +265,7 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
     button,
     input: fileInput,
     pick,
+    pickPhotos,
     canAdd,
     tray,
     ready,

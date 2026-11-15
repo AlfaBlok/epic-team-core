@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Context, Hono } from "hono";
+import { Resvg } from "@resvg/resvg-js";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import { notJordi } from "../status/mark.js";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_PER_MESSAGE, AttachError, cardFilesLine } from "./attachLimits.js";
@@ -114,6 +115,81 @@ export function bytesMatch(mime: string, b: Uint8Array): boolean {
   }
 }
 
+/** Width and height from an image's own header (PNG, JPEG, GIF, WebP); undefined when it cannot be read. */
+export function imageSize(b: Uint8Array): { w: number; h: number } | undefined {
+  const be16 = (i: number) => (b[i] << 8) | b[i + 1];
+  const le16 = (i: number) => b[i] | (b[i + 1] << 8);
+  const le24 = (i: number) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
+  const be32 = (i: number) => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+  if (starts(b, [0x89, 0x50, 0x4e, 0x47]) && b.length >= 24) return { w: be32(16), h: be32(20) };
+  if (ascii(b, 0, "GIF8") && b.length >= 10) return { w: le16(6), h: le16(8) };
+  if (ascii(b, 0, "RIFF") && ascii(b, 8, "WEBP") && b.length >= 30) {
+    if (ascii(b, 12, "VP8X")) return { w: le24(24) + 1, h: le24(27) + 1 };
+    if (ascii(b, 12, "VP8L")) {
+      const v = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+      return { w: (v & 0x3fff) + 1, h: ((v >>> 14) & 0x3fff) + 1 };
+    }
+    if (ascii(b, 12, "VP8 ")) return { w: le16(26) & 0x3fff, h: le16(28) & 0x3fff };
+    return undefined;
+  }
+  if (starts(b, [0xff, 0xd8])) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) return undefined;
+      const m = b[i + 1];
+      if (m === 0xff) {
+        i++;
+        continue;
+      }
+      // SOF0..SOF15 carry the size (C4 DHT, C8 JPG and CC DAC are not frames)
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: be16(i + 5), w: be16(i + 7) };
+      if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+        i += 2;
+        continue;
+      }
+      i += 2 + be16(i + 2);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * the longest side of the copy an agent reads (the model scales anything larger down to this
+ * anyway). Phone screenshots (JPEG 716x1600 carrying the phone's colour profile) were refused by the model whole;
+ * the same pixels redrawn as a plain PNG are read.
+ */
+export const AGENT_IMAGE_MAX_EDGE = 1568;
+const AGENT_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+/**
+ * The picture as an agent can read it: redrawn as a plain PNG (no colour profile, no metadata), its longest side at most
+ * AGENT_IMAGE_MAX_EDGE. Undefined when the console cannot read the picture (HEIC, a broken file): the agent is then told to say so.
+ */
+export function agentImage(bytes: Uint8Array, mime: string): Buffer | undefined {
+  if (!AGENT_IMAGE_TYPES.has(mime)) return undefined;
+  const size = imageSize(bytes);
+  if (!size || !size.w || !size.h || size.w > 20000 || size.h > 20000) return undefined;
+  const scale = Math.min(1, AGENT_IMAGE_MAX_EDGE / Math.max(size.w, size.h));
+  const w = Math.max(1, Math.round(size.w * scale));
+  const h = Math.max(1, Math.round(size.h * scale));
+  const href = `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size.w}" height="${size.h}" viewBox="0 0 ${size.w} ${size.h}"><image width="${size.w}" height="${size.h}" preserveAspectRatio="none" href="${href}"/></svg>`;
+  try {
+    const out = new Resvg(svg, { fitTo: w >= h ? { mode: "width", value: w } : { mode: "height", value: h } }).render();
+    if (out.width < 1 || Math.abs(out.height - h) > 2) return undefined;
+    // resvg draws nothing (no error) for a picture it cannot decode: an empty canvas is no copy
+    const px = out.pixels;
+    let seen = false;
+    for (let i = 3; i < px.length; i += 4) if (px[i]) {
+      seen = true;
+      break;
+    }
+    return seen ? out.asPng() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 export interface AttachmentsDeps {
@@ -175,6 +251,22 @@ export function createAttachments(d: AttachmentsDeps) {
     return { ...toAtt(r), file: r.file };
   }
 
+  /** The agent's copy of a picture: its link (same path + `/agent/<stem>.png`), made once and kept beside the original. */
+  const agentPath = (a: Attachment) => `/api/chat/attachments/${a.id}/agent/${a.name.replace(/\.[^.]*$/, "")}.png`;
+  function agentCopy(id: string, inWorld?: string): { name: string; png: Buffer } | undefined {
+    const a = get(id, inWorld);
+    if (ATTACH_TYPES[a.mime]?.kind !== "image") return undefined;
+    const cache = `${a.file}.agent.png`;
+    const name = a.name.replace(/\.[^.]*$/, "") + ".png";
+    if (fs.existsSync(cache)) return { name, png: fs.readFileSync(cache) };
+    const png = agentImage(fs.readFileSync(a.file), a.mime);
+    if (!png) return undefined;
+    fs.writeFileSync(cache, png, { mode: 0o600 });
+    return { name, png };
+  }
+  /** The link an agent opens for a file: a picture's readable copy when one can be made, else the file itself. */
+  const readLink = (a: Attachment, inWorld?: string) => (agentCopy(a.id, inWorld) ? `${base}${agentPath(a)}` : `${base}${a.path}`);
+
   /**
    * The message as the desk gets it: his text, then one block naming each file with its link and how to open it.
    * `fetchHeaders` is what the desk sends on its console calls (the Team desk's `-H 'X-Console-Run: team-desk'`).
@@ -188,12 +280,21 @@ export function createAttachments(d: AttachmentsDeps) {
     for (const a of atts) db.prepare("UPDATE chat_attachments SET sent_at = COALESCE(sent_at, ?) WHERE id = ?").run(stamp, a.id);
     const h = fetchHeaders ? `${fetchHeaders} ` : "";
     const first = atts[0];
+    const firstRead = ATTACH_TYPES[first.mime]?.kind === "image" && agentCopy(first.id);
+    const pics = atts.some((a) => ATTACH_TYPES[a.mime]?.kind === "image");
     return [
       text.trim(),
       "",
       `${ATTACH_HEAD} (${atts.length}): ${ownerName()} attached ${atts.length === 1 ? "this file" : "these files"} to his message. Open each one before you answer: ` +
-        `download it with the headers of your console calls, e.g. \`curl -sS ${h}-o /tmp/${first.id}-${first.name} '${base}${first.path}'\`, then read the file (an image shows as a picture).`,
-      ...atts.map((a) => `- ${a.name} · ${a.mime} · ${kb(a.bytes)} · ${base}${a.path}`),
+        `download it with the headers of your console calls, e.g. \`curl -sS ${h}-o /tmp/${first.id}-${firstRead ? firstRead.name : first.name} '${base}${firstRead ? agentPath(first) : first.path}'\`, then read the file (an image shows as a picture).` +
+        (pics
+          ? ` For a picture, download its \`read:\` copy (a plain PNG the console redrew for you, the original stays linked). If a picture still does not open, or has no read copy, say plainly in your answer that you could not see it and ask him to describe it or send it again: never guess what it shows.`
+          : ""),
+      ...atts.flatMap((a) => {
+        const line = `- ${a.name} · ${a.mime} · ${kb(a.bytes)} · ${base}${a.path}`;
+        if (ATTACH_TYPES[a.mime]?.kind !== "image") return [line];
+        return [line, agentCopy(a.id) ? `  read: ${base}${agentPath(a)}` : `  read: none, the console cannot redraw this picture (say you could not see it)`];
+      }),
     ]
       .join("\n")
       .replace(/^\n+/, "");
@@ -212,9 +313,9 @@ export function createAttachments(d: AttachmentsDeps) {
     const stamp = new Date(now()).toISOString();
     for (const a of atts) db.prepare("UPDATE chat_attachments SET sent_at = COALESCE(sent_at, ?) WHERE id = ?").run(stamp, a.id);
     const words = text.trim().replace(/\s+$/, "");
-    return `${words}${words ? " " : ""}${cardFilesLine(atts.map((a) => `${base}${a.path}`))}`;
+    return `${words}${words ? " " : ""}${cardFilesLine(atts.map((a) => readLink(a, inWorld)))}`;
   }
-  return { add, get, compose, cardText };
+  return { add, get, compose, cardText, agentCopy };
 }
 
 export type Attachments = ReturnType<typeof createAttachments>;
@@ -284,6 +385,24 @@ export function mountAttachments(api: Hono, atts: Attachments) {
     }),
   );
   const one = guard((c) => serve(atts.get(c.req.param("id") ?? "")));
+  // a picture's agent copy: a plain PNG the model reads, made on first ask; 415 when it cannot be made
+  api.get(
+    "/chat/attachments/:id/agent/:name",
+    guard((c) => {
+      const copy = atts.agentCopy(c.req.param("id") ?? "");
+      if (!copy) throw new AttachError(415, "no_agent_copy", "the console cannot redraw this file as a picture: say you could not see it");
+      return new Response(new Uint8Array(copy.png), {
+        headers: {
+          "content-type": "image/png",
+          "content-length": String(copy.png.byteLength),
+          "content-disposition": `inline; filename="${copy.name}"`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+          "cache-control": "private, max-age=31536000, immutable",
+        },
+      });
+    }),
+  );
   api.get("/chat/attachments/:id", one);
   api.get("/chat/attachments/:id/:name", one);
 }

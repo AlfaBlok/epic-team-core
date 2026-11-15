@@ -276,7 +276,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", /^\/api\/chat\/attachments$/],
   // the links line of uploaded files, found among the request's world's rows only (cardText: another world's id is a 404)
   ["POST", /^\/api\/chat\/attachments\/line$/],
-  ["GET", new RegExp(`^/api/chat/attachments/${ID}(/[\\w.-]+)?$`)],
+  ["GET", new RegExp(`^/api/chat/attachments/${ID}(/agent)?(/[\\w.-]+)?$`)],
   // snooze too: every action finds the row among the caller's world's rows (another world's id is a 404).
   ["POST", new RegExp(`^/api/review-items/${ID}/(recheck|approve|complete|relaunch|deny|snooze)$`)],
   // a card's screenshot, served from the row's repo; the card is found among the caller's world's rows only.
@@ -336,7 +336,7 @@ export const DOOR_SAFE: [string, RegExp][] = [
   // a milestone's chat (desk/routes.ts: that milestone's own thread; rule 3 404s another world's id) and its attachments
   ["GET|POST", new RegExp(`^/api/milestones/${ID}/chat/messages$`)],
   ["POST", /^\/api\/chat\/(seen|attachments|attachments\/line)$/],
-  ["GET", new RegExp(`^/api/chat/attachments/${ID}(/[\\w.-]+)?$`)],
+  ["GET", new RegExp(`^/api/chat/attachments/${ID}(/agent)?(/[\\w.-]+)?$`)],
   // the cards: asks waiting on the owner and the review list, with their buttons
   ["GET", /^\/api\/(waiting-on-owner|owner-responses|asked-no-row|counts|counts\/worlds|status|next-wake|moving-now)$/],
   ["GET", new RegExp(`^/api/waiting-on-owner/${ID}$`)],

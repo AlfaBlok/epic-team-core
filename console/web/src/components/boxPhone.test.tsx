@@ -49,18 +49,44 @@ describe("T18-S18 the one box on a phone", () => {
     expect(screen.queryByTestId("words-paste")).toBeNull(); // no Paste of its own in the row
   });
 
-  it("Paste is in the paperclip's menu with Choose a photo or file; the menu closes after a choice", async () => {
+  it("Paste is in the paperclip's menu with Choose photos and Choose files; the menu closes after a choice", async () => {
     phone(async () => []);
-    const pick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    const opened: HTMLInputElement[] = [];
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
+      opened.push(this);
+    });
     render(<Box />);
     const clip = screen.getByRole("button", { name: "Attach a screenshot or file" });
     expect(clip.getAttribute("aria-haspopup")).toBe("menu");
     fireEvent.click(clip);
     const menu = screen.getByTestId("chat-attach-menu");
-    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual(["Paste a screenshot", "Choose a photo or file"]);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Choose a photo or file" }));
-    expect(pick).toHaveBeenCalledTimes(1);
+    expect(within(menu).getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual(["Paste a screenshot", "Choose photos", "Choose files"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Choose photos" }));
     expect(screen.queryByTestId("chat-attach-menu")).toBeNull();
+    fireEvent.click(clip);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Choose files" }));
+    // photos open the photo picker (pictures and videos only, several at once), files the chooser with documents
+    expect(opened.map((i) => [i.dataset.testid, i.multiple, i.accept])).toEqual([
+      ["chat-attach-photos", true, "image/*,video/*"],
+      ["chat-attach-input", true, expect.stringContaining(".pdf")],
+    ]);
+  });
+
+  it("a phone that cannot paste still gets the menu, and three photos picked in one go are three files of one message", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(pointer: coarse)", media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+    Object.defineProperty(navigator, "clipboard", { value: {}, configurable: true });
+    let n = 0;
+    const upload = vi.spyOn(api, "uploadChatAttachment").mockImplementation(async (f, name) => ({
+      attachment: { id: `att_${++n}`, name, mime: f.type, bytes: f.size, createdAt: "", path: `/x/${n}` },
+    }));
+    render(<Box />);
+    fireEvent.click(screen.getByRole("button", { name: "Attach a screenshot or file" }));
+    expect(screen.getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual(["Choose photos", "Choose files"]);
+    const shot = (name: string) => new File([new Uint8Array([0xff, 0xd8, 0xff])], name, { type: "image/jpeg" });
+    fireEvent.change(screen.getByTestId("chat-attach-photos"), { target: { files: [shot("a.jpg"), shot("b.jpg"), shot("c.jpg")] } });
+    await waitFor(() => expect(screen.getAllByTestId("chat-attach-item").map((e) => e.getAttribute("data-state"))).toEqual(["ready", "ready", "ready"]));
+    expect(upload).toHaveBeenCalledTimes(3);
+    expect(screen.getAllByTestId("chat-attach-remove")).toHaveLength(3);
   });
 
   it("Nothing to paste is a toast over the page that goes by itself", async () => {
