@@ -68,3 +68,9 @@ export function hostDispatchersFromEnv(t: SshTarget | undefined, env: NodeJS.Pro
   if (!t || env.CONSOLE_VPS3_DISPATCHER === "0") return undefined;
   return { [workerHost()]: vps3Dispatcher(t, { remote: env.CONSOLE_VPS3_DISPATCHER || undefined }) };
 }
+
+/** the worker server's /proc/meminfo over the same ssh access (the worker ceiling's room reading). */
+export function sshMeminfo(t: SshTarget, o: { exec?: Exec; timeoutMs?: number } = {}): () => Promise<string> {
+  const exec = o.exec ?? sshExec;
+  return () => exec(sshArgv(t, "cat", ["/proc/meminfo"]), o.timeoutMs ?? 20_000);
+}

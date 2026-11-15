@@ -167,6 +167,8 @@ export function wakeProtocol(o: {
   /** ceiling of child workers running at once for the milestone (default 10) and how many run now (undefined = unknown). */
   maxWorkers?: number;
   runningWorkers?: number;
+  /** the room-aware ceiling's line (the number allowed now and why); absent = the flat ceiling. */
+  roomLine?: string;
   /** the Unblocker's confidence rubric in force at this wake (absent = the default). */
   rubric?: RubricSettings & { from?: RubricStamp["from"] };
   /** the milestone's deck link; each worker brief opens with it (absent: another world, no deck). */
@@ -204,6 +206,7 @@ export function wakeProtocol(o: {
         "B. Child workers: never do long work in this thread.",
         `   ${childStateRule(base, run.id)}`,
         `   ${dispatchRule(maxWorkers)}`,
+        ...(o.roomLine ? [`   ${o.roomLine}`] : []),
         ...(o.runningWorkers === undefined
           ? []
           : [`   At this wake's start the console counts ${o.runningWorkers} child run(s) still running for this milestone: you may launch ${Math.max(0, maxWorkers - o.runningWorkers)} more (recount before each launch).`]),

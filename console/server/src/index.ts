@@ -17,7 +17,8 @@ import { createStore } from "./store.js";
 import { McpT3Client } from "./t3/client.js";
 import { gitRunner } from "./cycle/repoPull.js";
 import { envDispatcher } from "./t3/dispatcher.js";
-import { hostDispatchersFromEnv } from "./t3/hostDispatcher.js";
+import { hostDispatchersFromEnv, sshMeminfo } from "./t3/hostDispatcher.js";
+import { createWorkerRoom, memAvailableMb, roomyMaxFromEnv } from "./cycle/workerRoom.js";
 import { hostGit } from "./cycle/preWake.js";
 import { realScanner } from "./usage/collector.js";
 import { pricesFromEnv } from "./usage/prices.js";
@@ -60,6 +61,21 @@ const worker = cycleEnabled && (process.env.CONSOLE_VPS3_SSH || process.env.CONS
 const read = readConfigFromEnv();
 // tokens per wake: read-only transcript scan on this host, and on the worker server over the console's ssh access (when set).
 const vps3Ssh = hooks.host.secondHostSsh(); // the second host's ssh access (hosted: the hosted second-host module)
+const centralDispatcher = envDispatcher();
+// the worker ceiling follows the room: up to CONSOLE_MAX_WORKERS_WITH_ROOM (14) while the broker has free seats and the
+// worker server's memory is over its floor plus the extra workers' share; the flat ceiling otherwise. CONSOLE_WORKER_ROOM=0 = flat.
+const workerRoom =
+  process.env.CONSOLE_WORKER_ROOM === "0" || !centralDispatcher?.status
+    ? undefined
+    : (() => {
+        const meminfo = vps3Ssh ? sshMeminfo(vps3Ssh) : undefined;
+        return createWorkerRoom({
+          base: maxWorkersFromEnv(),
+          roomy: roomyMaxFromEnv(undefined, maxWorkersFromEnv()),
+          seatsFree: async () => (await centralDispatcher.status!()).available,
+          memMb: meminfo ? async () => memAvailableMb(await meminfo()) : undefined,
+        });
+      })();
 const usage =
   process.env.CONSOLE_USAGE === "0"
     ? undefined
@@ -155,7 +171,7 @@ const app = createApp(db, {
       file: path.join(path.dirname(dbPath), ".last-session-start.json"),
     }),
     t3: cycleEnabled ? new McpT3Client() : undefined,
-    dispatcher: envDispatcher(),
+    dispatcher: centralDispatcher,
     // the worker server-hosted persona picks through the worker server's own client (the worker server memory, floor 3000; reservation still central).
     // no agent worker launches on the main server; CONSOLE_CAP_FALLBACK=1 is the incident override (the
     // the worker server-cap -> the main server wake fallback and the console worker route), never a standing setting.
@@ -166,6 +182,7 @@ const app = createApp(db, {
     cadenceTickMs: process.env.CONSOLE_SCHEDULER === "0" ? 0 : 60_000, // cadence wakes, every host
     bootstrapModel: process.env.CONSOLE_BOOTSTRAP_MODEL,
     maxWorkersPerMilestone: maxWorkersFromEnv(), // CONSOLE_MAX_WORKERS_PER_MILESTONE, default 10
+    workerRoom, // up to 14 while seats and memory have room
     rearmEveryMs: 15 * 60_000, // auto-park re-arm check
     retryTickMs: process.env.CONSOLE_SCHEDULER === "0" ? 0 : 30_000, // timed wakes (run retryAt)
     reconcileEveryMs: Number(process.env.CONSOLE_RECONCILE_MS ?? 60_000), // run recording from T3

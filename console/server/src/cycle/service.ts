@@ -13,6 +13,7 @@ import type { ChildEpic } from "./children.js";
 import { isCredentialRefusal, ROTATE_HINT } from "../t3/tokenWatch.js";
 import { T3BusyError, busyKind, errorText, isThreadBusy, matchProject, sendFailureText, type T3Client, type T3Project, type T3ScheduledTask } from "../t3/client.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
+import { roomLine, type Room } from "./workerRoom.js";
 import { pickerFor } from "../t3/hostDispatcher.js";
 import { createIdleStopper } from "./idleStop.js";
 import { classifyRefusal, DEFER_MAX_MS, deferredSummary, isHostCap, isStartGap, nextDeferral, refusalText, type Refusal } from "./capRefusal.js";
@@ -100,6 +101,8 @@ export interface CycleOptions {
   seatsFile?: string;
   /** ceiling of child workers running at once per milestone (default 10; env CONSOLE_MAX_WORKERS_PER_MILESTONE in index.ts). */
   maxWorkersPerMilestone?: number;
+  /** the ceiling now, from the broker's free seats and the worker server's memory (cycle/workerRoom.ts); unset = the flat ceiling. */
+  workerRoom?: () => Promise<Room>;
   /**
    * effort follows priority: the effort of the owner's best-ranked pursuit carrying this milestone's spine
    * (null = in no pursuit: its cadence and the global ceiling as set). Parked: no cadence wakes, ceiling 0. `priority`
@@ -1957,7 +1960,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     // the rubric settings this Unblocker wake shows (its finishing PATCH is judged by the same numbers).
     const rubric = isUnblocker(p.name) ? snapshotRubric(db, run.id, m.id) : undefined;
     const effort = effortOf(m);
-    const maxWorkers = effort ? Math.min(effort.maxWorkers, o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS) : (o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS);
+    // the flat ceiling, raised while seats and memory have room; a tier at the flat ceiling (Top) gets the room too.
+    const flat = o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS;
+    const room = o.workerRoom && !(effort && effort.maxWorkers < flat) ? await o.workerRoom().catch(() => undefined) : undefined;
+    const ceiling = room?.max ?? flat;
+    const maxWorkers = effort ? (effort.maxWorkers >= flat ? ceiling : Math.min(effort.maxWorkers, ceiling)) : ceiling;
     const priority = o.priorityFor ? (() => { try { return o.priorityFor!(m); } catch { return ""; } })() : "";
     const runningWorkers = store.listRuns({ milestoneId: m.id, limit: 1000 }).filter((r) => r.parentRunId && r.outcome === "running").length;
     const children = o.children ? await o.children(m).catch(() => undefined) : undefined;
@@ -1996,7 +2003,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       (launch ? "\n\n" + launch : "") +
       (services ? "\n\n" + services : "") +
       "\n" +
-      wakeProtocol({ base: jobBase ?? baseFor(p.host), run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, rubric, deckUrl, objectivesLine: owned?.line || undefined });
+      wakeProtocol({ base: jobBase ?? baseFor(p.host), run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, roomLine: room ? roomLine(room) : undefined, rubric, deckUrl, objectivesLine: owned?.line || undefined });
     if (skills.note) prompt += `\nNote: ${skills.note}.\n`;
     // the world's own skills are project skills of this checkout, not of the seat
     if (skills.world?.length)
