@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { OwnerPriorityTag } from "@/components/ownerPriority";
+import { OwnerPriorityTag, rankWhy } from "@/components/ownerPriority";
 import { pressingInReviewOnly } from "@/pages/Team";
 
 // the owner: what he was frustrated about or asked for again leads his inbox until answered,
@@ -50,14 +50,24 @@ describe("the review list moves above Blocked only for a pressing review card", 
   });
 });
 
-describe("a standing first rule", () => {
-  it("names the rule with its live count and says when it stops", () => {
-    const p = { level: "high" as const, why: "High.", ref: "E907-S9", pressing: { kind: "first" as const, rule: "Acme testers", why: "You asked that Acme tester work comes first.", count: { value: 2, reaches: 5, label: "active Acme testers" } } };
+describe("his objectives rank the inbox by themselves", () => {
+  it("an item on his first objective says so in one short line, and why it leads", () => {
+    const p = { level: "normal" as const, why: "It moves your objective 1: Five testers use Acme.", ref: "E907-S9", objective: { n: 0, id: "acme-live", name: "Five testers use Acme" } };
     render(<OwnerPriorityTag p={p} />);
     const tag = screen.getByTestId("owner-priority");
-    expect(tag.textContent).toBe("Acme testers first · 2 of 5");
-    expect(tag.getAttribute("data-pressing")).toBe("first");
+    expect(tag.textContent).toBe("Your objective 1: Five testers use Acme");
+    expect(tag.getAttribute("data-objective")).toBe("1");
     fireEvent.click(tag);
-    expect(screen.getByTestId("owner-priority-why").textContent).toContain("First in your inbox until 5 active Acme testers, 2 now.");
+    expect(screen.getByTestId("owner-priority-objective").textContent).toBe("It moves your first objective, Five testers use Acme, so it leads your inbox.");
+    expect(screen.getByTestId("owner-priority-why").textContent).toContain("First in your inbox while this is your first objective.");
+  });
+  it("what put an item high keeps its word and adds the objective it moves", () => {
+    expect(rankWhy({ level: "high", why: "x", ref: "a", pressing: { kind: "frustrated", why: "y" }, objective: { n: 2, id: "b", name: "B" } })).toBe("You were frustrated · objective 3");
+    expect(rankWhy({ level: "normal", why: "x", ref: "a", objective: { n: 1, id: "b", name: "Five testers use Beta" } })).toBe("Your objective 2: Five testers use Beta");
+    expect(rankWhy({ level: "high", why: "x", ref: "a" })).toBe("High priority");
+  });
+  it("a review card on his first objective puts the review list first", () => {
+    expect(pressingInReviewOnly([{ ownerPriority: { objective: { n: 0 } } }], [], [])).toBe(true);
+    expect(pressingInReviewOnly([{ ownerPriority: { objective: { n: 1 } } }], [], [])).toBe(false);
   });
 });

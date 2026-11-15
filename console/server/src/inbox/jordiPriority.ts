@@ -18,6 +18,8 @@ export const PRIORITIES_FILE = "docs/priorities.json";
  * order and his red lines live in one file, docs/pursuits.json; docs/priorities.json keeps only the levels.
  */
 export const OBJECTIVES_FILE = "docs/pursuits.json";
+/** his words on each objective, with the words that tell a message is about it (scripts/his_words.py). */
+export const HIS_WORDS_FILE = "docs/his-words.json";
 
 /** the file a checkout's red lines live in: the objectives file when it holds `redLines`, else docs/priorities.json (a world with no pursuits file). */
 export function redLinesFile(dir: string): string {
@@ -51,6 +53,8 @@ export interface JordiPriority {
   redLine?: RedLineMark;
   /** the owner was frustrated about it or asked for it again (the file's `pressing`): first of all, until it is answered. */
   pressing?: PressingMark;
+  /** the objective of his it moves (his order, docs/pursuits.json): the first leads, the rest break ties. */
+  objective?: ObjectiveMark;
 }
 
 /**
@@ -58,12 +62,9 @@ export interface JordiPriority {
  * every list (above the red line) until it is answered or closed. `scripts/pressing.py` writes the entries into the
  * levels file from his voice notes (and the desk adds one by hand); the console only reads them.
  */
-export type PressingKind = "frustrated" | "repeated" | "first";
+export type PressingKind = "frustrated" | "repeated";
 export interface PressingMark {
   kind: PressingKind;
-  /** kind `first`: the rule's name ("Acme testers") and its live count, until it switches off by itself. */
-  rule?: string;
-  count?: FirstCount;
   why: string;
   words?: string;
   said?: string;
@@ -77,27 +78,25 @@ export interface PressingEntry extends PressingMark {
   path?: string;
 }
 /**
- * a standing rule the owner gave ("every card and ask about the product's testers ranks first, until five testers use it"): every item whose words or red line match leads every list, above what is pressing, until a live count
- * reaches its number, then the rule switches off by itself. Written into the levels file as `first`; no section of its own.
+ * the objective an item moves, read from his objectives (docs/pursuits.json, his order; the one objectives file) and
+ * the words that tell a message is about each (docs/his-words.json `match`, read from his voice notes). No hand-set
+ * rule: the first objective's items lead every list, and inside every tier his order breaks the tie. `n` 0 is his first.
  */
-export interface FirstRule {
+export interface ObjectiveMark {
+  n: number;
+  id: string;
   name: string;
-  why: string;
-  words?: string;
-  said?: string;
-  source?: string;
-  /** an item matches when its title or question says one of `words` and names one of `products` (or lives in one of `repos`), or sits on one of `redLines`. */
-  match: { words: string[]; products: string[]; repos: string[]; redLines: string[] };
-  /** the rule is on until this count (`<source>#<field>`, remoteCounts.ts) reaches `reaches`; an unread count keeps it on. */
-  until?: { source: string; reaches: number; label?: string };
 }
-export interface FirstCount {
-  value: number | null;
-  reaches: number;
-  label?: string;
+export interface ObjectiveDef extends ObjectiveMark {
+  /** groups of word patterns, every pattern of one group in the item's words (his_words.py `matches`). */
+  match: RegExp[][];
+  /** repos only this objective names (its epics, watched paths, campaign): an item living there moves it. */
+  repos: string[];
+  /** `<repo>:<file>` of its epics and watched files. */
+  spines: string[];
 }
-/** At most this many rules: a standing rule or two, never a second backlog. */
-export const FIRST_MAX = 3;
+/** the objective tier: items on his first objective lead, above what is pressing. */
+export const OBJECTIVE_TIER = -2;
 
 /** At most this many items lead the inbox as pressing (the newest first in the file): a few, never a second backlog. */
 export const PRESSING_MAX = 7;
@@ -148,6 +147,8 @@ export interface RedLine {
   items: RedLineItem[];
   /** The repo whose file holds the line (its `ask` is in that repo's). */
   repo?: string;
+  /** the objective (its docs/pursuits.json id) the line serves. */
+  objective?: string;
   /**
    * pages the
    * line is about, each one plain label and an https address, shown on its band.
@@ -188,7 +189,6 @@ export interface PriorityFile {
   redLine?: RedLine;
   redLines?: RedLine[];
   pressing?: PressingEntry[];
-  first?: FirstRule[];
 }
 
 const LEVELS = new Set<JordiLevel>(["high", "normal", "low"]);
@@ -199,8 +199,8 @@ export const RED_LINE_TIER = 0;
 export const PRESSING_TIER = -1;
 /** The tier of an item the persona did not rank: with the normal ones. */
 export const UNRANKED_TIER = TIER.normal;
-export const tierOf = (p?: Pick<JordiPriority, "level" | "redLine" | "pressing">) =>
-  p?.pressing ? PRESSING_TIER : p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER;
+export const tierOf = (p?: Pick<JordiPriority, "level" | "redLine" | "pressing" | "objective">) =>
+  p?.objective?.n === 0 ? OBJECTIVE_TIER : p?.pressing ? PRESSING_TIER : p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER;
 
 const STATES = new Set<RedLineState>(["proposed", "agreed", "changed"]);
 /** At most this many items lead the inbox, whatever the file says (the owner: a line, not a second backlog). */
@@ -269,7 +269,7 @@ function oneLine(r: unknown, repoName: string): RedLine | undefined {
     .map((o) => ({ label: s(o, "label") ?? "", source: hooks.counts.sourceId(s(o, "source") ?? "") ?? "" }))
     .filter((c) => c.label && c.source)
     .slice(0, RED_LINE_EXTRAS_MAX);
-  return { ...opt("name"), sentence, state: state && STATES.has(state) ? state : "proposed", items, repo: repoName, ...opt("why"), ...opt("words"), ...opt("said"), ...opt("source"), ...opt("ask"), ...opt("at"), ...opt("target"), ...(links.length ? { links } : {}), ...(counts.length ? { counts } : {}) };
+  return { ...opt("name"), sentence, state: state && STATES.has(state) ? state : "proposed", items, repo: repoName, ...opt("why"), ...opt("words"), ...opt("said"), ...opt("source"), ...opt("ask"), ...opt("at"), ...opt("target"), ...opt("objective"), ...(links.length ? { links } : {}), ...(counts.length ? { counts } : {}) };
 }
 
 /** Parse one file; a broken entry is skipped, a broken file is none (the inbox keeps the milestone order). */
@@ -335,50 +335,83 @@ export function parsePressing(text: string, repoName: string): PressingEntry[] {
   return out;
 }
 
-/** the file's standing `first` rules (a broken one, with no name, why or match, is skipped), at most FIRST_MAX. */
-export function parseFirst(text: string): FirstRule[] {
-  let raw: unknown;
+/** a citation of where his words are kept ("<Name> Log/2026-11-14.md#^e-…") names the memory service, not what an item is about. */
+const NOT_ABOUT = /\b[\w-]+ Log\/\S*/g;
+/** one pattern of the words file as a word-start match (his_words.py `matches`); a broken one is dropped. */
+function pattern(t: string): RegExp | undefined {
   try {
-    raw = JSON.parse(text);
+    return new RegExp(`\\b(?:${t})`, "i");
+  } catch {
+    return undefined;
+  }
+}
+type Obj = Record<string, unknown>;
+const isObj = (x: unknown): x is Obj => !!x && typeof x === "object" && !Array.isArray(x);
+const str = (o: Obj, k: string) => (typeof o[k] === "string" && (o[k] as string).trim() ? (o[k] as string).trim() : undefined);
+const cleanPath = (f: string) => f.replace(/^\.?\//, "");
+
+/**
+ * his objectives in his order (docs/pursuits.json `pursuits`) with their words (docs/his-words.json, by id; its name
+ * is the one he uses). A broken or missing objectives file is none: the order is as before.
+ */
+export function parseObjectives(pursuitsText: string | undefined, wordsText?: string): ObjectiveDef[] {
+  let ps: Obj[];
+  try {
+    const p = JSON.parse(pursuitsText ?? "") as Obj;
+    ps = (Array.isArray(p.pursuits) ? (p.pursuits as unknown[]) : []).filter((x): x is Obj => isObj(x) && !!str(x, "id"));
   } catch {
     return [];
   }
-  const list = raw && typeof raw === "object" && Array.isArray((raw as PriorityFile).first) ? ((raw as PriorityFile).first as unknown[]) : [];
-  const out: FirstRule[] = [];
-  for (const it of list) {
-    if (!it || typeof it !== "object" || Array.isArray(it)) continue;
-    const e = it as Record<string, unknown>;
-    const s = (o: Record<string, unknown>, k: string) => (typeof o[k] === "string" && (o[k] as string).trim() ? (o[k] as string).trim() : undefined);
-    const strs = (o: Record<string, unknown>, k: string) => (Array.isArray(o[k]) ? (o[k] as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()) : []);
-    const m = e.match && typeof e.match === "object" && !Array.isArray(e.match) ? (e.match as Record<string, unknown>) : {};
-    const match = { words: strs(m, "words"), products: strs(m, "products"), repos: strs(m, "repos"), redLines: strs(m, "redLines") };
-    const name = s(e, "name");
-    const why = s(e, "why");
-    if (!name || !why || (!match.words.length && !match.redLines.length)) continue;
-    const u = e.until && typeof e.until === "object" && !Array.isArray(e.until) ? (e.until as Record<string, unknown>) : undefined;
-    const until = u && s(u, "source") && typeof u.reaches === "number" && u.reaches > 0 ? { source: s(u, "source")!, reaches: u.reaches, ...(s(u, "label") ? { label: s(u, "label") } : {}) } : undefined;
-    out.push({ name, why, match, ...(until ? { until } : {}), ...(s(e, "words") ? { words: s(e, "words") } : {}), ...(s(e, "said") ? { said: s(e, "said") } : {}), ...(s(e, "source") ? { source: s(e, "source") } : {}) });
-    if (out.length >= FIRST_MAX) break;
+  let ws: Obj[] = [];
+  try {
+    const w = JSON.parse(wordsText ?? "") as Obj;
+    ws = Array.isArray(w.objectives) ? (w.objectives as unknown[]).filter(isObj) : [];
+  } catch {
+    // no words file: matched by where items live only
   }
-  return out;
+  const places = ps.map((o) => {
+    const repos = new Set<string>();
+    const spines: string[] = [];
+    for (const e of [...(Array.isArray(o.epics) ? o.epics : []), ...(Array.isArray(o.watch) ? o.watch : [])] as unknown[]) {
+      if (!isObj(e) || !str(e, "repo")) continue;
+      const r = norm(str(e, "repo")!);
+      repos.add(r);
+      const files = [...(str(e, "spine") ? [str(e, "spine")!] : []), ...(Array.isArray(e.paths) ? (e.paths as unknown[]).filter((x): x is string => typeof x === "string") : [])];
+      for (const f of files) spines.push(`${r}:${cleanPath(f)}`);
+    }
+    const camp = isObj(o.numbers) ? str(o.numbers, "campaign") : undefined;
+    if (camp) repos.add(norm(camp));
+    return { repos, spines };
+  });
+  // a repo is an objective's own only when no other objective names it (the code repo serves them all)
+  const named = new Map<string, number>();
+  for (const p of places) for (const r of p.repos) named.set(r, (named.get(r) ?? 0) + 1);
+  return ps.map((o, n) => {
+    const id = str(o, "id")!;
+    const w = ws.find((x) => str(x, "id") === id);
+    const match = (w && Array.isArray(w.match) ? (w.match as unknown[]) : [])
+      .map((g) => (Array.isArray(g) ? g.filter((t): t is string => typeof t === "string" && !!t.trim()).map(pattern) : []))
+      .filter((g): g is RegExp[] => g.length > 0 && g.every(Boolean));
+    return { n, id, name: (w && str(w, "name")) ?? str(o, "name") ?? id, match, repos: [...places[n].repos].filter((r) => named.get(r) === 1), spines: places[n].spines };
+  });
 }
 
-/** a rule with its count read now: on while the count is unread or below its number. */
-export interface ActiveFirst extends FirstRule {
-  count?: FirstCount;
-}
-export const firstIsOn = (r: ActiveFirst) => !r.until || r.count?.value == null || r.count.value < r.until.reaches;
-
-const wordRe = (w: string) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
-/** does the item match the rule: its own words name the product and say one of the words, or it lives in the product's repo, or sits on the rule's red line. */
-export function firstMatches(r: FirstRule, i: Locatable, p?: JordiPriority): boolean {
-  if (p?.redLine?.name && r.match.redLines.some((n) => norm(n) === norm(p.redLine!.name!))) return true;
-  if (!r.match.words.length) return false;
-  // a source citation ("<Name> Log/2026-11-14.md#^e-…", where his words are kept) names the memory service, not what the item is about
-  const text = [i.title, i.question].filter(Boolean).join(" ").replace(/\b[\w-]+ Log\/\S*/g, " ");
-  if (!text || !r.match.words.some((w) => wordRe(w).test(text))) return false;
-  const inRepo = !!i.repo && r.match.repos.some((x) => norm(x) === norm(i.repo!));
-  return inRepo || r.match.products.some((w) => wordRe(w).test(text));
+/**
+ * the objective an item moves, the first in his order it touches: its red line's objective, an objective whose epic or
+ * watched file it lives in or whose own repo it lives in, or one whose words its title or question says.
+ */
+export function objectiveOf(defs: ObjectiveDef[], i: Locatable, redLineObjective?: string): ObjectiveMark | undefined {
+  const repo = i.repo ? norm(i.repo) : undefined;
+  const spine = repo && i.path ? `${repo}:${cleanPath(i.path)}` : undefined;
+  const text = [i.title, i.question].filter(Boolean).join(" ").replace(NOT_ABOUT, " ");
+  const d = defs.find(
+    (d) =>
+      d.id === redLineObjective ||
+      (!!spine && d.spines.includes(spine)) ||
+      (!!repo && d.repos.includes(repo)) ||
+      (!!text.trim() && d.match.some((g) => g.every((re) => re.test(text)))),
+  );
+  return d ? { n: d.n, id: d.id, name: d.name } : undefined;
 }
 
 /** What an inbox item tells about where it lives: its repo (checkout name), spine file, row code and own code. */
@@ -391,7 +424,7 @@ export interface Locatable {
   row?: string;
   /** Ask: its code (``). */
   code?: string;
-  /** its words (a card's title, an ask's question): a standing `first` rule reads them. */
+  /** its words (a card's title, an ask's question): his objectives' words are read in them. */
   title?: string;
   question?: string;
 }
@@ -406,18 +439,16 @@ const strip = ({ repo: _r, path: _p, ...p }: Entry): JordiPriority => p;
  * row code `` belongs to of the same repo; a number two epics share is no match), then its epic by spine
  * file; never another repo's.
  */
-export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], pressing: PressingEntry[] = [], first: ActiveFirst[] = []): PriorityLookup {
-  const pressed = pressedLookup(entries, redLines, pressing);
-  const rules = first.filter(firstIsOn);
-  if (!rules.length) return pressed;
-  // a standing rule leads above every pressing item: its order is below theirs (-rules.length .. -1) inside the same tier.
+export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], pressing: PressingEntry[] = [], objectives: ObjectiveDef[] = []): PriorityLookup {
+  const lines = Array.isArray(redLines) ? redLines : redLines ? [redLines] : [];
+  const pressed = pressedLookup(entries, lines, pressing);
+  if (!objectives.length) return pressed;
   return (i) => {
     const p = pressed(i);
-    const n = rules.findIndex((r) => firstMatches(r, i, p));
-    if (n < 0) return p;
-    const r = rules[n];
-    const mark: PressingMark = { kind: "first", rule: r.name, why: r.why, order: n - rules.length, ...(r.count ? { count: r.count } : {}), ...(r.words ? { words: r.words } : {}), ...(r.said ? { said: r.said } : {}), ...(r.source ? { source: r.source } : {}) };
-    return { ...(p ?? { level: "high" as const, ref: i.ref ?? i.code ?? i.row ?? r.name, why: r.why }), pressing: mark };
+    const o = objectiveOf(objectives, i, p?.redLine ? lines[p.redLine.line ?? 0]?.objective : undefined);
+    if (!o) return p;
+    // an item only an objective ranks says which, in his objective's words
+    return { ...(p ?? { level: "normal" as const, ref: i.ref ?? i.code ?? i.row ?? o.id, why: `It moves your objective ${o.n + 1}: ${o.name}.` }), objective: o };
   };
 }
 
@@ -562,40 +593,28 @@ function textOf(f: string): string | undefined {
 }
 
 /** a checkout's levels (docs/priorities.json) and red lines (the objectives file when they live there). */
-function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; first: FirstRule[] } {
+function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; objectives: ObjectiveDef[] } {
   const levels = textOf(path.join(dir, PRIORITIES_FILE));
   const lines = textOf(path.join(dir, redLinesFile(dir)));
-  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [], first: levels ? parseFirst(levels) : [] };
+  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [], objectives: objectivesIn(dir) };
 }
 
-/**
- * the rules' counts, as last read: the lists are sorted on every request and must not wait on a remote read, so each
- * count is read in the background (the counts hook keeps its own hourly cache) and the last value is used meanwhile.
- */
-const firstCounts = new Map<string, { value: number | null; readAt: number; reading?: boolean }>();
-export const FIRST_COUNT_TTL_MS = 10 * 60 * 1000;
-export function firstCountValue(source: string, now = Date.now(), read = (s: string) => hooks.counts.read([{ label: s, source: s }])): number | null {
-  const held = firstCounts.get(source);
-  if (!held || (!held.reading && now - held.readAt > FIRST_COUNT_TTL_MS)) {
-    const id = hooks.counts.sourceId(source) ?? source;
-    firstCounts.set(source, { value: held?.value ?? null, readAt: now, reading: true });
-    read(id)
-      .then((c) => firstCounts.set(source, { value: typeof c[0]?.value === "number" ? c[0].value : (held?.value ?? null), readAt: Date.now() }))
-      .catch(() => firstCounts.set(source, { value: held?.value ?? null, readAt: Date.now() }));
-  }
-  return firstCounts.get(source)?.value ?? null;
-}
-/** tests: forget every count read. */
-export const resetFirstCounts = () => firstCounts.clear();
-
-/** the world's standing rules with their counts now (GET /api/inbox-first shows them). */
-export function activeFirst(rules: FirstRule[]): ActiveFirst[] {
-  return rules.map((r) => (r.until ? { ...r, count: { value: firstCountValue(r.until.source), reaches: r.until.reaches, ...(r.until.label ? { label: r.until.label } : {}) } } : r));
+/** a checkout's objectives, parsed again only when either file changes. */
+const parsedObjectives = new Map<string, { p: string; w?: string; defs: ObjectiveDef[] }>();
+function objectivesIn(dir: string): ObjectiveDef[] {
+  const p = textOf(path.join(dir, OBJECTIVES_FILE));
+  if (!p) return [];
+  const w = textOf(path.join(dir, HIS_WORDS_FILE));
+  const hit = parsedObjectives.get(dir);
+  if (hit && hit.p === p && hit.w === w) return hit.defs;
+  const defs = parseObjectives(p, w);
+  parsedObjectives.set(dir, { p, w, defs });
+  return defs;
 }
 
-/** the world's standing `first` rules, each with its count and whether it is on. */
-export function worldFirst(store: Pick<Store, "listMilestones">, reposRoot: string): (ActiveFirst & { on: boolean })[] {
-  return activeFirst(worldFiles(store, reposRoot).first).map((r) => ({ ...r, on: firstIsOn(r) }));
+/** his objectives in the order the inbox follows (GET /api/inbox-first shows them). */
+export function worldObjectives(store: Pick<Store, "listMilestones">, reposRoot: string): ObjectiveMark[] {
+  return worldFiles(store, reposRoot).objectives.map(({ n, id, name }) => ({ n, id, name }));
 }
 
 /**
@@ -603,8 +622,8 @@ export function worldFirst(store: Pick<Store, "listMilestones">, reposRoot: stri
  * own). None written yet: undefined, so the lists keep the milestone order exactly as before.
  */
 export function worldPriorities(store: Pick<Store, "listMilestones">, reposRoot: string): PriorityLookup | undefined {
-  const { entries, redLines, pressing, first } = worldFiles(store, reposRoot);
-  return entries.length || redLines.length || pressing.length || first.length ? lookupOf(entries, redLines, pressing, activeFirst(first)) : undefined;
+  const { entries, redLines, pressing, objectives } = worldFiles(store, reposRoot);
+  return entries.length || redLines.length || pressing.length || objectives.length ? lookupOf(entries, redLines, pressing, objectives) : undefined;
 }
 
 /**
@@ -620,11 +639,11 @@ export function worldRedLines(store: Pick<Store, "listMilestones">, reposRoot: s
   return worldFiles(store, reposRoot).redLines;
 }
 
-function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; first: FirstRule[] } {
+function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; objectives: ObjectiveDef[] } {
   const seen = new Set<string>();
   const entries: Entry[] = [];
   const pressing: PressingEntry[] = [];
-  let first: FirstRule[] = [];
+  let objectives: ObjectiveDef[] = [];
   let redLines: RedLine[] = [];
   for (const m of store.listMilestones({ includeSettled: true })) {
     const r = m.repo ? resolveRepo(reposRoot, m.repo) : undefined;
@@ -634,10 +653,10 @@ function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { 
     entries.push(...f.entries);
     pressing.push(...f.pressing);
     if (!redLines.length) redLines = f.redLines;
-    // one world, one file: the first checkout (in milestone order) that writes rules holds them
-    if (!first.length) first = f.first;
+    // one world, one objectives file: the first checkout (in milestone order) that has it
+    if (!objectives.length) objectives = f.objectives;
   }
-  return { entries, redLines, pressing, first };
+  return { entries, redLines, pressing, objectives };
 }
 
 /** the lines with their counts read now (each remote source at most once an hour; a failed read says so). */

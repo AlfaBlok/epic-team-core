@@ -9,6 +9,8 @@ import { api, type WaitingItem } from "@/api";
 import { invalidate, mutate } from "@/lib/data";
 import { relayOf, snoozeItem, unsnoozeItem } from "@/lib/snooze";
 import { showClosed } from "@/lib/afterClose";
+import { markSent, useSent } from "@/lib/sentRows";
+import { SentRow } from "@/components/sentRow";
 import { CardButton } from "@/components/ui/cardButton";
 import { askLead, projectLabel } from "@/lib/askLead";
 
@@ -62,7 +64,16 @@ type Done = { kind: "approve" | "feedback" | "deny"; error?: string };
 
 const approve = (i: WaitingItem) => mutate(() => api.respondToWaiting(i.id, { kind: "approve", text: "", milestoneId: i.milestoneId, wake: true, asRow: true, ...relayOf(i) }));
 
-export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: string }) {
+/** vn_e00f1134: a set is answered as one: every ask of it shares one green Sent row, where the set was. */
+const setSlots = (group: AskSetGroup) => group.items.map((i) => `ask:${i.id}`);
+
+export function AskSet(props: { group: AskSetGroup; readOnly?: string }) {
+  const slot = `ask:${props.group.items[0]?.id ?? ""}`;
+  const sent = useSent(slot);
+  return sent ? <SentRow slot={slot} entry={sent} /> : <AskSetBody {...props} />;
+}
+
+function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string }) {
   const [done, setDone] = useState<Record<string, Done>>({});
   const [busy, setBusy] = useState<string>();
   const [progress, setProgress] = useState<string>();
@@ -88,10 +99,12 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
     setBusy("all");
     const list = left;
     let n = 0;
+    let ok = 0;
     for (const i of list) {
       setProgress(`Accepting ${++n} of ${list.length}…`);
       try {
         await approve(i);
+        ok++;
         setDone((d) => ({ ...d, [i.id]: { kind: "approve" } }));
       } catch (e) {
         setDone((d) => ({ ...d, [i.id]: { kind: "approve", error: (e as Error).message } }));
@@ -99,6 +112,12 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
     }
     setProgress(undefined);
     setBusy(undefined);
+    // every one taken: the set collapses in place to its Sent row (a failure keeps the card, its line says why)
+    if (list.length && ok === list.length) {
+      const title = `The ${group.persona}'s ${group.items.length} recommendations`;
+      const first = group.items.find((i) => i.source === "ask" && i.repo && i.path && i.code);
+      markSent(setSlots(group), { said: `Yes to all ${list.length}`, title, ...(first ? { card: { kind: "ask" as const, repo: first.repo!, path: first.path!, ref: first.code!, ...(first.milestoneId ? { milestoneId: first.milestoneId } : {}) } } : {}) });
+    }
     invalidate("inbox");
   };
 
@@ -106,7 +125,7 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
   const snoozable = left.filter((i) => i.source === "ask" && i.state === "open" && !!i.path);
   const snoozeAll = (c: SnoozeChoice) => {
     for (const i of snoozable) void snoozeItem(i, c);
-    showClosed({ said: "Snoozed", title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
+    showClosed({ said: "Snoozed", slot: setSlots(group), title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
   };
   const project = projectLabel(group.items[0]?.milestoneTitle);
   // one quiet card, then one decisions block: Accept all, Park, Snooze and the feedback block.
@@ -144,7 +163,7 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
               disabled={!!busy}
               onPark={() => {
                 for (const i of snoozable) void snoozeItem(i, { days: PARK_DAYS }, undefined, true);
-                showClosed({ said: PARK.said, title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
+                showClosed({ said: PARK.said, slot: setSlots(group), title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
               }}
             />
           )}

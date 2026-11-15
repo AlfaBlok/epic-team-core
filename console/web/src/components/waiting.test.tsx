@@ -89,8 +89,8 @@ describe("WaitingCard", () => {
     const { rerender } = wrap(<WaitingCard item={item()} />);
     fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "two", milestoneId: "ms_1", wake: true }));
-    // saved: the card says so at once, in place of the controls
-    await vi.waitFor(() => expect(screen.getByTestId("saved-line")).toBeTruthy());
+    // saved: vn_e00f1134 the card is one green Sent row at once, in its place
+    await vi.waitFor(() => expect(screen.getByTestId("sent-row")).toBeTruthy());
     expect(screen.queryByTestId("answer-buttons")).toBeNull();
     // The refresh brings the item back still open (here: the answer was not delivered): the controls are live again.
     const failed = { id: "jr_1", itemId: "wj_1", milestoneId: "ms_1", kind: "answer" as const, text: "two", delivery: "failed" as const, createdAt: new Date().toISOString() };

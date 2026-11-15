@@ -31,11 +31,19 @@ const redLabel = (r: NonNullable<OwnerPriority["redLine"]>) => (r.name ? `Red li
 const PRESSING_LABEL: Record<NonNullable<OwnerPriority["pressing"]>["kind"], string> = {
   frustrated: "You were frustrated",
   repeated: "You asked again",
-  first: "First until it is done",
 };
-/** a standing rule's marker names it with its live count ("Acme testers first · 2 of 5"). */
-const pressingLabel = (h: NonNullable<OwnerPriority["pressing"]>) =>
-  h.kind === "first" && h.rule ? `${h.rule} first${h.count && h.count.value != null ? ` · ${h.count.value} of ${h.count.reaches}` : ""}` : PRESSING_LABEL[h.kind];
+/**
+ * why the item ranks where it does, in one short line: his first objective leads ("Your objective 1: Five testers use
+ * the product"); else what put it high (frustrated, said again, red line, level) with the objective it moves.
+ */
+export function rankWhy(p: OwnerPriority): string {
+  const o = p.objective;
+  if (o && o.n === 0) return `Your objective 1: ${o.name}`;
+  const hot = p.pressing;
+  const base = hot ? PRESSING_LABEL[hot.kind] : p.redLine ? redLabel(p.redLine) : undefined;
+  if (base) return o ? `${base} · objective ${o.n + 1}` : base;
+  return o ? `Your objective ${o.n + 1}: ${o.name}` : LABEL[p.level];
+}
 
 /**
  * the owner's level for an inbox item (the Prioritizer read his voice notes and wrote it into the repo); a tap shows
@@ -47,7 +55,8 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
   if (!p) return null;
   const red = p.redLine;
   const hot = p.pressing;
-  const label = hot ? pressingLabel(hot) : red ? redLabel(red) : LABEL[p.level];
+  const first = p.objective?.n === 0;
+  const label = rankWhy(p);
   const why = hot ? hot.why : red ? red.sentence : p.why;
   const words = hot ? hot.words : p.words;
   const said = hot ? hot.said : p.said;
@@ -66,6 +75,7 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
         data-level={p.level}
         {...(red ? { "data-red-line": red.name ?? "" } : {})}
         {...(hot ? { "data-pressing": hot.kind } : {})}
+        {...(p.objective ? { "data-objective": p.objective.n + 1 } : {})}
       >
         {label}
       </button>
@@ -83,12 +93,19 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
               “{words}”{said ? ` · you said this on ${said}` : ""}
             </div>
           )}
+          {p.objective && (
+            <div className="mt-1" data-testid="owner-priority-objective">
+              {first
+                ? `It moves your first objective, ${p.objective.name}, so it leads your inbox.`
+                : `It moves your objective ${p.objective.n + 1}, ${p.objective.name}. Your objectives' order sorts your inbox.`}
+            </div>
+          )}
           <div className="mt-1 text-xs text-muted-foreground">
-            {hot
-              ? hot.kind === "first"
-                ? `First in your inbox until ${hot.count ? `${hot.count.reaches} ${hot.count.label ?? "people"}` : "it is done"}${hot.count?.value != null ? `, ${hot.count.value} now` : ""}.`
-                : "First in your inbox until you answer it."
-              : <>Set by the Prioritizer from your voice notes{(red?.at ?? p.at) ? ` on ${red?.at ?? p.at}` : ""}.</>}
+            {first
+              ? "First in your inbox while this is your first objective."
+              : hot
+                ? "First in your inbox until you answer it."
+                : <>Set by the Prioritizer from your voice notes{(red?.at ?? p.at) ? ` on ${red?.at ?? p.at}` : ""}.</>}
           </div>
         </div>
       )}

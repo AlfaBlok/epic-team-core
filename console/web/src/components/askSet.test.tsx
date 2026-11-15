@@ -67,9 +67,11 @@ describe("AskSet", () => {
     expect(screen.getByRole("heading").textContent).toBe("The Advisor's 3 recommendations"); // E948-S52: the card family
     expect(screen.getAllByTestId("ask-set-row").map((r) => r.querySelector("p")!.textContent)).toEqual(["Thing ROOT-A1", "Thing ROOT-A2", "Thing ROOT-A3"]);
     fireEvent.click(screen.getByTestId("accept-all"));
-    await waitFor(() => expect(screen.getAllByTestId("ask-set-done")).toHaveLength(3));
+    // vn_e00f1134: every one taken, the set collapses in place to one green Sent row with Add comment
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Yes to all 3"));
     expect(calls).toEqual(items.map((i) => [i.id, expect.objectContaining({ kind: "approve", asRow: true, wake: true, milestoneId: "ms_1" })]));
-    expect(screen.getAllByTestId("ask-set-done")[0].textContent).toBe("✓ Accepted: it becomes a ready row");
+    expect(screen.getByTestId("sent-row-title").textContent).toBe("The Advisor's 3 recommendations");
+    expect(screen.getByTestId("sent-row-comment")).toBeTruthy();
     expect(screen.queryByTestId("accept-all")).toBeNull();
   });
   it("one row: Accept, Ask a question (feedback, needs words), No (deny); a failed one says so and stays in Accept all", async () => {

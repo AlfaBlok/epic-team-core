@@ -38,6 +38,8 @@ import { HOLD_MS, SnoozeDate, SnoozeDropdown, SnoozingLinesFor } from "@/compone
 import { ParkButton, parkReview } from "@/components/parkButton";
 import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/postBasics";
 import { keepPlace } from "@/lib/keepPlace";
+import { unmarkSent, useKeepSent, useSent } from "@/lib/sentRows";
+import { SentRow } from "@/components/sentRow";
 
 /** the server adds the milestone's title to each card it lists. */
 type Listed = ReviewItem & { milestoneTitle?: string };
@@ -98,6 +100,8 @@ export function WaitingForReview({
   ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
   const snoozed = hits ? snoozedAll.filter((i) => hits.has(i.id)) : snoozedAll;
   const items = data ?? [];
+  // vn_e00f1134: a card he pressed stays where it was as its green Sent row, after the refetch drops it too
+  const rows = useKeepSent(items, (i) => `review:${i.id}`);
   // tasks just marked here are no longer open, before the list refetches (a goal's confirm never names them)
   // what a pressed card is doing once it has left: "Saved · writing it to the project… 3 s", then "Done ✓ … in 6.1 s"
   const progress = usePressProgress((id) => fetched?.find((i) => i.id === id));
@@ -151,9 +155,14 @@ export function WaitingForReview({
         {error && <ErrorBox error={error} muted />}
         {!data && !error && <SkeletonCards count={undefined} testId="waiting-for-review-loading" />}
         {data && items.length === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing to review matches “{search.q}”.</p> : <Empty>Nothing finished waiting for your review.</Empty>)}
-        {items.length > 0 && (
+        {rows.length > 0 && (
           <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="review-feed">
-            {items.map((i, n) => (
+            {rows.map(({ slot, item: i, sent }, n) =>
+              !i || sent ? (
+                <li key={slot} className="min-w-0" data-testid="review-feed-sent">
+                  {sent && <SentRow slot={slot} entry={sent} />}
+                </li>
+              ) : (
               <li
                 key={i.id}
                 className={cn("min-w-0 transition-all duration-300 ease-in", n >= PHONE_FIRST && !phoneAll && !hits && "max-sm:hidden")}
@@ -167,7 +176,8 @@ export function WaitingForReview({
                   <ReviewCard key={`${failed.get(i.id) ?? ""}:${backs.get(i.id) ?? 0}`} item={i} onDone={() => pressed(i.id)} onFailed={(why) => comeBack(i.id, why)} onBack={() => broughtBack(i.id)} failed={failed.get(i.id)} closedRefs={pressedRefs} />
                 )}
               </li>
-            ))}
+              ),
+            )}
           </ul>
         )}
         {items.length > PHONE_FIRST && !phoneAll && !hits && (
@@ -685,6 +695,7 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
       if (said)
         showClosed({
           said,
+          slot: `review:${item.id}`,
           title: item.face?.title ?? item.title,
           ...(cardOf(item) ? { card: cardOf(item) } : {}),
           back,
@@ -696,7 +707,8 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
         onDone();
         // the list and every count refetch (after the slide)
         setTimeout(() => void mutate(async () => undefined).catch(() => undefined), 330);
-      }, PRESS.savedMs);
+        // vn_e00f1134: the card is its green Sent row already, so it leaves the counts at once (no slide to wait for)
+      }, said ? 0 : PRESS.savedMs);
     };
     const off = onPress((n) => {
       if (!n.path.includes(`/review-items/${encodeURIComponent(item.id)}/`)) return;
@@ -714,7 +726,9 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
       if (e instanceof PressUndone || backed) return false;
       const why = e instanceof Error ? e.message : String(e);
       clearTimeout(leave);
-      if (gone) onFailed?.(why);
+      // vn_e00f1134: its Sent row goes, the card is back with the reason
+      unmarkSent(`review:${item.id}`);
+      if ((gone || saved) && onFailed) onFailed(why);
       else {
         setPressing(undefined);
         setLanding(undefined);
@@ -733,7 +747,17 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
 /** how many review cards a phone shows before "Show N more to review". */
 export const PHONE_FIRST = 5;
 
-export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: Set<string> }) {
+/**
+ * vn_e00f1134: a review card he pressed (Mark complete, Start N, an option, Give feedback, Park, Snooze) collapses in place to
+ * one green Sent row with Add comment, never vanishing (the owner, vn_e00f1134: ); a press that fails brings the card back.
+ */
+export function ReviewCard(props: CardProps & { closedRefs?: Set<string> }) {
+  const slot = `review:${props.item.id}`;
+  const sent = useSent(slot);
+  return sent ? <SentRow slot={slot} entry={sent} /> : <ReviewCardBody {...props} />;
+}
+
+function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<string> }) {
   const { item } = card;
   const face = item.face;
   const [denyOpen, setDenyOpen] = useState(false);
@@ -1077,6 +1101,7 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
               // the same floating note; Bring it back unsnoozes it
               showClosed({
                 said: "Snoozed",
+                slot: `review:${item.id}`,
                 title: face.title,
                 ...(cardOf(item) ? { card: cardOf(item) } : {}),
                 back: async () => (await unsnoozeReview(item), { back: true, line: "It is back in your inbox." }),

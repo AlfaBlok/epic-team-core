@@ -864,15 +864,14 @@ export function WakesDidSomething({ counts }: { counts?: { did: number; total: n
   );
 }
 
-/** a review card is pressing and no open ask is: the review list goes first (an open pressing ask already leads Blocked). */
-export function pressingInReviewOnly(
-  review: { ownerPriority?: { pressing?: unknown } }[] | undefined,
-  asks: { id: string; ownerPriority?: { pressing?: unknown } }[],
-  blocked: { id: string; ownerPriority?: { pressing?: unknown } }[],
-): boolean {
-  if (!review?.some((i) => i.ownerPriority?.pressing)) return false;
+type Leading = { ownerPriority?: { pressing?: unknown; objective?: { n: number } } };
+/** an item that leads every list: on his first objective, or pressing (frustrated, said again). */
+const leads = (i: Leading) => !!i.ownerPriority?.pressing || i.ownerPriority?.objective?.n === 0;
+/** a review card leads and no open ask does: the review list goes first (an open leading ask already leads Blocked). */
+export function pressingInReviewOnly(review: Leading[] | undefined, asks: ({ id: string } & Leading)[], blocked: ({ id: string } & Leading)[]): boolean {
+  if (!review?.some(leads)) return false;
   const open = new Set(blocked.map((b) => b.id));
-  return !blocked.some((b) => b.ownerPriority?.pressing) && !asks.some((a) => open.has(a.id) && a.ownerPriority?.pressing);
+  return !blocked.some(leads) && !asks.some((a) => open.has(a.id) && leads(a));
 }
 
 /**

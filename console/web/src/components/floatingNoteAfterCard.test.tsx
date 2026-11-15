@@ -73,22 +73,28 @@ const held = () =>
   );
 // the main button reads "Mark complete" (was "✓ Mark this task complete")
 const MARK = "Mark complete";
+/** vn_e00f1134: the press collapses the card in place to its green Sent row (the floating note stays away). */
 const press = async () => {
   const c = await screen.findByTestId("review-card");
   fireEvent.click(within(c).getByRole("button", { name: MARK }));
-  return screen.findByTestId("after-close-note");
+  return screen.findByTestId("sent-row");
 };
 
-describe("T72-S18 the floating note after a card closes", () => {
-  it("says Saved with the card's title and offers Add a last thought and Bring it back; the card leaves", async () => {
+describe("vn_e00f1134 an answered card shrinks to one green Sent row in place (was T72-S18's floating note)", () => {
+  it("says Sent with what was done and the card's title, offers Add comment and Bring it back; no floating note", async () => {
     mount();
     held();
-    const note = await press();
-    expect(within(note).getByTestId("after-close-said").textContent).toBe("Saved. Closed.");
-    expect(note.textContent).toContain(FACE.title);
-    expect(within(note).getByTestId("after-close-thought").textContent).toContain("Add a last thought");
-    expect(within(note).getByTestId("after-close-back").textContent).toContain("Bring it back");
-    await waitFor(() => expect(screen.queryByTestId("review-card")).toBeNull(), { timeout: 1500 });
+    const row = await press();
+    expect(within(row).getByTestId("sent-row-word").textContent).toContain("Sent");
+    expect(within(row).getByTestId("sent-row-said").textContent).toBe("Closed");
+    expect(within(row).getByTestId("sent-row-title").textContent).toBe(FACE.title);
+    expect(within(row).getByTestId("sent-row-comment").textContent).toContain("Add comment");
+    expect(within(row).getByTestId("sent-row-back").textContent).toContain("Bring it back");
+    expect(screen.queryByTestId("review-card")).toBeNull();
+    expect(screen.queryByTestId("after-close-note")).toBeNull();
+    // it stays in place past the old note's time
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
   });
 
   it("Bring it back inside the window takes the press back: the card is in the list again with its buttons", async () => {
@@ -96,16 +102,14 @@ describe("T72-S18 the floating note after a card closes", () => {
     held();
     const undo = vi.spyOn(api, "undoPress").mockResolvedValue({ undone: true });
     const reopen = vi.spyOn(api, "reopenReviewRow");
-    const note = await press();
-    await waitFor(() => expect(screen.queryByTestId("review-card")).toBeNull(), { timeout: 1500 });
-    fireEvent.click(within(note).getByTestId("after-close-back"));
+    const row = await press();
+    fireEvent.click(within(row).getByTestId("sent-row-back"));
     await waitFor(() => expect(undo).toHaveBeenCalledWith("pr_18"));
     expect(reopen).not.toHaveBeenCalled();
     const c = await screen.findByTestId("review-card");
     expect((within(c).getByRole("button", { name: MARK }) as HTMLButtonElement).disabled).toBe(false);
     expect(within(c).queryByTestId("review-error")).toBeNull();
-    expect((await screen.findByTestId("after-close-said")).textContent).toBe("Brought back.");
-    expect(screen.getByTestId("after-close-back-line").textContent).toContain("Nothing was written");
+    expect(screen.queryByTestId("sent-row")).toBeNull();
   });
 
   it("once the press is being written or landed (409), Bring it back reopens the row through the console", async () => {
@@ -113,39 +117,39 @@ describe("T72-S18 the floating note after a card closes", () => {
     held();
     vi.spyOn(api, "undoPress").mockRejectedValue(Object.assign(new Error("it is in the project already"), { status: 409 }));
     const reopen = vi.spyOn(api, "reopenReviewRow").mockResolvedValue({ status: "review" });
-    const note = await press();
-    fireEvent.click(within(note).getByTestId("after-close-back"));
+    const row = await press();
+    fireEvent.click(within(row).getByTestId("sent-row-back"));
     await waitFor(() => expect(reopen).toHaveBeenCalledWith({ ...ROW, title: FACE.title, id: ITEM.id }));
     expect(await screen.findByTestId("review-card")).toBeTruthy();
-    expect(screen.getByTestId("after-close-back-line").textContent).toContain("coming back to your inbox");
   });
 
-  it("Add a last thought opens a box (the note stays) and sends his words to the same row", async () => {
+  it("Add comment opens a note box on the same card and sends his words to the same row", async () => {
     mount();
     held();
     const comment = vi.spyOn(api, "commentClosedCard").mockResolvedValue({ sha: "abc1234" });
-    const note = await press();
-    fireEvent.click(within(note).getByTestId("after-close-thought"));
-    const box = within(note).getByTestId("after-close-box");
+    const row = await press();
+    fireEvent.click(within(row).getByTestId("sent-row-comment"));
+    const box = within(row).getByTestId("sent-row-box");
     fireEvent.change(within(box).getByRole("textbox"), { target: { value: "Also check the phone view" } });
-    fireEvent.click(within(box).getByTestId("after-close-box-send"));
+    fireEvent.click(within(box).getByTestId("sent-row-box-send"));
     await waitFor(() => expect(comment).toHaveBeenCalledWith({ ...ROW, title: FACE.title, text: "Also check the phone view", via: "text" }));
-    expect(await within(note).findByTestId("after-close-sent")).toBeTruthy();
+    expect(await within(row).findByTestId("sent-row-commented")).toBeTruthy();
+    // the row stays, Add comment again for one more
+    expect(within(row).getByTestId("sent-row-comment")).toBeTruthy();
   });
 
-  it("Sent shows on the console's reply (the press saved), not when it is written to the project", async () => {
+  it("the comment says sent on the console's reply (saved), not when it is written to the project", async () => {
     mount();
     held();
-    // the comment is saved (202 landing) and never lands in this test
     vi.spyOn(api, "commentClosedCard").mockImplementation(() =>
       landed({ press: { id: "pr_c", state: "landing" } }, "/closed-cards/comment", () => new Promise(() => {}), (m) => new Error(m)),
     );
-    const note = await press();
-    fireEvent.click(within(note).getByTestId("after-close-thought"));
-    const box = within(note).getByTestId("after-close-box");
+    const row = await press();
+    fireEvent.click(within(row).getByTestId("sent-row-comment"));
+    const box = within(row).getByTestId("sent-row-box");
     fireEvent.change(within(box).getByRole("textbox"), { target: { value: "one more thing" } });
-    fireEvent.click(within(box).getByTestId("after-close-box-send"));
-    expect(await within(note).findByTestId("after-close-sent")).toBeTruthy();
+    fireEvent.click(within(box).getByTestId("sent-row-box-send"));
+    expect(await within(row).findByTestId("sent-row-commented")).toBeTruthy();
   });
 
   it("goes by itself after NOTE_MS; a newer close replaces it", async () => {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type OwnerResponse, type WaitingItem } from "@/api";
-import { SAVED_ANSWER, SAVED_HOLD_MS, SecretBox, WaitingCard } from "@/components/waiting";
+import { SAVED_HOLD_MS, SecretBox, WaitingCard } from "@/components/waiting";
 
 /**
  * the clicked answer button keeps its colour with a spinner, and "Updating task…" ("Saving…") shows until the
@@ -75,16 +75,16 @@ describe("Approve shows it is working", () => {
     expect(deny.querySelector(".animate-spin")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
 
-    // The POST resolves: the card says Saved at once (no spinner, no greyed buttons) while the old card is still on
-    // screen; the controls wait for the refresh, so there is no second answer meanwhile.
+    // vn_e00f1134: the POST resolves: the card collapses at once to one green Sent row in its place (no spinner, no
+    // buttons, so no second answer), with Add comment; the refresh that brings the answered item keeps it.
     await act(async () => d.resolve(response()));
-    expect(screen.getByRole("status").textContent).toBe(SAVED_ANSWER);
+    expect(screen.getByTestId("sent-row-said").textContent).toBe("Approved");
+    expect(screen.getByTestId("sent-row-title").textContent).toBe("Ship the logger today?");
+    expect(screen.getByTestId("sent-row-comment")).toBeTruthy();
     expect(screen.queryByTestId("button-spinner")).toBeNull();
     expect(screen.queryByRole("button", { name: /Yes: go ahead/ })).toBeNull();
-
-    // The refresh brings the answered item: the controls go, and so do the spinner and the line.
     rerender(<MemoryRouter><WaitingCard item={item({ state: "answered", response: response() })} /></MemoryRouter>);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
     expect(screen.queryByTestId("button-spinner")).toBeNull();
   });
 
@@ -98,17 +98,16 @@ describe("Approve shows it is working", () => {
     expect(btn(/Yes: go ahead/).disabled).toBe(false);
   });
 
-  it("a refresh that never changes the card releases it after SAVED_HOLD_MS (T72-S3: was 15 s)", async () => {
+  it("vn_e00f1134: the Sent row stays where the card was (it never vanishes or turns back into buttons by itself)", async () => {
     vi.useFakeTimers();
     vi.spyOn(api, "respondToWaiting").mockResolvedValue(response());
     wrap(<WaitingCard item={item()} />);
     fireEvent.click(btn(/Yes: go ahead/));
     await act(async () => {});
-    expect(screen.getByRole("status")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe(SAVED_ANSWER);
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
     await act(async () => vi.advanceTimersByTime(SAVED_HOLD_MS + 1));
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(btn(/Yes: go ahead/).disabled).toBe(false);
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Yes: go ahead/ })).toBeNull();
   });
 });
 

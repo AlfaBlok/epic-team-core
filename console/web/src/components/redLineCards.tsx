@@ -5,6 +5,8 @@ import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inb
 import { useSnoozes, withSnoozes } from "@/lib/snooze";
 import { PostReviewCard, ReviewCard } from "@/components/review";
 import { WaitingCard } from "@/components/waiting";
+import { SentRow } from "@/components/sentRow";
+import { useKeepSent } from "@/lib/sentRows";
 
 const onLine = (r: RedLine, j?: OwnerPriority) => !!j?.redLine && (r.name ? j.redLine.name === r.name : true);
 
@@ -18,6 +20,16 @@ export function RedLineCards({ r }: { r: RedLine }) {
   const { entries: snoozes } = useSnoozes();
   const asks = withSnoozes(fetched, snoozes)?.filter((i) => onLine(r, i.ownerPriority) && needsAnswer(i) && isStructured(i) && !i.snoozedUntil && !i.decidedBy && i.signal !== "stamp_ready");
   const mine = reviews?.filter((i) => onLine(r, i.ownerPriority));
+  const place = (repo: string | undefined, ref: string | undefined) => {
+    const n = r.items.findIndex((it) => it.repo === repo && it.ref === ref);
+    return n < 0 ? r.items.length : n;
+  };
+  const list: ({ ask: WaitingItem } | { review: ReviewItem })[] = [
+    ...(asks ?? []).map((ask) => ({ ask, n: place(ask.repo, ask.code) })),
+    ...(mine ?? []).map((review) => ({ review, n: place(review.repo, review.ref) })),
+  ].sort((a, b) => a.n - b.n);
+  // vn_e00f1134: a card he answered stays where it was, as its green Sent row
+  const kept = useKeepSent(list, (c) => ("ask" in c ? `ask:${c.ask.id}` : `review:${c.review.id}`));
   if (!asks || !mine) {
     return (
       <p className="border-t border-red-600/20 px-3 py-2 text-sm text-muted-foreground" data-testid="red-line-cards-loading">
@@ -25,19 +37,17 @@ export function RedLineCards({ r }: { r: RedLine }) {
       </p>
     );
   }
-  const place = (repo: string | undefined, ref: string | undefined) => {
-    const n = r.items.findIndex((it) => it.repo === repo && it.ref === ref);
-    return n < 0 ? r.items.length : n;
-  };
-  const list: ({ ask: WaitingItem } | { review: ReviewItem })[] = [
-    ...asks.map((ask) => ({ ask, n: place(ask.repo, ask.code) })),
-    ...mine.map((review) => ({ review, n: place(review.repo, review.ref) })),
-  ].sort((a, b) => a.n - b.n);
   const rest = r.items.length - list.length;
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-red-600/20 p-2 sm:p-3" data-testid="red-line-cards">
-      {list.map((c) =>
-        "ask" in c ? (
+      {kept.map(({ slot, item: c, sent }) =>
+        sent || !c ? (
+          sent && (
+            <div key={slot} className="min-w-0" data-testid="red-line-card">
+              <SentRow slot={slot} entry={sent} />
+            </div>
+          )
+        ) : "ask" in c ? (
           <div key={`ask:${c.ask.id}`} className="min-w-0" data-testid="red-line-card" data-inbox-card={`ask:${c.ask.id}`}>
             <WaitingCard item={c.ask} showMilestone qualify />
           </div>

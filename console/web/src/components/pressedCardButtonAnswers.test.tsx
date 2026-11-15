@@ -89,17 +89,19 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     }
   });
 
-  it("on the 202 the button says Saved ✓, then the card slides away and leaves (it does not wait for the landing)", async () => {
+  it("vn_e00f1134: on the 202 the card collapses at once to one green Sent row in its place (it does not wait for the landing)", async () => {
     mount();
     const landing = new Promise<{ state: "landed" }>(() => {}); // the press worker has not written it yet
     vi.spyOn(api, "completeReviewItem").mockImplementation(saved202(landing));
     const c = await screen.findByTestId("review-card");
     fireEvent.click(within(c).getByRole("button", { name: MARK }));
-    const savedBtn = await within(c).findByText(PRESS.saved);
-    expect(savedBtn.closest("button")!.getAttribute("data-press")).toBe("saved");
-    expect(screen.getByTestId("review-feed-item").style.opacity).toBe("");
-    await waitFor(() => expect(screen.getByTestId("review-feed-item").style.opacity).toBe("0"), { timeout: PRESS.savedMs + 500 });
-    await waitFor(() => expect(screen.queryByTestId("review-card")).toBeNull(), { timeout: 1500 });
+    const row = await screen.findByTestId("sent-row");
+    expect(within(row).getByTestId("sent-row-word").textContent).toContain("Sent");
+    expect(within(row).getByTestId("sent-row-comment").textContent).toContain("Add comment");
+    expect(screen.queryByTestId("review-card")).toBeNull();
+    // it stays: never slides away or turns into a gap
+    await new Promise((r) => setTimeout(r, PRESS.savedMs + 400));
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
   });
 
   it("a refused press gives the buttons back with the reason next to them", async () => {

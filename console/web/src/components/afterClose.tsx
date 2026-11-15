@@ -4,6 +4,7 @@ import { api } from "@/api";
 import type { ClosedCard, ClosedCardRef } from "@/api/review-types";
 import { closeNote, NOTE_MS, useClosedNote, type ClosedNote } from "@/lib/afterClose";
 import { invalidate, mutate, useQuery } from "@/lib/data";
+import { useSentShown } from "@/lib/sentRows";
 import { onPress } from "@/lib/press";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -92,7 +93,12 @@ export function ThoughtBox({ card, label, onSent, onCancel, testid = "thought" }
  */
 export function AfterCloseNote() {
   const note = useClosedNote();
-  if (!note) return null;
+  // vn_e00f1134: the card became its own green Sent row in place; no second "Saved" floating over the page
+  const inPlace = useSentShown(note?.slot ? [note.slot].flat()[0] : undefined);
+  useEffect(() => {
+    if (note && inPlace) closeNote(note.id);
+  }, [note, inPlace]);
+  if (!note || inPlace) return null;
   return <NoteView key={note.id} note={note} />;
 }
 

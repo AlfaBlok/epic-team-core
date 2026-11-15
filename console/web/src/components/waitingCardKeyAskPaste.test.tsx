@@ -72,7 +72,11 @@ describe("WaitingCard: key ask paste box", () => {
     fireEvent.change(input, { target: { value: VALUE } });
     fireEvent.click(save);
     expect(input.value).toBe("");
-    await waitFor(() => expect(screen.getByTestId("secret-note").textContent).toMatch(/Saved: whatgpt-service STRIPE_SECRET_KEY is stored.*Woken Delivery Manager \(run run_1\)/));
+    await waitFor(() => expect(screen.getByTestId("sent-row-detail").textContent).toMatch(/Saved: whatgpt-service STRIPE_SECRET_KEY is stored.*Woken Delivery Manager \(run run_1\)/));
+    // (the owner, vn_e00f1134: "I pasted a key ... then the card disappeared"): the card is one green Sent row in its place
+    expect(screen.getByTestId("sent-row-said").textContent).toBe("Key saved");
+    expect(screen.getByTestId("sent-row-comment")).toBeTruthy();
+    expect(screen.queryByTestId("secret-box")).toBeNull();
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith("wj_key", { value: VALUE, milestoneId: "ms_1", wake: true });
     expect(document.body.textContent).not.toContain(VALUE);
@@ -84,9 +88,9 @@ describe("WaitingCard: key ask paste box", () => {
     fireEvent.change(screen.getByLabelText("Key"), { target: { value: VALUE } });
     fireEvent.submit(screen.getByTestId("secret-box"));
     await waitFor(() =>
-      expect(screen.getByTestId("secret-note").textContent).toMatch(/Saved: social COMPOSIO_API_KEY is stored in the secret store \(no Deployer app for social, so not set in an env\)/),
+      expect(screen.getByTestId("sent-row-detail").textContent).toMatch(/Saved: social COMPOSIO_API_KEY is stored in the secret store \(no Deployer app for social, so not set in an env\)/),
     );
-    expect(screen.getByTestId("secret-note").textContent).not.toContain("set in Deployer");
+    expect(screen.getByTestId("sent-row-detail").textContent).not.toContain("set in Deployer");
     expect(document.body.textContent).not.toContain(VALUE);
   });
 

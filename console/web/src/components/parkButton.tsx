@@ -35,6 +35,7 @@ export function parkReview(item: ReviewItem, title: string, card?: ClosedCardRef
   void snoozeReview(item, { days: PARK_DAYS }, title, true);
   showClosed({
     said: PARK.said,
+    slot: `review:${item.id}`,
     title,
     ...(card ? { card } : {}),
     back: async () => (await unsnoozeReview(item), { back: true, line: "It is back in your inbox." }),
@@ -46,6 +47,7 @@ export function parkAsk(item: WaitingItem, label?: string) {
   void snoozeItem(item, { days: PARK_DAYS }, label, true);
   showClosed({
     said: PARK.said,
+    slot: `ask:${item.id}`,
     title: item.question || item.title,
     ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
     back: async () => (await unsnoozeItem(item), { back: true, line: "It is back in your inbox." }),

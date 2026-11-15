@@ -173,7 +173,9 @@ describe("T72-S6 Done, waiting for your review: the green pill is the list's len
     expect(list.mock.calls.filter(([q]) => !q?.state)).toHaveLength(1); // one fetch for the pill and the list
     fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-complete"));
     await waitFor(() => expect(screen.getAllByTestId("review-card")).toHaveLength(1));
-    expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("1");
+    // vn_e00f1134: the pressed card is one green Sent row in its place; it no longer counts
+    expect(screen.getByTestId("sent-row")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("1"));
     expect(green()).toBe("1");
   });
 });

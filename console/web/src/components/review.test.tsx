@@ -185,7 +185,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
 });
 
 describe("T48-S26 the buttons", () => {
-  it("Mark this task complete writes, the card slides away and the count drops at once", async () => {
+  it("Mark this task complete writes, the card collapses in place to its green Sent row and the count drops at once", async () => {
     list([ITEM, card({ id: "rv_2" })]);
     const complete = vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
     mount();
@@ -193,11 +193,16 @@ describe("T48-S26 the buttons", () => {
     expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("2");
     fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-complete"));
     await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_1", { start: [], park: [] }));
-    await waitFor(() => expect(screen.getAllByTestId("review-feed-item")[0].getAttribute("style")).toContain("opacity: 0"));
+    // the first place of the list is now one Sent row, the other card still under it (nothing moved up into its place)
+    await waitFor(() => expect(screen.getByTestId("review-feed").firstElementChild?.getAttribute("data-testid")).toBe("review-feed-sent"));
+    expect(screen.getByTestId("sent-row-said").textContent).toBe("Closed");
+    expect(screen.getAllByTestId("review-card")).toHaveLength(1);
     await waitFor(() => expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("1"));
+    // the refetch that drops it keeps the Sent row where the card was
+    expect(screen.getByTestId("review-feed").firstElementChild?.getAttribute("data-testid")).toBe("review-feed-sent");
   });
 
-  it("a pressed card listed again later shows as a card, never as an invisible card-sized gap (Sam 2026-11-12)", async () => {
+  it("a pressed card listed again later shows as its Sent row, never as an invisible card-sized gap (Sam 2026-11-12, and the Sent row)", async () => {
     let rows: ReviewItem[] = [ITEM, card({ id: "rv_2" })];
     vi.spyOn(api, "listReviewItems").mockImplementation(async (q?: { state?: string }) => (q?.state ? [] : rows));
     vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
@@ -211,7 +216,8 @@ describe("T48-S26 the buttons", () => {
     await new Promise((r) => setTimeout(r, 300));
     rows = [ITEM, card({ id: "rv_2" })];
     invalidate("inbox");
-    await waitFor(() => expect(screen.getAllByTestId("review-feed-item")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("review-feed-item")).toHaveLength(1));
+    expect(screen.getAllByTestId("review-feed-sent")).toHaveLength(1);
     for (const li of screen.getAllByTestId("review-feed-item")) expect(li.getAttribute("style") ?? "").not.toContain("opacity: 0");
   });
 

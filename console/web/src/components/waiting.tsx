@@ -37,6 +37,8 @@ import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
 import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
 import { showClosed } from "@/lib/afterClose";
+import { markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
+import { SentRow } from "@/components/sentRow";
 import { DEFAULT_SKIN, useWords } from "@/lib/skin";
 import { AskSet, askSets } from "@/components/askSet";
 import { AskVerdictTap } from "@/components/askLog";
@@ -566,7 +568,15 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
     try {
       const res = await mutate(() => api.saveKey(item.id, { value: v, milestoneId: item.milestoneId, wake, ...relayOf(item) }));
       const where = res.stored.deployed === false ? `stored in the secret store (no ${deployerName()} app for ${res.stored.app}, so not set in an env)` : `stored and set in ${deployerName()}`;
-      setNote({ ok: true, text: `Saved: ${res.stored.app} ${res.stored.name} is ${where}.${res.wake ? ` ${wakeLine(res.wake, undefined, { unit })}` : ""}` });
+      const saved = `Saved: ${res.stored.app} ${res.stored.name} is ${where}.${res.wake ? ` ${wakeLine(res.wake, undefined, { unit })}` : ""}`;
+      setNote({ ok: true, text: saved });
+      // (the owner, vn_e00f1134: "I pasted a key ... then the card disappeared"): the card becomes its green Sent row in place
+      markSent(`ask:${item.id}`, {
+        said: "Key saved",
+        detail: saved,
+        title: item.question || item.title,
+        ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
+      });
     } catch (e) {
       setNote({ ok: false, text: `Not saved: ${(e as Error).message}` });
     } finally {
@@ -647,6 +657,7 @@ export function SnoozeMenu({ item, className, label }: { item: WaitingItem; clas
         // the same floating note; Bring it back unsnoozes it
         showClosed({
           said: "Snoozed",
+          slot: `ask:${item.id}`,
           title: item.question || item.title,
           ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
           back: async () => (await unsnoozeItem(item), { back: true, line: "It is back in your inbox." }),
@@ -858,7 +869,23 @@ function SnoozedRow({ item, qualify, showMilestone }: { item: WaitingItem; quali
   );
 }
 
-export function WaitingCard({
+/**
+ * vn_e00f1134: an ask he answered (a key saved, Yes/No, an option, Done, Park, Snooze, a note sent) shows as one green
+ * Sent row with Add comment, in the same place, never vanishing; Bring it back on the row shows the card again.
+ */
+export function WaitingCard(props: { item: WaitingItem; showMilestone?: boolean; readOnly?: string; qualify?: boolean }) {
+  const slot = `ask:${props.item.id}`;
+  const sent = useSent(slot);
+  // the refresh says his answer did not get through (still open, its delivery or spine write failed): the card is back
+  const r = props.item.response;
+  const failed = props.item.state === "open" && !!r && (r.delivery === "failed" || r.spine?.status === "failed" || r.spine?.status === "skipped");
+  useEffect(() => {
+    if (sent && failed) unmarkSent(slot);
+  }, [sent, failed, slot]);
+  return sent && !failed ? <SentRow slot={slot} entry={sent} /> : <WaitingCardBody {...props} />;
+}
+
+function WaitingCardBody({
   item,
   showMilestone = false,
   readOnly,
@@ -1053,7 +1080,11 @@ export function WaitingCard({
       const res = await mutate(() => api.respondToWaiting(item.id, { kind, text, milestoneId: item.milestoneId, wake, ...withFiles, ...relayOf(item) }));
       // the floating note: Add a last thought (to this ask's spine and its owner), Bring it back (the answer taken
       // back while it waits out its window; once it is in the project, his words go to the owner instead)
+      // vn_e00f1134: a press that reached its owner (or is being written) collapses the card to its green Sent row in
+      // place; one recorded but not delivered, or refused by the spine, keeps the card with the reason on it
+      const reached = (res.delivery === "sent" || !!res.spine || !!res.job) && res.spine?.status !== "skipped" && res.spine?.status !== "failed";
       showClosed({
+        ...(reached ? { slot: `ask:${item.id}` } : {}),
         said: kind === "approve" ? "Approved" : kind === "deny" ? "Declined" : kind === "feedback" ? "Changes sent to the team" : "Answered",
         title: item.question || item.title,
         ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
@@ -1712,10 +1743,18 @@ export function WaitingOnYou({
     const first = openRows.find((r) => r.card && g.items.some((i) => i.id === r.card!.id));
     if (first?.card) setLead.add(first.card.id);
   }
-  const byPersona = new Map<string, WaitingItem[]>();
-  for (const i of blocking) {
-    const who = i.blocksPersona ?? i.owner.personaName ?? i.owner.label;
-    byPersona.set(who, [...(byPersona.get(who) ?? []), i]);
+  // vn_e00f1134: an ask he answered stays where it was, as its green Sent row, after the refetch drops it
+  const keptRows = useKeepSent(openRows, (r) => (r.card ? `ask:${r.card.id}` : `status:${r.status!.id}`));
+  const keptBlocking = useKeepSent(blocking, (i) => `ask:${i.id}`);
+  const blockedBy = useRef(new Map<string, string>());
+  const byPersona = new Map<string, { slot: string; item?: WaitingItem; sent?: SentEntry }[]>();
+  for (const r of keptBlocking) {
+    const i = r.item;
+    // a Sent row stays in the group it was in (remembered while it was listed)
+    const who = i ? i.blocksPersona ?? i.owner.personaName ?? i.owner.label : blockedBy.current.get(r.slot);
+    if (!who) continue;
+    blockedBy.current.set(r.slot, who);
+    byPersona.set(who, [...(byPersona.get(who) ?? []), r]);
   }
   // every list here is the same fold section (one box, chevron, title, count pill), siblings in one column:
   // Blocked first, then Snoozed, Decided for you, Coming up, Answered, Superseded; each folds on its own header.
@@ -1774,7 +1813,9 @@ export function WaitingOnYou({
           </div>
         )}
         <div className="grid grid-cols-1 gap-3">
-          {[...byPersona].map(([who, list]) => {
+          {[...byPersona].map(([who, rows]) => {
+            const list = rows.flatMap((r) => (r.item ? [r.item] : []));
+            if (!list.length) return rows.map((r) => r.sent && <SentRow key={r.slot} slot={r.slot} entry={r.sent} />);
             const link = runHref(list[0]);
             return (
               <div key={who} className="grid min-w-0 grid-cols-1 gap-2 rounded-lg border p-3" data-testid="blocking-now">
@@ -1790,14 +1831,20 @@ export function WaitingOnYou({
                     </ThreadLink>
                   )}
                 </div>
-                {list.map((i) => (
-                  <WaitingCard key={i.id} item={i} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
-                ))}
+                {rows.map((r) =>
+                  r.sent || !r.item ? (
+                    r.sent && <SentRow key={r.slot} slot={r.slot} entry={r.sent} />
+                  ) : (
+                    <WaitingCard key={r.item.id} item={r.item} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+                  ),
+                )}
               </div>
             );
           })}
-          {openRows.map((r) =>
-            r.status ? (
+          {keptRows.map(({ slot, item: r, sent }) =>
+            sent || !r ? (
+              sent && <SentRow key={slot} slot={slot} entry={sent} />
+            ) : r.status ? (
               <StatusItemRow key={r.status.id} item={r.status} milestone={showMilestone ? names.get(r.status.milestoneId) : undefined} />
             ) : setOf.has(r.card!.id) ? (
               setLead.has(r.card!.id) && <AskSet key={`set:${r.card!.id}`} group={setOf.get(r.card!.id)!} readOnly={readOnly} />

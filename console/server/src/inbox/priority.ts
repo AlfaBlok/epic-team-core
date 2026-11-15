@@ -29,10 +29,18 @@ export function rankOf(i: Ranked, ranks: Map<string, number>): number {
  * carries `owner` (its level and the why quoting him) and always a `priority`, `tier * TIER_SPAN + rank`, so a screen
  * merging two lists (waiting.tsx mergeByPriority) keeps the same order.
  * several red lines: inside tier 0 the first line's items lead, then the next line's (`line * LINE_SPAN + rank`).
+ * his objectives: items on his first objective lead (their own tier); inside every tier his objectives' order comes
+ * before the line and the milestone (`objective * OBJECTIVE_SPAN`), so no rule is set by hand.
  */
 export const TIER_SPAN = 1_000_000;
 /** one red line's span inside tier 0 (lines in order; milestone ranks stay far below it). */
 export const LINE_SPAN = 10_000;
+/**
+ * one objective's span inside a tier (his order, docs/pursuits.json): up to 9 objectives, below the tier's old numbers,
+ * so an item on none keeps the number it had (`tier * TIER_SPAN + line * LINE_SPAN + rank`).
+ */
+export const OBJECTIVE_SPAN = 100_000;
+const OBJECTIVE_NONE = TIER_SPAN / OBJECTIVE_SPAN - 1;
 export function byMilestonePriority<T extends Ranked & Locatable>(
   items: T[],
   ranks: Map<string, number>,
@@ -41,14 +49,16 @@ export function byMilestonePriority<T extends Ranked & Locatable>(
   return items
     .map((it, i) => {
       const p = lookup?.(it);
-      return { it, i, r: rankOf(it, ranks), p, t: lookup ? tierOf(p) : 0, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
+      // his objectives' order (n 0 is his first; none after every objective) breaks ties inside a tier, before the line and file order
+      const o = Math.min(p?.objective?.n ?? OBJECTIVE_NONE, OBJECTIVE_NONE);
+      return { it, i, r: rankOf(it, ranks), p, t: lookup ? tierOf(p) : 0, o, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
     })
-    .sort((a, b) => a.t - b.t || a.l - b.l || a.r - b.r || a.i - b.i)
-    .map(({ it, r, p, t, l }) => {
+    .sort((a, b) => a.t - b.t || a.o - b.o || a.l - b.l || a.r - b.r || a.i - b.i)
+    .map(({ it, r, p, t, o, l }) => {
       if (!lookup) return r === Number.MAX_SAFE_INTEGER ? it : { ...it, priority: r + 1 };
-      // inside the red tier the first line leads, then the second, each in milestone order.
+      // inside a tier his first objective leads, then the next; inside one objective the first line, each in milestone order.
       const rank = Math.min(r + 1, LINE_SPAN - 1);
-      return { ...it, priority: t * TIER_SPAN + Math.min(l, TIER_SPAN / LINE_SPAN - 1) * LINE_SPAN + rank, ...(p ? { ownerPriority: p } : {}) };
+      return { ...it, priority: t * TIER_SPAN - (OBJECTIVE_NONE - o) * OBJECTIVE_SPAN + Math.min(l, OBJECTIVE_SPAN / LINE_SPAN - 1) * LINE_SPAN + rank, ...(p ? { ownerPriority: p } : {}) };
     });
 }
 

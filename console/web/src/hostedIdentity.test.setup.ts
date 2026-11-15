@@ -3,3 +3,8 @@
 // A test that checks our own words pins ours: vi.hoisted(async  => (await import("@/lib/pinIdentity")).pinOurIdentity).
 import { suiteIdentity } from "./lib/pinIdentity";
 globalThis.__IDENTITY__ = suiteIdentity();
+
+// vn_e00f1134: the Sent rows are page state (a card he answered); each test starts with none.
+import { afterEach } from "vitest";
+import { resetSent } from "./lib/sentRows";
+afterEach(() => resetSent());

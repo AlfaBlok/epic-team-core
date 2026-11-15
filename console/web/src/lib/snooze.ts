@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api, type ReviewItem, type SnoozeChoice, type SnoozeDays, type WaitingItem } from "@/api";
 import { mutate } from "@/lib/data";
+import { unmarkSent } from "@/lib/sentRows";
 
 // a snooze refreshes only the inbox queries (tag "inbox": waiting lists and status batches); refetching every
 // list after a write queued the next tap's POST behind ~15 slow GETs (the browser's 6 connections per host).
@@ -71,6 +72,7 @@ async function run(id: string, until: string, label: string, write: () => Promis
   } catch (e) {
     entries = set(entries, id, undefined);
     errors = set(errors, id, `Snooze failed, the card is back: ${e instanceof Error ? e.message : String(e)}`);
+    unmarkSent([`ask:${id}`, `review:${id}`]); // vn_e00f1134: its Sent row goes, the card is back with the reason
     emit();
   }
 }
@@ -90,6 +92,7 @@ export function snoozeReview(item: ReviewItem, choice: SnoozeChoice, label = ite
 /** Unsnooze a review card: resolves once written; the card is back in the list at once (throws on failure). */
 export async function unsnoozeReview(item: ReviewItem): Promise<void> {
   await mutate(() => api.snoozeReviewItem(item.id, { until: null }), "inbox");
+  unmarkSent(`review:${item.id}`);
   back = set(back, item.id, Date.now());
   entries = set(entries, item.id, undefined);
   emit();
@@ -105,6 +108,7 @@ export const BACK_MS = 30_000;
 /** Unsnooze: resolves once the spine line is pushed; the ask then counts as open at once (throws on failure). */
 export async function unsnoozeItem(item: WaitingItem): Promise<void> {
   await mutate(() => api.snoozeWaiting(item.id, { until: null, milestoneId: item.milestoneId, ...relayOf(item) }), "inbox");
+  unmarkSent(`ask:${item.id}`);
   back = set(back, item.id, Date.now());
   entries = set(entries, item.id, undefined); // a "Snoozed" line still showing must not hide the card again
   emit();

@@ -70,7 +70,9 @@ describe("T48-S10 snooze feedback", () => {
 
     // Before the server answers: card gone, count 1, chip "1 snoozed", the working line names the ask and the day.
     expect(screen.getAllByTestId("waiting-card")).toHaveLength(1);
-    expect(screen.queryByText("Question T9-A1?")).toBeNull();
+    // vn_e00f1134: in its place one green Sent row: Snoozed, its question, Add comment
+    expect(screen.getByTestId("sent-row-said").textContent).toBe("Snoozed");
+    expect(screen.getByTestId("sent-row-title").textContent).toBe("Question T9-A1?");
     expect(screen.queryByTestId("snooze-menu")).toBeNull();
     expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("1");
     expect(screen.getByTestId("snoozed-count").textContent).toBe("1");
