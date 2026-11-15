@@ -6,6 +6,8 @@ import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { useShows } from "@/lib/skin";
 import { sites } from "@/lib/identity";
+import { LAUNCH_PATH } from "@/lib/routePaths";
+export { LAUNCH_PATH };
 
 /**
  * the launch board inside the console. EpicTeam's Team home shows EpicTeam's lights, the social product's home
@@ -13,7 +15,6 @@ import { sites } from "@/lib/identity";
  * owner; the rule is written on the board. The lights come from GET /api/launch-board (the console runs the checks every
  * 30 minutes, server/src/launch/board.ts); the home world only: another world's home never shows it.
  */
-export const LAUNCH_PATH = "launch";
 /** the console the decks live on (this one) */
 const consoleUrl = () => sites().teamUrl.replace(/\/+$/, "");
 

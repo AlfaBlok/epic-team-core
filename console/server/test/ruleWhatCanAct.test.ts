@@ -43,7 +43,7 @@ afterEach(() => {
 
 const unresolved = (code: string): SpinesWait => ({ ref: code, repo: null, code, row: null, state: "unresolved" });
 
-async function memo(status: string, waiting: string, waits: SpinesWait[] = []) {
+async function memo(status: string, waiting: string, waits: SpinesWait[] = [], tweak?: (t: Tree) => void) {
   write("memo/docs/PLAN-7-REAL-USER-TEST.md", EPIC7(status, waiting));
   db = openDb(path.join(reposRoot, "c.db"));
   const store = createStore(db);
@@ -51,6 +51,7 @@ async function memo(status: string, waiting: string, waits: SpinesWait[] = []) {
   const treeFor = async (x: Milestone): Promise<Tree> => {
     const t = buildTree(reposRoot, x, undefined);
     if (waits.length) t.waits = { "docs/PLAN-7-REAL-USER-TEST.md": waits };
+    tweak?.(t);
     return t;
   };
   const tree = await treeFor(m);
@@ -84,6 +85,18 @@ describe("T13-S13 rule 1+2: only what Sam can act on now counts", () => {
     expect(z.painted.counts.red).toBe(0);
     const stale = await memo("ready", OLD_LINE, [unresolved("T7-A1"), unresolved("T7-A2")]);
     expect(stale.st.needsYou).toBe(0);
+  });
+
+  it("an epic whose own Status says active is never a Mark ready card, even when spines.py read no Status (run_state planning)", async () => {
+    // `Status: active — pilot ingestion…` plus a second `Execution status:` line: spines.py read the conflict as no
+    // status, run_state planning, and the inbox showed a Mark ready card whose button failed.
+    const planningNoStatus = (t: Tree) => Object.assign(t.root, { status: "", runState: "planning" });
+    const stale = await memo("active — pilot ingestion and local explorer", "Sam's feedback on the local explorer and a ready stamp for further ingestion work", [], planningNoStatus);
+    expect(stale.items.filter((i) => i.signal === "stamp_ready")).toEqual([]);
+    expect(stale.st.items.filter((i) => i.kind === "mark_ready")).toEqual([]);
+    // a real draft epic in the same state still gets its one Mark ready card.
+    const draft = await memo("draft", "Sam stamps this epic ready", [], planningNoStatus);
+    expect(draft.st.items.map((i) => [i.kind, i.title])).toEqual([["mark_ready", "Mark PLAN-7 ready"]]);
   });
 
   it("a stamp for later ('only after PLAN-34 is live') is Coming up, not counted", async () => {
@@ -164,7 +177,7 @@ Waiting on: nobody
 | T34-S8 | Ticket worker | worker | Ideas | ${status} | none | - | main | none | 2026-10-31 | build |
 | T34-S14 | Sam | Sam | Sam uses it a week and gives the verdict | draft | T34-S7..S8 | - | main | none | 2026-10-31 | use it |
 `;
-  const ASK = "- [ask PLAN-34-A2: do @Sam since 2026-10-28 row T34-S14] Start your week on the social console — steps: open the URL — unblocks: T34-S14";
+  const ASK = "- [ask PLAN-34-A2: do @Sam since 2026-10-28 row T34-S14] Start your week on the social console — steps: open https://social.example/week — unblocks: T34-S14";
   const setup = async (status: string, tail = "") => {
     write("memo/docs/e34.md", ROWS(status) + tail);
     db = openDb(path.join(reposRoot, "s.db"));

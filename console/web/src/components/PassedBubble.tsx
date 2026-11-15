@@ -36,10 +36,10 @@ export function PassedBubble({ p, at }: { p: Passed; at?: string }) {
     p.url && p.kind === "from"
       ? { href: p.url, text: `Open your ${p.desk} desk, where you said it` }
       : p.url && p.kind === "to"
-        ? { href: p.url, text: `Open your ${p.desk} desk` }
+        ? { href: p.url, text: p.by === "desk" ? "Open where it went" : `Open your ${p.desk} desk` }
         : undefined;
   return (
-    <li className="flex justify-start" data-testid="chat-passed" data-kind={p.kind} data-id={p.id}>
+    <li className="flex justify-start" data-testid="chat-passed" data-kind={p.kind} data-id={p.id} data-by={p.by}>
       <div className={cn("min-w-0 max-w-[92%] rounded-xl border-l-[6px] px-3 py-2.5 text-sm sm:max-w-[85%]", s.band)}>
         <div className="flex items-center gap-2">
           <span className={cn("inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full", s.dot)} aria-hidden>
@@ -80,7 +80,7 @@ export function PassedBubble({ p, at }: { p: Passed; at?: string }) {
           </details>
         )}
         <p className="mt-1 text-[11px] text-muted-foreground">
-          {p.kind === "to" ? "Note from the console · " : "Passed by the console · "}
+          {p.by === "desk" ? "This desk passed it on · " : p.kind === "to" ? "Note from the console · " : "Passed by the console · "}
           <RelTime iso={at} />
         </p>
       </div>

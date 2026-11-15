@@ -214,18 +214,58 @@ describe("E948-S26 completes: never worked out from the title (the E941-S2 bug)"
       [
         { id: "E941-S5", title: "a", status: "review", evidence: LIVE },
         { id: "E941-S6", title: "b", status: "review", evidence: LIVE },
-        { id: "E941-S7", title: "c", status: "active" },
+        { id: "E941-S7", title: "c", status: "done" },
+        { id: "E941-S8", title: "d", status: "draft (parked by Sam)" },
       ],
       { "E941-S5": GOOD("E941-S5", { completes: "E41-4" }), "E941-S6": GOOD("E941-S6", { completes: "E41-4" }) },
     );
     const { review } = setup();
     const cards = await listed(review);
-    expect(cards.map((i) => [i.ref, i.face?.closesGoal])).toEqual([
-      ["E941-S5", false],
-      ["E941-S6", true],
+    // E948-S53: another card of the goal still waits for his review, so neither closes the goal yet; both meet the line
+    expect(cards.map((i) => [i.ref, i.tag, i.face?.closesGoal])).toEqual([
+      ["E941-S5", "step", false],
+      ["E941-S6", "line", false],
     ]);
-    // the closing card names what else is open in the goal (its confirm)
-    expect(cards[1].face?.openInGoal.map((o) => o.ref)).toEqual(["E941-S5", "E941-S7"]);
+  });
+});
+
+describe("E948-S53 a card never offers to close a goal that still has open parts", () => {
+  const ROWS = (other: string) => [
+    { id: "E941-S5", title: "a", status: "review", evidence: LIVE },
+    { id: "E941-S6", title: "b", status: other },
+  ];
+
+  it("completes: goal while another part is worked on: card needs rewriting, never his card", async () => {
+    repoWith(ROWS("active"), { "E941-S5": GOOD("E941-S5", { completes: "goal" }) });
+    const { review } = setup();
+    const all = await listed(review, "all");
+    const c = all.find((i) => i.ref === "E941-S5")!;
+    expect(c.verdict.kind).toBe("needs-rewriting");
+    expect(c.verdict.problems?.join(" ")).toContain("still open (E941-S6)");
+    expect([c.tag, c.face?.closesGoal]).toEqual(["step", false]);
+    expect((await listed(review)).map((i) => i.ref)).not.toContain("E941-S5");
+  });
+
+  it("completes: goal with only parked parts left: closes the goal at once, the parked part named on the face", async () => {
+    repoWith(ROWS("draft (parked by Sam 2026-11-12)"), { "E941-S5": GOOD("E941-S5", { completes: "goal" }) });
+    const { review } = setup();
+    const [c] = await listed(review);
+    expect([c.ref, c.verdict.kind, c.tag, c.face?.closesGoal]).toEqual(["E941-S5", "card", "goal", true]);
+    expect(c.face?.openInGoal.map((o) => o.ref)).toEqual(["E941-S6"]);
+  });
+
+  it("completes: goal when every other part is done: closes the goal", async () => {
+    repoWith(ROWS("done"), { "E941-S5": GOOD("E941-S5", { completes: "goal" }) });
+    const { review } = setup();
+    const [c] = await listed(review);
+    expect([c.tag, c.face?.closesGoal, c.face?.openInGoal]).toEqual(["goal", true, []]);
+  });
+
+  it("the last open Done-means line with other parts still active meets the line and leaves the goal open", async () => {
+    repoWith(ROWS("ready"), { "E941-S5": GOOD("E941-S5", { completes: "E41-4" }) });
+    const { review } = setup();
+    const [c] = await listed(review);
+    expect([c.verdict.kind, c.tag, c.face?.closesGoal]).toEqual(["card", "line", false]);
   });
 });
 

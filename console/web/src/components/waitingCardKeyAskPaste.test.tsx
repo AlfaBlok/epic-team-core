@@ -53,7 +53,7 @@ describe("WaitingCard: key ask paste box", () => {
     expect(input.getAttribute("autocomplete")).toBe("new-password");
     expect(input.getAttribute("spellcheck")).toBe("false");
     expect(screen.getByTestId("secret-box").textContent).toMatch(/whatgpt-service.*STRIPE_SECRET_KEY/);
-    expect((screen.getByLabelText("Your answer") as HTMLTextAreaElement).placeholder).toMatch(/never paste the key here/);
+    expect(screen.getByTestId("card-feedback").textContent).toMatch(/Never paste the key here/);
     cleanup();
     wrap(<WaitingCard item={item({ secret: undefined })} />);
     expect(screen.queryByTestId("secret-box")).toBeNull();

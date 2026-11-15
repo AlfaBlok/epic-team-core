@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Assignment, Milestone, Persona, Run, Store } from "../store.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { ticketId } from "../adapters/outcome.js";
-import { FINISH_THE_JOB_RULE, STEPS_PAGE_RULE } from "../inbox/asks.js";
+import { FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE } from "../inbox/asks.js";
 import { START_FAIL_RULE, WORKER_FINISH_RULE, WORKER_TIER_RULE } from "../cycle/prompts.js";
 import type { ChatScope } from "./scope.js";
 import { chatCaller } from "./milestoneChat.js";
@@ -66,6 +66,46 @@ export function claimsFor(store: Store, m: Pick<Milestone, "repo"> & { id?: stri
   return out;
 }
 
+/**
+ * The dispatch-time check (a row was once dispatched twice by two Delivery Managers 2 minutes apart, on
+ * 2026-11-12): a new worker (a child run) for a row that already has a live session is refused before any worker starts,
+ * whoever dispatches it (a wake, the repo desk, another Delivery Manager). Live = a running child run of the same repo
+ * names the row, or the row's Owner cell holds a claim (`spines.py --claim`) whose holder is a running run, or whose holder
+ * is no run the console knows (a T3 thread, another host) and whose lease has not ended. A claim by a run that already
+ * ended is stale: the row may be dispatched again. A claim by the dispatching wake itself is its own.
+ */
+export function rowClaimRefusal(
+  store: Store,
+  o: { assignmentId: string; parentRunId?: string | null; summary?: string; claimIn?: (ref: string, m: Milestone) => { by: string; until: string; path: string } | undefined; now?: number },
+): { code: "claimed"; row: string; holder: string; message: string } | undefined {
+  if (!o.parentRunId) return undefined;
+  const row = rowOf(o.summary ?? "");
+  if (!row) return undefined;
+  const a = store.getAssignment(o.assignmentId);
+  const m = a ? store.getMilestone(a.milestoneId) : undefined;
+  if (!m) return undefined;
+  const run = claimsFor(store, m).find((c) => c.ticket === row);
+  if (run)
+    return {
+      code: "claimed",
+      row,
+      holder: run.runId,
+      message: `${row} already has a live session: ${run.persona}'s child run ${run.runId} works on it (parent ${run.parentRunId ?? "none"}). Skip this row: do not start a second worker; call \`done <seat>\` for the seat you picked.`,
+    };
+  const c = o.claimIn?.(row, m);
+  if (!c || c.by === o.parentRunId) return undefined;
+  const holder = store.getRun(c.by);
+  const leaseOn = Date.parse(c.until.replace(/Z$/, ":00Z")) > (o.now ?? Date.now());
+  const live = holder ? holder.outcome === "running" && !holder.endedAt : leaseOn;
+  if (!live) return undefined;
+  return {
+    code: "claimed",
+    row,
+    holder: c.by,
+    message: `${row} is claimed in ${c.path}: ${c.by} holds it (lease until ${c.until}${holder ? ", its run is still running" : ""}). Skip this row: do not start a second worker; call \`done <seat>\` for the seat you picked.`,
+  };
+}
+
 /** The wake-prompt section (appended next to the tree to-do): which rows are already being worked, and by whom. */
 export function claimsSection(claims: Claim[]): string | undefined {
   if (!claims.length) return undefined;
@@ -105,6 +145,8 @@ export interface ChatDispatchDeps {
   chatThread: (m: Milestone) => string | undefined;
   maxWorkers: number;
   now?: () => number;
+  /** the live claim in the row's Owner cell (spines.py --claim), read from the milestone's checkout. */
+  claimIn?: (ref: string, m: Milestone) => { by: string; until: string; path: string } | undefined;
 }
 
 export class DispatchError extends Error {
@@ -146,6 +188,12 @@ export function createChatDispatch(d: ChatDispatchDeps) {
         "claimed",
         `${b.ticket} is already being worked: ${claim.persona}'s child run ${claim.runId} (${base}/runs/${claim.runId}) claims it. Leave it to ${claim.persona}; steer or stop that run only if ${ownerName()} asks.`,
       );
+    const held = d.claimIn?.(b.ticket, m);
+    if (held) {
+      const holder = d.store.getRun(held.by);
+      const live = holder ? holder.outcome === "running" && !holder.endedAt : Date.parse(held.until.replace(/Z$/, ":00Z")) > (d.now ?? Date.now)();
+      if (live) throw new DispatchError(409, "claimed", `${b.ticket} is claimed in ${held.path}: ${held.by} holds it (lease until ${held.until}). Leave it; steer or stop that session only if ${ownerName()} asks.`);
+    }
     const running = d.store.listRuns({ milestoneId: m.id, limit: 1000 }).filter((r) => r.parentRunId && r.outcome === "running").length;
     if (running >= d.maxWorkers) throw new DispatchError(409, "ceiling", `queued: worker ceiling ${d.maxWorkers} (${running} child runs running for this milestone)`);
 
@@ -204,7 +252,7 @@ export function createChatDispatch(d: ChatDispatchDeps) {
         patch({ outcome: "progressed", summary: "dry run closed: no worker", endedAt: "<ISO-8601 UTC now>" }),
       ];
     return [
-      `1. Launch the worker with the T3 \`delegate_task\` tool (mode async), \`target.providerInstanceId\` = providerInstanceId, \`clientRequestId\` = \`<row id>-${child.id.slice(0, 12)}\` (the console binds its thread to this run). Its brief names \`Bound epic: <spine path>\` and the row,`,
+      `1. Launch the worker with the T3 \`delegate_task\` tool (mode async), \`target.providerInstanceId\` = providerInstanceId, \`clientRequestId\` = \`<row id>-${child.id.slice(0, 12)}\` (the console binds its thread to this run), \`title\` = \`<row id> <what it does, a few words>\` (every session is named by its ticket). Its brief names \`Bound epic: <spine path>\` and the row,`,
       `   says: end every commit message with the trailer line \`Run: ${child.id}\`; and carries briefRules verbatim.`,
       `2. ${patch({ threadId: "<childThreadId>" })}`,
       `3. When it returns: verify its diff and checks, integrate per the repo's Integration policy, then ${patch({ outcome: "progressed|failed|blocked|monitoring", summary: "<one line>", endedAt: "<ISO-8601 UTC now>" })}`,
@@ -236,7 +284,7 @@ export function mountChatDispatch(api: Hono, d: ChatDispatchDeps): ChatDispatch 
           seat: r.seat ?? null,
           providerInstanceId: r.providerInstanceId ?? null,
           dryRun: r.dryRun,
-          briefRules: [WORKER_FINISH_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE],
+          briefRules: [WORKER_FINISH_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE],
           steps: r.steps,
         },
         201,

@@ -48,7 +48,36 @@ export async function apiCall<T>(method: string, path: string, body?: unknown, o
   return call<T>(method, path, body, o);
 }
 
-async function call<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
+/**
+ * one request for the same GET while it is on its way. The Inbox's two sections and the page around them asked
+ * for the same list at the same moment (on a throttled phone: two 1.8 MB downloads sharing one slow link, every 30 s).
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * a list index.html started downloading before the app's code arrived (window.__earlyGets), taken once and
+ * only while fresh; a failed one (null) is asked again the normal way.
+ */
+export const EARLY_FRESH_MS = 15_000;
+export function takeEarly(path: string): Promise<unknown> | undefined {
+  const all = typeof window === "undefined" ? undefined : (window as { __earlyGets?: Record<string, { at: number; p: Promise<unknown> }> }).__earlyGets;
+  const e = all?.[path];
+  if (!e) return undefined;
+  delete all![path];
+  return Date.now() - e.at < EARLY_FRESH_MS ? e.p : undefined;
+}
+
+function call<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
+  if (method !== "GET" || o.headers) return callOnce<T>(method, path, body, o);
+  const found = inFlight.get(path);
+  if (found) return found as Promise<T>;
+  const early = takeEarly(path);
+  const p = (early ? early.then((d) => (d == null ? callOnce<T>(method, path, body, o) : (d as T))) : callOnce<T>(method, path, body, o)).finally(() => inFlight.delete(path));
+  inFlight.set(path, p);
+  return p;
+}
+
+async function callOnce<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
   if (method !== "GET" && !o.idempotent) return attempt<T>(method, path, body, o.headers);
   // a GET that meets a restarting console (proxy 502/503/504, connection refused) waits and tries again with
   // backoff for ~60 s; the page keeps its last good data and the layout shows one quiet "reconnecting" line meanwhile.
@@ -165,6 +194,38 @@ async function send<T>(method: string, path: string, body: unknown, form: boolea
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/**
+ * a raw upload that reports how many bytes have left (fetch cannot). On his phone a 402 KB photo took 54 s
+ * to leave over a slow link while the console wrote it in milliseconds: the bubble shows the percent instead of a bare spinner.
+ * Same errors as send(): the console's message, a 401 back to login, the 5 min limit.
+ */
+export function uploadWithProgress<T>(path: string, body: Blob, headers: Record<string, string>, onProgress: (sent: number, total: number) => void): Promise<T> {
+  return new Promise<T>((ok, fail) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", `/api${path}`);
+    for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v);
+    x.timeout = UPLOAD_TIMEOUT_MS;
+    x.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : body.size);
+    x.onload = () => {
+      let j: any;
+      try {
+        j = x.responseText ? JSON.parse(x.responseText) : undefined;
+      } catch {
+        /* not json */
+      }
+      if (x.status >= 200 && x.status < 300) return ok(j as T);
+      const code = typeof j?.error?.code === "string" ? j.error.code : undefined;
+      const msg = j?.error ? (typeof j.error === "string" ? j.error : String(j.error.message ?? j.error.code)) : `POST /api${path} → ${x.status}`;
+      if (x.status === 401 && code === "login_required" && typeof window !== "undefined" && window.location.pathname !== "/login")
+        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      fail(new ApiError(x.status, msg, code, undefined, TRANSIENT_STATUS.has(x.status) && !j?.error));
+    };
+    x.onerror = () => fail(new TypeError("the upload did not reach the console (network)"));
+    x.ontimeout = () => fail(new ApiError(504, "The console did not answer in 5 min. Try again.", "timeout"));
+    x.send(body);
+  });
+}
+
 /** POST /messages answers 502 with the stored (failed) message when delivery fails: return it, the UI shows why. */
 async function sendMessage(input: unknown, url = "/api/messages") {
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
@@ -203,8 +264,10 @@ export function createRealClient(): ApiClient {
     listTicketSessions: (milestoneId) => call("GET", `/tickets/sessions?milestoneId=${encodeURIComponent(milestoneId)}`),
     getDeskChat: (read) => call("GET", `/desk/messages${chatQs(read)}`),
     sendDeskMessage: (text, page, clientRequestId, attachments) => call("POST", "/desk/messages", { text, page, clientRequestId, ...(attachments?.length ? { attachments } : {}) }),
-    uploadChatAttachment: (file, name) =>
-      call("POST", "/chat/attachments", file, { headers: { "content-type": file.type || "application/octet-stream", "x-filename": encodeURIComponent(name) } }),
+    uploadChatAttachment: (file, name, onProgress) => {
+      const headers = { "content-type": file.type || "application/octet-stream", "x-filename": encodeURIComponent(name) };
+      return onProgress && typeof XMLHttpRequest !== "undefined" ? uploadWithProgress("/chat/attachments", file, headers, onProgress) : call("POST", "/chat/attachments", file, { headers });
+    },
     attachmentLine: (ids) => call("POST", "/chat/attachments/line", { ids }),
     getMilestoneChat: (id, read) => call("GET", `/milestones/${encodeURIComponent(id)}/chat/messages${chatQs(read)}`),
     getWorldDeskChat: (t, read) => call("GET", `/tenants/${encodeURIComponent(t)}/desk/messages${chatQs(read)}`),
@@ -215,6 +278,9 @@ export function createRealClient(): ApiClient {
 
     steerRun: (id, message, clientRequestId) => call("POST", `/runs/${id}/steer`, { message, clientRequestId }),
     stopRun: (id, input) => call("POST", `/runs/${id}/stop`, input),
+    getPriorityMode: () => call("GET", "/priority-mode"),
+    startPriorityMode: (input) => call("POST", "/priority-mode", input),
+    resumePriorityMode: (why) => call("POST", "/priority-mode/resume", why ? { why } : {}),
     addToTree: (mid, input) => call("POST", `/milestones/${mid}/tree/add`, input),
     listAskedNoRow: (limit) => call("GET", `/asked-no-row${limit ? qs({ limit: String(limit) }) : ""}`),
     listOrphanCommits: (limit) => call("GET", `/orphan-commits${limit ? qs({ limit: String(limit) }) : ""}`),
@@ -222,7 +288,9 @@ export function createRealClient(): ApiClient {
     listCompanies: () => call("GET", "/companies"),
     addCompany: (input) => call("POST", "/companies", input),
     setCompany: (id, input) => call("PUT", `/companies/${encodeURIComponent(id)}`, input),
-    listCompanyWorlds: () => call("GET", "/companies/worlds"),
+    listCompanyWorlds: () => call("GET", "/worlds"),
+    listExperiments: () => call("GET", "/experiments"),
+    listGoals: () => call("GET", "/goals"),
     getCompanyOps: (id) => call("GET", `/companies/${encodeURIComponent(id)}/ops`),
     getCompanyBuild: (id) => call("GET", `/companies/${encodeURIComponent(id)}/build`),
     listWheelNotes: () => call("GET", "/companies/notes"),
@@ -231,6 +299,33 @@ export function createRealClient(): ApiClient {
     getCompanyPromo: (id) => call("GET", `/companies/${encodeURIComponent(id)}/promo`),
     listBuilding: () => call("GET", "/building"),
     listPursuits: () => call("GET", "/pursuits"),
+    listScorecards: () => call("GET", "/scorecards"),
+    reorderPursuits: (ids) => call("POST", "/pursuits/order", { ids }),
+    parkPursuit: (id, parked) => call("POST", `/pursuits/${encodeURIComponent(id)}/park`, { parked }),
+    listOneOffs: () => call("GET", "/one-offs"),
+    listOutcomes: (f) => {
+      const q = new URLSearchParams(Object.entries(f ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
+      return call("GET", `/outcomes${q ? `?${q}` : ""}`);
+    },
+    listTeamCards: (q = {}) => {
+      const p = new URLSearchParams();
+      if (q.scorecard) p.set("scorecard", q.scorecard);
+      if (q.kind) p.set("kind", q.kind);
+      const s = p.toString();
+      return call("GET", `/inbox/team-cards${s ? `?${s}` : ""}`);
+    },
+    answerTeamCard: (id, a) => call("POST", `/inbox/team-cards/${encodeURIComponent(id)}/answer`, a),
+    advisorVerdict: (id, v) => call("POST", `/inbox/team-cards/${encodeURIComponent(id)}/advisor`, v),
+    listPages: () => call("GET", "/pages"),
+    listPinnedPages: () => call("GET", "/pages/pinned"),
+    pinnedPageStatus: (port) => call("GET", `/pages/pinned/${port}/status`),
+    refreshPinnedPage: (port) => call("POST", `/pages/pinned/${port}/refresh`),
+    pinPage: (b) => call("POST", "/pages/pin", b),
+    askLogSummary: () => call("GET", "/asks/log?summary=1"),
+    askVerdict: (id, verdict) => call("POST", `/asks/${encodeURIComponent(id)}/verdict`, { verdict }),
+    listVoiceNotes: (product) => call("GET", `/voice-notes${product && product !== "all" ? qs({ product }) : ""}`),
+    getXStats: (date) => call("GET", `/x-stats${date ? qs({ date }) : ""}`),
+    getPursuitKit: (id) => call("GET", `/pursuits/${encodeURIComponent(id)}/kit`),
 
     listRuns: (q) => call("GET", `/runs${qs({ ...(q?.since ? { since: q.since } : {}), ...(q?.milestoneId ? { milestoneId: q.milestoneId } : {}) })}`),
     getRunStats: (milestones) => call("GET", `/runs/stats${milestones ? qs({ milestones: milestones.join(",") }) : ""}`),
@@ -257,9 +352,12 @@ export function createRealClient(): ApiClient {
 
     listWaitingOnOwner: (f = {}) => {
       const { includeSettled, includeSuperseded, ...rest } = f;
-      const q = query({ ...rest, ...(includeSettled ? { includeSettled: "true" } : {}), ...(includeSuperseded ? { includeSuperseded: "true" } : {}) });
+      // the screen's view: done and superseded items as one-line rows (their card loads when opened).
+      const q = query({ ...rest, ...(includeSettled ? { includeSettled: "true" } : {}), ...(includeSuperseded ? { includeSuperseded: "true" } : {}), view: "list" });
       return call("GET", `/waiting-on-owner${q ? `?${q}` : ""}`);
     },
+    searchInbox: (q) => callOnce("GET", `/inbox/search?${query({ q })}`),
+    getWaitingItem: (id, milestoneId) => call("GET", `/waiting-on-owner/${encodeURIComponent(id)}${milestoneId ? `?${query({ milestoneId })}` : ""}`),
     // one key per answer: a request the network or a restart dropped is sent again with it (stored once).
     respondToWaiting: (itemId, { relay, ...input }) =>
       call("POST", `${askPath(itemId, relay)}/respond`, { ...input, clientKey: input.clientKey ?? newClientKey() }, { idempotent: true, headers: { "x-undo-ms": String(UNDO_MS) } }),
@@ -336,8 +434,10 @@ export function createRealClient(): ApiClient {
       call("PUT", `/mcp/services/${encodeURIComponent(serviceId)}/access${qs(world ? { world } : {})}`, { personaId, allowed, ...(capability && capability !== "read" ? { capability } : {}) }),
     setMailSettings: (input) => call("PUT", "/mcp/mail/settings", input),
     pollTeamMailbox: () => call("POST", "/mcp/mail/poll"),
+    listConnects: () => call("GET", "/connects"),
     getMemoryCard: (world) => call("GET", `/connections/memory${qs(world ? { world } : {})}`),
     listStepKeyPastes: () => call("GET", "/steps/secret-log"),
+    getTeamLogins: () => call("GET", "/mcp/team-logins"),
     connectMemory: (world) => call("POST", `/connections/memory/connect${qs(world ? { world } : {})}`),
     setMemorySettings: (input, world) => call("PUT", `/connections/memory/settings${qs(world ? { world } : {})}`, input),
     testMemory: (world) => call("POST", `/connections/memory/test${qs(world ? { world } : {})}`),
@@ -423,6 +523,8 @@ export function createRealClient(): ApiClient {
     listDeckCards: () => call("GET", "/deck-cards"),
     deckCardSeen: (ref) => call("POST", "/deck-cards/seen", ref),
     getCredits: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/credits`),
+    startPlanCheckout: (tenantId) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, {}),
+    getPlan: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/plan`),
     grantCredits: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/credits/grant`, input),
     setCreditsGate: (tenantId, on) => call("PUT", `/tenants/${encodeURIComponent(tenantId)}/credits/gate`, { on }),
     listTenants: () => call("GET", "/tenants"),

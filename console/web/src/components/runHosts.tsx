@@ -31,6 +31,8 @@ export function RunHostsSection() {
   const [open, setOpen] = useSectionOpen("runs-hosts");
   const { data, error, loading } = useQuery(() => api.getRunHosts({ range }), [range]);
   const s = data && data.range === range ? data : undefined;
+  // the door (the home world on a customer site) never reads which server ran what (403): no section there.
+  if ((error as { status?: number } | undefined)?.status === 403) return null;
   return (
     <FoldSection
       title="Live runs by host"

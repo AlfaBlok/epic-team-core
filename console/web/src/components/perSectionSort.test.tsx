@@ -66,8 +66,8 @@ describe("E948-S8 per-section sort", () => {
     await waitFor(() => expect(questions()).toEqual(["E909-A2", "E909-A1", "E909-A3"]));
     await waitFor(() => expect(reviewTitles()).toEqual(["rv_b", "rv_a", "rv_c"]));
     expect((screen.getByTestId("waiting-on-you-sort") as HTMLSelectElement).value).toBe("priority");
-    // the review list is one flat list in the server's order, with no sort control
-    expect(screen.queryByTestId("waiting-for-review-sort")).toBeNull();
+    // the review list has the same Sort back, default the server's order
+    expect((screen.getByTestId("waiting-for-review-sort") as HTMLSelectElement).value).toBe("priority");
   });
 
   it("each section sorts on its own: most recent, longest standing", async () => {
@@ -79,17 +79,25 @@ describe("E948-S8 per-section sort", () => {
     expect(reviewTitles()).toEqual(["rv_b", "rv_a", "rv_c"]); // the other section is untouched
     fireEvent.change(screen.getByTestId("waiting-on-you-sort"), { target: { value: "oldest" } });
     expect(questions()).toEqual(["E909-A1", "E909-A2", "E909-A3"]);
+    // the review section sorts on its own; Blocked keeps its choice
+    fireEvent.change(screen.getByTestId("waiting-for-review-sort"), { target: { value: "oldest" } });
+    expect(reviewTitles()).toEqual(["rv_a", "rv_b", "rv_c"]);
+    fireEvent.change(screen.getByTestId("waiting-for-review-sort"), { target: { value: "recent" } });
+    expect(reviewTitles()).toEqual(["rv_c", "rv_b", "rv_a"]);
+    expect(questions()).toEqual(["E909-A1", "E909-A2", "E909-A3"]);
   });
 
   it("each section remembers its choice after a reload", async () => {
     const first = home();
     await waitFor(() => expect(reviewTitles()).toHaveLength(3));
     fireEvent.change(screen.getByTestId("waiting-on-you-sort"), { target: { value: "oldest" } });
+    fireEvent.change(screen.getByTestId("waiting-for-review-sort"), { target: { value: "recent" } });
     first.unmount();
     home();
     await waitFor(() => expect(questions()).toEqual(["E909-A1", "E909-A2", "E909-A3"]));
-    await waitFor(() => expect(reviewTitles()).toEqual(["rv_b", "rv_a", "rv_c"]));
+    await waitFor(() => expect(reviewTitles()).toEqual(["rv_c", "rv_b", "rv_a"]));
     expect(localStorage.getItem("teamHome.sort.blocked")).toBe("oldest");
+    expect(localStorage.getItem("teamHome.sort.review")).toBe("recent");
   });
 
   it("no sort control off the Team home (a milestone's list keeps the server order)", async () => {

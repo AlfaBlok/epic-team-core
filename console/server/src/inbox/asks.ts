@@ -1,4 +1,5 @@
 import { copyPasteInText } from "../steps/copyPaste.js";
+import { ownBoxProblem } from "./phantomRefs.js";
 import { ASK_GATE_RULE } from "./askGate.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -234,6 +235,29 @@ export const FINISH_THE_JOB_RULE =
   "close a known defect, or complete or clean up the work just done (loose ends, docs, leftovers); an unrequested nice-to-have that unblocks " +
   "nothing gets one line and is dropped; ask-tier items stay asks.";
 /**
+ * (root L-59, the owner 2026-11-12 on a review card: "why don't you use a lot more diagrams and boxes ... it's a lot of text and heavy text"):
+ * every page, card evidence, report and proposal leads with its answer and shows it, prose last. In every worker brief and the wake's closing step;
+ * `scripts/text_wall_check.py` flags a new page that breaks it (advisory, pre-commit and the wake's checks).
+ */
+export const VISUAL_FIRST_RULE =
+  `Show, don't write walls (root L-59): every page, card evidence, report, proposal and status page you make for ${ownerName()} opens with its one-line answer (the punchline), ` +
+  "then a diagram or boxed summary in the first screen (boxes and arrows: a flow, a before and after, a table of ✓/✗; draw it with the house-diagram-style skill, " +
+  "the diagram-design skill for a named diagram type, the paper-deck skill for a deck or explainer page), " +
+  "prose only for what a picture cannot say, short paragraphs after it. Every page you serve on the page host is built on the one shared page shell " +
+  `(\`python3 scripts/page_shell.py new <dir> --title … --punchline … --row <row>\` in ${homeRepo()}: paper header, punchline box, diagram slot, the bar up to its parent), so every page looks the same. ` +
+  "Pick the shape that carries the idea: a cycle or wheel as a circle, a sequence as boxes in one line, a hierarchy as a tree, a comparison side by side; " +
+  "never a default grid of boxes (house-diagram-style layouts cycle, flow, tree, compare; the shell's `--shape cycle|line`). " +
+  `Easy calls (an obvious choice inside the goal) you build, ship to production and show ${ownerName()} live; a heavy one (architecture, a one-way door, a change across products) comes as one proposal page ` +
+  "(`python3 scripts/page_shell.py proposal`: the bottom line at the top and the bottom, the diagram, mock-ups, the changes, implications, our recommendation). " +
+  "Your own chat reports and run summaries lead the same way: the answer in one line, then boxes, never a wall of bullets. " +
+  "Before you hand over a page run `python3 scripts/text_wall_check.py <page>` " +
+  `in ${homeRepo()} (it flags a text wall and a diagram whose shape misleads); fix what it names. The review gate holds a card whose evidence page opens with text ("needs evidence"). ` +
+  // (the owner 2026-11-12: "I have like a strong predilection for simple UX ... make it clean and, like, sophisticated")
+  "Clean, simple, sophisticated: every page, screen and site you make looks calm and few: one thing per screen, flat surfaces (no gradients, no shadows at rest), " +
+  "colour only on data and the one action, two or three typefaces, no emoji or ornaments, nothing squeezed on a phone; take the look from the skills, never invent one " +
+  "(pages: paper-deck; app screens: design-taste-frontend's references/app-screens.md; a new site: hallmark). " +
+  `Check it with \`python3 scripts/clean_look_check.py <page>\` in ${homeRepo()}, or \`--screens\` after you change a product screen (each product's home and inbox at phone, tablet and laptop size); fix what it names.`;
+/**
  * steps for the owner carry their own feedback. Every worker brief says so;
  * how to include the kit: docs/steps-kit.md.
  */
@@ -282,7 +306,9 @@ export const ASK_WRITING_RULE =
  */
 export const ASK_LEAD_RULE =
   "An ask's question opens with one line by kind, `You approve: <one thing>`, `You decide: <A or B>`, `You do: <one action>` or `You give: <the key>`, " +
-  "then `Why: <one line>`; his card shows that line big and folds the rest (root L-56).";
+  "then `Why: <one line>`; his card shows that line big and folds the rest (root L-56). `You decide` is for a real decision only: " +
+  "when you are unsure what he MEANS, never make it a choice for him; the Team desk asks him one open question he answers by voice note " +
+  "until it can restate him in one sentence (root L-66).";
 /**
  * a key ask carries `secret:` and the console card stores the pasted key with the infra repo `secret put`.
  */
@@ -338,7 +364,7 @@ export interface HumanAsk {
   risk?: string | null;
   /** `why the owner:` (`why <who>:`): why an agent cannot decide it. */
   why?: string | null;
-  /** `secret: <app> <NAME>` on a provide ask: where the key goes (the console card shows a private paste box). */
+  /** `secret: <app> <NAME>` on an ask of any kind: where the key goes (the console card shows a private paste box; E996-S29: any kind, not only provide). */
   secret?: SecretTarget | null;
   since: string | null;
   row: string | null;
@@ -457,10 +483,16 @@ export function snoozedNow(until: string | undefined, now: number | string = Dat
 /** `hours` from now as the UTC minute a snooze line carries (`2026-11-02T18:30Z`), rounded up to the minute. */
 export const snoozeMinute = (hours: number, now = Date.now()) => new Date(Math.ceil((now + hours * 3_600_000) / 60_000) * 60_000).toISOString().slice(0, 16) + "Z";
 
+/**
+ * E948-S60 (E946-A29 showed its three options as one radio line): the contract writes `options: A | B`; asks also come
+ * with ` · ` between the options (`A posts out on time · B people talking to us · your own number`). A pipe wins; with
+ * no pipe, a spaced middle dot splits them.
+ */
+export const OPTION_DOT = /\s+·\s+/;
 const splitOptions = (text: string) =>
   lettered(
     text
-      .split(/\s*(?:\\\||\|)\s*/)
+      .split(/\||\\\|/.test(text) ? /\s*(?:\\\||\|)\s*/ : OPTION_DOT)
       .map((o) => stripInline(o))
       .filter(Boolean),
   );
@@ -473,6 +505,16 @@ const splitOptions = (text: string) =>
  */
 export function lettered(options: string[]): string[] {
   if (options.length !== 1) return options;
+  // E948-S60: one option holding ` · ` between options (E946-A29, read by spines.py as one) is that many options.
+  const dots = options[0].split(OPTION_DOT).map((o) => o.trim()).filter(Boolean);
+  if (dots.length > 1) return dots;
+  // E948-S69 (E946-A31: `options: yes as it stands; yes with changes said in the page's feedback box; no` came as one option
+  // and its Decide card showed only feedback): 2 to 4 short parts between `; ` are that many options.
+  // E948-S69: so do 2 to 4 parts between spaced slashes (another world's ask: `yes as shown (…) / no (…)`).
+  for (const sep of [/\s*;\s+/, /\s+\/\s+/]) {
+    const parts = options[0].split(sep).map((o) => o.trim()).filter(Boolean);
+    if (parts.length >= 2 && parts.length <= 4 && parts.every((o) => o.split(/\s+/).length <= 25) && !parts.some((o) => /^\(?(?:[a-z]|[1-9])\)\s/i.test(o))) return parts;
+  }
   const parts = options[0].split(/\s*[;,]?\s+(?=(?:\((?:[a-z]|[1-9])|\b(?:[a-z]|[1-9]))\)\s)/i).map((o) => o.replace(/[;,]\s*$/, "").trim()).filter(Boolean);
   if (parts.length < 2) return options;
   const ok = parts.every((p, i) => {
@@ -678,6 +720,9 @@ export function advisories(a: HumanAsk, all: HumanAsk[], now = Date.now()): stri
   if (!Number.isNaN(since) && now - since > STALE_DAYS * 86_400_000) out.push(`stale ask (open ${Math.floor((now - since) / 86_400_000)} days)`);
   // terminal lines for the owner to copy: the ask becomes a Mac-agent ticket instead
   if (copyPasteInText([a.question, a.steps ?? "", a.contextText ?? ""].join("\n")).length) out.push(COPY_PASTE_ADVISORY);
+  // a key card whose words send the key elsewhere or deny its own box (the card shows them pointed at its box; E996-S29)
+  const ownBox = ownBoxProblem(a);
+  if (ownBox) out.push(`key card words: ${ownBox}`);
   return out;
 }
 
@@ -696,13 +741,14 @@ const SPINES_SECRET_SEG = /\s+(?:—|–|--)\s+secret\s*:\s*(.*?)(?=\s+(?:—|�
 function liftSecret(e: Record<string, unknown>): { entry: Record<string, unknown>; secret?: string } {
   let secret: string | undefined;
   const entry: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(e)) {
-    const m = typeof v === "string" ? SPINES_SECRET_SEG.exec(v) : null;
-    if (m) {
-      secret ??= m[1];
-      entry[k] = (v as string).replace(m[0], "");
-    } else entry[k] = v;
-  }
+  const cut = (v: string) => {
+    const m = SPINES_SECRET_SEG.exec(v);
+    if (!m) return v;
+    secret ??= m[1];
+    return v.replace(m[0], "");
+  };
+  // E996-S29: the last option of an approve ask carried it too (T9-A9 `B stay on our server — secret: acme …`): its card had no box.
+  for (const [k, v] of Object.entries(e)) entry[k] = typeof v === "string" ? cut(v) : Array.isArray(v) ? v.map((x) => (typeof x === "string" ? cut(x) : x)) : v;
   return { entry, secret };
 }
 
@@ -906,7 +952,7 @@ export function askKindOf(...texts: (string | undefined)[]): AskKind {
 export function optionsOf(text?: string): string[] | undefined {
   const m = text && /\boptions?\s*:\s*(.+?)(?:\.\s|\n|$)/i.exec(text);
   if (!m) return undefined;
-  const opts = /\|/.test(m[1]) ? splitOptions(m[1]) : m[1].split(/\s*,\s*|\s+or\s+/i).map((o) => stripInline(o)).filter(Boolean);
+  const opts = /\||\s·\s/.test(m[1]) ? splitOptions(m[1]) : m[1].split(/\s*,\s*|\s+or\s+/i).map((o) => stripInline(o)).filter(Boolean);
   return opts.length > 1 ? opts : undefined;
 }
 

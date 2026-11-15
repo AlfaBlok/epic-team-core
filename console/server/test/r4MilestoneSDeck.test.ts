@@ -30,14 +30,14 @@ describe("T47-S4 r4: the milestone's deck in every wake and worker brief", () =>
     expect(p.indexOf(deck)).toBeLessThan(p.indexOf("## Your remit"));
     expect(p).toContain(`\`${deck}&epic=<EPIC-n, or the spine's file name>\``);
     expect(p).toContain(`Every worker brief you write inside this milestone opens with \`This milestone's deck: ${deck}\``);
-    expect(buildWakePrompt(persona, milestone)).not.toContain("deck");
+    expect(buildWakePrompt(persona, milestone)).not.toMatch(/milestone's deck|epic's deck|tab=deck/); // the visual-first rule names the paper-deck skill
   });
 
   it("the console protocol tells the manager each worker brief opens with the deck lines", () => {
     const o = { base: "http://c", run: { id: "run_1" }, assignment: { id: "asg_1", writeEnabled: true, writeScope: "repo" }, milestone: { id: "ms_1" }, persona: { name: "Delivery Manager", remit: "" }, runningWorkers: 0 };
     const p = wakeProtocol({ ...o, deckUrl: deck } as never);
     expect(p).toContain(`Its brief opens with the line \`${deckBriefLine(deck)}\` and, when it names a Bound epic, \`This epic's deck: ${deck}&epic=<that epic's EPIC-n>\``);
-    expect(wakeProtocol(o as never)).not.toContain("deck");
+    expect(wakeProtocol(o as never)).not.toMatch(/milestone's deck|epic's deck|tab=deck/);
   });
 
   it("a console-launched worker's message opens with the deck, once", () => {
@@ -45,7 +45,7 @@ describe("T47-S4 r4: the milestone's deck in every wake and worker brief", () =>
     expect(m.split("\n")[0]).toBe(`This milestone's deck: ${deck}`);
     const named = workerMessage({ base: "http://c", runId: "run_2", parentRunId: "run_1", ticket: "T47-S4", brief: `This milestone's deck: ${deck}\nDo the row.`, deckUrl: deck });
     expect(named.split(deck).length - 1).toBe(1);
-    expect(workerMessage({ base: "http://c", runId: "run_2", parentRunId: "run_1", ticket: "T47-S4", brief: "Do the row." })).not.toContain("deck");
+    expect(workerMessage({ base: "http://c", runId: "run_2", parentRunId: "run_1", ticket: "T47-S4", brief: "Do the row." })).not.toMatch(/milestone's deck|epic's deck|tab=deck/);
   });
 });
 

@@ -7,7 +7,7 @@ import { openDb, type DB } from "../src/db.js";
 import { createStore } from "../src/store.js";
 import { McpT3Client, type T3Client, type T3MessagePage, type T3ThreadMessage } from "../src/t3/client.js";
 import type { Dispatcher } from "../src/t3/dispatcher.js";
-import { createDesk, DESK_PERSONA_NAME, migrateDesk, SEED_MARKER } from "../src/desk/desk.js";
+import { createDesk, DEFAULT_DESK_REPO, DESK_PERSONA_NAME, migrateDesk, SEED_MARKER } from "../src/desk/desk.js";
 
 // the Team desk thread (launched once, reused, relaunched when gone) and the chat's read/send.
 /** the owner writes in the desk chat from the console page (a browser same-origin call). */
@@ -20,6 +20,8 @@ class FakeT3 implements T3Client {
   threads = new Map<string, { messages: T3ThreadMessage[]; status: string }>();
   gone = new Set<string>();
   sendDelayMs = 0;
+  /** a slow T3 status read (the tunnel to the worker server). */
+  statusDelayMs = 0;
   failSend: string | undefined;
   private n = 0;
   private pos = 0;
@@ -55,6 +57,7 @@ class FakeT3 implements T3Client {
   }
   async readThreadStatus(threadId: string) {
     this.calls.push({ op: "readThreadStatus", args: { threadId } });
+    if (this.statusDelayMs) await new Promise((r) => setTimeout(r, this.statusDelayMs));
     if (this.gone.has(threadId)) throw new Error('t3_thread_read: {"code":"not_found","message":"Thread not found."}');
     return { status: this.threads.get(threadId)?.status ?? "idle", raw: {} };
   }
@@ -249,6 +252,50 @@ describe("T18-S2 the chat reads and sends", () => {
   });
 });
 
+describe("Send never waits on T3", () => {
+  it("answers within sendWaitMs while the thread check and the send run on after the reply", async () => {
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 30 });
+    await desk.view();
+    t3.statusDelayMs = 150; // the thread check alone is slower than the wait
+    const t0 = Date.now();
+    const r = await desk.send("fast please", undefined, "chat-a");
+    expect(Date.now() - t0).toBeLessThan(120);
+    expect(r).toMatchObject({ pending: true });
+    expect(r.threadId).toMatch(/^desk_thread_/);
+    await new Promise((x) => setTimeout(x, 250));
+    expect(t3.ops("sendToThread").map((c) => c.args.clientRequestId)).toEqual(["chat-a"]);
+    t3.statusDelayMs = 0;
+    expect((await desk.view()).sending).toBe(0);
+  });
+
+  it("his sends reach T3 in the order he wrote them, even when each answers before T3 took it", async () => {
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 5 });
+    await desk.view();
+    t3.sendDelayMs = 40;
+    const rs = await Promise.all(["one", "two", "three"].map((w) => desk.send(w, undefined, `chat-${w}`)));
+    expect(rs.every((r) => r.pending)).toBe(true);
+    await new Promise((x) => setTimeout(x, 200));
+    expect(t3.ops("sendToThread").map((c) => c.args.clientRequestId)).toEqual(["chat-one", "chat-two", "chat-three"]);
+  });
+
+  it("a failure after the reply names his message by its clientRequestId, so the chat shows it on that bubble", async () => {
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 5 });
+    await desk.view();
+    t3.sendDelayMs = 30;
+    t3.failSend = "thread compacting after 5 attempts";
+    expect((await desk.send("hello", undefined, "chat-x")).pending).toBe(true);
+    await new Promise((x) => setTimeout(x, 80));
+    expect((await desk.view()).sendError).toMatchObject({ clientRequestId: "chat-x" });
+  });
+
+  it("a failure inside the wait still answers the request with the error", async () => {
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 200 });
+    await desk.view();
+    t3.failSend = "no seat available: all seats busy";
+    await expect(desk.send("hello", undefined, "chat-y")).rejects.toThrow(/no seat available/);
+  });
+});
+
 describe("T18-S2 McpT3Client.readThreadMessages", () => {
   let tokenFile: string;
   let bodies: any[];
@@ -294,5 +341,85 @@ describe("T18-S2 McpT3Client.readThreadMessages", () => {
     expect(call.params.arguments).toMatchObject({ threadId: "t1", view: "messages", afterPosition: 0, limit: 50 });
     expect(page.messages.map((m) => [m.role, m.text, m.position])).toEqual([["user", "hi", 1], ["assistant", "hello", 4]]);
     expect(page).toMatchObject({ nextPosition: 5, hasMore: true, archived: false });
+  });
+});
+
+describe("the desk reads every message against his objectives", () => {
+  // his words file holds only his words per objective id and the other worlds; the pursuits are his live objectives.
+  const words = (refreshedAt: string) => ({
+    version: 2,
+    refreshedAt,
+    objectives: [
+      { id: "product-testers", match: [["tester"]], after: { words: "more importantly for the product", said: new Date().toISOString().slice(0, 16) + "Z", via: "WhatsApp" } },
+      { id: "ops", match: [["browser"]], after: { words: "use the browser" } },
+      { id: "house", name: "The house", match: [["house"]], world: { repo: "home_two", status: "active", next: "worldwide weather search" }, after: { words: "the right weather at an affordable price" } },
+    ],
+  });
+  const objectives = async () => ({
+    nodes: [
+      { id: "ops", kind: "pursuit", name: "Ops", rank: 1, headline: "The browser works", greens: 1, total: 2, keyResults: [{ label: "Signs in", state: "red", value: "not yet" }, { state: "green" }] },
+      { id: "product-testers", kind: "pursuit", name: "T", rank: 2, headline: "Five testers use the product", greens: 0, total: 1, keyResults: [{ label: "Applications", state: "amber", value: "1" }] },
+      { id: "new-one", kind: "pursuit", name: "N", rank: 3, headline: "A new objective he just added", greens: 0, total: 1, keyResults: [{ state: "red" }] },
+    ],
+    progress: { sets: { "product-testers": { today: 1, week: 1 } } },
+  });
+  const writeWords = (f: unknown) => {
+    fs.mkdirSync(path.join(dir, DEFAULT_DESK_REPO, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(dir, DEFAULT_DESK_REPO, "docs", "his-words.json"), JSON.stringify(f));
+  };
+
+  it("puts his objectives block before his words: every live objective, the ones he names first with his words; the chat and his words never show it", async () => {
+    writeWords(words(new Date().toISOString()));
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 50, objectives });
+    await desk.view();
+    await desk.send("what about the tester alert I got?", "Pursuits", "obj-1");
+    await new Promise((x) => setTimeout(x, 60));
+    const sent = t3.ops("sendToThread").at(-1)!.args.message as string;
+    expect(sent.startsWith("[page: Pursuits]\n[his objectives]\n")).toBe(true);
+    expect(sent).not.toMatch(/plot/i);
+    expect(sent).toContain("His 3 objectives live from the objectives screen");
+    // the one his message names comes first, with his words; the others follow in his order, short
+    expect(sent.indexOf("2. 🟡 Five testers use the product")).toBeLessThan(sent.indexOf("1. 🔴 The browser works"));
+    expect(sent).toContain('his words');
+    expect(sent).toContain('"more importantly for the product"');
+    expect(sent).toContain("moved today: 1 turned green");
+    expect(sent).toContain("next: Signs in (not yet)");
+    expect(sent).not.toContain('"use the browser"');
+    // an objective he just added is in the block with no hand edit; the other world he names too
+    expect(sent).toContain("3. 🔴 A new objective he just added");
+    expect(sent).toContain("· The house (its own world home_two: notes only) · active · next: worldwide weather search");
+    expect(sent).toMatch(/\[\/his objectives\]\nwhat about the tester alert I got\?$/);
+    const v = await desk.view();
+    const mine = v.messages.filter((m: any) => m.role === "user" && m.kind === "message").at(-1) as any;
+    expect(mine.text).toBe("what about the tester alert I got?");
+    expect(mine.page).toBe("Pursuits");
+    // a quote from the block is never his: no stamp on the block's words
+    expect(await desk.jordiSaid("more importantly for the product")).toBe(false);
+    expect(await desk.jordiSaid("the tester alert I got")).toBe(true);
+  });
+
+  it("a stale refresh says so; no words file and no objectives = no block", async () => {
+    writeWords(words("2026-11-01T00:00Z"));
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher, publicUrl: BASE, reposRoot: dir, sendWaitMs: 50 });
+    await desk.view();
+    await desk.send("hi", undefined, "obj-2");
+    await new Promise((x) => setTimeout(x, 60));
+    expect(t3.ops("sendToThread").at(-1)!.args.message).toContain("STALE: run scripts/his_words.py refresh");
+    fs.rmSync(path.join(dir, DEFAULT_DESK_REPO, "docs", "his-words.json"));
+    await desk.send("hi again", undefined, "obj-3");
+    await new Promise((x) => setTimeout(x, 60));
+    expect(t3.ops("sendToThread").at(-1)!.args.message).toBe("hi again");
+  });
+
+  it("the seed and the endpoint-list update carry the objectives rule (v39: every live objective, no invented name)", async () => {
+    const { deskSeed, updateMessage, SEED_VERSION } = await import("../src/desk/desk.js");
+    expect(SEED_VERSION).toBeGreaterThanOrEqual(39);
+    const seed = deskSeed({ persona: { name: DESK_PERSONA_NAME, remit: "r" }, publicUrl: BASE, reposRoot: dir });
+    expect(seed).toContain("His objectives first (");
+    expect(seed).toContain("every live objective");
+    expect(seed).not.toContain("--stands");
+    expect(updateMessage(BASE)).toContain("his objectives first");
+    expect(seed).not.toContain("Plot:");
+    expect(updateMessage(BASE)).not.toContain("Plot:");
   });
 });

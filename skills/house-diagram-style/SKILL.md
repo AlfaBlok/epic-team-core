@@ -1,6 +1,6 @@
 ---
 name: house-diagram-style
-description: The team's house style for post and page diagrams - the paper style (the deck's warm paper, Newsreader headline, Instrument Sans labels, fine ink boxes, one deep-green focus; colours and fonts read from the shared `paper` brand file, one source with paper-deck) plus palette, type, layout, density, words and what to avoid, and a renderer (paper by default; five other styles kept for trials) that turns the `diagram` skill's JSON spec into a clean 1600x900 PNG + editable HTML. Use whenever you make or redo a diagram for a social post, campaign draft, book page or explainer, when a diagram looks generic, cluttered or "AI-made", or when someone asks for a style trial or a diagram "in our style".
+description: The team's house style for post and page diagrams - the paper style (the deck's warm paper, Newsreader headline, Instrument Sans labels, fine ink boxes, one deep-green focus; colours and fonts read from the shared `paper` brand file, one source with paper-deck) plus palette, type, layout, density, words and what to avoid, and a renderer (paper by default; five other styles kept for trials) that turns the `diagram` skill's JSON spec into a clean 1600x900 PNG + editable HTML. Use whenever you make or redo a diagram for a social post, campaign draft, book page or explainer, when a diagram looks generic, cluttered or "AI-made", or when someone asks for a style trial or a diagram "in our style". Also use for the first-screen diagram or boxed summary every status page, report, proposal and review card evidence page opens with (root L-59).
 ---
 
 # House diagram style
@@ -16,6 +16,13 @@ One look for every diagram the team ships, so a reader knows it is ours before r
 3. **Look at the PNG** (Read the image) before using it. Fix the spec, never the picture: shorter labels, fewer nodes. Check: no clipped or shrunken-to-tiny text, no arrow under a label, no box touching another, nothing in a corner by itself.
 
 Layouts: `flow` (3-6 steps; more than 5 makes two rows), `tree` (`root`; up to 4 levels, 6 per level), `hub` (`center`; the rest in a left and a right column with elbow connectors; give a node `"angle"` to place it on an ellipse instead). The `diagram` skill's `"ring"` is ignored here: draw the cycle as a flow.
+
+## Where a diagram goes: the first screen of every page
+
+Not only posts. Every status or evidence page, review card evidence, report and proposal opens with its one-line answer
+and then a diagram or boxed summary (the owner asked for "a lot more diagrams and boxes", not "heavy text"). Reach for this skill whenever a page explains how something flows, what changed (before and after), or which
+parts there are. A page that truly has no shape gets a row of boxes instead: one ✓ / ✗ box per point. `python3
+scripts/text_wall_check.py <page>` flags a page that still opens with prose.
 
 ## House rules (every style)
 

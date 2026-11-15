@@ -19,7 +19,7 @@ export function useOperatorPages(): { to: string; label: string; what: string; t
     // the owner looks for "who applied", so the entry says Applications.
     { screen: "testers", to: "/testers", label: "Applications", what: "tester applications", testId: "op-applications" },
     { screen: "testers", to: "/feedback", label: "Voice feedback", what: "voice notes from testers and customers", testId: "op-feedback" },
-    { screen: "credits", to: "/credits", label: "Credits", what: "your monthly grant and top-ups", testId: "op-credits" },
+    { screen: "credits", to: "/credits", label: "Credits", what: "your plan, monthly grant and top-ups", testId: "op-credits" },
     { screen: "browserAuth", to: "/auth", label: w.browserAuth, what: "the team browser's sign-ins", testId: "op-browser-auth" },
   ];
   return all.filter((p) => shows(p.screen));

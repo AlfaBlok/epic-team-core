@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/common";
 import { TeamPage } from "@/pages/Team";
 import { useOperatorPages } from "@/lib/settingsPath";
+import { useDashboardPanels } from "@/lib/dashboardPanels";
 
 /**
  * Settings: his team's setup, red lines and what he builds on top (they left the Inbox, the owner 2026-11-11:
@@ -9,11 +10,14 @@ import { useOperatorPages } from "@/lib/settingsPath";
  */
 export function SettingsPage() {
   const pages = useOperatorPages();
+  // the dashboard panels he does not use are off by default; one quiet switch at the foot brings them back.
+  const [dashboard, setDashboard] = useDashboardPanels();
   return (
     <>
-      <PageHeader title="Settings" description="Your team's setup, your priorities and what you build, then every operator page." />
+      <PageHeader title="Settings" description="Your red lines, then every operator page." />
       <TeamPage
         section="settings"
+        dashboard={dashboard}
         between={
           pages.length > 0 && (
             <section className="mt-6" data-testid="operator-pages">
@@ -32,6 +36,10 @@ export function SettingsPage() {
           )
         }
       />
+      <label className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" data-testid="dashboard-panels-switch">
+        <input type="checkbox" className="h-3.5 w-3.5 accent-current" checked={dashboard} onChange={(e) => setDashboard(e.target.checked)} />
+        Show the old dashboard panels (setup checklist, what you build, activity, project cards, personas)
+      </label>
     </>
   );
 }

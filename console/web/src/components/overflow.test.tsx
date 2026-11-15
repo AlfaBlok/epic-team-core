@@ -111,11 +111,12 @@ describe("Waiting cards stay inside the viewport at 390 px (M2-30)", () => {
     expect(card.id).toBeTruthy();
     expect(card.className).toContain("min-w-0");
     expect(card.querySelector(":scope > div")!.className).toContain("grid-cols-1");
-    // options are a radio list; each option's label wraps (no nowrap, no truncate) inside the card
-    const option = screen.getAllByTestId("ask-option")[0].closest("label")!;
+    // E948-S69: options are buttons; a long one wraps inside the card (never nowrap or truncate)
+    const option = screen.getAllByTestId("ask-option")[0];
     expect(option.textContent).toContain("S11");
     expect(option.className).not.toMatch(/whitespace-nowrap|truncate/);
-    expect(option.className).toContain("flex");
+    expect(option.className).toContain("whitespace-normal");
+    expect(option.className).toContain("max-w-full");
     expect(screen.getByTestId("ask-lead").className).not.toMatch(/whitespace-nowrap|truncate/);
     // the missing/advisory chips (ask-advisories) are no longer on the card, so their max-w-full check is gone
   });

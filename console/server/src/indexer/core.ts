@@ -18,6 +18,8 @@ import { useGitMemo } from "../inbox/waiting.js";
  * over every repo, was on the console's main thread every 2 min). It writes only console.db: spines_cache, the read
  * model's views, book_cache, and its heartbeat. The console reads those and asks for work through indexer_queue.
  */
+import type { Identity } from "../identity.js";
+
 export interface IndexerConfig {
   dbPath: string;
   reposRoot: string;
@@ -41,6 +43,8 @@ export interface IndexerConfig {
   /** rescan gap (default CONSOLE_RESCAN_GAP_MS or 5 min; tests set it). */
   rescanGapMs?: number;
   revision?: string;
+  /** the console's identity (owner, home world …), set by main.ts before anything loads (E996-S29). */
+  identity?: Partial<Identity>;
 }
 
 export interface IndexerDeps {

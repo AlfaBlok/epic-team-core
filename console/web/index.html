@@ -43,6 +43,25 @@
         }
       } catch {}
     </script>
+    <script>
+      // what the first screen shows starts downloading now, beside the app's code (on a phone the code took ~3 s and
+      // only then did the lists start). The app takes each answer once (src/api/real.ts takeEarly); a failed one is
+      // asked again the normal way. Only on Home (/), the Inbox (/inbox) and Chat (/chat), so no other page downloads them for nothing.
+      // Home is the goals view (its list is /scorecards), so Home asks for that first and leaves the Inbox's
+      // lists (~110 KB on the wire) to after the code, when they no longer slow the goals list on a slow phone link;
+      // a social site's Home is its campaigns and keeps the Inbox's lists, as /inbox does.
+      try {
+        var at = location.pathname, social = /social/i.test(location.hostname);
+        var inbox = ["/waiting-on-owner?includeSuperseded=true&view=list", "/status", "/review-items", "/laptop"];
+        // Chat (/chat, the console skin) asks its last 20 messages now too: they waited for the app's code and then Chat's
+        // own script, ~1.2 s on Slow 4G.
+        var paths = at === "/inbox" || (at === "/" && social) ? inbox : at === "/" ? ["/scorecards", "/status", "/laptop"] : at === "/chat" && !social ? ["/desk/messages?limit=20"] : [];
+        var early = (window.__earlyGets = {});
+        paths.forEach(function (p) {
+          early[p] = { at: Date.now(), p: fetch("/api" + p).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }) };
+        });
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,16 +1,18 @@
 import { addGrant, grantPrefix } from "../approvals.js";
+import { listView, wantsListView } from "./slimList.js";
 import { RecordError } from "../team/milestoneRecord.js";
 import { plainAssignments, type RecordedAssignments } from "../team/assignmentRecord.js";
 import { randomUUID } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
-import type { DB } from "../db.js";
+import { DEFAULT_TENANT, type DB } from "../db.js";
 import { withRubric } from "../cycle/rubric.js";
 import type { Store } from "../store.js";
 import { CycleError, type Cycle } from "../cycle/service.js";
 import type { Run } from "../store.js";
 import { answerWakeMessage, askerFor, epicRunState, requestReads, type Asker } from "./asker.js";
-import { isDm, NO_OWNER, ownerFor, qualifiedCode, VERB, waitingForMilestone, waitingOnJordi, withThreadEnvironments, type Owner, type WaitingDeps, type WaitingItem } from "./waiting.js";
+import type { HeldAsk } from "./askGate.js";
+import { isDm, NO_OWNER, ownerFor, qualifiedCode, VERB, waitingAndHeld, waitingForMilestone, waitingOnJordi, withThreadEnvironments, type Owner, type WaitingDeps, type WaitingItem } from "./waiting.js";
 import { pendingItems } from "../status/compute.js";
 import { listRepos, resolveRepo } from "../adapters/repos.js";
 import { adhocMilestone } from "../routes/spines.js";
@@ -36,7 +38,23 @@ import type { Attachments } from "../desk/attachments.js";
 import { addAcceptedAskRow } from "../review/followups.js";
 import { deployerName, opsRepo, ownerName } from "../identity.js";
 
+/**
+ * E996-S29: the other open asks that store the same key (same `secret: <app> <NAME>`) as `item`: one card and one box in
+ * the inbox, and the one Save key answers them all.
+ */
+export function sameKeyTwins(items: WaitingItem[], item: WaitingItem): WaitingItem[] {
+  const s = item.secret;
+  if (!s) return [];
+  return items.filter((i) => i.id !== item.id && i.source === "ask" && i.state === "open" && i.secret?.app === s.app && i.secret?.name === s.name);
+}
+
 /** ?includeSettled=true|1 (default false). */
+/** the longest a GET /waiting-on-owner waits on one item's git blame (an item the stored view did not cover). */
+export const ASKER_BUDGET_MS = 750;
+/** The promise's value, or undefined once `ms` passed (the promise carries on; its failure is dropped). */
+export function withinBudget<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([p.catch(() => undefined), new Promise<undefined>((res) => (setTimeout(res, ms) as { unref?: () => void }).unref?.())]);
+}
 const includeSettled = (c: Context) => ["true", "1"].includes(c.req.query("includeSettled") ?? "");
 
 /**
@@ -134,6 +152,8 @@ const snoozeIn = z
     hours: z.literal(3).optional(),
     days: z.union([z.literal(3), z.literal(7), z.literal(30)]).optional(),
     until: z.string().regex(new RegExp(`^${SNOOZE_UNTIL}$`)).nullable().optional(),
+    /** E948-S83 iteration 2: pressed as Park (the card's own button), so the commit says parked. */
+    park: z.literal(true).optional(),
   })
   .refine((b) => b.hours !== undefined || b.days !== undefined || b.until !== undefined, { message: "hours, days or until is required" });
 /** `days` after today (UTC), as YYYY-MM-DD. */
@@ -390,7 +410,22 @@ export function messageText(o: { milestoneTitle: string; milestoneId: string; te
 
 /** lets the ask path check that words handed over by the Team desk are the owner's own in the desk chat. */
 export interface DeskChat {
-  jordiSaid(chat: string): Promise<boolean>;
+  /** `world` = a world's own desk thread (the social product's desk); absent = the home Team desk. */
+  jordiSaid(chat: string, world?: string): Promise<boolean>;
+}
+
+/**
+ * Which desk is calling, from X-Console-Run. `team-desk` is the Team desk of the caller's own world (a world's
+ * token reads that world's desk thread, never the home one); `world-desk:<w>` is world w's own desk and needs w's own
+ * credential (or none, on the console host). undefined = not a desk; a string = why the header is refused.
+ */
+export function deskCaller(header: string | undefined, own: string | undefined, home: string): { world: string } | string | undefined {
+  const h = (header ?? "").trim().toLowerCase();
+  if (h === "team-desk") return { world: own ?? home };
+  const m = /^world-desk:([a-z0-9][a-z0-9_-]*)$/.exec(h);
+  if (!m) return undefined;
+  if (own && own !== m[1]) return `X-Console-Run ${h} is only for world ${m[1]}'s own desk, with its own token`;
+  return { world: m[1]! };
 }
 
 /** a milestone chat answers asks only inside its subtree, with the owner's words from ITS thread. */
@@ -416,6 +451,7 @@ export function mountInbox(
     /** a write grant also goes to the world's state/assignments.json first (default: console.db only). */
     recordAssignments?: (s: Store) => RecordedAssignments;
     /** pauses between the job's tries (answerJobs RETRY_MS). */ answerRetryMs?: number[];
+    /** false on a passive console (shared staging): the answer jobs belong to the database's own console. */ resumeJobs?: boolean;
     /** files sent with an answer become links after his words (desk/attachments.ts). */ attachments?: Pick<Attachments, "cardText">;
     /** an answer brought back before its job ran (its presses are marked undone). */ onAnswerUndone?: (id: string) => void;
     /** each answer job's state change (the press log follows it). */ onAnswerJob?: (id: string, s: { state: "pending" | "running" | "done" | "failed"; attempts: number; error?: string | null }) => void;
@@ -425,7 +461,7 @@ export function mountInbox(
      * repo, after his answer is in the spine. `retry` = worth trying again (git, a checkout not there yet).
      */
     improvement?: (r: JordiResponse) => Promise<{ ok: true; note: string } | { ok: false; retry: boolean; error: string }> },
-): { jobs: AnswerJobs; pasteKey: PasteKey; settle?: (src: SettleSource) => Promise<Settled> } {
+): { jobs: AnswerJobs; pasteKey: PasteKey; searchSources: () => Promise<{ waiting: Record<string, unknown>[]; responses: Record<string, unknown>[] }>; settle?: (src: SettleSource) => Promise<Settled> } {
   const { db, store, cycle } = o;
   const spineWriter = o.spine ?? createSpineWriter();
   const secretPut = o.secretPut ?? hooks.keys.runner();
@@ -925,6 +961,23 @@ export function mountInbox(
     return out.map((it) => withThreadEnvironments(it, o.deps.threadEnvironment));
   };
 
+  // E996-S48: the open asks the ask gate keeps from the owner (once each, with its reason) and how many each rule holds.
+  api.get("/asks/held", async (c) => {
+    const seen = new Set<string>();
+    const held: (HeldAsk & { milestoneId: string; rule: string })[] = [];
+    for (const m of store.listMilestones().filter((x) => !x.settledAt)) {
+      for (const h of (await waitingAndHeld(o.deps, m)).held) {
+        const k = `${h.repo}:${h.path}:${h.line ?? h.question}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        held.push({ milestoneId: m.id, rule: heldRule(h.reason), ...h });
+      }
+    }
+    const byRule: Record<string, number> = {};
+    for (const h of held) byRule[h.rule] = (byRule[h.rule] ?? 0) + 1;
+    return c.json({ count: held.length, byRule, held });
+  });
+
   api.get("/waiting-on-owner", async (c) => {
     settlePending();
     const milestoneId = c.req.query("milestoneId") || undefined;
@@ -957,8 +1010,30 @@ export function mountInbox(
     // the top milestone's items first (sidebar order); ties keep the order built above.
     // before that, the owner's level from the Prioritizer (high, normal, low), each item with its why.
     // the asker the refresher stored with the view (it reads git blame); only an item it did not cover is worked out here.
-    const askerOf = async (it: WaitingItem) => (read.askers && it.id in read.askers ? (read.askers[it.id] ?? undefined) : await askerFor(reads, it));
-    return c.json(await Promise.all(withRubric(db, byMilestonePriority(items, storeRanks(store), worldPriorities(store, o.deps.reposRoot))).map(async (it) => (wantsAsker(it) ? { ...it, asker: await askerOf(it) } : it))));
+    // an item the stored view did not cover asks git (blame) here; a slow git never holds the list: past
+    // ASKER_BUDGET_MS the card goes out without its asker (the blame finishes into the cache for the next read).
+    const askerOf = async (it: WaitingItem) =>
+      read.askers && it.id in read.askers ? (read.askers[it.id] ?? undefined) : await withinBudget(askerFor(reads, it), ASKER_BUDGET_MS);
+    const full = await Promise.all(withRubric(db, byMilestonePriority(items, storeRanks(store), worldPriorities(store, o.deps.reposRoot))).map(async (it) => (wantsAsker(it) ? { ...it, asker: await askerOf(it) } : it)));
+    // the web app's Inbox asks for `view=list` (done and superseded items as one-line rows, no second copy
+    // of each item inside its answer): 1.78 MB became ~0.2 MB. Agents' curl without `view` still get every field.
+    return c.json(wantsListView((n) => c.req.query(n)) ? listView(full as unknown as Record<string, unknown>[]) : full);
+  });
+
+  /**
+   * one item whole (the card behind a folded Answered or Superseded row, fetched when it opens). The same list
+   * as GET /waiting-on-owner (settled and superseded items included, ?milestoneId narrows), then that one id.
+   */
+  api.get("/waiting-on-owner/:id", async (c) => {
+    settlePending();
+    const id = c.req.param("id");
+    const milestoneId = c.req.query("milestoneId") || undefined;
+    if (milestoneId && !store.getMilestone(milestoneId)) return err(c, 404, "not_found", `milestone ${milestoneId} not found`);
+    const read = await itemsIn({ milestoneId, includeSettled: true, includeSuperseded: true });
+    const found = withResponses(read.items, { milestoneId }).find((it) => it.id === id);
+    if (!found) return err(c, 404, "not_found", `item ${id} not found`);
+    const [it] = withRubric(db, [found]);
+    return c.json(wantsAsker(it) ? { ...it, asker: await withinBudget(askerFor({ ...o.deps, store: requestReads(o.deps.store) }, it), ASKER_BUDGET_MS) } : it);
   });
 
   /** Why this answer cannot be taken for this item (checked on the click, or by the job for an item it had to resolve). */
@@ -1037,8 +1112,8 @@ export function mountInbox(
   };
   const ack = o.answerAck ?? "done";
   const jobs = createAnswerJobs({ db, step: answerStep, ...(o.answerRetryMs ? { retryMs: o.answerRetryMs } : {}), ...(o.onAnswerJob ? { onState: o.onAnswerJob } : {}) });
-  // answers a restart interrupted (or that wait for a retry) carry on now.
-  jobs.resume();
+  // answers a restart interrupted (or that wait for a retry) carry on now (never on a passive console: not its jobs).
+  if (o.resumeJobs !== false) jobs.resume();
 
   /** his words with the links of the files he sent along; an error message when a file is refused. */
   const withFiles = (b: { text: string; attachments?: string[] }): string | { status: 400 | 404 | 413 | 415; code: string; message: string } => {
@@ -1066,14 +1141,19 @@ export function mountInbox(
     p.data.text = filed;
     // the Team desk (header X-Console-Run: team-desk) registers only what the owner said in the chat: via + his words, which
     // must be in his messages to the desk thread; never an answer the desk wrote itself. Any other caller sends no via.
-    const fromDesk = (c.req.header("x-console-run") ?? "").trim().toLowerCase() === "team-desk";
+    // a world's own desk (X-Console-Run world-desk:<w>, or team-desk with its world's token) is a Team desk too:
+    // its owner's words are checked against ITS thread, typed or a voice-note transcript alike.
+    const desker = deskCaller(c.req.header("x-console-run"), credentialWorld(), DEFAULT_TENANT);
+    if (typeof desker === "string") return err(c, 403, "desk_only", desker);
+    const fromDesk = !!desker;
+    const deskWorld = desker?.world;
     // a milestone chat (header X-Console-Run: milestone-chat:<id>) does the same with via milestone-chat, inside its subtree.
     const fromChat = o.milestoneChat?.caller(c.req.header("x-console-run"));
     const via = p.data.via;
     const chat = p.data.chat?.trim();
     if (fromDesk && via !== "team-desk") return err(c, 400, "validation_error", `the Team desk registers an answer ${ownerName()} gave in the chat: send "via":"team-desk" and "chat" (his words, verbatim)`);
     if (fromChat && via !== "milestone-chat") return err(c, 400, "validation_error", `a milestone chat registers an answer ${ownerName()} gave in it: send "via":"milestone-chat" and "chat" (his words, verbatim)`);
-    if (via === "team-desk" && !fromDesk) return err(c, 403, "desk_only", "via team-desk is only for the Team desk's own calls (header X-Console-Run: team-desk)");
+    if (via === "team-desk" && !fromDesk) return err(c, 403, "desk_only", "via team-desk is only for a Team desk's own calls (header X-Console-Run: team-desk, or world-desk:<world> for a world's own desk)");
     if (via === "milestone-chat" && !fromChat) return err(c, 403, "desk_only", "via milestone-chat is only for a milestone chat's own calls (header X-Console-Run: milestone-chat:<id>)");
     if (via && !chat) return err(c, 400, "validation_error", `chat (${ownerName()}'s words from the chat, verbatim) is required with via`);
     if (via === "team-desk" && !o.deskChat) return err(c, 503, "desk_unavailable", "the Team desk chat is not available to check the answer against");
@@ -1125,8 +1205,11 @@ export function mountInbox(
       if (!grantAssignmentId) return err(c, 400, "unknown_reference", "the run that asked has no attached assignment to grant write to");
     }
     // Checked before anything changes: words the chat cannot show as the owner's register nothing.
-    if (via === "team-desk" && !(await o.deskChat!.jordiSaid(chat!))) return err(c, 409, "not_in_chat", `those words are not in ${ownerName()}'s messages to the Team desk: only an answer he gave in the chat is registered`);
-    if (via === "milestone-chat" && !(await o.milestoneChat!.jordiSaid(fromChat!, chat!)))
+    // a refused answer leaves one log line (item, desk, words length; never the words), so a day's refusals can be counted.
+    const refusedLog = (desk: string) => console.warn(`answer refused not_in_chat: item ${id} desk ${desk} chat ${chat!.length} chars`);
+    if (via === "team-desk" && !(await o.deskChat!.jordiSaid(chat!, deskWorld === DEFAULT_TENANT ? undefined : deskWorld)) && (refusedLog(`team-desk:${deskWorld ?? DEFAULT_TENANT}`), true))
+      return err(c, 409, "not_in_chat", `those words are not in ${ownerName()}'s messages to ${deskWorld && deskWorld !== DEFAULT_TENANT ? `world ${deskWorld}'s desk` : "the Team desk"} (typed or voice note): only an answer he gave in the chat is registered`);
+    if (via === "milestone-chat" && !(await o.milestoneChat!.jordiSaid(fromChat!, chat!)) && (refusedLog(`milestone-chat:${fromChat}`), true))
       return err(c, 409, "not_in_chat", `those words are not in ${ownerName()}'s messages to this milestone chat: only an answer he gave in the chat is registered`);
     if (grant) {
       // the grant is a `## Standing approvals` line in the asker's spine first, then the assignment's
@@ -1241,7 +1324,9 @@ export function mountInbox(
         line = e.line;
         if (e.how === "same") return { skip: until ? `already snoozed until ${until}` : "not snoozed" };
         return until
-          ? { text: e.text, msg: `Snooze ${label} until ${until} (${who}, via console)`, body: `${stripQ(item.question)}\n\n${who} snoozed this ask on the console: it stays open; the inbox hides it until ${until}. The agent-team console added \`— snoozed until: ${until}\` to its line in ${item.path}.` }
+          ? p.data.park
+            ? { text: e.text, msg: `Park ${label} until ${until} (${who}, via console)`, body: `${stripQ(item.question)}\n\n${who} parked this ask with the card's Park button: nothing was decided, it stays open and leaves the inbox until ${until}, then comes back by itself (Bring it back from Snoozed in the inbox). The agent-team console added \`— snoozed until: ${until}\` to its line in ${item.path}.` }
+            : { text: e.text, msg: `Snooze ${label} until ${until} (${who}, via console)`, body: `${stripQ(item.question)}\n\n${who} snoozed this ask on the console: it stays open; the inbox hides it until ${until}. The agent-team console added \`— snoozed until: ${until}\` to its line in ${item.path}.` }
           : { text: e.text, msg: `Unsnooze ${label} (${who}, via console)`, body: `${stripQ(item.question)}\n\n${who} unsnoozed this ask on the console: it is back in the inbox. The agent-team console took the snoozed-until field off its line in ${item.path}.` };
       },
     });
@@ -1282,6 +1367,16 @@ export function mountInbox(
     const own = credentialWorld(); // as for /respond
     if (own && milestoneWorld(db, item.milestoneId) !== own) return err(c, 404, "not_found", `waiting item ${id} not found in this world`);
     const r = await storeKey(item, p.value, p.wake);
+    // E996-S29: asks that name the same key (`secret: <app> <NAME>`) are one card and one box: the save answers them all.
+    if (r.ok) {
+      const twins = sameKeyTwins((await itemsIn({})).items, item).filter((i) => !own || milestoneWorld(db, i.milestoneId) === own);
+      const also: { code?: string; ok: boolean; reason?: string }[] = [];
+      for (const t of twins) {
+        const tr = await storeKey(t, p.value, p.wake);
+        also.push({ ...(t.code ? { code: t.code } : {}), ok: tr.ok, ...(tr.ok ? {} : { reason: tr.message }) });
+      }
+      if (also.length) return c.json({ ...(r.body as object), also }, 201);
+    }
     return r.ok ? c.json(r.body, 201) : r.status === 502 && r.body ? c.json(r.body, 502) : err(c, r.status, r.code, r.message);
   });
 
@@ -1617,5 +1712,20 @@ export function mountInbox(
     return storeKey(item, i.value, true, i.file === true);
   }
 
-  return { jobs, pasteKey, ...(o.settle ? { settle: settleFrom } : {}) };
+  /** what GET /api/inbox/search reads (inbox/search.ts): every ask of the world from the stored view and his answers. */
+  const searchSources = async () => ({ waiting: (await itemsIn({ includeSettled: true, includeSuperseded: true })).items as unknown as Record<string, unknown>[], responses: listResponses() as unknown as Record<string, unknown>[] });
+  return { jobs, pasteKey, searchSources, ...(o.settle ? { settle: settleFrom } : {}) };
+}
+
+/** the gate rule a held reason comes from (GET /api/asks/held). */
+export function heldRule(reason: string): string {
+  if (reason.startsWith("already answered on ")) return "answered before";
+  if (reason.startsWith("too long for one sitting")) return "too long";
+  if (reason.startsWith("ask needs rewriting")) return "dry run failed";
+  if (reason.startsWith("waiting for its dry run")) return "waiting for its dry run";
+  if (/re-states something/.test(reason)) return "re-states his decision";
+  if (/does not name what of/.test(reason)) return "not his ask";
+  if (/go-live date/.test(reason)) return "go-live date";
+  if (/hands without|rests on his Mac/.test(reason)) return "hands without why";
+  return "other";
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DB } from "../db.js";
-import { FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE } from "../inbox/asks.js";
+import { FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE } from "../inbox/asks.js";
 import { WORKER_FINISH_RULE, WORKER_TIER_RULE } from "./prompts.js";
 import { deckBriefLine } from "../wakePrompt.js";
 import { mainHost, workerHost } from "../identity.js";
@@ -79,5 +79,6 @@ export function workerMessage(o: { base: string; runId: string; parentRunId: str
     WORKER_TIER_RULE,
     FINISH_THE_JOB_RULE,
     STEPS_PAGE_RULE,
+    VISUAL_FIRST_RULE,
   ].join("\n");
 }

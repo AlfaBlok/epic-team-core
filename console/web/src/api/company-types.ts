@@ -129,7 +129,7 @@ export interface CompanyBuild {
 
 /**
  * an open ask or card of another product's world the login belongs to (the social product world such as a social world repo),
- * read only through that world's own lists (GET /api/companies/worlds); it opens in its own app (openUrl).
+ * read only through that world's own lists (GET /api/worlds); it opens in its own app (openUrl).
  */
 export interface WorldItem {
   key: string;
@@ -155,4 +155,66 @@ export interface WorldInbox {
   appUrl: string;
   items: WorldItem[];
   error?: string;
+  /** the world's live campaigns (absent = not read), so a world with none of its own names the owner's real ones. */
+  campaigns?: WorldCampaign[];
+}
+export interface WorldCampaign {
+  name: string;
+  milestoneId: string;
+  goal?: string;
+  posting?: string;
+  /** the goal's sentence (absent = none written yet). */
+  sentence?: string;
+  /** the one number toward the goal; `was` = at the start of today (UTC). */
+  metric?: { label: string; target: number; now: number | null; by?: string; proposed: boolean; was?: number };
+  /** the newest daily report of its repo, one line. */
+  digest?: { date: string; line: string };
+  openUrl: string;
+}
+
+/** GET /api/experiments: the home repo's live experiments, for the Inbox (read only). */
+export interface ExperimentKeyResult {
+  id: string;
+  label: string;
+  goal: number;
+  /** total: the count itself against the goal; gain: what was added since the start against the goal. */
+  kind: "total" | "gain";
+  baseline: number | null;
+  now: number | null;
+  gained: number | null;
+  onTrack: boolean;
+  source?: string;
+  sourceUrl?: string;
+}
+/** a line of a goal (the goal itself or one key result) with its traffic light (GET /api/goals). */
+export type GoalLight = "green" | "amber" | "red";
+export interface GoalLine {
+  id: string;
+  label: string;
+  now: number | null;
+  target: number;
+  by: string;
+  light: GoalLight;
+  /** the light's reason in a few words ("on pace", "no movement since 10 Nov"). */
+  why: string;
+  sourceUrl?: string;
+}
+export interface Goal extends GoalLine {
+  name: string;
+  keyResults: GoalLine[];
+  /** the traffic light rule in words, shown on the page. */
+  lightRule: string;
+  updatedAt?: string;
+}
+export interface Experiment {
+  id: string;
+  headline: string;
+  name: string;
+  from?: string;
+  to?: string;
+  status?: string;
+  plan?: string;
+  ask?: string;
+  updatedAt?: string;
+  keyResults: ExperimentKeyResult[];
 }

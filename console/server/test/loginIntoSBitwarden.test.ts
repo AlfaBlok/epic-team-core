@@ -23,7 +23,7 @@ describe("T83-S13 every new login into Sam's Bitwarden at creation", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these seven rules");
+    expect(brief).toContain("these ten rules");
     expect(brief).toContain(`"${LOGIN_RULE}"`);
   });
 });

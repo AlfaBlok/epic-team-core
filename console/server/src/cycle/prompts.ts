@@ -1,11 +1,13 @@
-import { ASK_LINE_FORMAT, ASK_TIER_ITEMS, FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, ASK_TYPE_RULES, ASK_WRITING_RULE, NO_COMMANDS_RULE, isDeliveryManager, isUnblocker, managerTriageRules, unblockerRules } from "../inbox/asks.js";
+import { outcomeDefLine, TICKET_WORKER } from "../outcomeDefs.js";
+import { objectivesRule } from "../objectives.js";
+import { ASK_LINE_FORMAT, ASK_TIER_ITEMS, FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, ASK_TYPE_RULES, ASK_WRITING_RULE, NO_COMMANDS_RULE, isDeliveryManager, isUnblocker, managerTriageRules, unblockerRules } from "../inbox/asks.js";
 import { WAKE_ENDING_RULE } from "./wakeEnding.js";
 import { CARD_FIELDS_RULE, FEATURE_LIST_RULE } from "../review/cardRule.js";
 import { DEFAULT_RUBRIC, rubricRules, type RubricSettings, type RubricStamp } from "./rubric.js";
 import { LEFT_READY_RULE } from "./followUp.js";
 import { GRANT_BRIEF_RULE, grantsSection, type Grant } from "./grants.js";
 import { effectiveWrite, type Assignment, type Milestone, type Persona, type Run } from "../store.js";
-import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, VOICE_SPILL_RULE, LOGIN_RULE, deckBriefLine, WORKER_PAUSE_S, dispatchRule, hasStandingDuty, queuedCeiling, queuedNoSeat } from "../wakePrompt.js";
+import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, deckBriefLine, WORKER_PAUSE_S, dispatchRule, hasStandingDuty, queuedCeiling, queuedNoSeat } from "../wakePrompt.js";
 import { homeRepo, mainHost, opsRepo, ownerName, workerHost } from "../identity.js";
 
 const wakeCurl = (base: string, assignmentId: string, clientRequestId?: string) =>
@@ -68,12 +70,20 @@ export const CLAIM_RULE =
   "Claim your row before any work: when `<skill dir>/scripts/claim.py` exists, run `python3 <skill dir>/scripts/spines.py --claim <row> --by <your run id> --repo <the repo checkout>` " +
   "(one pushed commit; exit 3 = someone else holds it: stop, report the holder in your run summary, never work it). Name the row code in every commit message (it renews your lease, 2 h); `--release` if you stop without finishing.";
 
+/**
+ * the outcome log: every wake and worker ends by logging its real outcomes, one each, in its finishing PATCH;
+ * the console appends them to docs/outcomes/<day>.jsonl of its repo and the Outcomes page reads them back.
+ */
+export const OUTCOME_LOG_RULE =
+  "Log your outcomes in your finishing run PATCH: add `\"outcomes\": [{\"kind\": \"delivered|learning|merged|folded|superseded|released|fixed|asked|other\", \"text\": \"<one plain line: what is now true>\", \"row\": \"<row code>\", \"link\": \"<live URL or card>\", \"goalRow\": \"<goal-set row it turned green, when known>\"}]` " +
+  "(one entry per real outcome, none for a wake that changed nothing; the console writes them into the repo's docs/outcomes/ and the Outcomes page shows them).";
+
 export const WORKER_FINISH_RULE =
   "Finish the step in this turn. Never end a turn planning to act later. If a step needs a time window or something not yet available, " +
   "PATCH your run `outcome: monitoring` with `nextCheckAt: <ISO UTC>` (what you wait for in the summary) and stop; `blocked` only for an open ask code. " +
   "A Team Browser `HELD: <egress> offline` result: do not retry; finish the rest, then end `outcome: monitoring` with `heldOn: \"egress:<name>\"`. " +
   ROW_CLOSE_RULE +
-  ` ${CLAIM_RULE}`;
+  ` ${CLAIM_RULE} ${OUTCOME_LOG_RULE}`;
 
 /**
  * every worker brief carries the ask tier too, so workers in repos without Operating Learnings do
@@ -84,6 +94,16 @@ export const WORKER_TIER_RULE =
   `Ask tier (only: ${ASK_TIER_ITEMS}): do not do it and do not ask ${ownerName()}; end your report with ` +
   `\`ask-tier: <proposed coded ask, in plain words: what — context — impact — risk + rollback — recommend + why — why ${ownerName()}>\`; the persona raises it in the spine. ` +
   ASK_WRITING_RULE;
+
+/**
+ * the ten rules every worker brief carries verbatim, in order, as one list: the wake's dispatch step prints
+ * them and `GET /api/worker-rules` serves them, so a manager's own brief helper never copies a stale set (one such
+ * helper kept a copy a day old and missed the visual-first rule in every brief after). The first is the owner's
+ * objectives with their live list ("which objective does this move?" opens every plan and report).
+ */
+export function workerBriefRules(objectivesLine?: string): string[] {
+  return [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE];
+}
 
 /** a child-run create that times out may still have created the run; the retry must not make a second one. */
 export const CHILD_RUN_RETRY_RULE =
@@ -128,6 +148,8 @@ export function wakeProtocol(o: {
   rubric?: RubricSettings & { from?: RubricStamp["from"] };
   /** the milestone's deck link; each worker brief opens with it (absent: another world, no deck). */
   deckUrl?: string;
+  /** the owner's objectives in one line (objectives.ts), carried in the first worker rule (absent: another world). */
+  objectivesLine?: string;
 }): string {
   const { base, run, assignment, milestone, persona } = o;
   const maxWorkers = o.maxWorkers ?? DEFAULT_MAX_WORKERS;
@@ -168,23 +190,20 @@ export function wakeProtocol(o: {
         "   1. `$EPICSPINE_DISPATCHER pick` → JSON. Workers run on " + workerHost().toUpperCase() + " only: never launch one on " + mainHost().toUpperCase() + " or through the console. " +
           "If `id` is null and `retryable` is true, pick again in this turn after `retry_after_s`, doubling the wait, for about 15 min in total (a Monitor or until-loop, never a foreground sleep). " +
           `Still null at the end, or not retryable: launch no more this wake: put \`N ready rows ${queuedNoSeat()}\` (N = rows not started, the reason = pick's reason field) in your finishing summary, ` +
-          "and finish `progressed` if you started any worker, else `monitoring`, with `retryAt` about now + 10 min either way (queued is waiting, not idle; never leave it to the next scheduled wake).",
+          "and finish `progressed` if you started any worker, else `monitoring`, with `retryAt` about now + 5 min either way (queued is waiting, not idle; never leave it to the next scheduled wake; a host cap usually clears within minutes).",
         `   2. Record it first: \`curl -sS -X POST ${base}/api/runs ${h} -d ${j({ assignmentId: assignment.id, parentRunId: run.id, seat: "<pick id>", outcome: "running", summary: "<ticket id> <what it does>", clientRequestId: "<ticket id>-<UTC HHMMSS now>" })}\``,
         "      Start the summary with the ticket id it works on (e.g. `N10-6 ...`). Keep the returned id: the child run id.",
+        "      A 409 `claimed` means the row already has a live session (another wake, desk or Delivery Manager runs a worker on it, or its row holds a live claim): skip that row, `$EPICSPINE_DISPATCHER done <pick id>`, and name it `skipped <row>: claimed by <holder>` in your summary.",
         `      ${CHILD_RUN_RETRY_RULE}`,
         "   3. Launch it with the T3 `delegate_task` tool, `target.providerInstanceId` = the pick's providerInstanceId, mode async,",
         "      `clientRequestId` = `<ticket id>-<child run id>` (e.g. `e6-s34-run_3a000db5`): the console binds the task's thread to that run, never a second run.",
+        "      `title` = `<ticket id> <what it does, a few words>` (e.g. `N10-6 outcome log`): every session is named by its ticket.",
         ...(o.deckUrl
           ? [`      Its brief opens with the line \`${deckBriefLine(o.deckUrl)}\` and, when it names a Bound epic, \`This epic's deck: ${o.deckUrl}&epic=<that epic's EPIC-n>\`.`]
           : []),
-        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, these seven rules:",
-        `      "${WORKER_FINISH_RULE}"`,
-        `      "${REPO_IS_SOURCE_RULE}"`,
-        `      "${WORKER_TIER_RULE}"`,
-        `      "${FINISH_THE_JOB_RULE}"`,
-        `      "${STEPS_PAGE_RULE}"`,
-        `      "${VOICE_SPILL_RULE}"`,
-        `      "${LOGIN_RULE}"`,
+        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, these ten rules:",
+        ...workerBriefRules(o.objectivesLine).map((r) => `      "${r}"`),
+        `      A brief helper of your own (a script, a rules file) reads them fresh each wake from \`${base}/api/worker-rules\` (plain text, one quoted rule a line), never a copy kept from an earlier wake.`,
         ...(grants.length ? [`      ${GRANT_BRIEF_RULE}`] : []),
         `      (the PATCH: \`curl -sS -X PATCH ${base}/api/runs/<child run id> ${h} -d ${j({ outcome: "monitoring", nextCheckAt: "<ISO UTC>", summary: "<what it waits for>", endedAt: "<ISO UTC now>" })}\`)`,
         `      Then \`curl -sS -X PATCH ${base}/api/runs/<child run id> ${h} -d ${j({ threadId: "<childThreadId>" })}\`.`,
@@ -223,6 +242,8 @@ export function wakeProtocol(o: {
     `   ${LEFT_READY_RULE}`,
     `   \`curl -sS -X PATCH ${base}/api/runs/${run.id} ${h} -d ${j({ outcome: "progressed|blocked|monitoring|idle|failed", summary: "<one line>", endedAt: "<ISO-8601 UTC now>" })}\``,
     "   Use one outcome word. Then reply with the same `outcome: … — summary` line.",
+    `   ${OUTCOME_LOG_RULE}`,
+    `   ${outcomeDefLine(persona.name)}`,
     `   ${TIMED_WAKE_RULE}`,
     `   e.g. \`-d ${j({ outcome: "monitoring", summary: "<step> needs the 06:10 UTC window", nextCheckAt: "<ISO-8601 UTC>", endedAt: "<ISO-8601 UTC now>" })}\``,
     `   ${HELD_RULE}`,

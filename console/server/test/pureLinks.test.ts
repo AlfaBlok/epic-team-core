@@ -294,7 +294,8 @@ describe("E990-S2 end to end: answering E986-A1 on the console", () => {
     expect(resp.settles.closed.map((c: any) => c.write.status)).toEqual(["written", "written", "written"]);
     // the inbox no longer shows them
     const after = (await call("GET", "/api/waiting-on-owner")).json as WaitingItem[];
-    expect(after.filter((i) => i.state === "open").map((i) => i.code).sort()).toEqual(["E981-A4", "EPIC-900-A23"]);
+    // E981-A4 stays open in its spine but is held from the inbox: it asks him to make a Stripe account with no link (ask gate rule 11, E948-S85)
+    expect(after.filter((i) => i.state === "open").map((i) => i.code).sort()).toEqual(["EPIC-900-A23"]);
   });
 
   it("off by default: without settle the answer closes only its own ask", async () => {

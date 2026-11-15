@@ -63,6 +63,8 @@ export function useAnswerVoice(props: {
   clock?: NoteClock;
   state?: () => Promise<NoteState | undefined>;
   disabled?: boolean;
+  /** E948-S60: the card feedback block's big, labelled microphone. */
+  big?: boolean;
 }): AnswerVoice {
   const n = useNote({ ...props, tid: "answer-voice", idleLabel: "Speak" });
   return { button: n.button, strip: n.strip, busy: n.busy };

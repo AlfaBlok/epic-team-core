@@ -618,17 +618,26 @@ export function softSpines(run: SpinesRunner) {
   // a read that ran out of time with no good output yet (a cold console: spines.py ~22 s after a restart)
   // answers undefined like a failure would, but it is "not read yet", not "no spines": the status reads it as loading.
   const missedAt = new Map<string, number>();
+  /**
+   * repos where a read already ran out of time while a last good output was there, and that run is not back.
+   * The next reads answer that output at once instead of each waiting softMs again: after the console's own spine
+   * write (the repo is dirty) spines.py took 100-264 s on the main server, and every GET /api/milestones waited its
+   * full 1.5 s (167 slow lines in 2.5 h, median 1,545 ms) only to answer the same last good output.
+   */
+  const behind = new Set<string>();
   let seq = 0;
   const soft = async (repoDir: string, softMs = 4_000): Promise<SpinesJson | undefined> => {
     try {
-      const p = run(repoDir).then((v) => (lastGood.set(repoDir, v), v));
-      p.catch(() => {});
+      const p = run(repoDir).then((v) => (lastGood.set(repoDir, v), behind.delete(repoDir), v));
+      p.catch(() => behind.delete(repoDir));
+      if (behind.has(repoDir) && lastGood.has(repoDir)) return lastGood.get(repoDir);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const late = new Promise<undefined>((r) => {
         timer = setTimeout(() => r(undefined), softMs);
       });
       const out = await Promise.race([p, late]).finally(() => clearTimeout(timer));
       if (!out && !lastGood.has(repoDir)) missedAt.set(repoDir, ++seq);
+      else if (!out) behind.add(repoDir);
       return out ?? lastGood.get(repoDir);
     } catch {
       return lastGood.get(repoDir);

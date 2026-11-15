@@ -104,6 +104,17 @@ describe("T48-S10 snooze write: no hook, Server-Timing", () => {
     expect(u.timing).not.toMatch(/fetch;/);
     expect(git(origin, "show", "main:docs/spines/root.md")).toBe(SPINE.trim());
   });
+
+  it("E948-S83 iteration 2: Park on an ask writes a month on its line and the commit says parked", async () => {
+    const call = setup();
+    const m = (await call("POST", "/api/milestones", { title: "Inbox", repo: "Acme/inbox", path: "docs/spines/root.md" })).json;
+    const ask = ((await call("GET", `/api/waiting-on-owner?milestoneId=${m.id}`)).json as any[]).find((i) => i.code === "T9-A3");
+    const r = await call("POST", `/api/waiting-on-owner/${ask.id}/snooze`, { days: 30, park: true, milestoneId: m.id });
+    expect(r.status).toBe(200);
+    expect(git(origin, "show", "main:docs/spines/root.md")).toContain(`${ASK} — snoozed until: ${snoozeDate(30)}`);
+    expect(git(origin, "log", "--format=%s", "-1", "main")).toMatch(/^Park T9-A3 until \d{4}-\d{2}-\d{2} \(.+, via console\)$/);
+    expect(git(origin, "log", "--format=%b", "-1", "main")).toMatch(/parked this ask with the card's Park button: nothing was decided/);
+  });
 });
 
 describe("T48-S10 writer options", () => {
@@ -134,4 +145,5 @@ describe("T48-S10 writer options", () => {
     expect(r.ms?.rebase).toBeGreaterThanOrEqual(0);
     expect(git(origin, "log", "--format=%s", "-3", "main").split("\n")).toEqual(["edit two", "raced", "edit one"]);
   });
+
 });

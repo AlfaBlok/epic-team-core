@@ -10,6 +10,7 @@ import { teamLink } from "../notify/notice.js";
 import type { WakeLink, WakeSkills } from "../teamSkills.js";
 import { ruleBrokenSection } from "./gateCore.js";
 import type { ChildEpic } from "./children.js";
+import { isCredentialRefusal, ROTATE_HINT } from "../t3/tokenWatch.js";
 import { T3BusyError, busyKind, errorText, isThreadBusy, matchProject, sendFailureText, type T3Client, type T3Project, type T3ScheduledTask } from "../t3/client.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { pickerFor } from "../t3/hostDispatcher.js";
@@ -17,6 +18,7 @@ import { createIdleStopper } from "./idleStop.js";
 import { classifyRefusal, DEFER_MAX_MS, deferredSummary, isHostCap, isStartGap, nextDeferral, refusalText, type Refusal } from "./capRefusal.js";
 import type { Vps3Target } from "../t3/remoteHost.js";
 import { nextRunAfter } from "./nextRun.js";
+import { scaleCadence } from "../pursuits.js";
 import { cadenceAfterTimedWake, timedCheckReplaces, timedReplacesSummary } from "./timedCheck.js";
 import { readSeats, seatBlockerFor } from "../adapters/seats.js";
 import type { Tree, TreeNode } from "../adapters/tree.js";
@@ -48,7 +50,7 @@ import {
   wakeStub,
 } from "./prompts.js";
 import { milestoneWorld } from "../tenancy/world.js";
-import { hooks, WORLD_WAKE_HOLD_CODE, type WorldWakeHold } from "../plug/hooks.js";
+import { hooks, openForJobs, WORLD_WAKE_HOLD_CODE, type JobEnd, type JobRoute, type WorldWakeHold } from "../plug/hooks.js";
 import { seatHeldElsewhere, threadRefusal, worldOfRun } from "./threadBinding.js";
 import { headSha } from "../gitRefs.js";
 import { openGate, type StartGate } from "./startGate.js";
@@ -62,6 +64,8 @@ export interface CycleOptions {
   startGate?: StartGate;
   /** a world's hold reason, or undefined when its personas may wake; default from env (on). */
   worldHold?: WorldWakeHold;
+  /** worlds whose wakes run on their own job servers (model A); their wakes never start a T3 thread. */
+  jobRoute?: JobRoute;
   t3?: T3Client;
   dispatcher?: Dispatcher;
   /** a launch host's own dispatcher (the worker server: its client gates on the worker server memory, reserves centrally); unset = `dispatcher`. */
@@ -80,11 +84,31 @@ export interface CycleOptions {
   staleRunMs?: number;
   /** A run-now placeholder younger than this is claimed by the next wake instead of a new run. */
   claimWindowMs?: number;
+  /**
+   * a running run with no thread past this (its start window) can be stopped: Stop closes it instead of 409
+   * no_thread. Default NO_THREAD_STOP_MS.
+   */
+  noThreadStopMs?: number;
+  /**
+   * a running top-level wake with no thread past this is an orphan (its start failed and its retry was lost or
+   * failed too): the reconciler closes it failed and Run now starts a fresh wake instead of answering already_running.
+   * Default NO_THREAD_CLOSE_MS.
+   */
+  noThreadCloseMs?: number;
   bootstrapModel?: string;
   /** M1 seats.json. A wake whose home thread sits on a limited / logged-out seat goes to a new home thread on a seat with headroom. */
   seatsFile?: string;
   /** ceiling of child workers running at once per milestone (default 10; env CONSOLE_MAX_WORKERS_PER_MILESTONE in index.ts). */
   maxWorkersPerMilestone?: number;
+  /**
+   * effort follows priority: the effort of the owner's best-ranked pursuit carrying this milestone's spine
+   * (null = in no pursuit: its cadence and the global ceiling as set). Parked: no cadence wakes, ceiling 0. `priority`
+   * = the wake's priority lines (which epics of its repo come first, each one's ceiling).
+   */
+  effortFor?: (m: Milestone) => { parked: boolean; wakeFactor: number; maxWorkers: number; minWakeMinutes?: number; pursuitName: string } | null;
+  priorityFor?: (m: Milestone) => string;
+  /** priority mode: why this assignment's cadence and timed wakes wait now (undefined = they may run). */
+  wakeHold?: (assignmentId: string) => string | undefined;
   /** the wake prompt's pack section for this persona when the milestone repo has a pack on (undefined / "" = none). */
   packSection?: (m: Milestone, p: Persona, since?: string) => Promise<string | undefined>;
   /** a role brief put right after the prompt's first line (the Writer brief of a social repo); `since` = its last wake's start. */
@@ -124,8 +148,20 @@ export interface CycleOptions {
   orphansDue?: () => Promise<Array<{ milestoneId: string; short: string; date: string }>>;
   /** launch board reds with no open row whose owning epic is in this milestone's tree (Delivery Manager only). */
   launchDrafts?: (m: Milestone) => Promise<string | undefined>;
+  /**
+   * the milestone's objectives below green (docs/pursuits.json): `section` goes into the Delivery Manager's wake,
+   * `idle` names the ones with nothing moving; while one is idle the cadence wake is never skipped as "nothing new".
+   */
+  objectives?: (m: Milestone) => Promise<{ section?: string; idle: string[] }>;
+  /**
+   * the owner's objectives, his order, live (objectives.ts): `block` opens every wake prompt of the milestone,
+   * `line` rides in the first worker rule of every brief. Undefined: another world's milestone (none).
+   */
+  ownerObjectives?: (m: Milestone) => Promise<{ block: string; line: string } | undefined>;
   /** the repo's open desk-to-desk notes from other worlds (desk/inbox.ts; undefined = none, or not the repo's home milestone). */
   deskInbox?: (m: Milestone) => Promise<string | undefined>;
+  /** Mac ticket questions to the Team desk still open for this milestone (a Delivery Manager wake answers them first). */
+  deskQuestions?: (m: Milestone, base: string) => Promise<string | undefined>;
   /** a Delivery Manager wake's section on stopped / overdue `Monitoring:` items (write a coded ask or clear the item). */
   monitorAlerts?: (m: Milestone) => Promise<string | undefined>;
   /** the milestone spine's child epics when it has some to steer (undefined = leaf: the usual wake steps). */
@@ -249,6 +285,14 @@ const wokeLine = (why?: string) => (why ? `Woke on cadence · woke: ${why}` : "W
 const TERMINAL = new Set(["progressed", "blocked", "monitoring", "idle", "failed", "blank_report", "stopped"]);
 /** summary of a run whose wake send failed once and waits for its one retry. */
 export const SEND_RETRY_PREFIX = "Run now: send failed";
+/** a run with no thread this long after its start can be stopped (a launch in flight gets this long). */
+export const NO_THREAD_STOP_MS = 2 * 60_000;
+/**
+ * a top-level wake still running with no thread after this is closed by the console. Past the send retry (5 min)
+ * and a worker-server coding start (12 min); a start still in flight (`starting`) is never closed. Production
+ * 2026-10-30..11-13: no wake that reported back ever ran over 15 min without a thread; the ones that did were all stuck.
+ */
+export const NO_THREAD_CLOSE_MS = 15 * 60_000;
 /** a starter's note queued into the running wake (no second wake): act on it in this wake, report on this run only. */
 export function queuedNoteText(by: string, note: string, runId: string): string {
   return [
@@ -320,6 +364,14 @@ const opt = <T>(v: T | null | undefined) => (v == null ? undefined : v);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function createCycle(db: DB, store: Store, o: CycleOptions) {
+  /** the milestone's effort from the owner's pursuits; a bad read is no effort (the pace as set). */
+  const effortOf = (m: Milestone) => {
+    try {
+      return o.effortFor?.(m) ?? null;
+    } catch {
+      return null;
+    }
+  };
   migrateCycle(db);
   const gate = o.startGate ?? openGate;
   ensureProviders(db);
@@ -327,6 +379,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   const base = o.publicUrl.replace(/\/+$/, "");
   const staleMs = o.staleRunMs ?? 3 * 3600_000;
   const claimMs = o.claimWindowMs ?? 15 * 60_000;
+  const noThreadStopMs = o.noThreadStopMs ?? NO_THREAD_STOP_MS;
+  const noThreadCloseMs = o.noThreadCloseMs ?? NO_THREAD_CLOSE_MS;
+  /** wake runs whose start (host start, send, launch) is in flight now: never closed as an orphan meanwhile. */
+  const starting = new Set<string>();
   /** run id -> when the reconciler re-sent its wake; the claim window restarts there. */
   const resentAt = new Map<string, number>();
   const background = new Set<Promise<unknown>>();
@@ -334,12 +390,18 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   const baseFor = (host: HostId) => (host === workerHost() && o.worker ? o.worker.publicUrl : base);
   const iso = () => new Date().toISOString();
   /** why this milestone's world may not wake an agent on a shared host (undefined = it may). */
-  const worldHold = o.worldHold ?? hooks.worldWakeGate();
+  const worldHold = openForJobs(o.worldHold ?? hooks.worldWakeGate(), o.jobRoute); // a job world is let through
   const worldOfM = (m: Milestone) => store.worldOfMilestone(m.id);
   // the milestone's deck (the home world's Deck tab; another world's milestone has no deck) in every wake and worker brief.
   const deckUrlOf = (m: Milestone) =>
     (worldOfM(m) ?? DEFAULT_TENANT) === DEFAULT_TENANT ? milestoneDeckUrl(o.teamUrl ?? process.env.CONSOLE_TEAM_URL ?? teamLink(), m.id) : undefined;
   const holdOf = (m: Milestone) => worldHold(worldOfM(m));
+  /** the world when its wakes run on its own job servers (model A), else undefined (a T3 thread, as before). */
+  const jobRoute = o.jobRoute;
+  const jobWorldOf = (m: Milestone | undefined): string | undefined => {
+    const w = m ? worldOfM(m) : undefined;
+    return w && jobRoute?.handles(w) ? w : undefined;
+  };
   const heldLogged = new Set<string>();
   /** Cadence and timed ticks skip a held world's assignment quietly: one log line per assignment per process. */
   const skipHeld = (a: Assignment, m: Milestone): boolean => {
@@ -607,9 +669,44 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   /** a Publisher's run is stale sooner (wakeGate.ts PUBLISHER_STALE_MS). */
   const staleFor = (r: Run) => staleRunMsFor(r.personaId ? store.getPersona(r.personaId) : undefined, staleMs);
   const isStale = (r: Run) => Date.now() - Date.parse(r.startedAt) > staleFor(r);
+  /**
+   * a running top-level wake with no thread past noThreadCloseMs whose start is not in flight: its start failed
+   * and nothing will ever claim it (2026-11-12: a T3 401 at start, then "running" with no thread for 2.5 h,
+   * Stop said no_thread and Run now already_running). A job server's wake has no T3 thread by design and is left alone.
+   */
+  const isOrphan = (r: Run): boolean => {
+    if (r.threadId || r.outcome !== "running" || r.parentRunId || r.kind !== "wake") return false;
+    if (starting.has(r.id) || retrying.has(r.id)) return false;
+    if (Date.now() - Date.parse(r.startedAt) <= noThreadCloseMs) return false;
+    const a = store.getAssignment(r.assignmentId);
+    const m = a ? store.getMilestone(a.milestoneId) : undefined;
+    return !(m && jobWorldOf(m));
+  };
+  /** close an orphan wake failed, with what its start said, so the next start is a fresh wake (never already_running). */
+  function closeOrphan(r: Run, by: string): Run {
+    const mins = Math.round((Date.now() - Date.parse(r.startedAt)) / 60_000);
+    const done = store.updateRun(r.id, {
+      outcome: "failed",
+      endedAt: iso(),
+      retryAt: null,
+      nextCheckAt: null,
+      summary: `No thread after ${mins} min: the wake never started (${r.summary.trim().slice(0, 400) || "no start note"}); closed by the console (${by}) so a new wake can start`,
+    })!;
+    if (getLink(r.assignmentId)?.pendingRunId === r.id) clearLinkField(r.assignmentId, "pending_run_id");
+    const a = store.getAssignment(r.assignmentId);
+    if (a?.retryRunId === r.id) store.updateAssignment(a.id, { retryAt: null, retryRunId: null });
+    console.warn(`orphan wake ${r.id} (${r.assignmentId}): no thread after ${mins} min, closed failed (${by})`);
+    track(releaseSeatHold(r.id));
+    track(onRunEnded(r.id));
+    return done;
+  }
   /** the assignment's live wake (running, top-level, not stale): every starter asks this one question before it starts a wake. */
   const liveWake = (assignmentId: string): Run | undefined => {
     const r = runningRun(assignmentId);
+    if (r && isOrphan(r)) {
+      closeOrphan(r, "at the next start");
+      return undefined;
+    }
     return r && !isStale(r) ? r : undefined;
   };
   // ---------- assignment ↔ T3 scheduled task ----------
@@ -794,19 +891,26 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
    * hot. The park gate and the unchanged-skip run before any T3 call: a skipped wake costs no turn, thread or tunnel.
    */
   async function tickCadence(now: Date = new Date()): Promise<string[]> {
-    if (!o.enabled || !o.t3) return [];
+    if (!o.enabled || (!o.t3 && !jobRoute)) return [];
     const woken: string[] = [];
     for (const a of store.listAssignments()) {
       const p = store.getPersona(a.personaId);
       const m = store.getMilestone(a.milestoneId);
       if (!p || !m || !a.enabled || m.paused || m.settledAt) continue;
+      if (!o.t3 && !jobWorldOf(m)) continue; // no T3 client: only the job worlds wake
       if (skipHeld(a, m)) continue; // no wake of a world without its own box (nextRunAt stays: it wakes when the gate opens)
+      if (o.wakeHold?.(a.id)) continue; // priority mode: nextRunAt stays, it wakes when the mode ends
+      const effort = effortOf(m);
+      if (effort?.parked) continue; // its pursuit is parked: no cadence wakes (Run now still wakes it)
+      const cadence = scaleCadence(a.cadence, effort, effort?.minWakeMinutes); // effort follows priority
       if (!a.nextRunAt) {
-        store.updateAssignment(a.id, { nextRunAt: nextRunAfter(a.cadence, now).toISOString() });
+        store.updateAssignment(a.id, { nextRunAt: nextRunAfter(cadence, now).toISOString() });
         continue;
       }
-      if (Date.parse(a.nextRunAt) > now.getTime()) continue;
-      const next = nextRunAfter(a.cadence, now);
+      // a faster pace pulls a far-off next wake in (rank raised); a slower one waits for the next wake as booked.
+      const pulledIn = !!effort && cadence !== a.cadence && !!a.lastRunAt && nextRunAfter(cadence, new Date(a.lastRunAt)).getTime() <= now.getTime();
+      if (Date.parse(a.nextRunAt) > now.getTime() && !pulledIn) continue;
+      const next = nextRunAfter(cadence, now);
       store.updateAssignment(a.id, { nextRunAt: next.toISOString(), lastRunAt: now.toISOString() });
       if (liveWake(a.id) || deferredWake(a.id)) continue; // still running, or deferred (it retries itself): skip this tick
       const timed = timedCheckReplaces(a.retryAt, next, now); // the timed check due this hour wakes instead
@@ -852,11 +956,12 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
    * assignment's request is dropped, never fired (only a manual Run now wakes an off persona).
    */
   async function tickRetry(now: Date = new Date()): Promise<string[]> {
-    if (!o.enabled || !o.t3) return [];
+    if (!o.enabled || (!o.t3 && !jobRoute)) return [];
     const woken: string[] = [];
     for (const a of store.listAssignments()) {
       if (!a.retryAt || Date.parse(a.retryAt) > now.getTime()) continue;
       const m = store.getMilestone(a.milestoneId);
+      if (!o.t3 && !jobWorldOf(m)) continue; // no T3 client: only the job worlds wake
       const clear = () => store.updateAssignment(a.id, { retryAt: null, retryRunId: null });
       if (!a.enabled || !m || m.paused || m.settledAt) {
         clear();
@@ -864,6 +969,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       }
       if (liveWake(a.id) || deferredWake(a.id)) continue;
       if (skipHeld(a, m)) continue; // the request stays pending until the world has its own box
+      if (o.wakeHold?.(a.id)) continue; // priority mode: the request stays pending until it ends
       clear();
       const notRun = (await notRunnable(m)) ?? (await awaitingMark(m)); // a follow-up wake does not work a spine that stopped being runnable (or waits for the owner's mark)
       if (notRun) {
@@ -1054,6 +1160,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     staleRunMs: staleMs,
     graceMs: claimMs,
     resend: (run, why, fresh) => resendWake(run, why, fresh),
+    // a wake with no thread past its start (send failed, retry lost) is closed, never left for Run now to meet
+    orphan: (r) => (isOrphan(r) ? (closeOrphan(r, "reconciler"), true) : false),
   });
   const reconcile = async () => {
     if (!(o.enabled && o.t3)) return { closed: [], noted: [], adopted: [] };
@@ -1195,6 +1303,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     return { skipped: store.createRun({ assignmentId: a.id, outcome: "idle", endedAt: iso(), summary: gateSkipSummary(lastRealWake(runs)?.id, d.why) }) };
   }
   const skipsGeneral = (p: Persona) => p.skipUnchanged && !isUnblocker(p.name);
+  /** the milestone's idle objectives, for its Delivery Manager only (the persona that owns them); [] for the others. */
+  const idleObjectivesOf = async (m: Milestone, p: Persona): Promise<string[]> =>
+    isDeliveryManager(p.name) && o.objectives ? (await o.objectives(m).catch(() => ({ idle: [] as string[] }))).idle : [];
+  const idleWhy = (ids: string[]) => `objective${ids.length === 1 ? "" : "s"} below green with nothing moving: ${ids.join(", ")}`;
 
   /**
    * A cadence wake (the console scheduler, or a pre- T3 task still firing; never Run now, a timed wake or a wake by the DM/the owner)
@@ -1206,6 +1318,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   async function unchangedSkip(a: Assignment, m: Milestone, p: Persona, threadId: string | null, seat: string | null): Promise<{ skipped?: Run; why?: string }> {
     if (!p.skipUnchanged) return { why: "skipping is off for this persona" };
     if (a.retryAt && Date.parse(a.retryAt) <= Date.now()) return { why: "its next check is due" }; // a due next check is news, never "nothing new"
+    const idleObjectives = await idleObjectivesOf(m, p);
+    if (idleObjectives.length) return { why: idleWhy(idleObjectives) }; // an objective below green with nothing moving is news
     if (!isUnblocker(p.name)) {
       const s = await wakeState(a, m);
       const runs = store.listRuns({ assignmentId: a.id, limit: 100 });
@@ -1250,7 +1364,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       return { ...base, unblocker: true, asks, wouldSkip: p.skipUnchanged && d.skip, ...(d.skip ? {} : { why: d.why }) };
     }
     const s = await wakeState(a, m);
-    const d = s ? cadenceSkipDecision(runs, s.fingerprint, undefined, undefined, readyPart(s.parts)) : { skip: false as const };
+    const idleObjectives = await idleObjectivesOf(m, p);
+    const d = s && !idleObjectives.length ? cadenceSkipDecision(runs, s.fingerprint, undefined, undefined, readyPart(s.parts)) : { skip: false as const };
     // a Publisher's no-model pre-check verdict (its own campaign's posts only) and its wake brief, read-only (no run).
     const pub = gateKindOf(p) === "publisher";
     const gate = pub && o.wakeGate ? await o.wakeGate(a, m, p, runs, { readOnly: true }).catch(() => undefined) : undefined; // a look moves no post
@@ -1261,7 +1376,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       parts: s && wakeParts(s.parts),
       readyIds: s?.readyIds ?? [],
       wouldSkip: p.skipUnchanged && d.skip,
-      ...(d.skip ? {} : { why: wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds }) }),
+      ...(d.skip ? {} : { why: idleObjectives.length ? idleWhy(idleObjectives) : wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds }) }),
+      ...(idleObjectives.length ? { idleObjectives } : {}),
       ...(gate ? { preCheck: { work: gate.work, why: gate.why } } : {}),
       ...(brief ? { brief } : {}),
     };
@@ -1418,7 +1534,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   }
 
   async function runNow(id: string, opts: { instructions?: string; instructionsBy?: string; onRun?: (run: Run) => void } = {}): Promise<Run & { startGuard?: StartGuard["action"] }> {
-    t3();
+    const peek = store.getAssignment(id);
+    const viaJob = peek ? jobWorldOf(store.getMilestone(peek.milestoneId)) : undefined;
+    if (!viaJob) t3(); // a job world's wake makes no T3 call; the kill switch still holds
+    else if (!o.enabled) throw new CycleError(409, "cycle_disabled", "the console cycle is off (CONSOLE_CYCLE_ENABLED is not true)");
     const { a, m, p } = ctx(id);
     const host = p.host;
     refuseHeld(m); // before any run row, credit or T3 call
@@ -1447,12 +1566,14 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     });
     setLink(id, { pendingRunId: run.id });
     opts.onRun?.(run);
+    if (viaJob) return startJob(a, m, p, run, viaJob); // the world's own job server, never a shared host
     // a declared skill missing from the library or the host fails here, before any host start or T3 call.
     const skills = await skillGate(p, run.id, m);
     if (!skills.ok) {
       clearLinkField(id, "pending_run_id");
       throw new CycleError(409, "skill_check", skills.reason, { runId: run.id });
     }
+    starting.add(run.id); // never an orphan while its start is in flight
     try {
       await ensureHost(host); // the worker server: coding start + health; throws vps3_unavailable, never falls back to the main server
       // a fresh-thread persona skips its home thread and scheduled task: the wake claims this run and launches a new thread.
@@ -1471,7 +1592,9 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       const retryMs = o.sendRetryMs ?? 5 * 60_000;
       if (retryMs > 0 && !p.freshThreadEachWake && !isThreadBusy(e) && retryableSend(e) && store.getRun(run.id)?.outcome === "running") {
         const at = new Date(Date.now() + retryMs).toISOString();
-        store.updateRun(run.id, { summary: `${SEND_RETRY_PREFIX} (${sendFailureText(e, link?.threadId, host)}); retrying once at ${at}` });
+        const refused = isCredentialRefusal(errorText(e)) ? ` · ALERT: T3 on ${host} refused the console's MCP token (expired or revoked): ${ROTATE_HINT}` : "";
+        if (refused) console.error(`[ALERT] run now ${id}: T3 on ${host} refused the console's MCP token; ${ROTATE_HINT}`);
+        store.updateRun(run.id, { summary: `${SEND_RETRY_PREFIX} (${sendFailureText(e, link?.threadId, host)}); retrying once at ${at}${refused}` });
         const t = setTimeout(() => void retrySend(id, run.id), retryMs);
         t.unref();
         timers.push(t);
@@ -1496,7 +1619,37 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       if (store.getRun(run.id)?.outcome === "running") store.updateRun(run.id, { outcome: "failed", endedAt: iso(), summary: `Run now failed: ${why}` });
       if (e instanceof CycleError) throw e;
       throw new CycleError(502, "t3_error", why, { runId: run.id });
+    } finally {
+      starting.delete(run.id);
     }
+    return store.getRun(run.id)!;
+  }
+
+  /**
+   * the wake of a world whose wakes run on its own job servers. The job route takes (or makes) a job
+   * server of the world, hands it the world's helper login sealed over ssh stdin, signed links to its folder and a per-job
+   * token for the agent gateway; the job's agent claims this run through the gateway (/wake) and reports on it there.
+   * When the job ends with the run still open, the run fails with the job's reason (never left running).
+   */
+  function startJob(a: Assignment, m: Milestone, p: Persona, run: Run, world: string): Run {
+    const route = jobRoute!;
+    const stub = hooks.worldPrompt(
+      wakeStub(route.base, a.id, { note: run.instructions ?? undefined, noteBy: run.instructionsBy ?? undefined, clientRequestId: run.id }),
+      { tenant: world, personaId: p.id, consoleUrl: route.base },
+    );
+    store.updateRun(run.id, { summary: `Run now: handed to a job server of ${world} (waiting for the persona to wake)` });
+    track(
+      route
+        .start({ runId: run.id, world, assignmentId: a.id, personaId: p.id, model: p.model, stub })
+        .catch((e): JobEnd => ({ ok: false, result: "failed", detail: errorText(e) }))
+        .then((end) => {
+          if (getLink(a.id)?.pendingRunId === run.id) clearLinkField(a.id, "pending_run_id");
+          const cur = store.getRun(run.id);
+          if (cur?.outcome !== "running") return;
+          const why = end.ok ? "the job ended without the persona's report" : `job server ${end.result}${end.detail ? `: ${end.detail}` : ""}`;
+          store.updateRun(run.id, { outcome: "failed", endedAt: iso(), summary: `${cur.summary} · ${why}${end.server ? ` (${end.server})` : ""}`.slice(0, 2000) });
+        }),
+    );
     return store.getRun(run.id)!;
   }
 
@@ -1533,6 +1686,14 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
    * thread (stdio MCP servers start once per session). The run's note travels in the message itself.
    */
   async function sendWake(id: string, runId: string, opts: { fresh?: string } = {}): Promise<void> {
+    starting.add(runId); // a send or launch in flight is never an orphan
+    try {
+      await sendWakeNow(id, runId, opts);
+    } finally {
+      starting.delete(runId);
+    }
+  }
+  async function sendWakeNow(id: string, runId: string, opts: { fresh?: string }): Promise<void> {
     const { m, p } = ctx(id);
     refuseHeld(m); // backstop: retries and deferred wakes reach here without runNow
     const host = p.host;
@@ -1609,9 +1770,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   async function resendWake(run: Run, why: string, fresh: boolean): Promise<boolean> {
     const a = store.getAssignment(run.assignmentId);
     if (!a || run.parentRunId || run.kind !== "wake") return false;
-    const { p } = ctx(a.id);
+    const { p, m } = ctx(a.id);
     const link = getLink(a.id);
     if (p.freshThreadEachWake || link?.pendingRunId !== run.id) return false;
+    if (jobWorldOf(m)) return false; // a job server's wake is never re-sent to a thread
     if (fresh && run.seat && o.dispatcher) await o.dispatcher.done(run.seat, true, why).catch(() => undefined);
     resentAt.set(run.id, Date.now());
     store.updateRun(run.id, { summary: `${run.summary} (${RESENT}${fresh ? " on a new thread" : ""}: ${why})` });
@@ -1707,6 +1869,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const p = store.getPersona(a.personaId)!;
     const hold = holdOf(m); // a held world's stub (or a hand call of /wake) gets no prompt to act on
     if (hold) return { prompt: inactivePrompt(hold) };
+    const jobBase = jobWorldOf(m) ? jobRoute!.base : undefined; // the job's agent calls back through the gateway
     await pullBeforeWake(m); // the prompt and park gate read what other runs pushed
     const link = getLink(id);
     const threadId = body.threadId ?? link?.threadId ?? null;
@@ -1786,7 +1949,9 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     }
     // the rubric settings this Unblocker wake shows (its finishing PATCH is judged by the same numbers).
     const rubric = isUnblocker(p.name) ? snapshotRubric(db, run.id, m.id) : undefined;
-    const maxWorkers = o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS;
+    const effort = effortOf(m);
+    const maxWorkers = effort ? Math.min(effort.maxWorkers, o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS) : (o.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS);
+    const priority = o.priorityFor ? (() => { try { return o.priorityFor!(m); } catch { return ""; } })() : "";
     const runningWorkers = store.listRuns({ milestoneId: m.id, limit: 1000 }).filter((r) => r.parentRunId && r.outcome === "running").length;
     const children = o.children ? await o.children(m).catch(() => undefined) : undefined;
     // the persona's pack role and what it may write; a Delivery Manager also gets the runs flagged rule broken since its last wake.
@@ -1800,11 +1965,17 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const alerts = isDeliveryManager(p.name) && o.monitorAlerts ? await o.monitorAlerts(m).catch(() => undefined) : undefined;
     const orphans = isDeliveryManager(p.name) && o.orphanCommits ? await o.orphanCommits(m).catch(() => undefined) : undefined;
     const inbox = isDeliveryManager(p.name) && o.deskInbox ? await o.deskInbox(m).catch(() => undefined) : undefined;
+    const questions = isDeliveryManager(p.name) && o.deskQuestions ? await o.deskQuestions(m, jobBase ?? baseFor(p.host)).catch(() => undefined) : undefined;
     const launch = isDeliveryManager(p.name) && o.launchDrafts ? await o.launchDrafts(m).catch(() => undefined) : undefined;
+    const objectives = isDeliveryManager(p.name) && o.objectives ? (await o.objectives(m).catch(() => undefined))?.section : undefined;
     const services = o.teamServices ? await o.teamServices(p, run.id).catch(() => undefined) : undefined;
+    const owned = o.ownerObjectives ? await o.ownerObjectives(m).catch(() => undefined) : undefined;
     const deckUrl = deckUrlOf(m);
     let prompt =
       buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl) +
+      (owned?.block ? "\n\n" + owned.block : "") +
+      (priority ? "\n\n" + priority : "") +
+      (objectives ? "\n\n" + objectives : "") +
       (rollup ? "\n\n" + rollup : "") +
       (todo ? "\n" + todo : "") +
       (pack ? "\n\n" + pack : "") +
@@ -1813,23 +1984,24 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       (held ? "\n\n" + held : "") +
       (alerts ? "\n\n" + alerts : "") +
       (orphans ? "\n\n" + orphans : "") +
+      (questions ? "\n\n" + questions : "") +
       (inbox ? "\n\n" + inbox : "") +
       (launch ? "\n\n" + launch : "") +
       (services ? "\n\n" + services : "") +
       "\n" +
-      wakeProtocol({ base: baseFor(p.host), run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, rubric, deckUrl });
+      wakeProtocol({ base: jobBase ?? baseFor(p.host), run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, rubric, deckUrl, objectivesLine: owned?.line || undefined });
     if (skills.note) prompt += `\nNote: ${skills.note}.\n`;
     // the world's own skills are project skills of this checkout, not of the seat
     if (skills.world?.length)
       prompt += `\nNote: ${skills.world.map((s) => `\`${s}\``).join(", ")} ${skills.world.length > 1 ? "are" : "is"} this world's own skill${skills.world.length > 1 ? "s" : ""}, linked in this checkout's .claude/skills (open .claude/skills/<name>/SKILL.md).\n`;
     if (seatNote) prompt += `\nNote: ${seatNote}. Keep this run short; if a turn fails on usage limits, PATCH the run failed and say so.\n`;
     // a fresh-thread persona's new session needs its checkout current too (the home-thread path pulled in sendWake).
-    if (p.freshThreadEachWake) await preWake(m, p.host, run.id).catch(() => undefined);
+    if (p.freshThreadEachWake && !jobBase) await preWake(m, p.host, run.id).catch(() => undefined);
     const pre = store.getRun(run.id)?.preWake;
     if (pre && /pull failed|unreadable/.test(pre))
       prompt += `\nNote: console ${pre}. Your checkout and repo tools may be stale: fix it if it is yours to fix (never reset others' work), else say so in your summary.\n`;
-    prompt = hooks.worldPrompt(prompt, { tenant: milestoneWorld(db, m.id), personaId: p.id, consoleUrl: baseFor(p.host === workerHost() ? workerHost() : mainHost()) }); // the home world unchanged
-    if (p.freshThreadEachWake) return launchFresh(a, m, p, run, prompt);
+    prompt = hooks.worldPrompt(prompt, { tenant: milestoneWorld(db, m.id), personaId: p.id, consoleUrl: jobBase ?? baseFor(p.host === workerHost() ? workerHost() : mainHost()) }); // the home world unchanged
+    if (p.freshThreadEachWake && !jobBase) return launchFresh(a, m, p, run, prompt); // a job is a fresh session already
     return { prompt, run };
   }
 
@@ -2142,6 +2314,13 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     return steerInto(run, run.threadId, hostOfRun(run), text, clientRequestId);
   }
 
+  /** send text into any run's own thread (running or parked), steer falling back to a new turn. */
+  async function sendToRun(run: Run, text: string) {
+    t3();
+    if (!run.threadId) throw new CycleError(409, "no_thread", `run ${run.id} has no thread`);
+    return steerInto(run, run.threadId, hostOfRun(run), text, `console-priority-${run.id}-${randomUUID().slice(0, 8)}`);
+  }
+
   async function steerInto(run: Run, threadId: string, host: Host, text: string, clientRequestId?: string) {
     const foreign = threadRefusal(db, worldOfRun(db, run.id), threadId); // (audit N3)
     if (foreign) throw new CycleError(403, "foreign_thread", foreign);
@@ -2178,8 +2357,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const run = store.getRun(runId);
     if (!run) throw new CycleError(404, "not_found", `run ${runId} not found`);
     if (run.outcome !== "running") throw new CycleError(409, "not_running", `run ${runId} is not running (${run.outcome})`);
-    if (!run.threadId) throw new CycleError(409, "no_thread", `run ${runId} has no thread yet to interrupt: try again in a moment`);
+    // a run with no thread past its start window (or whose send failed and waits on its retry) has nothing to
+    // interrupt: Stop closes it. Inside the window, with its start in flight, it still answers no_thread (a launch may land).
+    if (!run.threadId && !threadlessStoppable(run)) throw new CycleError(409, "no_thread", `run ${runId} has no thread yet to interrupt: try again in a moment`);
     const stopOne = async (r: Run): Promise<Run> => {
+      if (!r.threadId) return stopThreadless(r, reason);
       const world = worldOfRun(db, r.id);
       const foreign = threadRefusal(db, world, r.threadId); // never interrupt another world's thread
       if (foreign) throw new CycleError(403, "foreign_thread", foreign);
@@ -2215,7 +2397,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const workerErrors: { runId: string; error: string }[] = [];
     if (opts.withWorkers)
       for (const k of kids) {
-        if (!k.threadId) {
+        if (!k.threadId && !threadlessStoppable(k)) {
           workerErrors.push({ runId: k.id, error: "no thread yet to interrupt" });
           continue;
         }
@@ -2226,6 +2408,29 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
         }
       }
     return { run: stopped, workers, workersRunning: kids.length - workers.length, workerErrors };
+  }
+
+  /** a running run with no thread that Stop may close: past its start window, or its send failed (waits on a retry), and no start in flight. */
+  function threadlessStoppable(r: Run): boolean {
+    if (r.threadId || starting.has(r.id) || retrying.has(r.id)) return false;
+    return Date.now() - Date.parse(r.startedAt) > noThreadStopMs || r.summary.startsWith(SEND_RETRY_PREFIX);
+  }
+  /** Stop on a run with no thread: nothing to interrupt, the run closes `stopped` and its pending start is dropped. */
+  async function stopThreadless(r: Run, reason: string): Promise<Run> {
+    const prev = r.summary.trim();
+    const done = store.updateRun(r.id, {
+      outcome: "stopped",
+      endedAt: iso(),
+      retryAt: null,
+      nextCheckAt: null,
+      summary: `Stopped: ${reason} (no thread: the run never started, nothing to interrupt${prev ? `; was: ${prev.slice(0, 300)}` : ""})`,
+    })!;
+    if (getLink(r.assignmentId)?.pendingRunId === r.id) clearLinkField(r.assignmentId, "pending_run_id");
+    const a = store.getAssignment(r.assignmentId);
+    if (a?.retryRunId === r.id) store.updateAssignment(a.id, { retryAt: null, retryRunId: null });
+    await releaseSeatHold(r.id);
+    track(onRunEnded(r.id));
+    return done;
   }
 
   /** the owner's steer notes on a run, oldest first. */
@@ -2392,6 +2597,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     launchWorker,
     steer,
     steerRun,
+    sendToRun,
     stopRun,
     steersOf,
     /** the assignment's running (non-stale) wake run, if any: an answer steers it instead of waking. */

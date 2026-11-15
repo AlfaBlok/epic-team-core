@@ -130,15 +130,17 @@ describe("T42-S12 voice notes: record, transcribe, post", () => {
     expect(f.notes.get(id)).toMatchObject({ state: "failed", transcript: "First part of the note about the release." });
   });
 
-  it("caps: the switch off and the month cap refuse a note; a note stops at 30 minutes; only audio is taken", async () => {
+  it("caps: the switch off and the month cap refuse a note; a note stops at 2 hours, the part over the line still kept; only audio is taken", async () => {
     const s = setup();
     s.voice.setEnabled(false);
     expect(() => s.notes.start()).toThrow(expect.objectContaining({ code: "voice_off" }));
     s.voice.setEnabled(true);
     const id = s.notes.start().note.id;
     await expect(s.notes.segment(id, 0, audio(), "text/plain", 10)).rejects.toMatchObject({ status: 400 });
-    for (let n = 0; n < 15; n++) await s.notes.segment(id, n, audio(), "audio/webm", 120);
-    await expect(s.notes.segment(id, 15, audio(), "audio/webm", 120)).rejects.toMatchObject({ code: "note_cap" });
+    expect(NOTE_MAX_MIN).toBe(120);
+    // 60 two-minute parts are the 2 hours; the 61st (a late tick past the cap) is still kept; nothing past it.
+    for (let n = 0; n < 61; n++) await s.notes.segment(id, n, audio(), "audio/webm", 120);
+    await expect(s.notes.segment(id, 61, audio(), "audio/webm", 120)).rejects.toMatchObject({ code: "note_cap" });
 
     const c = setup({ cap: 1 });
     // A month that already spent its cap (calls and notes together).

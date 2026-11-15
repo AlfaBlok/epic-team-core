@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { useGapFinderQuery } from "@/lib/gapFinder";
 import { githubRepoUrl, homeOrg, memoryName, homeRepo, socialProduct } from "@/lib/identity";
+import { GAP_FINDER_PATH } from "@/lib/routePaths";
+export { GAP_FINDER_PATH };
 
 /**
  * the Gap finder has one place in the console, a main-menu
@@ -11,7 +13,6 @@ import { githubRepoUrl, homeOrg, memoryName, homeRepo, socialProduct } from "@/l
  * docs/status/gap-finder/build.py), /gap-finder/<date> opens one run's page (a repo file under /landing/, L-45) inside the
  * console with a way back, the same frame as the goal graph. Both say where it lives in one block.
  */
-export const GAP_FINDER_PATH = "gap-finder";
 const LANDING = "/landing/gap-finder";
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 

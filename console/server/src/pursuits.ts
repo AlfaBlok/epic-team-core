@@ -1,8 +1,11 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveRepo } from "./adapters/repos.js";
 import { homeRepo } from "./identity.js";
 import type { GitOut } from "./freshness.js";
+import type { Cadence } from "./schemas.js";
+import { repoKey } from "./adapters/repoNames.js";
 
 /**
  * The owner's pursuits: the big goals he wants to see through. `docs/pursuits.json` of the home repo names each one,
@@ -13,6 +16,8 @@ import type { GitOut } from "./freshness.js";
  * record; this is a read.
  */
 export const PURSUITS_FILE = "docs/pursuits.json";
+/** a wheel with no `owner` in the file is owned by the Delivery Manager of the world that holds it. */
+export const DEFAULT_OWNER = "Delivery Manager";
 
 export type LineState = "green" | "amber" | "red" | "unknown";
 
@@ -49,9 +54,60 @@ export interface Pursuit {
   /** moving: something it watches changed in the last `staleDays`; stalled: nothing did; unknown: no history read. */
   motion: "moving" | "stalled" | "unknown";
   lastMove: PursuitMove | null;
+  /** the pursuit has a social kit the console shows on its own page (/pursuits/<id>/social-kit). */
+  kit?: boolean;
+  /** its place in the owner's order, 1 first; parked pursuits have none. */
+  rank: number | null;
+  parked: boolean;
+  /** what its rank buys: wake pace, worker ceiling, stall watch patience, in plain words too. */
+  effort: PursuitEffort;
+  /** the epics that carry it (spines), each with its deck code when the spine has one. */
+  epics: PursuitEpic[];
+  /** the goal's one number, copied from its source file (docs/goals/<name>.json). */
+  goal?: PursuitGoal;
+  /** the persona that owns the wheel (file `owner`, default the Delivery Manager): the idle watch wakes it. */
+  owner?: string;
+}
+export interface PursuitGoal {
+  now: number;
+  target: number;
+  by?: string;
+}
+export interface PursuitEpic {
+  repo: string;
+  path: string;
+  /** EPIC-946 etc., read from the spine's first heading; absent = no deck code. */
+  code?: string;
+  title?: string;
+}
+/** One effort tier (docs/pursuits.json `effort.tiers`): the ranks up to `upToRank` get it. */
+export interface EffortTier {
+  name: string;
+  upToRank: number;
+  /** cadence wakes come this many times as often as set (2 = twice as often, 0.5 = half). */
+  wakeFactor: number;
+  maxWorkers: number;
+  /** the stall watch nudges an idle epic after this many hours. */
+  stallHours: number;
+}
+export interface PursuitEffort {
+  tier: string;
+  wakeFactor: number;
+  maxWorkers: number;
+  stallHours: number;
+  /** "Wakes twice as often, up to 10 workers, nudged after 1 h idle." / "Parked: no wakes, no workers." */
+  words: string;
+}
+export interface EffortPolicy {
+  tiers: EffortTier[];
+  minWakeMinutes: number;
+  /** a milestone in no pursuit keeps the pace it was set to (words for the page). */
+  outside: string;
 }
 export interface PursuitsBody {
   pursuits: Pursuit[];
+  /** the effort rule the ranks follow. */
+  effort?: EffortPolicy;
   staleDays: number;
   said?: { source: string; words: string };
   boardAt?: string | null;
@@ -80,6 +136,19 @@ interface Declared {
   watch: { repo: string; paths: string[] }[];
   lines: DeclaredLine[];
   totems: PursuitTotem[];
+  /** its social kit, a folder of the home repo holding kit.json and previews/, and where the full-size files live. */
+  kit?: PursuitKitRef;
+  parked: boolean;
+  epics: { repo: string; path: string }[];
+  goal?: PursuitGoal;
+  /** its owner persona: the one the idle watch wakes; default the Delivery Manager of the world holding it. */
+  owner: string;
+}
+export interface PursuitKitRef {
+  /** Repo-relative folder: kit.json, previews/*.webp; the fonts sit in its parent's fonts/. */
+  dir: string;
+  /** Where the full-size files are downloaded (a file store); the console links into it, never sends the owner there to look. */
+  files?: string;
 }
 interface Check {
   state?: string;
@@ -89,6 +158,7 @@ interface Check {
 }
 export interface PursuitsDoc {
   staleDays: number;
+  effort: EffortPolicy;
   said?: { source: string; words: string };
   pursuits: Declared[];
   checks: Record<string, Check>;
@@ -105,7 +175,7 @@ export function parsePursuits(text: string): PursuitsDoc {
   try {
     doc = obj(JSON.parse(text));
   } catch {
-    return { staleDays: 3, pursuits: [], checks: {} };
+    return { staleDays: 3, effort: DEFAULT_EFFORT, pursuits: [], checks: {} };
   }
   const staleDays = typeof doc.staleDays === "number" && doc.staleDays > 0 ? doc.staleDays : 3;
   const seen = new Set<string>();
@@ -136,17 +206,182 @@ export function parsePursuits(text: string): PursuitsDoc {
       if (url && SAFE_URL.test(url)) return [{ label, url }];
       return [{ label, missing: str(x.missing) ?? "not made yet" }];
     });
-    return [{ id, name, greenWhen, watch, lines, totems }];
+    const k = obj(o.kit);
+    const dir = str(k.dir);
+    const files = str(k.files);
+    const kit = dir && /^[\w./-]+$/.test(dir) && !dir.includes("..") && !dir.startsWith("/") ? { dir, ...(files && /^https?:\/\//.test(files) ? { files } : {}) } : undefined;
+    const epics = (Array.isArray(o.epics) ? o.epics : []).flatMap((e) => {
+      const r = str(obj(e).repo);
+      const sp = str(obj(e).spine);
+      return r && sp && /^[\w./-]+\.md$/.test(sp) && !sp.includes("..") && !sp.startsWith("/") ? [{ repo: r, path: sp }] : [];
+    });
+    const g = obj(o.goal);
+    const goal = typeof g.now === "number" && typeof g.target === "number" && g.target > 0 ? { now: g.now, target: g.target, ...(str(g.by) ? { by: str(g.by) } : {}) } : undefined;
+    return [{ id, name, greenWhen, watch, lines, totems, ...(kit ? { kit } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
   });
   const said = obj(doc.said);
   const checks: Record<string, Check> = {};
   for (const [k, v] of Object.entries(obj(doc.checks))) checks[k] = obj(v) as Check;
   return {
     staleDays,
+    effort: parseEffort(doc.effort),
     ...(str(said.source) && str(said.words) ? { said: { source: str(said.source)!, words: str(said.words)! } } : {}),
     pursuits,
     checks,
   };
+}
+
+// ---------- priority and effort ----------
+
+/**
+ * Effort follows priority: the file's order is the owner's order (he drags it on the Pursuits page), parked pursuits
+ * have no rank. Each rank falls in a tier that sets how often its milestones' teams wake, how many workers they may run
+ * at once and how soon the stall watch nudges an idle epic. A parked pursuit gets no cadence wakes, no workers and no
+ * nudges; a milestone in no pursuit keeps the pace it was set to. The file is the record (root L-45).
+ */
+export const DEFAULT_EFFORT: EffortPolicy = {
+  tiers: [
+    { name: "Top", upToRank: 1, wakeFactor: 2, maxWorkers: 10, stallHours: 1 },
+    { name: "High", upToRank: 3, wakeFactor: 1, maxWorkers: 6, stallHours: 2 },
+    { name: "Low", upToRank: 99, wakeFactor: 0.5, maxWorkers: 3, stallHours: 6 },
+  ],
+  minWakeMinutes: 15,
+  outside: "A team in no pursuit keeps the pace it was set to, up to 10 workers.",
+};
+
+const num = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined);
+
+export function parseEffort(v: unknown): EffortPolicy {
+  const o = obj(v);
+  const tiers = (Array.isArray(o.tiers) ? o.tiers : []).flatMap((t): EffortTier[] => {
+    const x = obj(t);
+    const name = str(x.name);
+    const upToRank = num(x.upToRank, 1, 1000);
+    const wakeFactor = num(x.wakeFactor, 0.05, 20);
+    const maxWorkers = num(x.maxWorkers, 0, 50);
+    const stallHours = num(x.stallHours, 0.25, 24 * 7);
+    return name && upToRank && wakeFactor && maxWorkers !== undefined && stallHours ? [{ name, upToRank: Math.floor(upToRank), wakeFactor, maxWorkers: Math.floor(maxWorkers), stallHours }] : [];
+  });
+  return {
+    tiers: tiers.length ? tiers.sort((a, b) => a.upToRank - b.upToRank) : DEFAULT_EFFORT.tiers,
+    minWakeMinutes: num(o.minWakeMinutes, 1, 24 * 60) ?? DEFAULT_EFFORT.minWakeMinutes,
+    outside: str(o.outside) ?? DEFAULT_EFFORT.outside,
+  };
+}
+
+const PARKED_EFFORT: PursuitEffort = { tier: "Parked", wakeFactor: 0, maxWorkers: 0, stallHours: 0, words: "Parked: no wakes, no workers, no nudges." };
+
+const paceWords = (f: number) =>
+  f === 1 ? "Wakes at the pace set" : f === 2 ? "Wakes twice as often" : f > 1 ? `Wakes ${f} times as often` : f === 0.5 ? "Wakes half as often" : `Wakes ${f} times as often`;
+
+/** The effort a rank buys (last tier for ranks past every tier); parked: none. */
+export function effortOf(rank: number | null, parked: boolean, policy: EffortPolicy): PursuitEffort {
+  if (parked || rank === null) return PARKED_EFFORT;
+  const t = policy.tiers.find((x) => rank <= x.upToRank) ?? policy.tiers[policy.tiers.length - 1];
+  const hours = t.stallHours === 1 ? "1 h" : `${t.stallHours} h`;
+  return {
+    tier: t.name,
+    wakeFactor: t.wakeFactor,
+    maxWorkers: t.maxWorkers,
+    stallHours: t.stallHours,
+    words: `${paceWords(t.wakeFactor)}, up to ${t.maxWorkers} worker${t.maxWorkers === 1 ? "" : "s"}, nudged after ${hours} idle.`,
+  };
+}
+
+/** Ranks in file order, parked ones skipped (null). */
+export function ranksOf(doc: Pick<PursuitsDoc, "pursuits">): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  let n = 0;
+  for (const p of doc.pursuits) out.set(p.id, p.parked ? null : ++n);
+  return out;
+}
+
+/** A cadence scaled by the effort: an interval wakes `wakeFactor` times as often, never under `minWakeMinutes`; a fixed time stays. */
+export function scaleCadence(c: Cadence, e: Pick<PursuitEffort, "wakeFactor"> | null | undefined, minWakeMinutes = DEFAULT_EFFORT.minWakeMinutes): Cadence {
+  if (!e || c.type !== "interval" || e.wakeFactor <= 0 || e.wakeFactor === 1) return c;
+  const every = Math.round(c.everyMinutes / e.wakeFactor);
+  const floor = Math.min(minWakeMinutes, c.everyMinutes); // never faster than the floor, never slower because of it
+  return { type: "interval", everyMinutes: Math.max(floor, Math.min(60 * 24 * 31, every)) };
+}
+
+const sameRepo = (a: string, b: string) => repoKey(a.split("/").pop()!) === repoKey(b.split("/").pop()!);
+const plain = (p: string) => p.replace(/^\.\//, "");
+
+/** The effort of the best-ranked pursuit carrying one spine; parked only when every pursuit carrying it is parked. */
+export interface SpineEffort extends PursuitEffort {
+  pursuitId: string;
+  pursuitName: string;
+  rank: number | null;
+  parked: boolean;
+}
+export function effortForSpine(doc: PursuitsDoc, repo: string, spinePath: string): SpineEffort | null {
+  const ranks = ranksOf(doc);
+  let best: SpineEffort | null = null;
+  for (const p of doc.pursuits) {
+    if (!p.epics.some((e) => sameRepo(e.repo, repo) && plain(e.path) === plain(spinePath))) continue;
+    const rank = ranks.get(p.id) ?? null;
+    const e: SpineEffort = { ...effortOf(rank, p.parked, doc.effort), pursuitId: p.id, pursuitName: p.name, rank, parked: p.parked };
+    if (!best || (best.parked && !e.parked) || (!e.parked && !best.parked && (e.rank ?? 1e9) < (best.rank ?? 1e9))) best = e;
+  }
+  return best;
+}
+
+/** The pursuit epics in one repo, in rank order (parked last), for a wake's priority lines. */
+export function epicsInRepo(doc: PursuitsDoc, repo: string): { path: string; effort: SpineEffort }[] {
+  const seen = new Set<string>();
+  const out: { path: string; effort: SpineEffort }[] = [];
+  for (const p of doc.pursuits)
+    for (const e of p.epics) {
+      if (!sameRepo(e.repo, repo) || seen.has(plain(e.path))) continue;
+      seen.add(plain(e.path));
+      const eff = effortForSpine(doc, repo, e.path);
+      if (eff) out.push({ path: plain(e.path), effort: eff });
+    }
+  return out.sort((a, b) => (a.effort.rank ?? 1e9) - (b.effort.rank ?? 1e9));
+}
+
+/** The wake's priority section: which epics come first, each one's ceiling, parked ones none. Empty: no lines. */
+export function priorityLines(doc: PursuitsDoc, repo: string, skip: (path: string) => boolean = () => false): string {
+  const list = epicsInRepo(doc, repo).filter((x) => !skip(x.path));
+  if (!list.length) return "";
+  return [
+    "## Priority (the owner's pursuits)",
+    "Effort follows his order on the Pursuits page: start ready rows of higher pursuits first, keep each epic within its ceiling, and start nothing in a parked pursuit's epics (say `queued: pursuit parked` for those rows).",
+    ...list.map((x) =>
+      x.effort.parked
+        ? `- ${x.path}: ${x.effort.pursuitName}, parked: no workers.`
+        : `- ${x.path}: ${x.effort.pursuitName}, rank ${x.effort.rank} (${x.effort.tier}): at most ${x.effort.maxWorkers} workers at once.`,
+    ),
+  ].join("\n");
+}
+
+/** Rewrites the file's pursuits into `ids` order (every id once, the same set); null when it is not a reorder. */
+export function reorderText(text: string, ids: string[]): string | null {
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const have = list.map((p) => str(obj(p).id) ?? "");
+  if (ids.length !== have.length || new Set(ids).size !== ids.length || !ids.every((id) => have.includes(id))) return null;
+  doc.pursuits = ids.map((id) => list[have.indexOf(id)]);
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/** Parks or un-parks one pursuit (`parked: true` or no field); null when no such pursuit. */
+export function parkText(text: string, id: string, parked: boolean): string | null {
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const p = list.find((x) => str(obj(x).id) === id);
+  if (!p) return null;
+  if (parked) p.parked = true;
+  else delete p.parked;
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/** `# EPIC-946: Social launch` → code and title. */
+export function epicHeading(markdown: string): { code?: string; title?: string } {
+  const h = /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim();
+  if (!h) return {};
+  const m = /^(EPIC-\d+[A-Z]?)\s*[:·—-]\s*(.+)$/.exec(h);
+  return m ? { code: m[1], title: m[2].trim() } : { title: h };
 }
 
 const RANK: Record<LineState, number> = { red: 0, amber: 1, unknown: 2, green: 3 };
@@ -240,6 +475,7 @@ export async function buildPursuits(
   const now = o.now ?? Date.now();
   const staleMs = doc.staleDays * 86_400_000;
   const pursuits: Pursuit[] = [];
+  const ranks = ranksOf(doc);
   for (const d of doc.pursuits) {
     const lines = d.lines.map((l): PursuitLine => {
       if (l.from === "light" || l.from === "board") return lightLine(l, o.board);
@@ -266,15 +502,28 @@ export async function buildPursuits(
       totems: d.totems,
       motion,
       lastMove,
+      ...(d.kit ? { kit: true } : {}),
+      ...(d.goal ? { goal: d.goal } : {}),
+      owner: d.owner,
+      rank: ranks.get(d.id) ?? null,
+      parked: d.parked,
+      effort: effortOf(ranks.get(d.id) ?? null, d.parked, doc.effort),
+      epics: d.epics.map((e) => {
+        const text = o.spineText(e.repo, e.path);
+        return { repo: e.repo, path: e.path, ...(text ? epicHeading(text) : {}) };
+      }),
     });
   }
-  return { pursuits, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null };
+  // parked pursuits sit after the ranked ones, in file order.
+  pursuits.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
+  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null };
 }
 
 /** Reads the home repo's file and every spine it names; kept a few minutes (git log per watched repo). */
 export function createPursuits(o: { reposRoot: string; board: () => BoardView | null; git: GitOut; ttlMs?: number; home?: string }) {
   const ttl = o.ttlMs ?? 5 * 60_000;
   let cached: { at: number; body: PursuitsBody } | null = null;
+  let docCache: { file: string; mtime: number; doc: PursuitsDoc } | null = null;
   const repoDir = (name: string) => resolveRepo(o.reposRoot, name)?.path;
   const spineText = (repo: string, file: string) => {
     const dir = repoDir(repo);
@@ -301,6 +550,76 @@ export function createPursuits(o: { reposRoot: string; board: () => BoardView | 
     },
     clear() {
       cached = null;
+      docCache = null;
+    },
+    /** The parsed file, re-read when it changes (the scheduler asks every minute; one stat per call). Null: no file. */
+    doc(): PursuitsDoc | null {
+      const home = repoDir(o.home ?? homeRepo());
+      if (!home) return null;
+      const file = path.join(home, PURSUITS_FILE);
+      let mtime = 0;
+      try {
+        mtime = fs.statSync(file).mtimeMs;
+      } catch {
+        return null;
+      }
+      if (docCache?.file === file && docCache.mtime === mtime) return docCache.doc;
+      try {
+        docCache = { file, mtime, doc: parsePursuits(fs.readFileSync(file, "utf8")) };
+      } catch {
+        return null;
+      }
+      return docCache.doc;
+    },
+    /** The home repo checkout (where the file is written). */
+    homeDir: () => repoDir(o.home ?? homeRepo()),
+    /** one pursuit's social kit (its kit.json) for the console's Social kit tab; null when it has none. */
+    kit(id: string): PursuitKitBody | null {
+      const ref = kitRef(id);
+      if (!ref) return null;
+      try {
+        const kit = obj(JSON.parse(fs.readFileSync(path.join(ref.root, ref.kit.dir, "kit.json"), "utf8")));
+        return { pursuit: { id, name: ref.name }, kit, ...(ref.kit.files ? { files: ref.kit.files } : {}) };
+      } catch {
+        return null;
+      }
+    },
+    /** A kit's preview (previews/<name>.webp) or font (../fonts/<name>.woff2), by a plain file name only. */
+    kitFile(id: string, kind: "previews" | "fonts", name: string): { body: Buffer; type: string } | null {
+      const ref = kitRef(id);
+      const ext = kind === "previews" ? "webp" : "woff2";
+      if (!ref || !new RegExp(`^[a-z0-9][a-z0-9-]*\\.${ext}$`).test(name)) return null;
+      const rel = kind === "previews" ? path.posix.join(ref.kit.dir, "previews", name) : path.posix.join(path.posix.dirname(ref.kit.dir), "fonts", name);
+      const type = kind === "previews" ? "image/webp" : "font/woff2";
+      try {
+        return { body: fs.readFileSync(path.join(ref.root, rel)), type };
+      } catch {
+        /* not on disk: a checkout without media (sparse) still holds the file in git */
+      }
+      try {
+        return { body: execFileSync("git", ["-C", ref.root, "show", `HEAD:${rel}`], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }), type };
+      } catch {
+        return null;
+      }
     },
   };
+  function kitRef(id: string): { root: string; name: string; kit: PursuitKitRef } | null {
+    const home = repoDir(o.home ?? homeRepo());
+    if (!home) return null;
+    let text = "";
+    try {
+      text = fs.readFileSync(path.join(home, PURSUITS_FILE), "utf8");
+    } catch {
+      return null;
+    }
+    const d = parsePursuits(text).pursuits.find((p) => p.id === id);
+    return d?.kit ? { root: home, name: d.name, kit: d.kit } : null;
+  }
+}
+
+/** GET /api/pursuits/<id>/kit: the kit as its kit.json holds it, the pursuit it belongs to, and the full-size file store. */
+export interface PursuitKitBody {
+  pursuit: { id: string; name: string };
+  kit: Record<string, unknown>;
+  files?: string;
 }

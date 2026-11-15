@@ -7,6 +7,7 @@ import { parseDoc } from "../adapters/doc.js";
 import type { Tree, TreeNode } from "../adapters/tree.js";
 import { parseAsks } from "../inbox/asks.js";
 import { ownerName } from "../identity.js";
+import { splitObjectivesContext } from "./hisObjectives.js";
 
 /**
  * "what changed since your last message". Every message the owner sends in a milestone chat goes to the repo desk with a
@@ -31,7 +32,8 @@ export const git: Git = (repoDir, args) =>
 
 const BLOCK = /^\[since your last message\]\n[\s\S]*?\n\[\/since\]\n/;
 /** the owner's own words and the block before them (the block is console context, never his). */
-export function splitSince(text: string): { text: string; since?: string } {
+export function splitSince(raw: string): { text: string; since?: string } {
+  const text = splitObjectivesContext(raw).text; // the Team desk's objectives block is console context too
   const b = BLOCK.exec(text);
   if (!b) return { text };
   return { text: text.slice(b[0].length), since: b[0].slice(SINCE_MARKER.length + 1, -(SINCE_END.length + 2)) };

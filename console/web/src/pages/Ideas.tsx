@@ -22,9 +22,10 @@ import { Input } from "@/components/ui/input";
 import { Empty, ErrorBox, Loading, PageHeader } from "@/components/common";
 import { cn } from "@/lib/utils";
 import { ownerName } from "@/lib/identity";
+import { IDEAS_PATH } from "@/lib/routePaths";
+export { IDEAS_PATH };
 
 /** route of "My ideas & priorities" (social skin, lib/skin.tsx "ideas"). */
-export const IDEAS_PATH = "ideas";
 export const IDEAS_LABEL = "Ideas & priorities";
 
 /** Pack issue lines (422) or the error, shown right where the write was made. */

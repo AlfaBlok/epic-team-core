@@ -19,6 +19,13 @@ export interface RemoteSourceDef {
   cumulative: string[];
   /** Where a person sees the numbers and the people behind them (shown beside the number). */
   page: SiteWhere;
+  /**
+   * what each field counts, in plain words: a metric read from that field takes its label and unit from here,
+   * so a number never wears the catalog's default words (`Tester applications` over a sign-ups count).
+   */
+  words?: Record<string, { label: string; counts: string }>;
+  /** fields shown as their own line beside a campaign target that reads another field of this source. */
+  alongside?: string[];
 }
 
 /** the named remote sources (config): none in the open core; the hosted layer sets its own (setRemoteSources). */
@@ -61,6 +68,12 @@ export function remoteSourceOf(id: string): { def: RemoteSourceDef; field: strin
   const [name, field] = id.split("#");
   const def = REMOTE_SOURCES[name];
   return def && field && def.fields.includes(field) ? { def, field } : undefined;
+}
+
+/** a field's own label and unit, when its source names them. */
+export function remoteWords(id: string): { label: string; counts: string } | undefined {
+  const src = remoteSourceOf(id);
+  return src ? src.def.words?.[src.field] : undefined;
 }
 
 /** One source's last reading as the console holds it. */

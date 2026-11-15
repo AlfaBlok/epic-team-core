@@ -40,7 +40,7 @@ ${
 <p class="muted small">${esc(o.page.title)}</p>
 <div class="card" id="box">
 <button id="rec" type="button"><span class="dot"></span><span id="label">Tap to start talking</span></button>
-<div id="time">0:00</div><div id="status" class="muted small">Up to ${NOTE_MAX_MIN} minutes. Tap again to send it as your note on this step.</div>
+<div id="time">0:00</div><div id="status" class="muted small">Up to ${NOTE_MAX_MIN / 60} hours. Tap again to send it as your note on this step.</div>
 <button id="cancel" type="button">Cancel, do not send</button>
 </div>
 <div id="done" class="card"><p><b>Sent as your note on this step.</b> The team has it; you can close this window.</p><pre id="words"></pre></div>
@@ -59,7 +59,8 @@ const PAGE_JS = String.raw`
   const ticks = base.replace(/\/voice$/, "/ticks");
   const $ = (id) => document.getElementById(id);
   const rec = $("rec"), label = $("label"), time = $("time"), status = $("status"), cancel = $("cancel");
-  let SEG = 120000, MAX = 30 * 60000;
+  let SEG = 120000, MAX = 120 * 60000, WARN = 110 * 60000, warned = false;
+  const hours = (ms) => { const m = Math.round(ms / 60000), h = Math.floor(m / 60), r = m % 60; return !h ? m + " minutes" : !r ? (h === 1 ? "1 hour" : h + " hours") : h + " h " + r + " min"; };
   let stream, mr, note, t0, tick, segTimer, part = 0, parts = 0, queue = Promise.resolve(), failed = false, stopping = false, cid, rec0;
   const skip = [], done = [];
   // the note is kept in this browser until the console confirms it; a resend lands in the same note, once.
@@ -70,7 +71,7 @@ const PAGE_JS = String.raw`
   const api = async (path, init) => {
     const r = await fetch(path, init);
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error((j.error && j.error.message) || ("Error " + r.status)); e.status = r.status; throw e; }
+    if (!r.ok) { const e = new Error((j.error && j.error.message) || ("Error " + r.status)); e.status = r.status; e.code = j.error && j.error.code; throw e; }
     return j;
   };
   const upload = async (n, blob, seconds) => {
@@ -80,6 +81,8 @@ const PAGE_JS = String.raw`
         done.push(n); KEEP.dropPart(cid, n); keepRec({ done: done.slice() });
         return;
       } catch (e) {
+        // the console kept the audio but could not turn it into words: saved there, the note names it.
+        if (e.code === "transcribe_failed" && i >= 2) { done.push(n); KEEP.dropPart(cid, n); keepRec({ done: done.slice() }); return; }
         if (e.status && e.status < 500 && e.status !== 429) { failed = e.message; return; }
         await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
       }
@@ -115,14 +118,18 @@ const PAGE_JS = String.raw`
     const pageHint = (document.title + " · step " + STEP.id).slice(0, 200);
     try {
       const s = await api(base + "/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ page: pageHint, clientId: cid }) });
-      note = s.note; SEG = (s.segmentS || 120) * 1000; MAX = (s.maxMin || 30) * 60000;
+      note = s.note; SEG = (s.segmentS || 120) * 1000; MAX = (s.maxMin || 120) * 60000; WARN = (s.warnMin || (s.maxMin || 120) - 10) * 60000; warned = false;
     } catch (e) { KEEP.held.delete(cid); reset(); say(e.message, true); return; }
     rec0 = { cid, base, page: pageHint, id: note.id, step: STEP.id, title: STEP.title, parts: 0, done: [] }; KEEP.put(rec0);
     part = 0; parts = 0; skip.length = 0; done.length = 0; failed = false; stopping = false; queue = Promise.resolve();
     startPart();
     t0 = Date.now(); rec.disabled = false; rec.classList.add("on"); label.textContent = "Tap to send"; cancel.style.display = "block";
     say("Recording. Take your time.");
-    tick = setInterval(() => { const el = Date.now() - t0; time.textContent = clock(el); if (el >= MAX) stop(); }, 250);
+    tick = setInterval(() => {
+      const el = Date.now() - t0; time.textContent = clock(el);
+      if (!warned && el >= WARN) { warned = true; say(hours(MAX - el) + " left: at " + hours(MAX) + " this note stops and is sent by itself, everything you said kept. Send it now and start a new one to keep talking.", true); }
+      if (el >= MAX) { stop(); say("Stopped at the " + hours(MAX) + " limit and sent. Everything you said up to here is kept."); }
+    }, 250);
     segTimer = setInterval(roll, SEG);
   }
   async function stop() {
@@ -158,7 +165,7 @@ const PAGE_JS = String.raw`
     const n = await KEEP.drain({
       base,
       start: async (r) => (await api(base + "/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ page: r.page, clientId: r.cid }) })).note.id,
-      segment: (id, p) => api(base + "/notes/" + id + "/segments/" + p.n, { method: "POST", headers: { "content-type": p.blob.type || "audio/webm", "x-seconds": String(p.seconds) }, body: p.blob }),
+      segment: (id, p) => api(base + "/notes/" + id + "/segments/" + p.n, { method: "POST", headers: { "content-type": p.blob.type || "audio/webm", "x-seconds": String(p.seconds) }, body: p.blob }).catch((e) => { if (e.code === "transcribe_failed") return {}; throw e; }),
       finish: (id, n, sk) => api(base + "/notes/" + id + "/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ segments: n, skip: sk }) }),
       after: async (r, rec) => {
         const words = (r.note && r.note.transcript || "").trim();

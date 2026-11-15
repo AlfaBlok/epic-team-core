@@ -240,6 +240,8 @@ export interface WaitingItem {
   detail?: string;
   proposedAction?: string;
   options?: string[];
+  /** E948-S69: the options were built from the question (the ask listed none): `Yes, <the action>` and `No`, or its either-or. */
+  optionsDerived?: true;
   recommendation?: string;
   /** plain-words sections of an ask; the card shows them labelled, technical fields under Details. */
   contextText?: string;
@@ -249,6 +251,8 @@ export interface WaitingItem {
   whyYou?: string;
   /** a key ask (`secret: <app> <NAME>`): the card shows a private paste box; the server stores it with `secret put`. */
   secret?: { app: string; name: string };
+  /** E996-S29 (client): the codes of the other open asks that store this same key; this card holds their one box. */
+  sameKey?: string[];
   contextLinks: { label: string; url: string; threadId?: string; environmentId?: string }[];
   owner: WaitingOwner;
   since?: string;
@@ -265,6 +269,8 @@ export interface WaitingItem {
   readyRowError?: string;
   /** display name of the world's owner when it is not the owner (absent for the home world). */
   ownerName?: string;
+  /** a done or superseded item as its folded row only (`?view=list`); getWaitingItem fetches the whole card. */
+  slim?: true;
 }
 
 export interface ConsoleMessage {
@@ -381,4 +387,15 @@ export interface LaptopView {
   done?: MacTask[];
   listUrl: string;
   tasksError?: string;
+}
+
+/** GET /api/inbox/search?q= : the items matching every word, by section, each with where it matched. */
+export interface InboxSearchResult {
+  q: string;
+  tookMs: number;
+  total: number;
+  counts: { blocked: number; review: number; done: number };
+  hits: { id: string; section: "blocked" | "review" | "done"; where: ("title" | "card" | "note")[]; title: string }[];
+  /** done items older than the Inbox's own list (up to 30 days), as one-line rows. */
+  rows: WaitingItem[];
 }

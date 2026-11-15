@@ -45,4 +45,18 @@ describe("T42-S40 the reply voice relay", () => {
     const off = setup({ url: "off", fetch: vi.fn() as unknown as typeof globalThis.fetch });
     expect((await off.speak({ text: "Hello." })).status).toBe(503);
   });
+  it("warm speaks the piece ahead and sends nothing back (204); every answer says how long the voice took and whether it was ready", async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([82, 73, 70, 70]), { headers: { "content-type": "audio/wav", "x-voice-cache": "miss", "x-voice-ms": "870" } }));
+    const { speak } = setup({ url: "http://voice:1", fetch: fetch as unknown as typeof globalThis.fetch });
+    const w = await speak({ text: "All good, the deploy is live.", warm: true });
+    expect(w.status).toBe(204);
+    expect(await w.text()).toBe("");
+    expect(w.headers.get("server-timing")).toMatch(/^voice;dur=\d+;desc=miss$/);
+    // the worker server is asked for the same words and speed Play asks for, so Play finds them spoken
+    expect(JSON.parse(String((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({ text: "All good, the deploy is live.", speed: 0.95 });
+    const hit = setup({ url: "http://voice:1", fetch: (async () => new Response(new Uint8Array([1]), { headers: { "content-type": "audio/wav", "x-voice-cache": "hit" } })) as typeof globalThis.fetch });
+    const r = await hit.speak({ text: "All good, the deploy is live." });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("server-timing")).toMatch(/^voice;dur=\d+;desc=hit$/);
+  });
 });

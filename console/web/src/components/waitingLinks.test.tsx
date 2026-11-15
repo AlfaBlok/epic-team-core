@@ -37,7 +37,8 @@ describe("links on ask cards are clickable", () => {
       </MemoryRouter>,
     );
     // the heading is a button (it opens More); the question's own link must still be a link on the card
-    const q = within(screen.getByTestId("waiting-card")).getByRole("link", { name: /10\.86\.141\.63/ });
+    // a server's own address is labelled Open the page, never its host and port
+    const q = within(screen.getByTestId("waiting-card")).getByRole("link", { name: /Open the page/ });
     expect(q.getAttribute("href")).toBe("http://10.86.141.63:8828/voices/");
     expect(q.getAttribute("target")).toBe("_blank");
     fireEvent.click(screen.getByTestId("ask-lead")); // Context and Why you live under More

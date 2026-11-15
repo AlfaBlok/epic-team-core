@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { api, type Assignment, type Milestone, type Persona, type Run, type RunOutcome } from "@/api";
-import { useQuery } from "@/lib/data";
+import { useQuery, useWaitingList } from "@/lib/data";
 import { isAnswerRun, isOrphanRun, nestRuns, runPersonaId, type RunNode } from "@/lib/derive";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import { cap, useWords } from "@/lib/skin";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { ActiveAgentsSection } from "@/components/activeAgents";
+import { PriorityModeSection } from "@/components/priorityMode";
 import { RunHostsSection } from "@/components/runHosts";
 import { ownerName } from "@/lib/identity";
 
@@ -52,7 +53,7 @@ export function RunsPage() {
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
   const w = useWords();
   // an old `blocked` run reads Needs you only while a code it cites is open, else Monitoring.
-  const { data: waiting } = useQuery(() => api.listWaitingOnOwner(), [], { tag: "inbox" });
+  const { data: waiting } = useWaitingList();
   // Until assignments load every run would look orphaned ("assignment deleted"): the list waits for them.
   const { data: assignments, error: assignmentsError } = useQuery(() => api.listAssignments(), []);
   const set = (key: keyof typeof f, value: string) => {
@@ -87,6 +88,7 @@ export function RunsPage() {
   return (
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
       <PageHeader title="Runs" description={`Every persona run across ${w.milestonesWord}, newest first; child runs nested under the wake that launched them.`} />
+      <PriorityModeSection />
       <UsagePanel />
       <UnblockerPanel />
       <ActiveAgentsSection />

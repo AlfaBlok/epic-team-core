@@ -56,3 +56,26 @@ export function repoLevelIds(cards: CampaignCard[] | undefined): Set<string> {
   const named = new Set(liveCards(cards).filter((c) => c.campaign).map((c) => c.repo));
   return new Set((cards ?? []).flatMap((c) => (!c.campaign && c.milestoneId && named.has(c.repo) ? [c.milestoneId] : [])));
 }
+
+/** a repo's names a card or milestone may carry: the checkout name, `owner/name`, a path's last part; lower case. */
+const repoNames = (...names: (string | null | undefined)[]) =>
+  names.flatMap((n) => {
+    const s = (n ?? "").trim().replace(/\/+$/, "").toLowerCase();
+    return s ? [s, s.split("/").pop()!] : [];
+  });
+
+/**
+ * the milestones the social skin shows as campaigns (Home and the menu). The definition is the
+ * campaign list itself (GET /api/tenants/:id/campaigns: a repo with the social pack, a name, one goal): a
+ * live campaign's milestone, or a job in a repo that runs a live campaign (Add job makes it there). Every other
+ * milestone of the world (a house decision, a server, taxes) belongs to the EpicTeam side and is left out, as are retired
+ * campaigns and a repo's own level (repoLevelIds). The owner, on opening the old list: "it felt like a little bit of a mess".
+ */
+export function campaignMilestones<M extends { id: string; repo?: string | null; remote?: string | null }>(cards: CampaignCard[] | undefined, ms: M[] | undefined): M[] {
+  const live = liveCards(cards);
+  const liveIds = new Set(live.flatMap((c) => (c.milestoneId ? [c.milestoneId] : [])));
+  const retired = new Set((cards ?? []).flatMap((c) => (c.retired && c.milestoneId && !liveIds.has(c.milestoneId) ? [c.milestoneId] : [])));
+  const level = repoLevelIds(cards);
+  const repos = new Set(live.flatMap((c) => repoNames(c.repo, c.remote)));
+  return (ms ?? []).filter((m) => !level.has(m.id) && !retired.has(m.id) && (liveIds.has(m.id) || repoNames(m.remote, m.repo).some((n) => repos.has(n))));
+}

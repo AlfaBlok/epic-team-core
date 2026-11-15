@@ -103,6 +103,8 @@ const cardIn = async (lane: string, text: string) => (await within(await screen.
 
 describe("the menu's Pipeline: every campaign on one board", () => {
   it("the left menu reads Team, Chat, Pipeline in the social skin (not in the console skin)", async () => {
+    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
+    localStorage.setItem("sidebar.more.open", "1");
     render(
       <SkinProvider skin={SKINS.social}>
         <MemoryRouter>
@@ -116,7 +118,7 @@ describe("the menu's Pipeline: every campaign on one board", () => {
     const names = (el: Element) => [...el.querySelectorAll("a")].map((a) => a.textContent?.replace(/\d+/g, "").trim());
     // Home and
     // Chat on top, the campaigns next, then Performance, Product and Messages. The Pipeline is each campaign's tab.
-    expect(names(main)).toEqual(["Home", "Chat"]);
+    expect(names(main)).toEqual(["Home", "Inbox", "Chat"]);
     expect(names(screen.getByTestId("nav-social-pages"))).toEqual(["Performance", "Product", "Messages"]);
     expect(screen.queryByTestId("nav-pipeline")).toBeNull();
     cleanup();

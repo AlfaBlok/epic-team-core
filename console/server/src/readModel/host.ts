@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { identity } from "../identity.js";
 import type { DB } from "../db.js";
 import { addPatch, applyPatch, keyOf, type Patch, type ViewKey } from "./views.js";
 import { createRefresher, type Refresher, type RefresherOptions } from "./refresher.js";
@@ -53,13 +54,20 @@ export interface ReadModelHostOptions {
    * rebuilt off to the side and compared; `onResult` gets every result (the app logs it and alerts on drift). 0 = off.
    */
   drift?: { everyMs: number; firstAfterMs?: number; confirmAfterMs?: number; onResult?: (r: DriftResult) => void };
+  /**
+   * how long a request waits on an inline read of a view with no stored row (spines.py: seconds on an idle host, minutes
+   * on a CPU-capped one) before it answers from the nearest stored view instead (`nearestView`; default 2 s, 0 =
+   * wait as before). The inline read carries on and the refresher stores the view, so the next request is a hit.
+   */
+  inlineBudgetMs?: number;
 }
 
 export interface ViewRead<T> {
   payload: T;
   /** When the view was last known current (computed, or its inputs found unchanged). */
   asOf: string;
-  source: "snapshot" | "inline";
+  /** fallback: a stored neighbour stood in while the asked view is still being read (see `nearestView`). */
+  source: "snapshot" | "inline" | "fallback";
 }
 
 export interface ReadModelHost {
@@ -149,7 +157,7 @@ export function createReadModelHost(o: ReadModelHostOptions): ReadModelHost {
       return inProcess();
     }
     const spines = o.spines && !o.worker.spinesFixture ? o.spines : undefined;
-    const w = new Worker(file, { workerData: { ...o.worker, worlds: o.worlds(), tickMs, t3: t3States(), ...(spines ? { spinesViaHost: true, startedAt: now() } : {}) } });
+    const w = new Worker(file, { workerData: { ...o.worker, identity: identity(), worlds: o.worlds(), tickMs, t3: t3States(), ...(spines ? { spinesViaHost: true, startedAt: now() } : {}) } });
     worker = w;
     w.on("message", (m: { type?: string; msg?: string }) => {
       if (m?.type === "log" && m.msg) log(m.msg);
@@ -315,7 +323,17 @@ export function createReadModelHost(o: ReadModelHostOptions): ReadModelHost {
           .finally(() => inflight.delete(s));
         inflight.set(s, p);
       }
-      const r = await p;
+      const budget = o.inlineBudgetMs ?? 2_000;
+      const r = budget > 0 ? await Promise.race([p, new Promise<undefined>((res) => (setTimeout(res, budget) as { unref?: () => void }).unref?.())]) : await p;
+      if (!r) {
+        const near = nearestView(k, peek);
+        if (near) {
+          log(`read model: ${s} not stored yet, answered from ${near.from} after ${budget} ms (its read carries on)`);
+          return { payload: near.read.payload as T, asOf: near.read.asOf, source: "fallback" };
+        }
+        const late = await p;
+        return { payload: patched(k, late.value, late.at) as T, asOf: late.at, source: "inline" };
+      }
       return { payload: patched(k, r.value, r.at) as T, asOf: r.at, source: "inline" };
     },
     peek,
@@ -346,4 +364,28 @@ export function createReadModelHost(o: ReadModelHostOptions): ReadModelHost {
       void worker?.terminate();
     },
   };
+}
+
+/**
+ * the stored view that can stand in for one that has no row yet, so a request never waits on a cold read:
+ * the same scope with the other includeSettled (open items are a subset of settled ones), then for a milestone the
+ * world's view narrowed to that milestone. Only for waiting and status views; undefined when none is stored.
+ */
+export function nearestView(k: ViewKey, peek: <T>(k: ViewKey) => ViewRead<T> | undefined): { from: string; read: ViewRead<unknown> } | undefined {
+  const tries: { key: ViewKey; narrow?: (p: unknown) => unknown }[] = [];
+  if (k.kind === "waiting" || k.kind === "status") tries.push({ key: { ...k, includeSettled: !k.includeSettled } as ViewKey });
+  if (k.kind === "waiting" && k.milestoneId) {
+    const id = k.milestoneId;
+    const narrow = (p: unknown) => {
+      const w = p as { items: { milestoneId?: string; alsoIn?: string[]; referencedBy?: { milestoneId: string }[] }[]; scopedIds?: string[] };
+      const mine = (it: (typeof w.items)[number]) => it.milestoneId === id || !!it.alsoIn?.includes(id) || !!it.referencedBy?.some((r) => r.milestoneId === id);
+      return { ...w, items: w.items.filter(mine), scopedIds: [id] };
+    };
+    for (const includeSettled of [k.includeSettled, !k.includeSettled]) tries.push({ key: { kind: "waiting", world: k.world, includeSettled }, narrow });
+  }
+  for (const t of tries) {
+    const hit = peek<unknown>(t.key);
+    if (hit) return { from: keyOf(t.key), read: t.narrow ? { ...hit, payload: t.narrow(hit.payload) } : hit };
+  }
+  return undefined;
 }

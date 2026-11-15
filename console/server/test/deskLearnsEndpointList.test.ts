@@ -10,6 +10,7 @@ import type { T3Client, T3MessagePage, T3ThreadMessage } from "../src/t3/client.
 import type { Dispatcher } from "../src/t3/dispatcher.js";
 import { DELIVERED_MARKER, doneMeansLine, ledgerRow, readPlacement } from "../src/desk/placements.js";
 import { SEED_VERSION, UPDATE_MARKER, endpointLines } from "../src/desk/desk.js";
+import { createStore } from "../src/store.js";
 
 /** the desk's seed update, answers from chat through the ask path, delivered notes. */
 
@@ -288,6 +289,53 @@ describe("T18-S4 an ask answered from the chat goes through the ask path", () =>
     git(repo, ["fetch", "-q"]);
     expect(git(repo, ["rev-parse", "origin/main"])).toBe(head);
     expect(db.prepare("SELECT COUNT(*) n FROM jordi_responses").get()).toEqual({ n: 0 });
+  });
+
+  it("his voice-note transcript in the desk counts exactly like typed words (punctuation, case and a cut middle aside)", async () => {
+    const x = await setup();
+    const note = [
+      "🎙 Voice note (Chat), 2026-11-12 23:03Z · 1 min 23 s · $0.0035 (gpt-4o-mini-transcribe) · vn_1",
+      "Audio: https://example.test/voice/notes/vn_1/audio",
+      "",
+      "I mean, for me, if you, yes, for me. The logger? But generally, just go for it — two. I'll take a look, then feedback.",
+    ].join("\n");
+    await x.call("POST", "/api/desk/messages", { text: note, page: "voice note to Memory" }, PAGE);
+    // the desk quotes him with the punctuation dropped and a middle part left out: still his words, in one message, in order
+    const r = await respond(x, { via: "team-desk", chat: "if you yes for me [...] just go for it - two" });
+    expect(r.status).toBe(201);
+    expect(r.json).toMatchObject({ via: "team-desk", spine: { status: "written" } });
+  });
+
+  it("a cut quote still needs every part in his words, in order, in one message", async () => {
+    const x = await setup();
+    await x.call("POST", "/api/desk/messages", { text: "🎙 Voice note (Chat) · vn_1\n\nJust go for it. Two." }, PAGE);
+    expect((await respond(x, { via: "team-desk", chat: "two [...] just go for it" })).status).toBe(409); // out of order
+    expect((await respond(x, { via: "team-desk", chat: "just go for it [...] three" })).status).toBe(409); // a part he never said
+    expect((await respond(x, { via: "team-desk", chat: "[...]" })).status).toBe(409); // no words at all
+  });
+
+  it("a world's own desk (the social skin) registers his voice-note answer against ITS thread, never the Team desk's", async () => {
+    const x = boot();
+    const W = "social-world";
+    db.prepare("INSERT OR IGNORE INTO tenants (id, name, skin, plan, created_at) VALUES (?, ?, 'social', 'internal', ?)").run(W, W, new Date().toISOString());
+    const m = createStore(db, { tenant: W }).createMilestone({ title: "Testers", repo: "Acme/inbox", path: "docs/spines/root.md", owner: "Sam", paused: false });
+    await x.call("GET", `/api/tenants/${W}/desk/messages`); // the world desk's thread
+    const item = ((await x.call("GET", `/api/waiting-on-owner?milestoneId=${m.id}`)).json as any[]).find((i) => i.code === "T9-A1");
+    expect(item).toBeTruthy();
+    const WD = { "X-Console-Run": `world-desk:${W}` };
+    const answer = (chat: string, headers: Record<string, string>) =>
+      x.call("POST", `/api/waiting-on-owner/${item.id}/respond`, { kind: "answer", text: "two", milestoneId: m.id, via: "team-desk", chat }, headers);
+    const said = "but generally, just go for it, two. I'll take a look";
+    // his words are in the HOME Team desk only: the world desk cannot use them
+    await x.call("GET", "/api/desk/messages");
+    await x.call("POST", "/api/desk/messages", { text: said }, PAGE);
+    expect((await answer("just go for it, two", WD)).json.error?.code).toBe("not_in_chat");
+    // his voice note in the world desk (the Chat mic posts its transcript there): it counts, from the world desk's own header
+    const note = `🎙 Voice note (Chat), 2026-11-12 23:03Z · 1 min 23 s · vn_1\nAudio: https://example.test/a\n\nI mean, yes. ${said}, you know.`;
+    expect((await x.call("POST", `/api/tenants/${W}/desk/messages`, { text: note, page: "voice note to Memory" }, PAGE)).status).toBeLessThan(300);
+    const r = await answer("I mean yes [...] just go for it - two", WD);
+    expect(r.status).toBe(201);
+    expect(r.json).toMatchObject({ via: "team-desk", spine: { status: "written" } });
   });
 
   it("the desk must say via + chat; via is only for the desk's own calls; the web card path is unchanged", async () => {

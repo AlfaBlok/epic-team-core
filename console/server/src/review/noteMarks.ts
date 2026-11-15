@@ -36,7 +36,7 @@ export interface NoteMark {
 }
 
 const DECISIONS = /^##\s+decisions\b/i;
-const HEAD = /^([A-Za-z][\w.-]*\d[\w.-]*):\s+your (?:long )?(?:voice )?note of (\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z) (?:changed|added to) this(?::\s*(.*))?$/i;
+const HEAD = /^([A-Za-z][\w.-]*\d[\w.-]*):\s+your (?:long )?(?:voice )?(?:note|message) of (\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z) (?:changed|added to) this(?::\s*(.*))?$/i;
 const KEY = /\bmark key ([0-9a-f]{8})\b/i;
 const QUOTE = /^[“"](.*)[”"]\s*$/s;
 
@@ -105,7 +105,8 @@ export function markFields(m: MarkInput): { date: string; outcome: string; decis
   return {
     date: m.date,
     outcome: m.kind,
-    decision: `${m.ref}: your voice note of ${m.at} ${m.kind === "stale" ? "changed this" : "added to this"}: "${quote}" (mark key ${markKey(m.current)})`,
+    // a line typed in the desk Chat is a message, not a voice note
+    decision: `${m.ref}: your ${/^a message to the /.test(m.note) ? "message" : "voice note"} of ${m.at} ${m.kind === "stale" ? "changed this" : "added to this"}: "${quote}" (mark key ${markKey(m.current)})`,
     summary: cellOf(m.why).slice(0, 300) || "—",
     evidence: cellOf(m.note).slice(0, 200) || "—",
     revisit: "when its owner acts",

@@ -17,6 +17,8 @@ export interface BookTreeNode {
   parent: string | null;
   /** Depth under the milestone's spine (0 = the milestone itself). */
   depth: number;
+  /** view-only fold (docs/epic-folds.json): the parent path it is drawn inside, not as its own row. */
+  foldedInto?: string;
   state: BookState;
   status: string;
   dod: { done: number; total: number };
@@ -211,6 +213,7 @@ export function milestoneBook(
       code: e.code,
       title: titleRest(e),
       parent: e === root ? null : e.parent,
+      ...(e !== root && e.foldedInto ? { foldedInto: e.foldedInto } : {}),
       depth: e.depth - root.depth,
       state: e.state,
       status: e.status,

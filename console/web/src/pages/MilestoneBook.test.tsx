@@ -84,6 +84,18 @@ describe("E947-S1 Epic Book per milestone", () => {
     expect(milestoneBookHref("ms_1")).toBe("/book/ms_1");
   });
 
+  it("draws folded epics as one dashed line under their fold parent, not as rows of their own", () => {
+    const b = sampleMilestoneBook();
+    const tree = [
+      ...b.tree,
+      { ...b.tree[1], path: "a.md", code: "EPIC-950", parent: "docs/spines/epic-940.md", depth: 2, foldedInto: "docs/spines/epic-940.md" },
+      { ...b.tree[1], path: "b.md", code: "EPIC-951", parent: "docs/spines/epic-940.md", depth: 2, state: "done" as const, foldedInto: "docs/spines/epic-940.md" },
+    ];
+    const rows = planRows(tree).map((r) => [r.code ?? r.title, r.depth, r.parent]);
+    expect(rows).toContainEqual(["2 folded in: EPIC-950, EPIC-951", 2, 2]);
+    expect(rows.map((r) => r[0])).not.toContain("EPIC-950");
+  });
+
   it("says it is being built when the server has no book yet", async () => {
     vi.spyOn(api, "getMilestoneBook").mockResolvedValue({ book: null, building: true });
     at("/book/home_repo");

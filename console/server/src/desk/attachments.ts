@@ -147,16 +147,17 @@ export function createAttachments(d: AttachmentsDeps) {
   const world = () => d.world() || DEFAULT_TENANT;
   const base = d.publicUrl.replace(/\/+$/, "");
   const toAtt = (r: any): Attachment => ({ id: r.id, name: r.name, mime: r.mime, bytes: r.bytes, createdAt: r.created_at, path: `/api/chat/attachments/${r.id}/${r.name}` });
-  const row = (id: string) => db.prepare("SELECT * FROM chat_attachments WHERE id = ? AND tenant_id = ?").get(id, world()) as any;
+  const row = (id: string, w = world()) => db.prepare("SELECT * FROM chat_attachments WHERE id = ? AND tenant_id = ?").get(id, w) as any;
 
-  function add(bytes: Uint8Array, declaredType: string, rawName: string): Attachment {
+  /** `inWorld`: a caller with no session (a steps page, its token the credential) names the page's world. */
+  function add(bytes: Uint8Array, declaredType: string, rawName: string, inWorld?: string): Attachment {
     if (!bytes.byteLength) throw new AttachError(400, "empty", "the file is empty");
     if (bytes.byteLength > ATTACH_MAX_BYTES) throw new AttachError(413, "too_big", `a file is at most ${ATTACH_MAX_BYTES / 1024 / 1024} MB (this one is ${kb(bytes.byteLength)})`);
     const mime = attachType(declaredType, rawName);
     if (!mime) throw new AttachError(415, "type_refused", `Chat takes images, screen recordings, PDF, Office documents and text files, not ${declaredType || "this file type"}`);
     if (!bytesMatch(mime, bytes)) throw new AttachError(415, "type_mismatch", `the file does not look like a ${ATTACH_TYPES[mime].ext.toUpperCase()} file`);
     const id = `att_${crypto.randomBytes(6).toString("hex")}`;
-    const w = world();
+    const w = inWorld || world();
     const folder = path.join(d.dir, w.replace(/[^\w-]/g, "_"));
     fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
     const file = path.join(folder, `${id}.${ATTACH_TYPES[mime].ext}`);
@@ -164,12 +165,12 @@ export function createAttachments(d: AttachmentsDeps) {
     const name = safeName(rawName, ATTACH_TYPES[mime].ext);
     const sha = crypto.createHash("sha256").update(bytes).digest("hex");
     db.prepare("INSERT INTO chat_attachments (id, tenant_id, name, mime, bytes, file, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, w, name, mime, bytes.byteLength, file, sha, new Date(now()).toISOString());
-    return toAtt(row(id));
+    return toAtt(row(id, w));
   }
 
   /** One attachment of this world, with its file; another world's id is a 404, like a missing one. */
-  function get(id: string): Attachment & { file: string } {
-    const r = row(id);
+  function get(id: string, inWorld?: string): Attachment & { file: string } {
+    const r = row(id, inWorld || world());
     if (!r || !fs.existsSync(r.file)) throw new AttachError(404, "not_found", `no attachment ${id}`);
     return { ...toAtt(r), file: r.file };
   }
@@ -203,11 +204,11 @@ export function createAttachments(d: AttachmentsDeps) {
    * the spine answer line, the reopened row's status and the brief or wake of the agent who reads the answer: no brackets
    * (a status cell turns them into square ones), only the link of each file, opened with that agent's console headers.
    */
-  function cardText(text: string, ids: string[] | undefined): string {
+  function cardText(text: string, ids: string[] | undefined, inWorld?: string): string {
     const list = [...new Set(ids ?? [])];
     if (!list.length) return text;
     if (list.length > ATTACH_MAX_PER_MESSAGE) throw new AttachError(400, "too_many", `at most ${ATTACH_MAX_PER_MESSAGE} files in one answer`);
-    const atts = list.map((id) => get(id));
+    const atts = list.map((id) => get(id, inWorld));
     const stamp = new Date(now()).toISOString();
     for (const a of atts) db.prepare("UPDATE chat_attachments SET sent_at = COALESCE(sent_at, ?) WHERE id = ?").run(stamp, a.id);
     const words = text.trim().replace(/\s+$/, "");

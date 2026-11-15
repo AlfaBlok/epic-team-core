@@ -6,7 +6,7 @@ import { createApp } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import { createSpineWriter } from "../src/inbox/spineWrite.js";
 import { activeMark, addMarks, markKey, noteMarksOf, type MarkInput } from "../src/review/noteMarks.js";
-import { createNoteTouch, flat, noteKey, openAiTouchJudge, saidIn, spokenAt, TOUCH_HEAD, TOUCH_MIN_WORDS, type TouchCard, type TouchJudge } from "../src/voice/touch.js";
+import { createNoteTouch, flat, isTyped, noteKey, openAiTouchJudge, saidIn, spokenAt, TOUCH_HEAD, TOUCH_MIN_TYPED_WORDS, TOUCH_MIN_WORDS, type TouchCard, type TouchJudge } from "../src/voice/touch.js";
 import { makeRepo, spineText, web } from "./reviewFixture.js";
 
 /**
@@ -63,6 +63,13 @@ describe("E948-S40 marks in the spine", () => {
     expect(marks).toHaveLength(2);
     expect(marks[0]).toMatchObject({ kind: "stale", ref: "E948-S37", at: "2026-11-10 23:08Z", quote: "make the ending say 'Epic Team dot app' / twice", why: "he wants a new ending", key: markKey("review (live abc1234)") });
     expect(addMarks(r.text, [mark()]).added).toBe(0);
+  });
+
+  it("a line he typed says 'your message', not 'your voice note', and still reads back", () => {
+    const r = addMarks(SPINE, [mark({ note: "a message to the Team desk, chat-f37c98e1" })]);
+    expect(r.text).toContain("E948-S37: your message of 2026-11-10 23:08Z changed this:");
+    expect(noteMarksOf(r.text)).toHaveLength(1);
+    expect(addMarks(r.text, [mark({ note: "a message to the Team desk, chat-f37c98e1" })]).added).toBe(0);
   });
 
   it("holds while the card is as it was and clears the moment its status or question changes", () => {
@@ -161,6 +168,24 @@ describe("E948-S40 the long-note pass", () => {
     expect(s.marks).toHaveLength(0);
     expect(s.wakes).toHaveLength(0);
     expect(s.told).toHaveLength(0);
+  });
+
+  it("a typed desk message marks the cards it speaks about, from TOUCH_MIN_TYPED_WORDS words, and says typed", async () => {
+    const typed = "Didn't any of the many workers we have picked up on this not being reflected? The red line clip should end on the app address, not the logo.";
+    expect(isTyped(typed)).toBe(true);
+    expect(isTyped("🎙 Voice note (Chat), 2026-11-13 17:57Z\n\nhello")).toBe(false);
+    expect(typed.split(/\s+/).length).toBeGreaterThanOrEqual(TOUCH_MIN_TYPED_WORDS);
+    expect(typed.split(/\s+/).length).toBeLessThan(TOUCH_MIN_WORDS);
+    const s = setup([{ ref: "E948-S37", how: "stale", quote: "The red line clip should end on the app address", why: "new ending" }]);
+    // the same words as a voice note are too short; typed they are read
+    expect(await s.t.heard({ world: "acme", words: typed, where: "a message to the Team desk", id: "t0" })).toBeUndefined();
+    expect(await s.t.heard({ world: "acme", words: typed, where: "a message to the Team desk", id: "t1", typed: true })).toBe("done");
+    expect(s.marks).toEqual([{ repo: "home_repo", path: "docs/spines/epic-48.md", refs: ["E948-S37"] }]);
+    expect(s.wakes[0].text).toContain("Sam's typed message of");
+    expect(s.wakes[0].text).toContain("STALE");
+    // a short typed answer stays the desk's to place
+    expect(await s.t.heard({ world: "acme", words: "yes go ahead with the second option", where: "a message to the Team desk", typed: true })).toBeUndefined();
+    expect(s.judged).toHaveLength(1);
   });
 
   it("skips a card whose spine words already cite the note: it was made from it", async () => {

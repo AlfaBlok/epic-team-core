@@ -1,6 +1,7 @@
 import { copyPasteInText } from "../steps/copyPaste.js";
 import { stripInline } from "../adapters/markdown.js";
 import { ownerName } from "../identity.js";
+import { hasPlaceLink } from "../inbox/askGate.js";
 
 /**
  * (the owner 2026-11-03, approved mockup docs/status/e48-s26/real-feed-mockup.html; spec docs/status/e48-s26-card-spec.md):
@@ -104,6 +105,20 @@ export interface CardFields {
   fed?: string;
   /** `from:` the persona that sent it, with `from settings:`, `from line:` and `runs:`. */
   from?: CardFrom;
+  /**
+   * `source:` where the card came from, in words the owner knows: his own words with their date and a link to the
+   * note or card, or who raised it and why. The card opens with it. Required (a persona card's `from:` counts).
+   */
+  source?: string;
+  /** `decision:` the one decision or ask for the owner, in plain words, with the team's recommendation. The card ends with it. Required. */
+  decision?: string;
+  /**
+   * E948-S69 `options:` a decision card's own buttons, 2 to 4 list lines `<label>: <what happens next>` (`Yes: plan it`,
+   * `No: park it`). A next step that starts park, drop, stop or leave parks the next steps; any other starts them.
+   */
+  options?: string[];
+  /** `objective:` read and kept, never shown: a card no longer opens with an objective (the owner 2026-11-14, vn_e751eeeb). */
+  objective?: string;
 }
 
 const KEYS: [RegExp, keyof CardFields | "skip"][] = [
@@ -121,6 +136,10 @@ const KEYS: [RegExp, keyof CardFields | "skip"][] = [
   [/^(confirm)$/, "confirm"],
   [/^(example of|example for)$/, "exampleOf"],
   [/^(fed|fed ask|feeds|ask)$/, "fed"],
+  [/^(source|where it came from|where it comes from|came from|comes from|origin|raised by)$/, "source"],
+  [/^(decision|the decision|you decide|your decision|decide|the ask for you|your call)$/, "decision"],
+  [/^(options|choices|buttons|decision options)$/, "options"],
+  [/^(objective|objectives|serves|serves objective)$/, "objective"],
 ];
 /** the `from` fields (the persona that sends the card). */
 const FROM_KEYS: [RegExp, keyof CardFrom][] = [
@@ -208,13 +227,16 @@ export function parseCard(text: string): CardFields | undefined {
   const fm = frontMatter(text);
   if (!fm) return undefined;
   const out: CardFields = { delivered: [], next: [] };
-  let list: "delivered" | "next" | undefined;
+  let list: "delivered" | "next" | "options" | undefined;
   let any = false;
   for (const raw of fm) {
     if (!raw.trim() || /^\s*#/.test(raw)) continue;
     const item = /^\s*[-*]\s+(.*)$/.exec(raw);
     if (item && list) {
-      if (list === "delivered") {
+      if (list === "options") {
+        const o = unquote(item[1]);
+        if (o) (out.options ??= []).push(o);
+      } else if (list === "delivered") {
         const d = deliveredOf(item[1]);
         if (d) out.delivered.push(d);
       } else {
@@ -242,6 +264,12 @@ export function parseCard(text: string): CardFields | undefined {
     const v = unquote(kv[2]);
     if (key === "next" && /^none\.?$/i.test(v)) {
       out.nextNone = true;
+      continue;
+    }
+    if (key === "options") {
+      list = "options";
+      // one line: `options: Yes: plan it · No: park it`
+      for (const part of v ? v.split(/\s+·\s+/) : []) if (unquote(part)) (out.options ??= []).push(unquote(part));
       continue;
     }
     if (key === "delivered" || key === "next") {
@@ -340,6 +368,18 @@ export function plainProblem(label: string, text: string, max: number): string |
   return undefined;
 }
 
+/**
+ * the source line quotes the owner, so his own words may hold a slash or a bracket: only its length, row codes and
+ * file paths outside links count (a link to the note or card carries the code, never the words).
+ */
+export function sourceProblem(text: string): string | undefined {
+  const bare = outsideLinks(text);
+  if (words(text) > 40) return "the source is longer than 40 words";
+  if (ROW_CODE.test(bare)) return "the source names a row code: link the card instead";
+  if (FILE_PATH.test(bare)) return "the source names a file";
+  return undefined;
+}
+
 export interface GateInput {
   card?: CardFields;
   /** The project's plain name and the goal sentence (the card's top line). */
@@ -377,12 +417,42 @@ export function gateProblems(g: GateInput): string[] {
   c.next.forEach((n, i) => add(plainProblem(`next step ${i + 1}`, n.title, 20)));
   // the label is the link's own words (it may name the page, memory.dev/connect)
   if (c.evidenceLabel && c.evidence) add(plainProblem("the evidence label", c.evidence, 6));
+  // the card opens with where it came from and ends with the one decision asked: a card with neither is held back
+  if (!c.source?.trim() && !c.from?.name) out.push("the source is missing: say where it came from, his words with their date and a link, or who raised it and why");
+  if (c.source?.trim()) add(sourceProblem(c.source));
+  if (!c.decision?.trim()) out.push("the decision is missing: name the one decision asked of him, in plain words, with the team's recommendation");
+  else {
+    add(plainProblem("the decision", c.decision, 30));
+    // E948-S85: a decision that sends him to act somewhere off the card links that place (his voice note of 12 Nov: "I need to see a link")
+    add(decisionLinkProblem(c.decision));
+  }
+  // E948-S69: a decision card's buttons each name what happens next, `<label>: <next step>`
+  if (c.options) {
+    if (c.options.length < 2 || c.options.length > 4) out.push(`it has ${c.options.length} options, a decision needs 2 to 4`);
+    c.options.forEach((o, i) => {
+      if (!/^[^:]{1,30}:\s*\S/.test(o)) out.push(`option ${i + 1} does not name its next step: write it as <answer>: <what happens next>, like Yes: plan it`);
+      else add(plainProblem(`option ${i + 1}`, o, 10));
+    });
+  }
   // a card never hands the owner terminal lines to copy
-  const lines = copyPasteInText([c.title, c.goal, ...c.delivered.map((d) => d.text), c.after ?? "", ...c.next.map((n) => n.title)].join("\n"));
+  const lines = copyPasteInText([c.title, c.goal, ...c.delivered.map((d) => d.text), c.after ?? "", ...c.next.map((n) => n.title), c.source ?? "", c.decision ?? ""].join("\n"));
   if (lines.length) out.push(`it gives ${ownerName()} a terminal line to copy (${lines[0].line}): make it a Mac-agent ticket or do it yourself`);
   if (!c.screenshot) out.push("the screenshot is missing");
   else if (g.screenshotFound === false) out.push(`the screenshot ${c.screenshot} is not in the repo`);
   return out;
+}
+
+/** A sentence of the decision that starts by sending him to act off the card: sign in, install, upload, scan ("Open …" is the card's own evidence link). */
+const ACT_ELSEWHERE = /(?:^|[.!?]\s+)(?:please\s+)?(sign in|sign up|log ?in|install|download|upload|scan|fill in)\b/i;
+
+/**
+ * E948-S85: the decision asks him to act somewhere other than the card's own buttons and evidence link, with no link to
+ * that place. Undefined when it links it (a web address or a bare site like x.com), or asks nothing off the card.
+ */
+export function decisionLinkProblem(decision: string): string | undefined {
+  const m = ACT_ELSEWHERE.exec(decision);
+  if (!m || hasPlaceLink(decision)) return undefined;
+  return `the decision asks ${ownerName()} to ${m[1].toLowerCase()} somewhere but does not link the place: put its link in the decision, or ask only what he answers on the card`;
 }
 
 /** Why the evidence cannot be judged: none, GitHub only, or a dry run (L-47). Undefined when it is a live, non-GitHub URL. */

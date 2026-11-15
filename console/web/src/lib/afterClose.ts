@@ -54,3 +54,6 @@ export const resetClosedNote = () => {
   note = undefined;
   emit();
 };
+
+/** Tests only: the note showing now. */
+export const closedNote = () => note;

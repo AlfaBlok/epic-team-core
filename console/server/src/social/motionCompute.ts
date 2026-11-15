@@ -1,5 +1,5 @@
 import { CODE_KEY, SITE_PAGES, type SiteCount, type SiteWhere } from "../siteKpisCompute.js";
-import { remoteSourceId, remoteSourceNames, remoteSourceOf, remoteSourceText, remoteValue, type RemoteReading, type RemoteSourceId } from "./remoteCounts.js";
+import { remoteSourceId, remoteSourceNames, remoteSourceOf, remoteSourceText, remoteValue, remoteWords, type RemoteReading, type RemoteSourceId } from "./remoteCounts.js";
 import { dayOf, isLive, platformOf, type SnapshotRow } from "./kpisCompute.js";
 
 /**
@@ -353,6 +353,8 @@ export interface TargetView extends CampaignTarget {
   sourceId?: SourceId | "unknown";
   /** when a remote number was read, or that its endpoint is not answering. */
   sourceNote?: string;
+  /** the same source's other numbers shown as their own line beside this target (applications beside sign-ups). */
+  alongside?: { label: string; source: RemoteSourceId; now: number | null }[];
 }
 export interface CatalogRow extends MetricDef {
   now: number | null;
@@ -414,10 +416,23 @@ export function computeMotion(inp: MetricInputs, spines: { rel: string; text: st
   // source names the page where its numbers live.
   const whereOf = (def: MetricDef, sourceId: SourceId) => (sourceId === "default" ? def.where : isRemote(sourceId) ? [remoteSourceOf(sourceId)!.def.page] : undefined);
   const note = (sourceId: SourceId) => (isRemote(sourceId) ? { sourceNote: sourceNote(sourceId, inp.remote) } : {});
+  // a number read from a remote field wears that field's words, never the catalog's default ones.
+  const wordsOf = (def: MetricDef, sourceId: SourceId | "unknown") => (isRemote(sourceId) ? remoteWords(sourceId) : undefined) ?? { label: def.label, counts: def.counts };
+  const alongsideOf = (sourceId: SourceId, from: string | null) => {
+    const src = isRemote(sourceId) ? remoteSourceOf(sourceId) : undefined;
+    if (!src) return {};
+    const rows = (src.def.alongside ?? [])
+      .filter((f) => f !== src.field && src.def.fields.includes(f))
+      .map((f) => {
+        const id = `${src.def.name}#${f}` as RemoteSourceId;
+        return { label: remoteWords(id)?.label ?? f, source: id, now: remoteValue(id, remoteReading(id, inp.remote), from) };
+      });
+    return rows.length ? { alongside: rows } : {};
+  };
   const catalog = METRICS.map((m) => {
     const sourceId = srcOf(m.id);
     const source = sourceText(m, sourceId, inp.remote);
-    return { ...m, where: whereOf(m, sourceId), source, sourceId, ...note(sourceId), now: source ? metricValue(m.id, inp, { source: sourceId }) : null };
+    return { ...m, ...wordsOf(m, sourceId), where: whereOf(m, sourceId), source, sourceId, ...note(sourceId), now: source ? metricValue(m.id, inp, { source: sourceId }) : null };
   });
   const targets: TargetView[] = spines
     .map((s) => campaignTarget(s.rel, s.text))
@@ -432,11 +447,12 @@ export function computeMotion(inp: MetricInputs, spines: { rel: string; text: st
       const source = sourceText(def, sourceId, inp.remote);
       return {
         ...t,
-        label: def.label,
+        label: wordsOf(def, sourceId).label,
         where: whereOf(def, sourceId),
         source,
         sourceId,
         ...note(sourceId),
+        ...alongsideOf(sourceId, def.kind === "total" ? t.from : null),
         now: source ? metricValue(def.id, inp, { from: def.kind === "total" ? t.from : null, campaign: def.id === "posts_out" || def.id === "replies_received" ? t.tag : null, source: sourceId }) : null,
       };
     });
@@ -445,7 +461,7 @@ export function computeMotion(inp: MetricInputs, spines: { rel: string; text: st
     const def = metricDef(r.lever)!;
     return {
       ...r,
-      leverLabel: def.label,
+      leverLabel: wordsOf(def, srcOf(r.lever)).label,
       leverNow: srcOf(r.lever) === "none" ? null : metricValue(r.lever, inp, { source: srcOf(r.lever) }),
       moves: set.map((t) => ({ code: t.code, name: t.name, label: t.label!, target: t.target!, now: t.now, by: t.by })),
       files: [...SHARED_READS, ...set.map((t) => t.spine).filter((s, i, a) => a.indexOf(s) === i), ...r.reads],
@@ -481,6 +497,7 @@ export function renderMetricsFile(m: Pick<MotionBody, "catalog" | "targets" | "p
         )
       : ["| none yet |  |  |  |  |  |  |"]),
     "",
+    ...alongsideLines(m.targets),
     "## Catalog",
     "",
     "| Id | Metric | One unit is | Kind | Now (all time or latest) | Source |",
@@ -501,6 +518,14 @@ export function renderMetricsFile(m: Pick<MotionBody, "catalog" | "targets" | "p
     "",
   ];
   return L.join("\n");
+}
+
+/** each target's alongside numbers, one line each under the Targets table (none: no lines). */
+function alongsideLines(targets: TargetView[]): string[] {
+  const L = targets.flatMap((t) =>
+    (t.metric ? t.alongside ?? [] : []).map((a) => `- Beside ${cell(`${t.code} ${t.name}`)}: ${cell(a.label)} ${a.now ?? "not read yet"} (source ${a.source}, ${t.from ? `counted from ${t.from}` : "all time"})`),
+  );
+  return L.length ? [...L, ""] : [];
 }
 
 /**

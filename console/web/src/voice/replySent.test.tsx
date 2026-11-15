@@ -124,7 +124,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
   it("Answer on a question: Send note sends the spoken answer at once, with what was typed, the note's id and recording", async () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_1", itemId: "wj_1", kind: "answer", text: "x", delivery: "sent", createdAt: new Date().toISOString() });
     const { container } = wrap(<WaitingCard item={ask()} />);
-    fireEvent.change(await screen.findByLabelText("Your answer"), { target: { value: "Yes:" } });
+    fireEvent.change(await screen.findByLabelText("Feedback"), { target: { value: "Yes:" } });
     await speak(container);
     await waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: `Yes: ship it after the tests pass (voice note vn_ab12cd34, audio ${AUDIO})`, milestoneId: "ms_1", wake: true }));
     // The note went up as a card answer: words back for the card, nothing posted to the chat.
@@ -165,7 +165,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
     await speak(container);
     expect((await screen.findByTestId("answer-voice-out")).textContent).toBe("Nothing was heard, so nothing was sent.");
     expect(spy).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "pino" } });
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "pino" } });
     fireEvent.click(screen.getByTestId("answer"));
     await waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ text: "pino" })));
     unmount();
@@ -201,7 +201,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
         </MemoryRouter>
       </NoteProvider>,
     );
-    fireEvent.change(await screen.findByLabelText("Your answer"), { target: { value: "Use pino." } });
+    fireEvent.change(await screen.findByLabelText("Feedback"), { target: { value: "Use pino." } });
     fireEvent.click(await screen.findByTestId("answer-voice-button"));
     await screen.findByTestId("answer-voice-timer");
     expect(screen.queryByTestId("note-widget")).toBeNull();
@@ -217,9 +217,9 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
     await waitFor(() => expect(screen.getByTestId("note-widget").textContent).toContain("Sent to Which logger should we use?"));
   });
 
-  it("the microphone is a 44 px target on the phone", async () => {
+  it("the microphone is a 44 px target on the phone (E948-S60: 44 px and labelled on every screen)", async () => {
     wrap(<WaitingCard item={ask({ id: "wj_4" })} />);
-    expect((await screen.findByTestId("answer-voice-button")).className).toMatch(/max-sm:size-11/);
+    expect((await screen.findByTestId("answer-voice-button")).className).toMatch(/\bh-11\b/);
   });
 });
 
@@ -266,8 +266,8 @@ describe("T72-S8 a voice note on a review card", () => {
     );
   };
 
-  // Not yet (was ↻ Changes wanted) opens the note box; the spoken words' Send starts the new round
-  it("Not yet: the spoken words' Send starts the new round with them and the note", async () => {
+  // Give feedback (was Not yet, ↻ Changes wanted) opens the note box; the spoken words' Send starts the new round
+  it("Give feedback: the spoken words' Send starts the new round with them and the note", async () => {
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");

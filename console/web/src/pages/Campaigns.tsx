@@ -17,14 +17,14 @@ import { useProject } from "@/lib/project";
 import { socialHref } from "@/pages/social/nav";
 import { nextFocusPosition } from "@/lib/bigRoots";
 import { ownerName } from "@/lib/identity";
+import { CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH } from "@/lib/routePaths";
+export { CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH };
 
 /**
  * the Campaigns list (one card per world repo with `Pack: social`) and the New campaign wizard
  * (pick a checkout → short brief → preview → create). The server does the work (hosted/console/server/src/social/campaigns.ts):
  * milestone, `pack init social`, brief through the S6 brief action, commits as the owner, persona team from templates.
  */
-export const CAMPAIGNS_PATH = "campaigns";
-export const NEW_CAMPAIGN_PATH = "campaigns/new";
 
 /** "2026-10-28 18:00" → "Wed 28 Oct 18:00" (UTC as written). */
 function slotLabel(slot: string) {

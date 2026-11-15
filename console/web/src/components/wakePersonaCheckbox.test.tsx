@@ -53,8 +53,7 @@ describe("Wake <persona> checkbox", () => {
     wrap(<WaitingCard item={item()} />);
     expect(screen.queryByTestId("wake-toggle")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
-    fireEvent.click(screen.getByRole("radio", { name: "two" }));
-    fireEvent.click(screen.getByTestId("send-pick"));
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "two", milestoneId: "ms_1", wake: true }));
   });
 

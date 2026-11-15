@@ -1,4 +1,6 @@
+import type { PageNote } from "./pageNotes.js";
 import fs from "node:fs";
+import type { CardQc } from "./qc.js";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { field, stripInline } from "../adapters/markdown.js";
@@ -29,6 +31,8 @@ export interface CardFace {
   evidence: { url: string; label: string };
   /** Repo-relative path of the screenshot (served by GET /api/review-items/<id>/screenshot). */
   screenshot?: string;
+  /** E948-S62 the quality check: his words beside the result point by point, the live screens at 390 and 1280 (GET …/screenshot?width=390). */
+  qc?: CardQc;
   tree: TreeLine[];
   /** What the team does next once it is marked complete (sub-line of the button). */
   after?: string;
@@ -39,6 +43,14 @@ export interface CardFace {
   openInGoal: { ref: string; name?: string }[];
   /** the persona that sent the card on its own, and where it lives. */
   from?: CardFrom;
+  /** where it came from (his words with their date and a link, or who raised it and why): right under the title (vn_e751eeeb). */
+  source?: string;
+  /** the one decision asked of the owner, with the team's recommendation: the card ends with it. */
+  decision?: string;
+  /** notes he left in the page's own feedback box (typed or by voice), newest last: he sees they landed. */
+  pageNotes?: Omit<PageNote, "refs">[];
+  /** E948-S69 a decision card's own buttons, `<label>: <what happens next>` (the card's `options:`). */
+  options?: string[];
 }
 
 /** a goal a follow-up names (`in:` or a spine file), found in the repo's docs/spines. */

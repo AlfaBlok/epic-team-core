@@ -98,7 +98,7 @@ describe("campaign page", () => {
     const own = vi.spyOn(api, "getMilestoneChat").mockResolvedValue({ available: true, threadId: "th_m", session: 1, status: "idle", working: false, sending: 0, hasEarlier: false, messages: [] } as never);
     const world = vi.spyOn(api, "getWorldDeskChat");
     page("/milestones/ms-memo?tab=chat");
-    await waitFor(() => expect(own).toHaveBeenCalledWith("ms-memo", { limit: 30 }));
+    await waitFor(() => expect(own).toHaveBeenCalledWith("ms-memo", { limit: 20 }));
     expect(world).not.toHaveBeenCalled();
   });
 

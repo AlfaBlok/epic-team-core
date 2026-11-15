@@ -44,12 +44,21 @@ export interface ChatUnreadDeps {
   staleMs?: number;
   /** Runs the background pass outside the request that started it (the app: unscoped, every world's chats). */
   detach?: <T>(fn: () => T) => T;
+  /** how long marking a chat seen waits for a fresh read before it marks from the last snapshot (default SEEN_WAIT_MS). */
+  seenWaitMs?: number;
 }
+
+/**
+ * marking a chat seen waits at most this long for T3; past it the mark uses the snapshot it has and the read finishes in the
+ * background. Was unbounded: on 2026-11-13 his chat opens held this request 30 to 114 s over the worker server's tunnel.
+ */
+export const SEEN_WAIT_MS = 400;
 
 export function createChatUnread(d: ChatUnreadDeps) {
   migrateChatSeen(d.db);
   const now = d.now ?? Date.now;
   const staleMs = d.staleMs ?? 20_000;
+  const seenWaitMs = d.seenWaitMs ?? SEEN_WAIT_MS;
   const snaps = new Map<string, ReplyTimes>();
   let passAt: number | undefined;
   let passing: Promise<void> | undefined;
@@ -101,10 +110,11 @@ export function createChatUnread(d: ChatUnreadDeps) {
     },
     /**
      * the owner opened the chat: everything there now is seen. The mark is the later of now and the newest reply known (so a
-     * reply stamped a moment ahead of this clock is not counted again); the snapshot is read again right away.
+     * reply stamped a moment ahead of this clock is not counted again); the snapshot is read again, waited on at most seenWaitMs.
      */
     async markSeen(key: string): Promise<{ key: string; seenAt: string; unread: number }> {
-      await read(key);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([read(key), new Promise<void>((r) => (timer = setTimeout(r, seenWaitMs)))]).finally(() => clearTimeout(timer));
       const t = snaps.get(key);
       const newest = Math.max(now(), ...(t?.replies ?? []).map((at) => Date.parse(at)).filter((x) => !isNaN(x)));
       const seenAt = new Date(newest).toISOString();

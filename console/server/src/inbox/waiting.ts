@@ -1,4 +1,6 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
+import { createDryRunReader, dryRunProblem } from "./askDryRun.js";
+import { createAskLogReader, repeatProblem, sizeProblem, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "node:child_process";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
 import { createHash } from "node:crypto";
@@ -8,14 +10,18 @@ import { inside, readDoc } from "../adapters/doc.js";
 import { proseLines, stripInline } from "../adapters/markdown.js";
 import { listRepos, resolveRepo } from "../adapters/repos.js";
 import { headOf } from "../adapters/gitHead.js";
-import { holdState, isClosed, namesJordi, statusWordOf, type AnsweredAsk, type Tree, type TreeNode } from "../adapters/tree.js";
+import { firstStatusWord, holdState, isClosed, namesJordi, statusWordOf, type AnsweredAsk, type Tree, type TreeNode } from "../adapters/tree.js";
 import type { Milestone, Store } from "../store.js";
 import { isTeamMilestone, TEAM_LABEL } from "../team/teamState.js";
 import type { Asker } from "./asker.js";
 import { scanTree, refKey, unblockRefs, waitingOnLineRefs, waitingOnTextLine, type AskReference, type RowAt } from "./refs.js";
 import { citesRows, jordiLine, laterStep, openForJordi, rowHasAsk, rowLabel, rowTitle } from "./freeText.js";
 import { DEFAULT_OWNER, ownerPatterns, type OwnerInfo } from "../tenancy/owner.js";
+import { decideChoices } from "./decideChoices.js";
 import { advisories, snoozedNow, citedAskCodes, isJordis, missingFields, rowMatches, stripJordi, type AskKind, type LocatedAsk, type SecretTarget } from "./asks.js";
+
+/** an epic Status that is past the owner's ready stamp: its first word, EpicSpine vocabulary. */
+const STAMPED = new Set(["ready", "active", "blocked", "deferred", "review", "done", "superseded"]);
 
 /** one thing blocked on the owner, from a Needs the owner row or a spine (red node, `Waiting on:` line, `[ask: …]`). */
 export interface WaitingItem {
@@ -112,6 +118,8 @@ export interface WaitingItem {
   detail?: string;
   proposedAction?: string;
   options?: string[];
+  /** E948-S69: the options were built from the question (the ask listed none): a yes or no, or its either-or. */
+  optionsDerived?: true;
   recommendation?: string;
   /** plain-words sections of an ask; the card shows them labelled, technical fields under Details. */
   contextText?: string;
@@ -539,6 +547,20 @@ export async function waitingForMilestone(d: WaitingDeps, m: Milestone): Promise
   return (await waitingAndHeld(d, m)).items;
 }
 
+/** E996-S43: the dry-run verdicts of the home repo per repos root (inbox/askDryRun.ts), read again when they change. */
+const dryRunReaders = new Map<string, ReturnType<typeof createDryRunReader>>();
+function dryRunReader(reposRoot: string) {
+  if (!dryRunReaders.has(reposRoot)) dryRunReaders.set(reposRoot, createDryRunReader({ reposRoot }));
+  return dryRunReaders.get(reposRoot)!;
+}
+const dryRunsOf = (reposRoot: string) => dryRunReader(reposRoot)();
+/** E996-S48: the home repo's asks log folded to the asks the owner answered (inbox/askRepeat.ts), read again when it changes. */
+const askLogReaders = new Map<string, ReturnType<typeof createAskLogReader>>();
+function askLogReader(reposRoot: string) {
+  if (!askLogReaders.has(reposRoot)) askLogReaders.set(reposRoot, createAskLogReader({ reposRoot }));
+  return askLogReaders.get(reposRoot)!;
+}
+
 /** the milestone's items for the owner, and the open asks the ask gate held back from him (inbox/askGate.ts). */
 export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ items: WaitingItem[]; held: HeldAsk[] }> {
   const out: WaitingItem[] = [];
@@ -568,7 +590,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
     }
     // the spine items (steps 1-3) depend only on the tree (its files), the owner, the blame and HEAD: reused
     // while the memoized tree object is the same, so a 30 s poll does not rescan and re-blame every spine.
-    const memoKey = tree ? JSON.stringify([m.id, m.title, m.path, owner, headOf(repo.path) ?? null]) : "";
+    const memoKey = tree ? JSON.stringify([m.id, m.title, m.path, owner, headOf(repo.path) ?? null, dryRunReader(d.reposRoot).stamp(), askLogReader(d.reposRoot).stamp()]) : "";
     const hit = tree ? spineItemsMemo.get(tree)?.get(memoKey) : undefined;
     if (tree && hit && hit.blame === blame && hit.firstAdded === firstAdded) {
       worldOwner = tree.owner;
@@ -618,6 +640,15 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
       // 1. Human asks (skill contract): spines.py `waiting_on` or the `## Waiting on` lines, collected by buildTree.
       const askFiles = new Set<string>();
       const askRows = new Set<TreeNode>();
+      // E996-S48: what the owner already answered (this tree's `[answered …]` lines, his own, and the asks log), for rule 9.
+      const answered: PriorAnswer[] = [
+        ...Object.entries(tree.asks ?? {}).flatMap(([rel, asks]) =>
+          asks
+            .filter((a) => a.state === "answered" && !a.feedback && !a.supersededBy && isJordis(a, who) && a.since)
+            .map((a) => ({ code: a.code, repo: repo.name, row: a.row, question: a.question, answer: a.answer, on: a.since!, at: `${repo.name}:${rel}:${a.line ?? ""}` })),
+        ),
+        ...askLogReader(d.reposRoot)(),
+      ];
       for (const [rel, asks] of Object.entries(tree.asks ?? {})) {
         const v = nodeByPath.get(rel);
         if (!v || isClosed(v.node)) continue;
@@ -631,7 +662,14 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           const row = a.row ? visits.find((x) => x.rowFile === rel && rowMatches(a.row, x.node)) : undefined;
           if (row && a.state === "open") askRows.add(row.node);
           // an ask that fails the gate never reaches the owner; the Delivery Manager's wake lists it.
-          const gate = !fyi && a.state === "open" && a.doneAt === undefined ? askGateProblem(a) : undefined;
+          // E996-S43: and one a fresh agent could not do from the card alone (or a new one not yet dry-run) waits too.
+          const gate =
+            !fyi && a.state === "open" && a.doneAt === undefined
+              ? (askGateProblem(a) ??
+                repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ??
+                sizeProblem(a) ??
+                dryRunProblem(a.line !== undefined ? linesOf(rel)?.[a.line] : undefined, a.since, dryRunsOf(d.reposRoot)))
+              : undefined;
           if (gate) {
             held.push({ ...(a.code ? { code: a.code } : {}), repo: repo.name, path: rel, ...(a.line !== undefined ? { line: a.line } : {}), question: a.question, reason: gate });
             continue;
@@ -639,6 +677,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           const missing = missingFields(a);
           const rowLinkAt = a.row ? link(rel, (row ? rowLineOf(linesOf(rel) ?? [], row.node) : rowLine(linesOf(rel) ?? [], a.row)), `row ${a.row}`)[0] : undefined;
           const stepsLink = a.stepsLink ? contextLink({ ...a, context: a.stepsLink, contextLabel: "runbook" })[0] : undefined;
+          const choices = decideChoices(a);
           const noteMark = a.state === "open" && a.code ? activeMark(marksOf(rel), a.code, a.question) : undefined;
           out.push({
             id: askItemId(repo.name, rel, a.row, a.question),
@@ -647,7 +686,9 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             state: a.doneAt !== undefined ? "done" : a.state,
             ...(a.doneAt !== undefined ? { doneAt: a.doneAt } : {}),
             ...(a.state === "open" && a.doneAt === undefined && snoozedNow(a.snoozedUntil) ? { snoozedUntil: a.snoozedUntil } : {}),
-            ...(a.state === "open" && a.doneAt === undefined && a.macAgent ? { macAgent: true as const } : {}),
+            // E996-S29: a key ask is answered by pasting into its card's box in the inbox, so it is never moved off the list to the
+            // Mac list (T9-A10, labelled needs Mac agent, sat folded under Needs Mac agent and the owner never saw its box).
+            ...(a.state === "open" && a.doneAt === undefined && a.macAgent && !a.secret ? { macAgent: true as const } : {}),
             ...(a.improvement ? { improvement: a.improvement } : {}),
             repo: repo.name,
             ...(a.code ? { code: a.code } : {}),
@@ -671,14 +712,16 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             title: row ? `${row.node.id === "draft" ? "" : `${row.node.id} `}${stripInline(row.node.title)}`.trim() : stripInline(v.node.title),
             ask: a.ask,
             question: a.question,
-            ...(a.options.length ? { options: a.options } : {}),
-            ...(a.recommend ? { recommendation: a.recommend } : {}),
+            // E948-S69: a Decide card always has its choices: the listed options, else buttons built from the question.
+            ...(choices.options.length ? { options: choices.options } : {}),
+            ...(choices.derived && choices.options.length ? { optionsDerived: true as const } : {}),
+            ...(choices.recommend ?? a.recommend ? { recommendation: choices.recommend ?? a.recommend! } : {}),
             ...(a.contextText ? { contextText: a.contextText } : {}),
             ...(a.impact ? { impact: a.impact } : {}),
             ...(a.risk ? { risk: a.risk } : {}),
             ...(a.why ? { whyYou: a.why } : {}),
             // a provide ask naming where the key goes gets a private paste box on its card.
-            ...(a.secret && a.ask === "provide" ? { secret: a.secret } : {}),
+            ...(a.secret ? { secret: a.secret } : {}),
             contextLinks: [...contextLink(a), ...link(rel, a.line, `${rel}${a.line !== undefined ? `:${a.line + 1}` : ""} · Waiting on`)],
             owner: ownerAt(rel),
             // an open ask's date-only `since` gets its hour from git (the commit that added the coded line,
@@ -767,7 +810,11 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         // Planning epic is one Mark ready item (on an epic that is not Planning the stamp is done: nothing to do).
         const jl = jordiLine(w, who);
         if (!jl.now.length && !jl.later.length) continue;
-        const planning = holdState({ ...v.node, kind: "spine" }) === "planning";
+        // the spine's own `Status:` line wins over a missing run_state. An epic whose Status says ready, active,
+        // blocked, deferred or finished was stamped already: its stamp card is stale (its button could only fail).
+        // A spine with two Status lines (Current State and an Execution Cursor) leaves spines.py with none: "planning".
+        const own = firstStatusWord(doc?.statusLine);
+        const planning = holdState({ ...v.node, kind: "spine" }) === "planning" && !(own && STAMPED.has(own));
         if (jl.stamp && !planning && !jl.later.length) continue;
         const line = waitingOnTextLine(linesOf(rel) ?? []);
         const epic = /^\s*([A-Za-z][\w]*-\d+)\b/.exec(stripInline(doc?.title ?? v.node.title))?.[1] ?? (v.node.code && v.node.code !== m.id ? v.node.code : stripInline(doc?.title ?? v.node.title));
@@ -848,6 +895,17 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           since: rowFile && v.rowFile ? await sinceAt(rowFile, line) : undefined,
           decidable: false,
         });
+      }
+      // E996-S43: a free-text item (a Waiting on line, a row on the owner) is a card he sees too: one a fresh agent could
+      // not do from the card alone is held like an ask (only on a failed dry run: these lines change every wake).
+      const verdicts = dryRunsOf(d.reposRoot);
+      for (let i = out.length - 1; i >= 0; i--) {
+        const it = out[i]!;
+        if (it.source !== "heuristic" || it.gate === "future" || it.line === undefined || !it.path) continue;
+        const why = dryRunProblem(linesOf(it.path)?.[it.line], null, verdicts);
+        if (!why) continue;
+        held.push({ repo: repo.name, path: it.path, line: it.line, question: it.question, reason: why });
+        out.splice(i, 1);
       }
       const byKey = spineItemsMemo.get(tree) ?? new Map();
       byKey.set(memoKey, { blame, firstAdded, items: out.map((it) => ({ ...it })), settled: [...settledCodes], held: held.map((h) => ({ ...h })) });

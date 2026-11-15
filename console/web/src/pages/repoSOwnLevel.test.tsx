@@ -48,12 +48,16 @@ describe("the repo's own level is not a campaign", () => {
   });
 
   it("the social skin's sidebar leaves PLAN-0 out of Other campaigns; the console skin still lists it", async () => {
+    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
+    localStorage.setItem("sidebar.more.open", "1");
     const mk = (title: string, bigRoot?: number) => api.createMilestone({ title, repo: "acme-ai/social", path: "docs/spines/root.md", owner: "Sam", ...(bigRoot ? { bigRoot } : {}) });
     const w37: Milestone = await mk("Reddit awareness week 37", 1);
     const epic0: Milestone = await mk("PLAN-0: Memo social presence");
     vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue({ tenant: { id: "social" } } as never);
     vi.spyOn(api, "listCampaigns").mockResolvedValue({ tenantId: "social", campaigns: [WEEK37(w37.id), card({ title: epic0.title, milestoneId: epic0.id })] });
     const total = (await api.listMilestones()).filter((m) => !m.bigRoot).length;
+    // the social menu lists real campaigns only: here week 37 and another campaign of the same repo, a job.
+    const job = await mk("Launch post job");
 
     render(
       <SkinProvider skin={SKINS.social}>
@@ -62,8 +66,9 @@ describe("the repo's own level is not a campaign", () => {
         </MemoryRouter>
       </SkinProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^Other campaigns \\(${total - 1}\\)`)));
+    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(/^Other campaigns \(1\)/));
     fireEvent.click(screen.getByTestId("other-milestones-toggle"));
+    expect(screen.getByText(job.title)).toBeTruthy();
     expect(screen.queryByText("PLAN-0: Memo social presence")).toBeNull();
     expect(screen.getAllByText("Reddit awareness week 37").length).toBeGreaterThan(0);
     cleanup();
@@ -73,7 +78,7 @@ describe("the repo's own level is not a campaign", () => {
         <SidebarNav />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^Other projects \\(${total}\\)`)));
+    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^Other projects \\(${total + 1}\\)`)));
   });
 });
 
@@ -115,7 +120,7 @@ describe("Draft it on the all-campaigns board", () => {
 
 describe("a retired campaign's page", () => {
   it("offers Restore, not Retire", async () => {
-    const m = await api.createMilestone({ title: "Epic campaign: EpicSpine, EpicTeam, SocialApp", repo: "Acme/brand-campaign", path: "docs/spines/root.md", owner: "Sam" });
+    const m = await api.createMilestone({ title: "Epic campaign: EpicSpine, the console skin, SocialApp", repo: "Acme/brand-campaign", path: "docs/spines/root.md", owner: "Sam" });
     vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue({ tenant: { id: "social" } } as never);
     vi.spyOn(api, "listCampaigns").mockResolvedValue({ tenantId: "social", campaigns: [card({ repo: "brand-campaign", title: m.title, milestoneId: m.id, retired: true })] });
     vi.spyOn(api, "getSocial").mockRejectedValue(new Error("not in this test"));

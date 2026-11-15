@@ -20,6 +20,40 @@ export type WorldWakeHold = (world: string | undefined) => string | undefined;
 /** The code a held wake answers with (409). */
 export const WORLD_WAKE_HOLD_CODE = "world_needs_box";
 
+/**
+ * a world whose wakes run on its own job servers, never on a shared host. The cycle
+ * hands such a world's wake to `start` instead of a T3 thread; the world gate is open for exactly these worlds.
+ * Hosted: cycle/jobRoute.ts (a world on CONSOLE_JOB_SERVER_WORLDS whose jobs are on: a Stripe payment or a coupon).
+ */
+export interface JobRoute {
+  /** This world's wakes run on its own job servers now (listed, jobs on). */
+  handles(world: string | undefined): boolean;
+  /** The console as the job's agent reaches it: the agent gateway through the job's ssh tunnel. */
+  base: string;
+  /** Hand one wake to a job server of the world; resolves when the job ended (never throws). */
+  start(i: JobStart): Promise<JobEnd>;
+}
+export interface JobStart {
+  runId: string;
+  world: string;
+  assignmentId: string;
+  personaId: string;
+  model: string;
+  /** The wake stub the job's agent runs (its curls read the per-job token from the job's memory). */
+  stub: string;
+}
+export interface JobEnd {
+  ok: boolean;
+  /** ok | vault | timeout | failed | off (provision.py job-report's words) */
+  result: string;
+  server?: string;
+  detail?: string;
+}
+
+/** The world gate with the job worlds let through (their wakes never reach a shared host). */
+export const openForJobs = (hold: WorldWakeHold, route: JobRoute | undefined): WorldWakeHold =>
+  route ? (world) => (route.handles(world) ? undefined : hold(world)) : hold;
+
 export interface HostedHooks {
   /** The wake / chat seed text of a world's persona: its curls carry the world token (hosted: tenancy/agentAuth.ts withWorldAuth). */
   worldPrompt(text: string, w: { tenant: string; personaId: string; consoleUrl?: string }): string;
@@ -29,6 +63,8 @@ export interface HostedHooks {
   worldWakeGate(env?: NodeJS.ProcessEnv): WorldWakeHold;
   /** Its state for /api/health (hosted: cycle/worldGate.ts worldWakeGateState). */
   worldWakeGateState(env?: NodeJS.ProcessEnv): { on: boolean; sharedHostWorlds: string[] };
+  /** The job servers' route for worlds of model A (hosted: cycle/jobRoute.ts createJobRoute); none in the one-team core. */
+  jobRoute(db: DB): JobRoute | undefined;
   /** Where a pasted key is stored (hosted: inbox/secretPut.ts, secrets/worlds.ts, secrets/worldStore.ts). */
   keys: KeyHooks;
   /** Live counts read from our sites for the red line's band (hosted: social/remoteCounts.ts). */
@@ -110,6 +146,7 @@ const ONE_TEAM: HostedHooks = {
   worldCurls: (text) => text,
   worldWakeGate: () => () => undefined,
   worldWakeGateState: () => ({ on: false, sharedHostWorlds: [] }),
+  jobRoute: () => undefined,
   keys: {
     runner: () => async () => ({ ok: false, err: NO_KEY_STORE }),
     putWithFallback: async (put, i) => {

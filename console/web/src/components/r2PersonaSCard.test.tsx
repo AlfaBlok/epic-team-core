@@ -74,7 +74,8 @@ describe("T79-S1 r2 a persona's card with switches", () => {
     const c = await screen.findByTestId("review-card");
     // the From band sits under More, opened by the heading; what it says to him is the heading and the body
     expect(within(c).queryByTestId("review-from")).toBeNull();
-    expect(within(c).getByTestId("review-title").textContent).toBe("Gap finder found 2 things you asked for more than once that are not…");
+    // the computer's short heading (a phone shows the whole title)
+    expect(within(c).getByTestId("review-title").querySelector('[data-heading="computer"]')!.textContent).toBe("Gap finder found 2 things you asked for more than once that are not…");
     fireEvent.click(within(c).getByTestId("review-title"));
     const from = within(c).getByTestId("review-from");
     expect(from.textContent).toContain("From the Gap finder");
@@ -98,13 +99,14 @@ describe("T79-S1 r2 a persona's card with switches", () => {
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toContain('You said "I have been asking for this URL" 8 Nov');
     expect(items[0].textContent).toContain("Becomes a task in: We want you to see how your words reach the next round");
-    // one short "Send my choices"; what it does (the on and off counts) is its title
+    // E979-G20261113 iteration 2 (vn_78c963b6): "Start 2", and "Start 1" once one is switched off; the details are its title
     const send = within(c).getByTestId("review-complete");
-    expect(send.textContent).toBe("Send my choices");
+    expect(send.textContent).toBe("Start 2");
     expect(send.getAttribute("title")).toBe("The 2 you switched on become tasks in their goals, and the team starts them.");
     fireEvent.click(within(items[1]).getByTestId("review-switch"));
     expect(within(items[1]).getByTestId("review-switch").getAttribute("aria-checked")).toBe("false");
     fireEvent.change(within(items[1]).getByTestId("review-switch-why"), { target: { value: "We count them on the Pipeline already" } });
+    expect(within(c).getByTestId("review-complete").textContent).toBe("Start 1");
     expect(within(c).getByTestId("review-complete").getAttribute("title")).toBe(
       "The one you switched on becomes a task in its goal, and the team starts it. The one switched off is dropped with your reason and not suggested again.",
     );

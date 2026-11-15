@@ -77,7 +77,7 @@ const put = (dir: string, rel: string, text: string) => {
   fs.writeFileSync(path.join(dir, rel), text);
 };
 const A2 = "- [ask T9-A2: approve @Sam since 2026-10-20 row T5] Approve the two mockups? — recommend: yes — context: notes.md";
-const A3 = "- [ask T9-A3: provide @Sam since 2026-10-20] Which screen looks wrong? — context: notes.md";
+const A3 = "- [ask T9-A3: provide @Sam since 2026-10-20] Which screen looks wrong? — context: https://app.example/screens";
 const SPINE = `# PLAN-9: Inbox spine
 
 Spine ID: inbox-root

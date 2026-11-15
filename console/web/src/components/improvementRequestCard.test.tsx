@@ -49,7 +49,7 @@ describe("T101-S8 the improvement request card", () => {
     expect(facts).toContain("Done means: epicspine.dev links to the campaign page");
     expect(facts).toContain("On your yes it goes to the EpicTeam desk");
     // it stays an approve card: the Approve button is there
-    expect(screen.getByRole("button", { name: /^Approve/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Yes: go ahead/ })).toBeTruthy();
   });
 
   it("names a world id as that world's desk; an ordinary ask has neither tag nor facts", () => {

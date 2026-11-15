@@ -105,11 +105,11 @@ describe("T18-S12: a do step's Answer box (the T18-A1 card)", () => {
         <WaitingCard item={ask()} />
       </MemoryRouter>,
     );
-    // a do step has Done and Stuck (was Done, Answer, Changes wanted, Decline); Stuck's first press opens the note
-    expect(within(container).queryByTestId("words-box")).toBeNull();
+    // a do step has Done and Stuck (was Done, Answer, Changes wanted, Decline); E948-S60: the note box is always open
+    expect(within(container).getByTestId("card-feedback-box")).toBeTruthy();
     fireEvent.click(await within(container).findByTestId("stuck"));
-    const box = await within(container).findByTestId("words-box");
-    const area = within(box).getByLabelText("Your note");
+    const box = await within(container).findByTestId("card-feedback-box");
+    const area = within(box).getByLabelText("Feedback");
     pasteItem(area);
     await attached(box);
     fireEvent.change(area, { target: { value: "the send button sits lower" } });
@@ -129,7 +129,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_2", ask: "provide", question: "Which screen looks wrong?" })} />
       </MemoryRouter>,
     );
-    const box = await within(container).findByTestId("words-box");
+    const box = await within(container).findByTestId("card-feedback-box");
     // Paste is folded into the paperclip's menu (the box's row keeps the paperclip, the mic and the press)
     const clip = within(box).getByRole("button", { name: "Attach a screenshot or file" });
     expect(clip.className).toMatch(/max-sm:size-11/);
@@ -152,10 +152,10 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_3", ask: "provide" })} />
       </MemoryRouter>,
     );
-    const box = await within(container).findByTestId("words-box");
+    const box = await within(container).findByTestId("card-feedback-box");
     fireEvent.click(within(box).getByRole("button", { name: "Attach a screenshot or file" }));
     fireEvent.click(within(box).getByRole("menuitem", { name: "Paste a screenshot" }));
-    await waitFor(() => expect((within(box).getByLabelText("Your answer") as HTMLTextAreaElement).value).toBe("copied words"));
+    await waitFor(() => expect((within(box).getByLabelText("Feedback") as HTMLTextAreaElement).value).toBe("copied words"));
     cleanup();
     phone("refused");
     const again = render(
@@ -163,7 +163,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_4", ask: "provide" })} />
       </MemoryRouter>,
     );
-    const box2 = await within(again.container).findByTestId("words-box");
+    const box2 = await within(again.container).findByTestId("card-feedback-box");
     fireEvent.click(within(box2).getByRole("button", { name: "Attach a screenshot or file" }));
     fireEvent.click(within(box2).getByRole("menuitem", { name: "Paste a screenshot" }));
     expect((await within(again.container).findByTestId("words-paste-note")).textContent).toMatch(/paperclip/);
@@ -177,7 +177,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_5", ask: "provide" })} />
       </MemoryRouter>,
     );
-    const box = await within(container).findByTestId("words-box");
+    const box = await within(container).findByTestId("card-feedback-box");
     expect(within(box).queryByRole("button", { name: "Paste a screenshot" })).toBeNull();
     // with a mouse the paperclip opens the file dialog at once, no menu
     expect(within(box).getByRole("button", { name: "Attach a screenshot or file" }).getAttribute("aria-haspopup")).toBeNull();

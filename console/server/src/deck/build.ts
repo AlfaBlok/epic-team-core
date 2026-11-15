@@ -284,7 +284,7 @@ export function deckList(
   for (const name of o.lanesOf ?? [homeRepo()]) {
     const repo = book.repos.find((r) => r.name === name);
     if (!repo?.root) continue;
-    for (const e of repo.epics.filter((x) => x.parent === repo.root && (x.state === "moving" || x.state === "stuck"))) add(repo, e, "lane");
+    for (const e of repo.epics.filter((x) => x.parent === repo.root && !x.foldedInto && (x.state === "moving" || x.state === "stuck"))) add(repo, e, "lane");
   }
   return out;
 }

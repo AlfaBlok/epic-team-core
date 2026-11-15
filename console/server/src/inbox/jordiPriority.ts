@@ -13,6 +13,22 @@ import { hooks } from "../plug/hooks.js";
  */
 export type JordiLevel = "high" | "normal" | "low";
 export const PRIORITIES_FILE = "docs/priorities.json";
+/**
+ * One objectives file every agent and the desk read: the owner's objectives, their
+ * order and his red lines live in one file, docs/pursuits.json; docs/priorities.json keeps only the levels.
+ */
+export const OBJECTIVES_FILE = "docs/pursuits.json";
+
+/** the file a checkout's red lines live in: the objectives file when it holds `redLines`, else docs/priorities.json (a world with no pursuits file). */
+export function redLinesFile(dir: string): string {
+  try {
+    const f = JSON.parse(textOf(path.join(dir, OBJECTIVES_FILE)) ?? "{}") as { redLines?: unknown };
+    if (Array.isArray(f.redLines)) return OBJECTIVES_FILE;
+  } catch {
+    // no objectives file here
+  }
+  return PRIORITIES_FILE;
+}
 
 export interface JordiPriority {
   level: JordiLevel;
@@ -349,31 +365,33 @@ function levelLookup(entries: Entry[]): PriorityLookup {
   };
 }
 
-const cache = new Map<string, { mtimeMs: number; entries: Entry[]; redLines: RedLine[] }>();
+const cache = new Map<string, { mtimeMs: number; text: string }>();
 
-function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[] } {
-  const f = path.join(dir, PRIORITIES_FILE);
+/** a file's text, cached by mtime; undefined when it is not there. */
+function textOf(f: string): string | undefined {
   let st: fs.Stats;
   try {
     st = fs.statSync(f);
   } catch {
     cache.delete(f);
-    return { entries: [], redLines: [] };
+    return undefined;
   }
   const hit = cache.get(f);
-  if (hit && hit.mtimeMs === st.mtimeMs) return hit;
-  let entries: Entry[] = [];
-  let redLines: RedLine[] = [];
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.text;
   try {
     const text = fs.readFileSync(f, "utf8");
-    entries = parsePriorities(text, name);
-    redLines = parseRedLines(text, name);
+    cache.set(f, { mtimeMs: st.mtimeMs, text });
+    return text;
   } catch {
-    entries = [];
+    return undefined;
   }
-  const out = { mtimeMs: st.mtimeMs, entries, redLines };
-  cache.set(f, out);
-  return out;
+}
+
+/** a checkout's levels (docs/priorities.json) and red lines (the objectives file when they live there). */
+function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[] } {
+  const levels = textOf(path.join(dir, PRIORITIES_FILE));
+  const lines = textOf(path.join(dir, redLinesFile(dir)));
+  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [] };
 }
 
 /**

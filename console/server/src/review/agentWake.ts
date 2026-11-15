@@ -3,7 +3,7 @@ import type { DB } from "../db.js";
 import type { Store } from "../store.js";
 import { isDm } from "../inbox/waiting.js";
 import type { RelaunchCycle, ReviewItem } from "./review.js";
-import { homeRepo, ownerName } from "../identity.js";
+import { homeRepo, ownerName, workerHost } from "../identity.js";
 
 /**
  * a row in review that is not a card for the owner goes back to the agents: it closes itself (no `confirm: yes`,
@@ -44,6 +44,8 @@ export function agentLine(i: ReviewItem): string {
         ? `needs evidence: ${v.reason}. Put the live thing or an evidence page in its card's \`evidence:\` (never GitHub, never a dry run)`
         : v.kind === "needs-rewriting"
           ? `card needs rewriting: ${(v.problems ?? [v.reason ?? ""]).join("; ")}`
+          : v.kind === "fails-qc"
+            ? `held by the quality check, ${v.reason}: ${(v.problems ?? []).join("; ")}. Fix the result (not the card's words), then run \`python3 scripts/card_qc.py --repo <checkout> --row ${i.ref} --commit\` on ${workerHost()}`
           : i.state === "pending_live"
             ? `its evidence link is being checked${i.liveError ? `: ${i.liveError}` : ""}`
             : v.reason ?? v.kind;

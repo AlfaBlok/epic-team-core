@@ -3,48 +3,72 @@ import { Layout } from "@/components/Layout";
 import { CallProvider, CallWidget } from "@/voice/CallProvider";
 import { NoteProvider, NoteWidget } from "@/voice/NoteProvider";
 import { NewBuild } from "@/components/NewBuild";
-import { TeamPage } from "@/pages/Team";
-import { SettingsPage } from "@/pages/Settings";
 import { SETTINGS_PATH } from "@/lib/settingsPath";
-import { MilestonePage } from "@/pages/Milestone";
-import { PersonasPage } from "@/pages/Personas";
-import { BrowserAuthPage } from "@/pages/BrowserAuth";
-import { SeatsPage, ThreadsPage, TicketsPage } from "@/pages/Lists";
-import { MilestoneNodePage, SpineViewPage } from "@/pages/Node";
-import { SpinesPage } from "@/pages/Spines";
-import { FEEDBACK_PATH, VoiceFeedbackPage } from "@/pages/VoiceFeedback";
-import { TEAM_SKILLS_PATH, TeamSkillsPage } from "@/pages/TeamSkills";
-import { RunsPage } from "@/pages/Runs";
-import { ChatPage } from "@/pages/Chat";
-import { ReportPage } from "@/pages/Report";
-import { YOUR_TEAM_PATH, YourTeamPage } from "@/pages/YourTeam";
-import { CalendarPage } from "@/pages/Calendar";
-import { SetupPage } from "@/pages/Setup";
-import { IDEAS_PATH, IdeasPage } from "@/pages/Ideas";
-import { AllPipelinePage, PipelinePage } from "@/pages/social/Pipeline";
-import { HistoryPage } from "@/pages/social/History";
-import { DirectionsPage } from "@/pages/social/Directions";
-import { ALL_PIPELINE_PATH, socialPath } from "@/pages/social/nav";
-import { CAMPAIGNS_PATH, CampaignsPage, NEW_CAMPAIGN_PATH, NewCampaignPage } from "@/pages/Campaigns";
-import { BRIEF_PATH, BriefPage } from "@/pages/Brief";
-import { DigestPage } from "@/pages/Digest";
-import { BOOK_PATH, BookPage } from "@/pages/Book";
-import { MILESTONE_BOOK_PATH } from "@/pages/MilestoneBook";
+import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
 import { BookIndexRedirect, BookToDeck } from "@/pages/BookRedirect";
 import { DECK_ALL_PATH } from "@/lib/deck";
-import { DECK_INDEX_PATH, DeckIndexPage, EPIC_DECK_PATH, EpicDeckPage } from "@/pages/EpicDeck";
-import { BigRocksPage, ROCKS_PAGE_PATH } from "@/pages/BigRocks";
-import { GOAL_GRAPH_PATH, GoalGraphPage, memoryPagePath } from "@/pages/GoalGraph";
-import { GAP_FINDER_PATH, GapFinderPage } from "@/pages/GapFinder";
-import { LAUNCH_PATH, LaunchBoardPage } from "@/components/launchBoard";
-import { PURSUITS_PATH, PursuitsPage } from "@/components/pursuits";
+import { ALL_PIPELINE_PATH, PRODUCT_PATH, socialPath } from "@/pages/social/nav";
+import { HomePage } from "@/components/homeView";
+import { INBOX_PATH } from "@/components/inboxLine";
+import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/components/pursuits";
+import { SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
 import { Empty } from "@/components/common";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { type ScreenId, type Skin, SkinProvider, skinFromFlag, useRoutes, useSkin, useWords } from "@/lib/skin";
 import { ProjectProvider } from "@/lib/project";
 import { CampaignRedirect } from "@/pages/social/CampaignRedirect";
-import { PRODUCT_PATH, ProductPage } from "@/pages/social/Motion";
 import { HOSTED_ROUTES, type ScreenRoute } from "@/lib/hostedPlug";
+import { lazyPage } from "@/lib/lazyPage";
+
+// Home and the sidebar ship in the first download; every other screen is its own script, fetched the first
+// time it opens (lib/lazyPage.tsx). A cold open was one 1.7 MB script (495 KB zipped) holding every screen.
+const CardInventoryPage = lazyPage(() => import("@/components/cardInventory"), "CardInventoryPage");
+const InboxPage = lazyPage(() => import("@/components/homeView"), "InboxPage");
+const SettingsPage = lazyPage(() => import("@/pages/Settings"), "SettingsPage");
+const MilestonePage = lazyPage(() => import("@/pages/Milestone"), "MilestonePage");
+const PersonasPage = lazyPage(() => import("@/pages/Personas"), "PersonasPage");
+const BrowserAuthPage = lazyPage(() => import("@/pages/BrowserAuth"), "BrowserAuthPage");
+const SeatsPage = lazyPage(() => import("@/pages/Lists"), "SeatsPage");
+const ThreadsPage = lazyPage(() => import("@/pages/Lists"), "ThreadsPage");
+const TicketsPage = lazyPage(() => import("@/pages/Lists"), "TicketsPage");
+const MilestoneNodePage = lazyPage(() => import("@/pages/Node"), "MilestoneNodePage");
+const SpineViewPage = lazyPage(() => import("@/pages/Node"), "SpineViewPage");
+const SpinesPage = lazyPage(() => import("@/pages/Spines"), "SpinesPage");
+const VoiceFeedbackPage = lazyPage(() => import("@/pages/VoiceFeedback"), "VoiceFeedbackPage");
+const TeamSkillsPage = lazyPage(() => import("@/pages/TeamSkills"), "TeamSkillsPage");
+const RunsPage = lazyPage(() => import("@/pages/Runs"), "RunsPage");
+const PriorityModePage = lazyPage(() => import("@/components/priorityShortcut"), "PriorityModePage");
+const ChatPage = lazyPage(() => import("@/pages/Chat"), "ChatPage");
+const ReportPage = lazyPage(() => import("@/pages/Report"), "ReportPage");
+const YourTeamPage = lazyPage(() => import("@/pages/YourTeam"), "YourTeamPage");
+const CalendarPage = lazyPage(() => import("@/pages/Calendar"), "CalendarPage");
+const SetupPage = lazyPage(() => import("@/pages/Setup"), "SetupPage");
+const IdeasPage = lazyPage(() => import("@/pages/Ideas"), "IdeasPage");
+const AllPipelinePage = lazyPage(() => import("@/pages/social/Pipeline"), "AllPipelinePage");
+const PipelinePage = lazyPage(() => import("@/pages/social/Pipeline"), "PipelinePage");
+const HistoryPage = lazyPage(() => import("@/pages/social/History"), "HistoryPage");
+const DirectionsPage = lazyPage(() => import("@/pages/social/Directions"), "DirectionsPage");
+const CampaignsPage = lazyPage(() => import("@/pages/Campaigns"), "CampaignsPage");
+const NewCampaignPage = lazyPage(() => import("@/pages/Campaigns"), "NewCampaignPage");
+const BriefPage = lazyPage(() => import("@/pages/Brief"), "BriefPage");
+const DigestPage = lazyPage(() => import("@/pages/Digest"), "DigestPage");
+const BookPage = lazyPage(() => import("@/pages/Book"), "BookPage");
+const DeckIndexPage = lazyPage(() => import("@/pages/EpicDeck"), "DeckIndexPage");
+const EpicDeckPage = lazyPage(() => import("@/pages/EpicDeck"), "EpicDeckPage");
+const BigRocksPage = lazyPage(() => import("@/pages/BigRocks"), "BigRocksPage");
+const GoalGraphPage = lazyPage(() => import("@/pages/GoalGraph"), "GoalGraphPage");
+const GapFinderPage = lazyPage(() => import("@/pages/GapFinder"), "GapFinderPage");
+const LaunchBoardPage = lazyPage(() => import("@/components/launchBoard"), "LaunchBoardPage");
+const PursuitPage = lazyPage(() => import("@/components/pursuits"), "PursuitPage");
+const PagesIndexPage = lazyPage(() => import("@/components/pagesIndex"), "PagesIndexPage");
+const GoalSetPage = lazyPage(() => import("@/components/goalSets"), "GoalSetPage");
+const GoalSetsPage = lazyPage(() => import("@/components/goalSets"), "GoalSetsPage");
+const PursuitsListPage = lazyPage(() => import("@/components/pursuitsList"), "PursuitsListPage");
+const OneOffsPage = lazyPage(() => import("@/components/oneOffs"), "OneOffsPage");
+const OutcomesPage = lazyPage(() => import("@/components/outcomes"), "OutcomesPage");
+const VoiceNotesPage = lazyPage(() => import("@/components/voiceNotesIndex"), "VoiceNotesPage");
+const XStatsPage = lazyPage(() => import("@/components/xStats"), "XStatsPage");
+const ProductPage = lazyPage(() => import("@/pages/social/Motion"), "ProductPage");
 
 /** Routes of every screen; a screen the skin neither shows nor reaches has no route (plan §3: presentation only, its API still works). */
 const CORE_ROUTES: ScreenRoute[] = [
@@ -57,6 +81,7 @@ const CORE_ROUTES: ScreenRoute[] = [
   { screen: "spines", path: "spines/:repo/view", element: <SpineViewPage /> },
   { screen: "personas", path: "personas", element: <PersonasPage /> },
   { screen: "runs", path: "runs", element: <RunsPage /> },
+  { screen: "runs", path: PRIORITY_PATH, element: <PriorityModePage /> },
   { screen: "threads", path: "threads", element: <ThreadsPage /> },
   { screen: "tickets", path: "tickets", element: <TicketsPage /> },
   { screen: "testers", path: FEEDBACK_PATH, element: <VoiceFeedbackPage /> },
@@ -93,8 +118,28 @@ const CORE_ROUTES: ScreenRoute[] = [
   // the Gap finder's runs (repo pages under /landing/gap-finder/), a main-menu entry, the home world only.
   { screen: "book", path: GAP_FINDER_PATH, element: <GapFinderPage /> },
   // the owner's pursuits: scorecard, totems, moving or stalled (docs/pursuits.json), opened from the sidebar.
-  { screen: "book", path: PURSUITS_PATH, element: <PursuitsPage /> },
+  // (a skin without them, the social one, gets All objectives: OldPursuitRoute).
+  { screen: "goalSets", path: PURSUITS_PATH, element: <OldPursuitRoute page={<PursuitsListPage />} /> },
+  // one-offs: single jobs outside every pursuit, by stage from his voice note to delivered; beside Pursuits.
+  { screen: "book", path: ONE_OFFS_PATH, element: <OneOffsPage /> },
+  // the outcome log: one line per real outcome every persona logged at the end of a wake, filterable.
+  { screen: "book", path: OUTCOMES_PATH, element: <OutcomesPage /> },
+  // every one-off page the team made, by repo and epic (docs/pages/registry.json); each page links back here.
+  { screen: "book", path: PAGES_PATH, element: <PagesIndexPage /> },
+  // his voice notes in one place, a product filter, each with the rows made from it (docs/voice-notes/index.json).
+  { screen: "book", path: VOICE_NOTES_PATH, element: <VoiceNotesPage /> },
+  // the team's X accounts: likes, replies, reposts and views per post, one file a day (data/x-stats).
+  { screen: "book", path: X_STATS_PATH, element: <XStatsPage /> },
+  // each pursuit's own page: its scorecard and its social kit, under the same top bar.
+  // in a skin without them (the social one) an old pursuit link opens its objective, /sets/<id>.
+  { screen: "goalSets", path: PURSUIT_PATH, element: <OldPursuitRoute page={<PursuitPage />} /> },
+  { screen: "goalSets", path: PURSUIT_TAB_PATH, element: <OldPursuitRoute page={<PursuitPage />} /> },
   { screen: "book", path: `${GAP_FINDER_PATH}/:date`, element: <GapFinderPage /> },
+  // the goal sets: every set in one place with the combined inbox and the team desk, and each set's own page.
+  { screen: "goalSets", path: SCORECARDS_PATH, element: <GoalSetsPage /> },
+  { screen: "goalSets", path: SCORECARD_PATH, element: <GoalSetPage /> },
+  // an old social kit link opens the set's Social kit tab in both skins.
+  { screen: "goalSets", path: PURSUIT_KIT_PATH, element: <PursuitKitRedirect /> },
   // the launch board, every product (both skins; the home world only on the server).
   { screen: "team", path: LAUNCH_PATH, element: <LaunchBoardPage /> },
 ];
@@ -129,8 +174,12 @@ export function AppRoutes() {
   return (
     <ProjectProvider>
     <Routes>
+      {/* E948-S60: every card type from samples, at 390 and 1280 px (no app frame, so the iframes show the card alone). */}
+      <Route path="cards/inventory" element={<PageBoundary><CardInventoryPage /></PageBoundary>} />
       <Route element={<Layout />}>
-        <Route index element={<PageBoundary><TeamPage /></PageBoundary>} />
+        {/* Home is the goals view, the full Inbox its own page one tap away in the top bar (components/homeView). */}
+        <Route index element={<PageBoundary><HomePage /></PageBoundary>} />
+        <Route path={INBOX_PATH} element={<PageBoundary><InboxPage /></PageBoundary>} />
         {campaigns && <Route path={ALL_PIPELINE_PATH} element={<PageBoundary><AllPipelinePage /></PageBoundary>} />}
         {SCREEN_ROUTES.filter((r) => routes(r.screen)).map((r) => (
           // a page that throws shows a clear state under the nav, never a blank screen

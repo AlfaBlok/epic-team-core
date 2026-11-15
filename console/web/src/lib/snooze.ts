@@ -76,15 +76,15 @@ async function run(id: string, until: string, label: string, write: () => Promis
 }
 
 /** Pick a snooze: the card hides now; resolves once the spine line is pushed (or the card is back with the error). */
-export function snoozeItem(item: WaitingItem, choice: SnoozeChoice | SnoozeDays, label = item.code ?? item.title): Promise<void> {
+export function snoozeItem(item: WaitingItem, choice: SnoozeChoice | SnoozeDays, label = item.code ?? item.title, park = false): Promise<void> {
   const c = asChoice(choice);
-  return run(item.id, snoozeUntilFor(c), label, () => api.snoozeWaiting(item.id, { ...c, milestoneId: item.milestoneId, ...relayOf(item) }));
+  return run(item.id, snoozeUntilFor(c), label, () => api.snoozeWaiting(item.id, { ...c, milestoneId: item.milestoneId, ...relayOf(item), ...(park ? { park: true as const } : {}) }));
 }
 
 /** Snooze on a review card: the same instant hide, spinner line and error as an ask (the server writes its row). */
-export function snoozeReview(item: ReviewItem, choice: SnoozeChoice, label = item.ref ?? item.title): Promise<void> {
+export function snoozeReview(item: ReviewItem, choice: SnoozeChoice, label = item.ref ?? item.title, park = false): Promise<void> {
   const hours = (choice.hours ?? 0) + (choice.days ?? 0) * 24;
-  return run(item.id, snoozeMinute(hours), label, () => api.snoozeReviewItem(item.id, choice));
+  return run(item.id, snoozeMinute(hours), label, () => api.snoozeReviewItem(item.id, { ...choice, ...(park ? { park: true as const } : {}) }));
 }
 
 /** Unsnooze a review card: resolves once written; the card is back in the list at once (throws on failure). */

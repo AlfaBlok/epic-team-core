@@ -25,6 +25,7 @@ const OPEN: [string, RegExp][] = [
   ["POST", /^\/api\/access\/(login|logout|setup|handoff|handoff\/peek)$/], // handoff = a one-time switch link to the other host; peek = what it would do, unspent
   ["GET", /^\/api\/auth-sync\/[^/]+$/],
   ["POST", /^\/api\/auth-sync\/[^/]+\/(upload|fail)$/],
+  ["POST", /^\/api\/auth-sync\/rs[0-9a-f]{32}\/start$/], // the owner's Mac list runner starts one row's Re-sync (the link is the credential)
   ["GET", /^\/auth-sync\/[^/]+$/],
   ["GET", /^\/login$/],
   // Google and GitHub sign-in and sign-up (auth/oauth.ts): which buttons this site shows, the hop to the provider and
@@ -37,11 +38,16 @@ const OPEN: [string, RegExp][] = [
   // the YouTube Allow link (auth/youtubeConnect.ts): the hop to Google, its follow-ups, names-only status;
   // a stranger's Allow is refused at the channel check
   ["GET", /^\/api\/access\/oauth\/youtube\/(start|enable|finish|status)$/],
+  // the one-button connects (auth/connects.ts): the hop to the provider's consent page, from the inbox card
+  ["GET", /^\/api\/access\/oauth\/connect\/[a-z0-9-]{2,40}\/start$/],
   // the favicon set (web/public) is open, as a gated page redirects crawlers and browsers to /login and their icon fetch carries no identity
   // + the social product's violet set; + the 16/32 px tab icons and the share image (a crawler has no session)
   // + the web app manifest (Add to Home Screen fetches it without the session cookie)
   ["GET", /^\/(favicon(-social)?\.(ico|svg)|favicon-(16|32)(-social)?\.png|icon-(social-)?\d+\.png|apple-touch-icon(-social)?\.png|og-image(-social)?\.png|manifest(-social)?\.webmanifest)$/],
   ["GET", /^\/sw\.js$/], // the installed app's service worker (phone notifications); a static script, no data
+  // the owner's one-tap Approve or Deny of one password-manager login read (hosted mcp/vaultApprovals.ts); the token in
+  // the path is the credential, single-use, 10 minutes.
+  ["GET|POST", /^\/api\/public\/vault-ok\/[a-f0-9]{32}$/],
   ["GET", /^\/api\/public\/pv$/], // epicspine.dev's page-view counter, a 1x1 image (siteKpis.ts: known pages only, no cookie, nothing about the visitor kept)
   ["POST", /^\/api\/public\/testers$/], // the tester signup form on epicspine.dev (testers.ts guards it)
   ["POST", /^\/api\/public\/stripe\/tester$/], // the Stripe webhook of the tester link (signature-checked in stripeTesters.ts)
@@ -57,11 +63,17 @@ const OPEN: [string, RegExp][] = [
   ["GET", /^\/fonts\/inter-(400|600)\.woff2$/],
   ["GET", /^\/api\/public\/steps\/[\w-]{20,40}$/],
   ["POST", /^\/api\/public\/steps\/[\w-]{20,40}\/ticks$/],
+  // a Mac ticket asks the Team desk by its page token and polls the answer (steps/deskQuestions.ts)
+  ["POST", /^\/api\/public\/steps\/[\w-]{20,40}\/questions$/],
+  ["GET", /^\/api\/public\/steps\/[\w-]{20,40}\/questions\/q_[a-f0-9]{12}$/],
   // a step's private box: writes only the key names its page registered (steps/steps.ts `paste`)
   ["POST", /^\/api\/public\/steps\/[\w-]{20,40}\/secret$/],
+  // a note's screenshot (attached or pasted in a note box): pictures only, stored in the page's world
+  ["POST|OPTIONS", /^\/api\/public\/steps\/[\w-]{20,40}\/files$/],
   // the voice button of a step's note box: its recorder page and the record/send calls (voice/notes.ts open form:
   // no list, no audio, every note `fill`); the page token in the path is the credential, as for the ticks.
   ["GET", /^\/api\/public\/steps\/[\w-]{20,40}\/voice$/],
+  ["GET", /^\/api\/public\/steps-keep\.js$/], // the kit's in-place recorder's keep (voice/keepJs.ts, a static script, no data)
   ["POST", /^\/api\/public\/steps\/[\w-]{20,40}\/voice\/notes(\/vn_[a-f0-9]{8}\/(segments\/\d{1,3}|finish|discard))?$/],
   ["POST", /^\/api\/hooks\/memory\/voice-note$/], // the memory service's voice-note push (host/tailnet/docker-bridge peer + HMAC, desk/voiceNotes.ts)
   // option A: a world's signed delivery (that connection's whsec_ HMAC, 5-min window, event dedupe; 404 unless
@@ -72,10 +84,21 @@ const OPEN: [string, RegExp][] = [
 ];
 
 const ID = "[^/]+";
-const TENANT_SAFE: [string, RegExp][] = [
+/**
+ * the words that name a route under a collection (GET /api/runs/stats, POST /api/needs-owner/carry), never a
+ * record's id. ROW_ID is an id under milestones, personas, assignments, runs and needs-owner that is none of them, so a
+ * `/<collection>/${ROW_ID}` rule never lets a named route through by accident (a plain /runs/:id once let /runs/active,
+ * /runs/hosts and /runs/stats through the door): each named route is listed by its name where it is allowed.
+ * The hosted door walk test fails when a registered route's word slips through an id rule.
+ */
+export const NAMED_SEGMENTS = ["active", "hosts", "stats", "carry", "retire"] as const;
+const ROW_ID = `(?!(?:${NAMED_SEGMENTS.join("|")})(?:/|$))[^/]+`;
+export const TENANT_SAFE: [string, RegExp][] = [
   ["GET|POST", /^\/api\/(milestones|personas|assignments|runs|needs-owner)$/],
-  ["GET|PATCH|PUT|DELETE", new RegExp(`^/api/(milestones|personas|assignments)/${ID}$`)],
-  ["GET|PATCH", new RegExp(`^/api/(runs|needs-owner)/${ID}$`)],
+  ["GET|PATCH|PUT|DELETE", new RegExp(`^/api/(milestones|personas|assignments)/${ROW_ID}$`)],
+  ["GET|PATCH", new RegExp(`^/api/(runs|needs-owner)/${ROW_ID}$`)],
+  // the Runs page's and Team home's charts, each counted over the request-scoped store (the world's own runs only)
+  ["GET", /^\/api\/runs\/(active|hosts|stats)$/],
   ["POST", new RegExp(`^/api/needs-owner/${ID}/supersede$`)],
   // run control by one id (cycle/routes.ts, cycle/service.ts): the wake stub and its prompt, the wake check, Run now
   // (the Unblocker wakes its Delivery Manager), steer and stop read and write only that assignment's or run's rows (rule 3
@@ -116,6 +139,8 @@ const TENANT_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/milestones/${ID}/(tree/add|chat/dispatch)$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/respond$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/snooze$`)], // same world check as respond
+  // one item whole (an opened Answered row): the same world-scoped list as GET /waiting-on-owner, then that id.
+  ["GET", new RegExp(`^/api/waiting-on-owner/${ID}$`)],
   // a monitor alert's ask actions: the path milestone is the caller's (rule 3); the relay acts in the ask's world
   // only for a member login, the owner login of an internal world with the same owner, or the console host
   // (status/alertActions.ts actAs), then through the routes above. alertWhoseUnblockingAsk.test.ts
@@ -129,6 +154,7 @@ const TENANT_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/social/digest/send$`)],
   ["GET", new RegExp(`^/api/tenants/${ID}/credits$`)], // the world's own balance + ledger (writes stay platform-only)
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // a world buys its own €49 Epic Team plan (owner login only, below)
+  ["GET", new RegExp(`^/api/tenants/${ID}/plan$`)], // may the world buy the paid plan, has it paid (the Buy button)
   // the world's own lists by path (app.ts: a store for the path's tenant in every auth mode, rule 3 404s another
   // world) and its provider default (one tenants row, the path's; the PUT stays the platform's). routeList4.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs|provider)$`)],
@@ -261,6 +287,13 @@ const TENANT_SAFE: [string, RegExp][] = [
   ["DELETE", /^\/api\/people\/logins\/[\w.-]+$/],
   ["POST", /^\/api\/people\/asks\/[\w.-]+\/[A-Za-z0-9-]+\/(answer|approve|send-back|not-sure|seen)$/],
   ["GET", /^\/api\/orphan-commits$/], // per world, as asked-no-row
+  // the team's inbox cards (inbox/teamCards.ts). A card world (cardWorlds, the owner's own social world) reads
+  // and posts only its own idea cards, kept in its own repo; any other world gets 403 world_scope; advisor verdicts stay the
+  // home world's (the owner's inbox). teamCardsWorlds.test.ts (both directions)
+  ["GET|POST", /^\/api\/inbox\/team-cards$/],
+  // the owner answers a card world's idea card from that world's skin (Go ahead, his words): the handler finds
+  // the card in the caller world's own file only (another world's id or a home card: 404) and refuses its agent tokens.
+  ["POST", /^\/api\/inbox\/team-cards\/[\w.-]+\/answer$/],
   // rework (the owner's review: services per world, added and signed in on the console): mcp/services.ts acts only on the
   // caller's world (servicesWorld: a token's or login's own; only the platform names another with ?world=); a service id of
   // another world answers 404; writes are the world's owner's (ownerRefusal: never a token or a member). The hub (mcp/hub.ts)
@@ -278,6 +311,61 @@ const TENANT_SAFE: [string, RegExp][] = [
   ["POST", /^\/api\/connections\/memory\/(connect|test|disconnect|backfill)$/],
   ["PUT", /^\/api\/connections\/memory\/settings$/],
 ];
+/**
+ * the door's own list (deny by default). A door session (CONSOLE_PLATFORM_DOOR: the owner's login let into the
+ * home world on a customer site, auth/gate.ts) is the home world, and many TENANT_SAFE handlers answer the home world with
+ * the PLATFORM's view (secrets/worlds.ts falls through to every app's keys; services, browser, credits, usage, threads,
+ * tokens…). So a door session reaches only the routes below, each read through the request-scoped store, the review
+ * rows or one milestone's chat (never a home-world branch to a platform file); everything else is 403 platform_private.
+ * Writes are the card buttons and a milestone chat only: no persona, epic or run changes, no wakes, no keys.
+ * A route joins this list only with a check in the hosted door walk test (it seeds the platform stores).
+ */
+export const DOOR_SAFE: [string, RegExp][] = [
+  ["GET", /^\/api\/(milestones|personas|assignments|runs|needs-owner)$/],
+  ["GET", new RegExp(`^/api/(milestones|personas|assignments|runs|needs-owner)/${ROW_ID}$`)],
+  // the run charts the door reads, by name: the Team home's wake numbers and the Runs page's Active agents, both
+  // the home world's own runs. Not /runs/hosts: which of the platform's servers ran what is the private console's.
+  ["GET", /^\/api\/runs\/(active|stats)$/],
+  ["GET", new RegExp(`^/api/milestones/${ID}/(tree|status|approvals|claims|run-commits|backlog|freshness)$`)],
+  ["GET", new RegExp(`^/api/tenants(/${ID})?$`)],
+  ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs)$`)],
+  // a milestone's chat (desk/routes.ts: that milestone's own thread; rule 3 404s another world's id) and its attachments
+  ["GET|POST", new RegExp(`^/api/milestones/${ID}/chat/messages$`)],
+  ["POST", /^\/api\/chat\/(seen|attachments|attachments\/line)$/],
+  ["GET", new RegExp(`^/api/chat/attachments/${ID}(/[\\w.-]+)?$`)],
+  // the cards: asks waiting on the owner and the review list, with their buttons
+  ["GET", /^\/api\/(waiting-on-owner|owner-responses|asked-no-row|counts|counts\/worlds|status|next-wake|moving-now)$/],
+  ["GET", new RegExp(`^/api/waiting-on-owner/${ID}$`)],
+  ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/(respond|snooze)$`)],
+  ["GET|POST", /^\/api\/review-items$/],
+  ["GET", /^\/api\/review-goals(\/closed)?$/],
+  ["POST", /^\/api\/(review-goals\/reopen|closed-cards\/comment|review-items\/reopen)$/],
+  ["GET", /^\/api\/closed-cards$/],
+  ["POST", new RegExp(`^/api/review-items/${ID}/(recheck|approve|complete|relaunch|deny|snooze)$`)],
+  ["GET", new RegExp(`^/api/review-items/${ID}/screenshot$`)],
+  ["POST", new RegExp(`^/api/(presses|owner-responses)/${ID}/undo$`)],
+  ["GET", new RegExp(`^/api/presses/${ID}$`)],
+  // generic lists with no world data
+  ["GET", /^\/api\/(persona-templates|team-skills)$/],
+  // the home world's top-level Chat through the door is its own world desk (hosted desk/worldDesk.ts: a door session gets
+  // the home world's own desk thread `world-desk:<home>`, never the Team desk's platform thread); rule 3 404s another world.
+  ["GET|POST", new RegExp(`^/api/tenants/${ID}/desk/messages$`)],
+  // the home world's own idea cards only (inbox/teamCards.ts doorSession: the home file's idea cards, never a
+  // card world's, never a digest, goal or advisor card) and the owner's answer on one of them.
+  ["GET", /^\/api\/inbox\/team-cards$/],
+  ["POST", /^\/api\/inbox\/team-cards\/[\w.-]+\/answer$/],
+];
+/**
+ * routes the door reaches that a customer world does not have yet. Each handler cuts its answer to the home
+ * world's own data in a door session (app.ts doorBook: the epic decks read only the checkouts the home world's own
+ * milestones name, never another world's repo). Read only. A route joins only with a check in the hosted door walk test.
+ */
+export const DOOR_ONLY: [string, RegExp][] = [
+  ["GET", /^\/api\/(decks|deck-cards)$/],
+  ["GET", /^\/api\/deck\/[\w.-]+\/[\w.%-]+$/],
+  ["GET", /^\/api\/deck-of\/[\w.%-]+$/],
+];
+
 /**
  * owner powers. Under `on` these need an owner login (any world: its
  * handler keeps it to that world) or the console host's own owner token (auth/owner.ts); legacy trust without a
@@ -311,6 +399,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/credits/grant$`)],
   ["PUT", new RegExp(`^/api/tenants/${ID}/credits/gate$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // money: an owner login, never an agent token
+  ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only
   ["PUT", new RegExp(`^/api/tenants/${ID}/provider$`)],
   ["POST", /^\/api\/team-skills(\/preview)?$/],
   ["DELETE", new RegExp(`^/api/team-skills/${ID}$`)],
@@ -319,11 +408,34 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["PUT|DELETE", new RegExp(`^/api/rubric-settings(/${ID})?$`)],
 ];
 
+/**
+ * the owner's objectives: the owner's login on the social site lands in the owner's own social world, which read none of
+ * them (403 world_scope, an empty sidebar). The objectives are the platform owner's, read from the home repo's scorecards
+ * and pursuits, so an owner login in one of the owner's own worlds (plan internal: never a customer's or a tester's world)
+ * reads them too. Read only. ownerWorldObjectives.test.ts
+ */
+const OWNER_WORLD_READS: [string, RegExp][] = [
+  ["GET", /^\/api\/(scorecards|pursuits)$/],
+  // an objective's Social kit tab on the social site: its kit.json, previews and fonts, read only
+  ["GET", new RegExp(`^/api/pursuits/${ID}/kit(/(previews|fonts)/[\\w.-]+)?$`)],
+];
+const isOwnersOwnWorld = (db: DB, identity: Identity): boolean => {
+  if (identity.kind !== "session" || identity.role !== "owner" || identity.door) return false;
+  try {
+    return (db.prepare("SELECT plan FROM tenants WHERE id = ?").get(identity.tenant) as { plan?: string } | undefined)?.plan === "internal";
+  } catch {
+    return false;
+  }
+};
+
 const matches = (rules: [string, RegExp][], method: string, path: string) =>
   rules.some(([m, re]) => m.split("|").includes(method) && re.test(path));
 
 export const isOpen = (method: string, path: string) => matches(OPEN, method === "HEAD" ? "GET" : method, path);
 export const isTenantSafe = (method: string, path: string) => matches(TENANT_SAFE, method === "HEAD" ? "GET" : method, path);
+export const isDoorSafe = (method: string, path: string) => matches(DOOR_SAFE, method === "HEAD" ? "GET" : method, path);
+/** a door-only route (DOOR_ONLY): the door reaches it, its handler scoped to the home world's own data. */
+export const isDoorOnly = (method: string, path: string) => matches(DOOR_ONLY, method === "HEAD" ? "GET" : method, path);
 export const isOwnerOnly = (method: string, path: string) => matches(OWNER_ONLY, method === "HEAD" ? "GET" : method, path);
 const ownerPowerFor = (identity: Identity, method: string, path: string) =>
   hasOwnerPower(identity, "on") || (identity.kind === "token" && identity.tenant !== DEFAULT_TENANT && matches(WORLD_AGENT_SECRETS, method, path));
@@ -368,7 +480,18 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
   const owner = ownerOfPath(db, path);
   if (owner !== undefined && owner !== identity.tenant)
     return { allow: false, status: 404, reason: "cross_tenant", message: `no route or id ${path} in this world` };
-  if (identity.tenant !== DEFAULT_TENANT && path.startsWith("/api/") && !isTenantSafe(method, path))
+  // a door session into the home world (customer site) is judged like a customer world's, and more: only DOOR_SAFE.
+  const door = identity.kind === "session" && !!identity.door;
+  const doorOnly = door && isDoorOnly(method, path);
+  if (door && path.startsWith("/api/") && !doorOnly && !(isTenantSafe(method, path) && isDoorSafe(method, path)))
+    return { allow: false, status: 403, reason: "platform_private", message: "the platform is managed from the private console" };
+  if (
+    !doorOnly &&
+    (identity.tenant !== DEFAULT_TENANT || door) &&
+    path.startsWith("/api/") &&
+    !isTenantSafe(method, path) &&
+    !(matches(OWNER_WORLD_READS, method === "HEAD" ? "GET" : method, path) && isOwnersOwnWorld(db, identity))
+  )
     return { allow: false, status: 403, reason: "world_scope", message: "this part of the console is not available in this world yet" };
   // owner powers need an owner login or the host owner token; never bare legacy trust or an agent token.
   if (isOwnerOnly(method, path) && !ownerPowerFor(identity, method, path))

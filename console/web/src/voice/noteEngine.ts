@@ -22,6 +22,8 @@ export interface NoteStartInfo {
   note: { id: string };
   segmentS: number;
   maxMin: number;
+  /** the minute the page warns at (1 h 50 min of a 2-hour note); older consoles leave it out: ten minutes before the cap. */
+  warnMin?: number;
   usdPerMin: number;
   monthUsd: number;
   monthCapUsd: number;
@@ -144,9 +146,25 @@ export interface NoteView {
   uploaded: number;
   error?: string;
   info?: string;
+  /** the warning before the cap, shown while recording. */
+  warn?: string;
   note?: SentNote;
 }
 
+/** the cap of a note until the console's answer is in (it sends its own). */
+export const DEFAULT_MAX_MIN = 120;
+/** the length as he says it: "2 hours", "1 h 50 min", "30 minutes". */
+export function lengthText(min: number): string {
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  if (!h) return `${m} minutes`;
+  if (!m) return h === 1 ? "1 hour" : `${h} hours`;
+  return `${h} h ${m} min`;
+}
+/** shown from 1 h 50 min (ten minutes before the cap): the note never stops without telling him first. */
+export const warnText = (maxMin: number, leftMin: number) =>
+  `${lengthText(Math.max(1, Math.round(leftMin)))} left: at ${lengthText(maxMin)} this note stops and is sent by itself, everything you said kept. Tap Send note and start a new one to keep talking.`;
+export const capText = (maxMin: number) => `Stopped at the ${lengthText(maxMin)} limit and sent. Everything you said up to here is kept.`;
+export const PARTS_CAP_TEXT = "Stopped and sent: this note reached its most parts (the phone locked very often). Everything you said up to here is kept.";
 export const INTERRUPTED_TEXT = "Recording stopped: a call came in, the screen locked or another app took the microphone. What you said so far is kept. Tap Resume to go on, or Send.";
 export const resumedText = (at: string) => `The phone locked at ${at}. What you said before is kept, and recording picked up again.`;
 export const NO_ANSWER_TEXT = "The console has not answered yet. Recording goes on and what you say is kept here. Send tries again.";
@@ -165,7 +183,7 @@ export const MIN_PART_S = 2;
 /** A part shorter than this is not uploaded (no words in it; the transcriber refuses near-empty audio). */
 export const MIN_AUDIO_S = 1;
 /** The console takes at most this many parts per note. */
-export const MAX_PARTS = 100;
+export const MAX_PARTS = 300;
 const hhmm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const UPLOAD_TRIES = 3;
 /** A part's length until the console's answer (its `segmentS`) is in. */
@@ -190,8 +208,12 @@ const realClock: NoteClock = {
 };
 
 export class NoteEngine {
-  private v: NoteView = { phase: "idle", elapsedS: 0, level: 0, costUsd: 0, estUsd: 0, usdPerMin: 0.003, maxMin: 30, segments: 0, uploaded: 0 };
+  private v: NoteView = { phase: "idle", elapsedS: 0, level: 0, costUsd: 0, estUsd: 0, usdPerMin: 0.003, maxMin: DEFAULT_MAX_MIN, segments: 0, uploaded: 0 };
   private subs = new Set<(v: NoteView) => void>();
+  /** the warning before the cap was shown for this note. */
+  private warned = false;
+  /** why the note stopped by itself (the cap, the most parts): still said once it is sent. */
+  private stopWhy?: string;
   private info?: NoteStartInfo;
   /** the note opening on the console (its id), while the recording already runs; undefined once thrown away. */
   private noteP?: Promise<NoteStartInfo>;
@@ -585,6 +607,16 @@ export class NoteEngine {
           this.set({ uploaded: this.v.uploaded + 1, costUsd: r.note.costUsd });
           return;
         } catch (e) {
+          // the console kept this part's audio but could not turn it into words: it is saved there, and
+          // Send names it in the note with its audio link instead of holding the rest of what he said.
+          if (i === UPLOAD_TRIES - 1 && (e as { code?: string }).code === "transcribe_failed") {
+            this.failed.delete(n);
+            this.done.add(n);
+            if (this.out && this.cid) void this.out.store.delPart(this.cid, n);
+            this.keep();
+            this.set({ uploaded: this.v.uploaded + 1, error: `Part ${n + 1} is saved on the console but was not turned into words yet; the note names it with its audio.` });
+            return;
+          }
           if (i === UPLOAD_TRIES - 1) {
             this.failed.set(n, { blob, seconds });
             this.set({ error: `Part ${n + 1} did not upload yet (${(e as Error).message}); it is saved on this phone and Send retries it.` });
@@ -616,12 +648,34 @@ export class NoteEngine {
     // until the console's answer is in, the caps it usually sends (the view's, and two-minute parts) hold.
     const maxMin = this.info?.maxMin ?? this.v.maxMin;
     if (this.closedS + cur >= maxMin * 60) {
-      this.set({ info: `Stopped at the ${maxMin}-minute cap and sent.` });
+      this.stopWhy = capText(maxMin);
+      this.set({ info: this.stopWhy });
+      // the tick stops first: one Send, never one per tick while the last part closes.
+      this.stopTick?.();
+      this.stopTick = undefined;
       void this.finish();
       return;
     }
+    // a visible warning before the cap (1 h 50 min of 2 hours), once per note.
+    const warnMin = this.info?.warnMin ?? maxMin - 10;
+    if (!this.warned && warnMin > 0 && this.closedS + cur >= warnMin * 60) {
+      this.warned = true;
+      this.set({ warn: warnText(maxMin, maxMin - (this.closedS + cur) / 60) });
+    }
     // A new segment before the old one stops: no gap in what he says.
-    if (this.rec && cur >= (this.info?.segmentS ?? DEFAULT_SEGMENT_S)) this.rotate();
+    if (this.rec && cur >= (this.info?.segmentS ?? DEFAULT_SEGMENT_S)) {
+      // the console takes MAX_PARTS parts: at the last one the note is sent, never cut without a word.
+      if (this.segN >= MAX_PARTS - 1) {
+        this.stopWhy = PARTS_CAP_TEXT;
+        this.set({ info: PARTS_CAP_TEXT });
+        // the tick stops first: one Send, never one per tick while the last part closes.
+        this.stopTick?.();
+        this.stopTick = undefined;
+        void this.finish();
+        return;
+      }
+      this.rotate();
+    }
   }
 
   /** Close the part being recorded (it uploads) and go on in a new one on the same microphone, with no gap. */
@@ -733,7 +787,7 @@ export class NoteEngine {
       const r = await (skip.length ? this.api.finish(id, this.segN, this.page, skip) : this.api.finish(id, this.segN, this.page));
       this.store.clear();
       this.outDone();
-      this.set({ phase: "sent", note: r.audio ? { ...r.note, audio: r.audio } : r.note, costUsd: r.note.costUsd, info: r.note.state === "empty" ? "Nothing was heard in that note, so nothing was posted." : undefined });
+      this.set({ phase: "sent", note: r.audio ? { ...r.note, audio: r.audio } : r.note, costUsd: r.note.costUsd, info: r.note.state === "empty" ? "Nothing was heard in that note, so nothing was posted." : this.stopWhy });
     } catch (e) {
       this.set({ phase: "failed", error: `Not sent: ${(e as Error).message}`, ...(this.out ? { info: KEPT_FAILED_TEXT } : {}) }), void this.retryLater();
     }
@@ -797,6 +851,8 @@ export class NoteEngine {
     this.stopBeat = undefined;
     this.cid = undefined;
     this.closedS = 0;
+    this.warned = false;
+    this.stopWhy = undefined;
     this.segN = 0;
     this.queue = Promise.resolve();
     this.failed.clear();
@@ -844,7 +900,7 @@ export function fetchNotesApi(base = "/api/voice", f: typeof fetch = (...a) => f
       const headers: Record<string, string> = { "content-type": audio.type || "audio/webm", "x-seconds": seconds.toFixed(2), ...(startMs ? { "x-start-ms": startMs } : {}) };
       const r = await f(`${base}/notes/${id}/segments/${n}`, { method: "POST", headers, body: audio });
       const j = (await r.json().catch(() => ({}))) as any;
-      if (!r.ok) throw new Error(j?.error?.message ?? `console answered ${r.status}`);
+      if (!r.ok) throw Object.assign(new Error(j?.error?.message ?? `console answered ${r.status}`), { status: r.status, code: j?.error?.code });
       return j;
     },
     finish: (id, segments, page, skip) => call("POST", `/notes/${id}/finish`, { segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}), ...(o.fill ? { fill: true } : {}) }),

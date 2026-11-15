@@ -138,6 +138,8 @@ describe("T24-S3 setup screen sits behind the social skin", () => {
   });
 
   it("is absent in the console skin: no route, no nav link; social: in the menu while something is unconnected (T58-S3)", async () => {
+    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
+    localStorage.setItem("sidebar.more.open", "1");
     routeAt("/setup", SKINS.console);
     expect(screen.getByText(/Not found\./)).toBeTruthy();
     cleanup();

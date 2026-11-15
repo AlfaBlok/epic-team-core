@@ -1,3 +1,4 @@
+import { ClaimChip } from "@/components/tree";
 import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
@@ -130,6 +131,7 @@ export function TicketsPage() {
                   </TableCell>
                   <TableCell className="max-w-[9rem] [&>*]:max-w-full">
                     <TicketStatus status={t.status} detail={t.statusDetail} />
+                    <ClaimChip owner={t.owner} status={t.status} />
                   </TableCell>
                   <TableCell className="max-w-[10rem] truncate text-muted-foreground max-sm:hidden" title={t.owner}>
                     {t.owner ?? "—"}

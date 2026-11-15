@@ -26,7 +26,7 @@ Waiting on: Sam (see Waiting on)
 ## Waiting on
 
 ${ASK}
-- [ask T9-A4: provide @Sam since 2026-10-22 row T7] Share the staging URL — unblocks: T7
+- [ask T9-A4: provide @Sam since 2026-10-22 row T7] Share the staging URL at https://dash.example/staging — unblocks: T7
 
 ## Issue Ledger
 

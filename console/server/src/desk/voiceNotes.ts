@@ -122,10 +122,49 @@ export function twoPassLine(words: string, k = 1, n = 1): string {
   return `${TWO_PASS_HEAD} (${chars.toLocaleString("en-US")} characters, over ${LONG_NOTE_CHARS.toLocaleString("en-US")}): two passes before filing, ${when} run them (seed: Long voice notes, two passes).`;
 }
 
-/** The header lines of one part: header (with "part k of n"), the long-note line when it applies, the memory reference. */
+/** First characters of the points-back line under a relayed note's header (the desk seed names it). */
+export const POINTS_BACK_HEAD = "🔎 Points back";
+
+/**
+ * Phrases that point at something said, shown or suggested before ("the guy was suggesting flats", "you suggested", "this
+ * penthouse", "testers"). Same list as scripts/find_source.py (root L-64, L-65): a note saying "when the guy was
+ * suggesting flats" was once filed where its words sounded right while the flats were in another repo.
+ */
+const POINTS_BACK = [
+  /\bthe (?:guy|bot|agent|man|woman|other one)\b/g,
+  /\b(?:this|that|those|these) (?:penthouse|flat|flats|apartment|apartments|place|places|house|listing|listings|project|thing|things|idea|page|list|report|card|feature|alert|deal|guy|bot|one|ones|option|options|address|addresses)\b/g,
+  /\byou (?:suggested|said|showed|sent|found|proposed|recommended|mentioned|picked|gave)\b/g,
+  /\b(?:was|were) (?:suggesting|showing|proposing|recommending|talking about|saying)\b/g,
+  /\b(?:we|i) (?:talked|spoke|discussed|were talking|was talking|have been talking|mentioned)\b/g,
+  /\b(?:as|like) i (?:said|told you|mentioned)\b/g,
+  /\b(?:remember|earlier|last time|the other day|yesterday)\b/g,
+  /\b(?:testers|tester|the launch|the campaign|the waitlist|signups|sign-ups)\b/g,
+];
+
+/** The back-reference phrases in his words, in order, each once (none = nothing to look up). */
+export function pointsBackCues(words: string): string[] {
+  const t = words.toLowerCase().replace(/\s+/g, " ");
+  const out: string[] = [];
+  for (const rx of POINTS_BACK) for (const m of t.matchAll(rx)) if (!out.includes(m[0])) out.push(m[0]);
+  return out;
+}
+
+/**
+ * The line a note carries under its header when his words point back, or "": find the source before filing it (every repo,
+ * his recent words in the memory service and the desk chat, T3 threads), and when it is still unsure ask him one short line.
+ */
+export function pointsBackLine(words: string): string {
+  const cues = pointsBackCues(words);
+  if (!cues.length) return "";
+  const shown = cues.slice(0, 4).map((c) => `"${c}"`).join(", ");
+  return `${POINTS_BACK_HEAD} (${shown}${cues.length > 4 ? ", …" : ""}): find its source before filing, \`python3 ~/github/${homeRepo()}/scripts/find_source.py --note-file <his words>\`; unsure: ask him one open question he answers by voice note, file nothing (seed: Notes that point back, Understanding him).`;
+}
+
+/** The header lines of one part: header (with "part k of n"), the long-note and points-back lines when they apply, the memory reference. */
 export function noteHeadLines(head: string, refLine: string, words: string, k: number, n: number): string[] {
   const long = twoPassLine(words, k, n);
-  return [partHead(head, k, n), ...(long ? [long] : []), refLine];
+  const back = pointsBackLine(words);
+  return [partHead(head, k, n), ...(long ? [long] : []), ...(back ? [back] : []), refLine];
 }
 
 /** The header line of a relayed note, with "part k of n" when it comes in parts. */
@@ -148,7 +187,8 @@ export function voiceNoteMessages(ref: string, e: Pick<MemoryEntry, "content" | 
 export function voiceNoteMessage(ref: string, e: Pick<MemoryEntry, "content" | "capturedAt" | "githubUrl" | "url">): string {
   const link = e.githubUrl || e.url;
   const words = transcriptOf(e.content ?? "") || "(no transcript)";
-  return [`${VOICE_NOTE_HEAD} (WhatsApp → ${memoryName()}), ${hhmm(e.capturedAt)}`, `${memoryName()}: ${ref}${link ? ` · ${link}` : ""}`, "", words].join("\n");
+  const back = pointsBackLine(words);
+  return [`${VOICE_NOTE_HEAD} (WhatsApp → ${memoryName()}), ${hhmm(e.capturedAt)}`, ...(back ? [back] : []), `${memoryName()}: ${ref}${link ? ` · ${link}` : ""}`, "", words].join("\n");
 }
 
 /** The request id of part k (1-based) of a note: part 1 keeps the id a one-part note always had, so nothing is posted twice. */

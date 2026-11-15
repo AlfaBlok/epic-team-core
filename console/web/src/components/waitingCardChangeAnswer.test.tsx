@@ -57,11 +57,9 @@ describe("WaitingCard: Change answer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
     expect(screen.queryByTestId("answer-state")).toBeNull();
     expect(screen.getByTestId("changing-answer").textContent).toMatch(/now: “one”.*rewritten in place/);
-    // the options are a radio list (the current answer marked), one Change to this and Cancel
-    const options = screen.getAllByTestId("ask-option").map((o) => o.closest("label")!.textContent);
-    expect(options).toEqual(["one · recommended · your answer now", "two"]);
+    // E948-S69: the options are the buttons (the current answer marked), then Cancel
     const buttons = [...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent);
-    expect(buttons).toEqual(["Change to this", "Cancel"]);
+    expect(buttons).toEqual(["one (current)", "two", "Cancel"]);
     expect(screen.queryByRole("button", { name: "Send to…" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("answer-buttons")).toBeNull();
@@ -73,8 +71,7 @@ describe("WaitingCard: Change answer", () => {
     const respond = vi.spyOn(api, "respondToWaiting");
     wrap(<WaitingCard item={item()} />);
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
-    fireEvent.click(screen.getByRole("radio", { name: "two" }));
-    fireEvent.click(screen.getByRole("button", { name: "Change to this" }));
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(change).toHaveBeenCalledWith("jr_1", { kind: "answer", text: "two", wake: true }));
     expect(respond).not.toHaveBeenCalled();
     cleanup();
@@ -82,11 +79,10 @@ describe("WaitingCard: Change answer", () => {
     wrap(<WaitingCard item={item({ answer: "neither, wait", response: resp({ text: "neither, wait" }) })} />);
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
     // the typed answer is pre-filled in the note, which travels with the picked option
-    const box = screen.getByLabelText("Your note") as HTMLTextAreaElement;
+    const box = screen.getByLabelText("Feedback") as HTMLTextAreaElement;
     expect(box.value).toBe("neither, wait");
     fireEvent.change(box, { target: { value: "after the audit" } });
-    fireEvent.click(screen.getByRole("radio", { name: "two" }));
-    fireEvent.click(screen.getByRole("button", { name: /Change to this/ }));
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(change).toHaveBeenLastCalledWith("jr_1", { kind: "answer", text: "two. after the audit", wake: true }));
   });
 
@@ -94,8 +90,7 @@ describe("WaitingCard: Change answer", () => {
     vi.spyOn(api, "changeResponse").mockRejectedValue(new Error("the answered line in docs/E904.md is marked done: the owner already acted on the answer; nothing changed"));
     wrap(<WaitingCard item={item()} />);
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
-    fireEvent.click(screen.getByRole("radio", { name: "two" }));
-    fireEvent.click(screen.getByRole("button", { name: "Change to this" }));
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     expect(await screen.findByText(/owner already acted on the answer/)).toBeTruthy();
   });
 
@@ -117,11 +112,11 @@ describe("WaitingCard: Change answer", () => {
     expect(screen.getByTestId("answer-state").textContent).toMatch(/Sent to the owner's thread/);
     expect(screen.getByTestId("owner-ran").textContent).toMatch(/may already have read the old answer.*written as a correction/);
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
-    expect(screen.getByRole("button", { name: /Approve \(current\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Yes: go ahead \(current\)/ })).toBeTruthy();
     expect(screen.getByTestId("changing-answer").textContent).toMatch(/thread gets a correction/);
     // No's first press opens the note (the reason is optional), the next changes the answer to a no
     fireEvent.click(screen.getByTestId("decline"));
-    expect(screen.getByLabelText("Your note")).toBeTruthy();
+    expect(screen.getByLabelText("Feedback")).toBeTruthy();
     expect(change).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("decline"));
     await vi.waitFor(() => expect(change).toHaveBeenCalledWith("jr_1", { kind: "deny", text: "", wake: true }));

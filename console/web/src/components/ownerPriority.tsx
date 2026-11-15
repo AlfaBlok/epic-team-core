@@ -42,7 +42,7 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
     <>
       <button
         type="button"
-        className={cn("shrink-0 text-xs font-medium hover:underline", red ? RED : LOOK[p.level], className)}
+        className={cn("shrink-0 text-xs font-medium hover:underline max-sm:-my-3 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center", red ? RED : LOOK[p.level], className)}
         aria-expanded={open}
         title={open ? undefined : `${label}: ${red ? red.sentence : p.why}`}
         onClick={(e) => {
@@ -170,18 +170,20 @@ function OneRedLine({ r, onDeleted }: { r: RedLine; onDeleted: (name: string) =>
           counts of sit in the row, never in a strip under it. */}
       <div className="flex items-center gap-0.5 pl-2 pr-0.5">
         <button type="button" className="flex min-h-12 min-w-0 flex-1 items-center gap-2 py-1.5 text-left" aria-expanded={open} onClick={() => setOpen(!open)} title={r.sentence} data-testid="red-line-row">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
+          <span className="inline-flex h-8 w-5 shrink-0 items-center justify-center text-muted-foreground sm:w-8" aria-hidden>
             <Flag className="h-4 w-4" strokeWidth={2} />
           </span>
-          <span className="line-clamp-2 min-w-0 break-words text-[15px] font-semibold leading-tight text-foreground sm:truncate sm:leading-snug" data-testid="red-line-name">
-            {r.name ?? r.sentence}
-          </span>
-          {r.target && (
-            <span className="shrink-0 text-sm text-muted-foreground" data-testid="red-line-target">
-              <span className="hidden sm:inline">by </span>
-              {day(r.target)}
+          {/* on a phone the date sits under the name, so the name keeps the row's width (a two-word name was cut at 360 px) */}
+          <span className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-2">
+            <span className="line-clamp-2 min-w-0 text-[15px] font-semibold leading-tight text-foreground [overflow-wrap:normal] sm:truncate sm:leading-snug" data-testid="red-line-name">
+              {r.name ?? r.sentence}
             </span>
-          )}
+            {r.target && (
+              <span className="shrink-0 text-xs text-muted-foreground sm:text-sm" data-testid="red-line-target">
+                by {day(r.target)}
+              </span>
+            )}
+          </span>
           <span className="shrink-0 rounded-full bg-[hsl(0_72%_51%)] px-2 text-xs font-semibold leading-5 text-white" title={`${n} ${n === 1 ? "item blocks" : "items block"} it`} data-testid="red-line-count">
             {n}
           </span>
@@ -266,7 +268,7 @@ function IconTap({ label, active, onClick, testid, children }: { label: string; 
       aria-label={label.trim()}
       title={label.trim()}
       aria-pressed={active}
-      className={cn("flex h-11 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", active && "bg-accent text-foreground")}
+      className={cn("flex h-11 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:w-10", active && "bg-accent text-foreground")}
       onClick={onClick}
       data-testid={testid}
     >
@@ -315,7 +317,7 @@ function LiveLinks({ r }: { r: RedLine }) {
           rel="noreferrer"
           aria-label={nums ? `${l.label}: ${nums}` : l.label}
           title={nums ? `${l.label}: ${nums}` : l.label}
-          className="flex h-11 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-11 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:w-10"
           data-testid="red-line-link"
         >
           <BarChart3 className="h-4 w-4" strokeWidth={2} aria-hidden />

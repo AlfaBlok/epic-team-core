@@ -5,12 +5,13 @@ import { isWakeRun, nextWake, runPersonaId } from "@/lib/derive";
 import { isLiveNow } from "@/lib/status";
 import { Card, CardContent } from "@/components/ui/card";
 import { ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
+import { YOUR_TEAM_PATH } from "@/lib/routePaths";
+export { YOUR_TEAM_PATH };
 
 /**
  * "Your team", the four social personas as cards: what each did (last wakes, in
  * plain words), what it is doing now, and when it wakes next. Reads the existing persona, assignment and run routes.
  */
-export const YOUR_TEAM_PATH = "your-team";
 export const YOUR_TEAM_LABEL = "Your team";
 
 export const TEAM_ROLES: { name: string; job: string }[] = [

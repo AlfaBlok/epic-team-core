@@ -1,0 +1,190 @@
+import { useState, type ReactNode } from "react";
+import { Mic } from "lucide-react";
+import { api } from "@/api";
+import { mutate } from "@/lib/data";
+import { Button } from "@/components/ui/button";
+import { CardButton } from "@/components/ui/cardButton";
+import { useChatAttach, type ChatAttach } from "@/components/ChatAttach";
+import { WordsBox } from "@/components/WordsBox";
+import { homeWorld } from "@/lib/identity";
+import { knownWorld } from "@/lib/useSocial";
+import { cn } from "@/lib/utils";
+import { cardPage, shortTo, useAnswerVoice, type AnswerVoice } from "@/voice/AnswerVoice";
+
+/**
+ * E948-S60 (the owner 2026-11-12 18:27Z, Team desk vn_3d129e53: "Never again I want to see a card with I don't have a simple
+ * button to give feedback that allows me to add text, screenshots, voice"): the one feedback block every card carries,
+ * the same on every card type, in both skins.
+ *
+ * - a text box (any length),
+ * - a screenshot: paste it (Ctrl/Cmd+V, a phone's Paste in the paperclip menu), drop it, or pick it with the paperclip,
+ * - a BIG microphone with its word ("Speak") on every screen, recording in place (the card recorder, useAnswerVoice),
+ * - Send.
+ *
+ * Shown open on every card, never behind a press. A card with its own words state (an ask's answer box, a review's
+ * Not yet note) passes its state in (`FeedbackBlock`); every other card uses `CardFeedback`, which keeps its own.
+ * The inventory (cardInventory.tsx) lists every card type and its test fails when one has no block.
+ */
+
+export const FEEDBACK_LABEL = "Feedback";
+/** E948-S60 iteration 2: the box's one prompt and its one button, on every card ("Why are the cards so different every time?"). */
+export const FEEDBACK_HINT = "Feedback: write, paste a screenshot, or speak";
+export const FEEDBACK_SEND = "Send";
+
+/** a microphone that is off (voice paused for the month, or no voice on this console): still big and in place, it says why. */
+function MicOff() {
+  return (
+    <Button type="button" variant="outline" disabled className="h-11 shrink-0 gap-1.5 px-4 text-sm font-medium max-sm:min-h-11 [&_svg]:size-5" title="Voice is off on this console or paused for the month" data-testid="feedback-mic-off">
+      <Mic /> Speak
+    </Button>
+  );
+}
+
+export function FeedbackBlock({
+  value,
+  onChange,
+  files,
+  voice,
+  onSend,
+  sendTestId = "card-feedback-send",
+  sending,
+  disabled,
+  id,
+  note,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  files: ChatAttach;
+  voice: Pick<AnswerVoice, "button" | "strip" | "busy">;
+  /** Send: the card's own route for his words (an answer, changes wanted, a note, a comment to its owner). */
+  onSend: () => void;
+  sendTestId?: string;
+  sending?: boolean;
+  disabled?: boolean;
+  id?: string;
+  /** one grey line under the box (what Send does, a card's own hint, a refusal): a card says its difference here, never in the box. */
+  note?: ReactNode;
+  className?: string;
+}) {
+  const empty = !value.trim() && !files.ids.length;
+  return (
+    <div className={cn("mt-3 grid min-w-0 gap-1", className)} id={id} data-testid="card-feedback" data-card-feedback="">
+      <WordsBox
+        label={FEEDBACK_LABEL}
+        rows={2}
+        boxClassName="min-h-12"
+        placeholder={FEEDBACK_HINT}
+        value={value}
+        onChange={onChange}
+        files={files}
+        voice={{ button: <span data-feedback-mic="">{voice.button ?? <MicOff />}</span>, strip: voice.strip }}
+        testid="card-feedback-box"
+        send={
+          <CardButton
+            className="h-11"
+            disabled={disabled || sending || voice.busy || !files.ready || empty}
+            pending={sending}
+            pendingLabel="Sending…"
+            onClick={onSend}
+            data-testid={sendTestId}
+            data-feedback-send=""
+          >
+            {FEEDBACK_SEND}
+          </CardButton>
+        }
+      />
+      {note && <div className="text-xs text-muted-foreground">{note}</div>}
+    </div>
+  );
+}
+
+/** where a card's words go when the card has no route of its own: the card's spine and owner, else the Team desk. */
+export type FeedbackTarget =
+  | { kind: "card"; card: { kind: "review" | "ask"; repo: string; path: string; ref: string; title?: string; milestoneId?: string } }
+  | { kind: "desk"; page: string };
+
+/** Send his words (and screenshots) to a feedback target. */
+export async function sendFeedback(t: FeedbackTarget, words: string, files: string[], via: "text" | "voice" = "text"): Promise<void> {
+  if (t.kind === "card") {
+    await mutate(() => api.commentClosedCard({ ...t.card, text: words, ...(files.length ? { attachments: files } : {}), via }), "inbox");
+    return;
+  }
+  const world = knownWorld();
+  const text = `Feedback on ${t.page}: ${words}`;
+  const id = `feedback:${t.page}:${Date.now()}`;
+  if (world && world !== homeWorld()) await api.sendWorldDeskMessage(world, text, t.page, id, files.length ? files : undefined);
+  else await api.sendDeskMessage(text, t.page, id, files.length ? files : undefined);
+}
+
+/**
+ * the block with its own words, files and voice: for a card whose buttons take no words (a status line, an alert,
+ * an ask set, a decided FYI, an answered ask, a Mac ticket with no page). `send` is the card's route; default is
+ * `target` through sendFeedback.
+ */
+export function CardFeedback({
+  origin,
+  title,
+  refName,
+  target,
+  send,
+  disabled,
+  className,
+}: {
+  /** one per card (`card:<id>`): the floating voice pill sends to it. */
+  origin: string;
+  title: string;
+  refName: string;
+  target?: FeedbackTarget;
+  send?: (words: string, files: string[], via: "text" | "voice") => Promise<unknown>;
+  /** what Send does on this card: kept for the callers, never shown (the owner 2026-11-15: no text explaining the buttons). */
+  hint?: ReactNode;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [words, setWords] = useState("");
+  const [sending, setSending] = useState(false);
+  const [line, setLine] = useState<string>();
+  const files = useChatAttach({ enabled: !disabled, disabled: sending });
+  const go = async (text: string, via: "text" | "voice") => {
+    setSending(true);
+    setLine(undefined);
+    try {
+      if (send) await send(text, files.ids, via);
+      else await sendFeedback(target ?? { kind: "desk", page: cardPage(refName, title) }, text, files.ids, via);
+      setWords("");
+      files.clear();
+      setLine("Sent ✓ The team has your words.");
+      return true;
+    } catch (e) {
+      setLine(`Not sent: ${(e as Error).message}`);
+      return false;
+    } finally {
+      setSending(false);
+    }
+  };
+  const voice = useAnswerVoice({
+    origin,
+    to: shortTo(title),
+    page: cardPage(refName, title),
+    typed: words,
+    big: true,
+    deliver: async (reply) => {
+      if (!(await go(reply, "voice"))) throw new Error("the card did not take it");
+    },
+    disabled: disabled || sending,
+  });
+  return (
+    <FeedbackBlock
+      value={words}
+      onChange={setWords}
+      files={files}
+      voice={voice}
+      onSend={() => void go(words.trim(), "text")}
+      sending={sending}
+      disabled={disabled}
+      note={line}
+      className={className}
+    />
+  );
+}

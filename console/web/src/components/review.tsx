@@ -1,11 +1,13 @@
+import { saysNeedle, useInboxSearch, useSearchNeedle } from "@/lib/inboxSearch";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { useSlotReady } from "@/components/slot";
 import { OwnerPriorityTag } from "./ownerPriority";
 import { NoteMarkBand } from "./noteMark";
 import { ACTION, PRESS, pressProps, type Pressing } from "@/components/cardActions";
 import { Link } from "react-router-dom";
 import { Check, Loader2, X } from "lucide-react";
 import { api, type ReviewItem } from "@/api";
-import type { CardFace, ClosedCardRef, ClosedGoal, PostCardInfo, TreeLine } from "@/api/review-types";
+import type { CardFace, CardPageNote, ClosedCardRef, ClosedGoal, PostCardInfo, TreeLine } from "@/api/review-types";
 import { mutate, useQuery } from "@/lib/data";
 import { milestoneBookHref } from "@/lib/book";
 import { deckHref } from "@/lib/deck";
@@ -19,17 +21,21 @@ import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inb
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, PHONE_TAP, RelTime } from "@/components/common";
+import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
+import { CardFeedback, FeedbackBlock } from "@/components/cardFeedback";
+import { CARD_FRAME, CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 
 /** A voice note's press the card did not take (the card says why). */
 const refused = (): never => {
   throw new Error("the card did not take it, open the card to see why");
 };
-import { FoldSection, SkeletonCards, useSectionOpen } from "@/components/homeSection";
+import { FoldSection, SkeletonCards, SortControl, sortSection, useSectionOpen, useSectionSort } from "@/components/homeSection";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { HOLD_MS, SnoozeDate, SnoozeDropdown, SnoozingLinesFor } from "@/components/waiting";
+import { ParkButton, parkReview } from "@/components/parkButton";
 import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/postBasics";
 import { keepPlace } from "@/lib/keepPlace";
 
@@ -43,28 +49,43 @@ type Listed = ReviewItem & { milestoneTitle?: string };
  * the badge's and the sidebar's. A pressed card slides away and the count drops at once; every press writes the spine
  * first and a refused write changes nothing and shows why, with Retry.
  */
-export function WaitingForReview({ fold }: { fold?: string } = {}) {
+export function WaitingForReview({ fold, only, title = "Done, waiting for your review" }: { fold?: string; only?: (i: ReviewItem) => boolean; title?: string } = {}) {
   // tagged "inbox", so a snooze refreshes this list and the green pill (counts) together.
   // the cards are `useReviewCards`, the list the green pills count (one fetch, this browser's snoozes and presses
   // applied the same way), so the header, the sidebar and the phone top bar never show a card the list does not.
   const project = useProject();
-  const { data: fetchedAll, error, cards } = useReviewCards({ keep: project.keep });
+  const { data: fetchedAll, error, cards: allCards } = useReviewCards({ keep: project.keep });
+  // a goal set shows its own cards only; the Inbox shows every card.
+  const cards = only ? allCards?.filter(only) : allCards;
+  useSlotReady(!!fetchedAll || !!error);
   const { data: fetchedSnoozedAll } = useQuery(() => api.listReviewItems({ state: "snoozed" }) as Promise<Listed[]>, [], { tag: "inbox" });
   // the selected project's review cards only.
-  const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId));
-  const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId));
+  const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
+  const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
   // the Team home's section header folds like every section (L-39, remembered); the cards in it are never folded
   const [open, setOpen] = useSectionOpen(fold);
   const [snoozedOpen, setSnoozedOpen] = useState(false);
+  // the owner 2026-11-12, "on the mobile, it's just a total mess": 21 open cards made
+  // Home about 40 phone screens long. On a phone the first PHONE_FIRST show and one button shows the rest; every card
+  // stays whole (its feedback block open), the computer shows them all, and a search shows every match.
+  const [phoneAll, setPhoneAll] = useState(false);
   const [snoozedLimit, setSnoozedLimit] = useListLimit("review-snoozed");
   // a pressed card: `leaving` slides it out, then it is gone from every list and count (lib/inbox) until the refetch no longer has it
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const { entries: snoozing, back } = useSnoozes();
-  const data = cards as Listed[] | undefined;
-  const snoozed = [
+  // the Inbox's search box keeps only the cards the server's search names (title, card text, his notes).
+  const search = useInboxSearch();
+  const hits = search.active ? search.hits : undefined;
+  // on the Team home (fold set) the same Sort as Blocked on you, remembered per section (the owner
+  // 2026-11-12 "I want to be able to do sorting"): Highest priority keeps the server's order, the others by the date it came to review.
+  const [sort, setSort] = useSectionSort(fold);
+  const shown = hits ? (cards as Listed[] | undefined)?.filter((i) => hits.has(i.id)) : (cards as Listed[] | undefined);
+  const data = shown && sortSection(shown, sort, (i) => i.createdAt || undefined);
+  const snoozedAll = [
     ...(fetched ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
     ...(fetchedSnoozed ?? []).filter((i) => !back.has(i.id) && !fetched?.some((x) => x.id === i.id)),
   ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
+  const snoozed = hits ? snoozedAll.filter((i) => hits.has(i.id)) : snoozedAll;
   const items = data ?? [];
   // tasks just marked here are no longer open, before the list refetches (a goal's confirm never names them)
   // what a pressed card is doing once it has left: "Saved · writing it to the project… 3 s", then "Done ✓ … in 6.1 s"
@@ -106,24 +127,25 @@ export function WaitingForReview({ fold }: { fold?: string } = {}) {
   return (
     <>
       <FoldSection
-        title="Done, waiting for your review"
+        title={title}
         count={data ? items.length : fold && !error ? undefined : 0}
         hideZero={!fold}
         tone="review"
         testId="waiting-for-review"
-        open={open}
+        open={open || !!hits}
         onToggle={fold ? setOpen : undefined}
+        actions={fold && <SortControl value={sort} onChange={setSort} testId="waiting-for-review" />}
       >
         <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
         {error && <ErrorBox error={error} muted />}
         {!data && !error && <SkeletonCards count={undefined} testId="waiting-for-review-loading" />}
-        {data && items.length === 0 && <Empty>Nothing finished waiting for your review.</Empty>}
+        {data && items.length === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing to review matches “{search.q}”.</p> : <Empty>Nothing finished waiting for your review.</Empty>)}
         {items.length > 0 && (
           <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="review-feed">
-            {items.map((i) => (
+            {items.map((i, n) => (
               <li
                 key={i.id}
-                className="min-w-0 transition-all duration-300 ease-in"
+                className={cn("min-w-0 transition-all duration-300 ease-in", n >= PHONE_FIRST && !phoneAll && !hits && "max-sm:hidden")}
                 style={leaving.has(i.id) ? { opacity: 0, transform: "translateX(-40px)" } : undefined}
                 data-testid="review-feed-item"
                 data-inbox-card={`review:${i.id}`}
@@ -137,6 +159,11 @@ export function WaitingForReview({ fold }: { fold?: string } = {}) {
             ))}
           </ul>
         )}
+        {items.length > PHONE_FIRST && !phoneAll && !hits && (
+          <CardButton variant="outline" className="mt-3 w-full sm:hidden" onClick={() => setPhoneAll(true)} data-testid="review-phone-more">
+            Show {items.length - PHONE_FIRST} more to review
+          </CardButton>
+        )}
       </FoldSection>
       <PressProgress lines={progress} />
       <ClosedGoalsFold />
@@ -147,7 +174,7 @@ export function WaitingForReview({ fold }: { fold?: string } = {}) {
           count={snoozed.length}
           testId="review-snoozed"
           bodyTestId="review-snoozed-section"
-          open={snoozedOpen}
+          open={snoozedOpen || !!hits}
           onToggle={setSnoozedOpen}
           actions={<LimitControl limit={snoozedLimit} onChange={setSnoozedLimit} total={snoozed.length} testId="review-snoozed" />}
         >
@@ -170,10 +197,12 @@ export function WaitingForReview({ fold }: { fold?: string } = {}) {
 function ClosedGoalsFold() {
   const { data } = useQuery(() => api.listClosedGoals().catch(() => [] as ClosedGoal[]), [], { tag: "inbox" });
   const [open, setOpen] = useState(false);
-  const items = (data ?? []).filter((g) => g.hidden.length > 0);
+  // E948-S78: the Inbox search keeps the closed goals whose title, code or hidden items hold it; none left, it hides.
+  const needle = useSearchNeedle();
+  const items = (data ?? []).filter((g) => g.hidden.length > 0 && saysNeedle(needle, g.title, g.code, ...g.hidden));
   if (!items.length) return null;
   return (
-    <FoldSection title="Closed goals with open items" count={items.length} testId="review-closed-goals" bodyTestId="review-closed-goals-section" open={open} onToggle={setOpen}>
+    <FoldSection title="Closed goals with open items" count={items.length} testId="review-closed-goals" bodyTestId="review-closed-goals-section" open={open || !!needle} onToggle={setOpen}>
       <p className="mb-2 text-xs text-muted-foreground">You closed these goals while items were still open. Those items show nowhere else until you reopen the goal. Nothing was deleted.</p>
       <ul className="grid gap-2">
         {items.map((g) => (
@@ -205,9 +234,9 @@ function ClosedGoalRow({ goal }: { goal: ClosedGoal }) {
         <span className="min-w-0 flex-1 truncate" title={goal.title}>
           {book ? <Link className="underline-offset-2 hover:underline" to={book}>{goal.title}</Link> : goal.title}
         </span>
-        <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} disabled={busy} pending={busy} pendingLabel="Reopening…" onClick={reopen} data-testid="review-reopen-goal">
+        <CardButton variant="outline" className="h-7 text-xs" disabled={busy} pending={busy} pendingLabel="Reopening…" onClick={reopen} data-testid="review-reopen-goal">
           ↺ Reopen the goal
-        </Button>
+        </CardButton>
       </div>
       <div className="text-xs text-muted-foreground">
         {goal.hidden.length} open {goal.hidden.length === 1 ? "item is" : "items are"} hidden until you reopen it.
@@ -260,9 +289,9 @@ function SnoozedReviewRow({ item }: { item: Listed }) {
         {snoozing && !snoozing.done ? (
           <span className="shrink-0 text-xs text-muted-foreground">Snoozing…</span>
         ) : (
-          <Button size="sm" variant="outline" className={cn("h-7 shrink-0 text-xs", PHONE_TAP)} disabled={busy} pending={busy} pendingLabel="Unsnoozing…" onClick={unsnooze} data-testid="review-unsnooze">
+          <CardButton variant="outline" className="h-7 shrink-0 text-xs" disabled={busy} pending={busy} pendingLabel="Unsnoozing…" onClick={unsnooze} data-testid="review-unsnooze">
             Unsnooze
-          </Button>
+          </CardButton>
         )}
       </div>
       {error && <div className="text-xs text-red-700 dark:text-red-400">{error}</div>}
@@ -368,7 +397,7 @@ export function cardButtons(face: Pick<CardFace, "closesGoal" | "next" | "after"
       ? [
           {
             label: `✓ Mark this task complete${close ? ", close the goal" : ""} and start ${n} next ${n === 1 ? "step" : "steps"}`,
-            sub: `The team starts: ${started.join(", ")}.${parked ? ` ${parked === 1 ? "The other next step is" : `The other ${parked} next steps are`} parked on the goal.` : ""}`,
+            sub: `The team starts: ${joinSteps(started)}.${parked ? ` ${parked === 1 ? "The other next step is" : `The other ${parked} next steps are`} parked on the goal.` : ""}`,
             how: "switches" as const,
             go: true,
           },
@@ -381,6 +410,75 @@ export function cardButtons(face: Pick<CardFace, "closesGoal" | "next" | "after"
       go: n === 0,
     },
   ];
+}
+
+/**
+ * E979-G20261113 iteration 2 (the owner 2026-11-14, vn_78c963b6, on the Gap finder card: "the button shouldn't be marked
+ * complete. It should be start ... the count, start the 6. And if I switch one off, start 5. Mark complete is ambiguous."):
+ * the main button names what the press does, counted live from the switches.
+ *  - any follow-ups (On / Off switches or Start now / Park steps): "Start <n>", "Close, start nothing" when none starts;
+ *  - no next steps: "Mark complete" (the owner 2026-11-12 21:46Z: accept it as is, or Give feedback); never on a card
+ *    with follow-ups (E948-S83, cardInventory.test.tsx renders every card kind and fails on it).
+ * A press that closes the goal says so: ", close the goal".
+ */
+export function mainButtonLabel(face: { closesGoal?: boolean; next?: CardFace["next"] }, start: boolean[]): string {
+  const next = face.next ?? [];
+  const n = next.filter((_, i) => start[i]).length;
+  const close = face.closesGoal ? ", close the goal" : "";
+  // E948-S83 (the owner, third time, ^e-f43544: "We're still not getting the button names that make sense for the tasks"):
+  // every card with follow-ups, switches or Start now / Park steps alike, names the press by what it starts.
+  if (next.length) return n ? `Start ${n}${close}` : `Close${close ? " the goal" : ""}, start nothing`;
+  return `Mark complete${close}`;
+}
+
+/**
+ * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "when we have decisions, then the buttons need to be the decisions, or I can
+ * leave feedback ... we cannot have a button that says Mark complete when the card is about a decision"): a card that
+ * asks a decision answers it with its options, each button named by what happens next, never Mark complete.
+ * A decision card is one with `options:` (2 to 4 `<label>: <next step>`), or whose decision asks "Do we / Should we …?".
+ * Undefined for a review card (Mark complete or Give feedback).
+ */
+/** step titles in one sentence: each without its own closing full stop, so "…for the app., Three…" never shows (vn_e751eeeb). */
+export const joinSteps = (titles: string[]) => titles.map((t) => t.trim().replace(/[.。]+$/, "")).join(", ");
+export const DECIDE_QUESTION = /^(?:do|should|shall|will|can|would) (?:we|the team|i)\b[^?]*\?/i;
+export type DecisionChoice = { label: string; sub: string; start: boolean; recommended: boolean };
+export function decisionChoices(face: Pick<CardFace, "decision" | "options" | "next">): DecisionChoice[] | undefined {
+  const next = face.next ?? [];
+  const titles = joinSteps(next.map((s) => s.title));
+  const decision = face.decision ?? "";
+  const own = (face.options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
+  const rec = (label: string) => {
+    const word = label.split(":")[0].trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!word) return false;
+    const said = /recommends?\s+(?:to\s+|the\s+)?["“']?([a-z0-9]+)/i.exec(decision)?.[1]?.toLowerCase();
+    return said === word;
+  };
+  const parks = (label: string) => {
+    const [answer, ...rest] = label.split(":");
+    const step = rest.join(":").trim();
+    return /^(?:park|drop|stop|leave|not now|keep it parked)\b/i.test(step) || /^(?:no|not now)\b/i.test(answer.trim());
+  };
+  const subOf = (label: string, start: boolean) =>
+    start
+      ? /:\s*plan\b/i.test(label)
+        ? `The team writes a detailed plan${titles ? ` for ${titles}` : ""} and brings it to you before building.`
+        : titles
+          ? `The team starts: ${titles}.`
+          : "The team takes your answer and goes on."
+      : titles
+        ? `${titles} ${next.length === 1 ? "stays" : "stay"} parked on the goal. Nothing new starts.`
+        : "Nothing new starts. It stays parked.";
+  const list =
+    own.length >= 2
+      ? own.slice(0, 4)
+      : DECIDE_QUESTION.test(decision.trim())
+        ? ["Yes: plan it", "No: park it"]
+        : undefined;
+  if (!list) return undefined;
+  const out = list.map((label) => ({ label, start: !parks(label), sub: subOf(label, !parks(label)), recommended: rec(label) }));
+  // the team's recommendation leads (filled); with none named, the first option does
+  if (!out.some((c) => c.recommended)) out[0].recommended = true;
+  return [...out.filter((c) => c.recommended), ...out.filter((c) => !c.recommended)];
 }
 
 const MARK: Record<TreeLine["mark"], string> = { done: "✓", progress: "◐", this: "●", next: "○" };
@@ -621,18 +719,20 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
   return { act, pressing, busy: !!pressing, err, last, landing, props: (key: string, disabled = false) => pressProps(pressing, key, disabled) };
 }
 
+/** how many review cards a phone shows before "Show N more to review". */
+export const PHONE_FIRST = 5;
+
 export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: Set<string> }) {
   const { item } = card;
   const face = item.face;
   const [denyOpen, setDenyOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const { act, pressing, busy, err, last, landing, props } = useCardPress(card);
-  /** More (opened by the heading), the note shown by Not yet, a Not yet pressed with no words. */
+  /** More (opened by the heading), a Give feedback pressed with no words. */
   const [open, setOpen] = useState(false);
-  const [noteOpen, setNoteOpen] = useState(false);
   const [needWords, setNeedWords] = useState(false);
   const files = useChatAttach({ enabled: true, disabled: busy });
-  // a spoken note goes with Not yet, with what is typed before it
+  // a spoken note goes back as feedback, with what is typed before it
   const voice = useAnswerVoice({
     origin: `review:${item.id}:changes`,
     to: shortTo(item.face?.title ?? item.title),
@@ -640,8 +740,8 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
     typed: feedback,
     deliver: (reply) => act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, reply, files.ids) : api.relaunchReviewItem(item.id, reply))).then((ok) => (ok ? (setFeedback(""), files.clear()) : refused())),
     disabled: busy,
+    big: true,
   });
-  const [confirmClose, setConfirmClose] = useState<{ start: number[]; park: number[]; why?: string[] }>();
   const next = face?.next ?? [];
   // a Start now / Park switch per next step, preset to the team's recommendation
   const [start, setStart] = useState<boolean[]>(() => next.map((s) => s.recommend === "start"));
@@ -654,39 +754,52 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
     if (how === "park") return { start: [], park: idx };
     return { start: idx.filter((i) => start[i]), park: idx.filter((i) => !start[i]), ...(switches ? { why: next.map((_, i) => (start[i] ? "" : offWhy[i].trim())) } : {}) };
   };
-  const complete = (how: "switches" | "park") => {
-    const pick = pickOf(how);
-    // case C: closing the goal while other parts are open names them first
-    if (face.closesGoal && stillOpen.length && !confirmClose) return setConfirmClose(pick);
-    setConfirmClose(undefined);
-    void act(`complete:${how}`, () => api.completeReviewItem(item.id, pick));
-  };
+  // E948-S53: the button does what it says. The console only offers to close the goal when this is its last open part,
+  // so there is no confirm that warns against the close it just offered.
+  const complete = (how: "switches" | "park") => void act(`complete:${how}`, () => api.completeReviewItem(item.id, pickOf(how)));
   const stillOpen = face.openInGoal.filter((o) => !closedRefs?.has(`${item.repo}:${item.path}#${o.ref}`));
   const goalHref = item.milestoneId ? `${milestoneBookHref(item.milestoneId)}#${encodeURIComponent(face.goal.code)}` : undefined;
   const goal = goalHref ? <A href={goalHref}>{face.goal.text}</A> : <span>{face.goal.text}</span>;
   const tasks = `${face.tasks.done} of ${face.tasks.total} tasks done`;
   const buttons = cardButtons(face, start);
+  const choices = decisionChoices(face);
+  // E948-S69: a decision button answers the decision: Yes-like starts every next step (planned first), No-like parks them
+  const choose = (c: DecisionChoice) => {
+    const idx = next.map((_, i) => i);
+    const plain = (face.decision ?? "").split("?")[0].replace(/^(?:do|should|shall|will|can|would) (?:we|the team|i)\s+/i, "").trim();
+    const plan = !next.length && c.start && plain ? `${/:\s*plan\b/i.test(c.label) ? "Plan" : "Do"}: ${plain}` : undefined;
+    void act(`choice:${c.label}`, () =>
+      api.completeReviewItem(item.id, { ...(c.start ? { start: idx, park: [] } : { park: idx }), ...(switches && c.start ? { why: next.map(() => "") } : {}), choice: c.label, ...(plan ? { plan } : {}) }),
+    );
+  };
   const spine = githubFile(item.github, item.path ?? "");
   // Review,
-  // the project and the age; a short heading; the goal as the Why; what was delivered; Mark complete or Not yet; one foot.
+  // the project and the age; a short heading; the goal as the Why; what was delivered; Mark complete or Give feedback; one foot.
   const heading = cardHeading({ title: face.title });
   const body = cardBody({ title: face.title }, heading);
+  // the owner 2026-11-12, "on the mobile, it's just a total mess": on a phone the heading is the whole
+  // title (one sentence of 20 words or fewer, docs/review-cards.md) and the body that only repeats it is left out: the
+  // short heading plus the same sentence again cost two to four lines on every card. The computer keeps the mockup.
+  const phoneHeading = cardHeading({ title: face.title }, 200);
+  const phoneBody = cardBody({ title: face.title }, phoneHeading);
   const mainHow = buttons[0].how;
-  const mainLabel = switches ? "Send my choices" : start.some(Boolean) ? `Mark complete, start ${start.filter(Boolean).length}` : "Mark complete";
-  const notYet = () => {
-    if (!noteOpen && !open) {
-      setNoteOpen(true);
-      setTimeout(() => document.getElementById(`note-review-${item.id}`)?.querySelector("textarea")?.focus(), 0);
-      return;
-    }
+  // E948-S53: a press that closes the goal says so on the button itself
+  const mainLabel = mainButtonLabel(face, start);
+  // E948-S60 iteration 3 (the owner 2026-11-12 21:46Z: only "Mark complete" or "Give feedback", never "Not yet"):
+  // the feedback block is always open; Give feedback sends his words, or asks for them and puts the cursor in the box
+  const giveFeedback = () => {
+    if (!feedback.trim() && !files.ids.length) setTimeout(() => document.getElementById(`note-review-${item.id}`)?.querySelector("textarea")?.focus(), 0);
+    feedbackSend();
+  };
+  const feedbackSend = () => {
     const words = feedback.trim();
     if (!words && !files.ids.length) return setNeedWords(true);
     void act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, words, files.ids) : api.relaunchReviewItem(item.id, words))).then((ok) => ok && (setFeedback(""), files.clear()));
   };
   return (
-    <article className="min-w-0 rounded-xl border bg-card p-4 text-card-foreground [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="review-crumb">
-        <span className="font-medium text-foreground">Review</span>
+    <article className={CARD_FRAME} data-card-shell="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
+      <div className={CARD_META} data-card-meta="" data-testid="review-crumb">
+        <span className="font-medium text-foreground" data-card-kind-word="">Review</span>
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {item.createdAt && <RelTime iso={item.createdAt} />}
         {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}
@@ -710,6 +823,8 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
       </div>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
+      {/* a note he left inside the page itself shows on its card, so he sees it landed. */}
+      {!!face.pageNotes?.length && <PageNotes notes={face.pageNotes} />}
       <button
         type="button"
         className="mt-1.5 text-left text-[15px] font-medium leading-snug text-foreground hover:underline hover:decoration-foreground/30 hover:underline-offset-[3px]"
@@ -717,10 +832,25 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
         onClick={() => setOpen(!open)}
         data-testid="review-title"
       >
-        {heading}
+        <span className={cn(heading !== phoneHeading && "max-sm:hidden")} data-heading="computer">
+          {heading}
+        </span>
+        {heading !== phoneHeading && (
+          <span className="sm:hidden" data-heading="phone">
+            {phoneHeading}
+          </span>
+        )}
       </button>
+      {/* (the owner 2026-11-14, vn_e751eeeb: "the art of the non-confusion"): the card opens with what was made, its title,
+          then where it came from: his own words and date, or who raised it and why. It never opens with an objective's score. */}
+      {(face.source || face.from?.name) && (
+        <p className="mt-2 text-[13px] leading-snug text-foreground/80" data-testid="review-source">
+          <span className="font-medium text-foreground">Came from: </span>
+          {face.source ? <CardText text={face.source} item={item} /> : `the ${face.from!.name}${face.from!.line ? `. ${face.from!.line}` : ""}`}
+        </p>
+      )}
       {body && (
-        <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="review-body">
+        <p className={cn("mt-1 text-sm leading-relaxed text-foreground/85", body !== phoneBody && !phoneBody && "max-sm:hidden")} data-testid="review-body">
           <CardText text={body} item={item} />
         </p>
       )}
@@ -739,7 +869,25 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
           </li>
         ))}
       </ul>
-      {next.length > 0 && (
+      {/* The owner 2026-11-14 23:43Z: the link to check comes right after what was delivered, before the
+          follow-ups, the decision and every button, so he sees the thing before he decides. */}
+      <a className={CARD_LINK} href={face.evidence.url} target="_blank" rel="noreferrer" data-testid="review-go">
+        {face.evidence.label} ↗
+      </a>
+      {/* vn_e751eeeb: the steps his answer decides, one plain sentence a line (never joined after their own full stops). */}
+      {next.length > 0 && choices && (
+        <section className="mt-3 text-sm text-foreground/85" data-testid="review-decision-next">
+          <div className="text-xs text-muted-foreground">Next steps your answer decides:</div>
+          <ul className="m-0 mt-0.5 list-disc pl-5">
+            {next.map((s, i) => (
+              <li key={i} className="py-0.5">
+                <CardText text={s.title} item={item} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {next.length > 0 && !choices && (
         <section className="mt-3" data-testid="review-next">
           <div className="mb-1 text-xs text-muted-foreground">{switches ? (next.every((s) => s.kind === "new") ? "New goals it proposes, each on or off" : "Follow-ups it suggests, each on or off") : "Next steps the team suggests"}</div>
           {switches ? (
@@ -747,7 +895,7 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
               {next.map((s, i) => (
                 <li key={i} className={cn("grid min-w-0 gap-1 py-2", i > 0 && "border-t")} data-testid="review-switch-item" data-on={start[i] ? "yes" : "no"}>
                   <div className="flex min-w-0 flex-wrap items-start gap-2">
-                    <span className="min-w-0 flex-1 basis-56 text-foreground/85">
+                    <span className="min-w-0 flex-1 basis-36 sm:basis-56 text-foreground/85">
                       <CardText text={s.title} item={item} />
                     </span>
                     <button
@@ -794,16 +942,16 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
             <ul className="grid list-none grid-cols-1 p-0 text-sm">
               {next.map((s, i) => (
                 <li key={i} className={cn("flex min-w-0 flex-wrap items-center gap-2 py-1.5", i > 0 && "border-t")} data-testid="review-suggestion">
-                  <span className="min-w-0 flex-1 basis-56 text-foreground/85">
+                  <span className="min-w-0 flex-1 basis-36 sm:basis-56 text-foreground/85">
                     <CardText text={s.title} item={item} />
                   </span>
-                  <span className="inline-flex overflow-hidden rounded-md border text-xs" role="group" aria-label={`${s.title}: start now or park`}>
+                  <span className="inline-flex shrink-0 overflow-hidden rounded-md border text-xs" role="group" aria-label={`${s.title}: start now or park`}>
                     {(["start", "park"] as const).map((w) => (
                       <button
                         key={w}
                         type="button"
                         aria-pressed={start[i] === (w === "start")}
-                        className={cn("px-2 py-1", PHONE_TAP, start[i] === (w === "start") ? "bg-foreground text-background" : "bg-transparent text-muted-foreground")}
+                        className={cn("whitespace-nowrap px-2 py-1 [overflow-wrap:normal]", PHONE_TAP, start[i] === (w === "start") ? "bg-foreground text-background" : "bg-transparent text-muted-foreground")}
                         onClick={() => setStart(start.map((x, j) => (j === i ? w === "start" : x)))}
                         data-testid={`review-switch-${w}`}
                       >
@@ -878,52 +1026,73 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
           {denyOpen ? (
             <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.face?.title ?? item.title)} page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)} onCancel={() => setDenyOpen(false)} onDeny={(why, f) => act("decline", () => (f.length ? api.denyReviewItem(item.id, why, f) : api.denyReviewItem(item.id, why)))} sub={ACTION.decline.hint} />
           ) : (
-            <button type="button" className="w-max text-xs text-muted-foreground underline decoration-foreground/25 underline-offset-[3px] hover:text-foreground" disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
+            <button type="button" className="w-max text-xs text-muted-foreground underline max-sm:min-h-11 max-sm:text-left decoration-foreground/25 underline-offset-[3px] hover:text-foreground" disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
               Decline it instead: it closes as a no
             </button>
           )}
         </div>
       )}
-      {(open || noteOpen || !!feedback) && (
-        <div className="mt-3 grid gap-1" id={`note-review-${item.id}`} data-testid="review-note">
-          <WordsBox label="Your note" rows={1} boxClassName="min-h-10" placeholder="What should change? It goes with Not yet" value={feedback} onChange={(v) => (setFeedback(v), setNeedWords(false))} files={files} voice={voice} />
-          {needWords && <span className="text-xs text-muted-foreground">Say what should change, then press Not yet.</span>}
-        </div>
+      {face.closesGoal && stillOpen.length > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="review-parked-left">
+          Parked for later, kept with the goal:{" "}
+          {stillOpen.map((o, i) => (
+            <Fragment key={o.ref}>
+              {i > 0 && ", "}
+              {o.name ?? <A href={spine ?? goalHref ?? "/"}>{o.ref}</A>}
+            </Fragment>
+          ))}
+          .
+        </p>
       )}
-      {confirmClose ? (
-        <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border p-3 text-sm" data-testid="review-close-confirm">
-          <span>
-            Other parts of this goal are still open:{" "}
-            {stillOpen.map((o, i) => (
-              <Fragment key={o.ref}>
-                {i > 0 && ", "}
-                {o.name ?? <A href={spine ?? goalHref ?? "/"}>{o.ref}</A>}
-              </Fragment>
-            ))}
-            . Closing the goal hides them until you reopen it. Nothing is deleted.
-          </span>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" className={PHONE_TAP} {...props("close")} onClick={() => void act("close", () => api.completeReviewItem(item.id, confirmClose))} data-testid="review-close-confirm-yes">
-              Close the goal
-            </Button>
-            <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy} onClick={() => setConfirmClose(undefined)}>
-              Cancel
-            </Button>
+      <div className="mt-3 text-xs text-muted-foreground" data-testid="review-foot">
+        {face.project.name} · {face.goal.text} · {tasks}
+      </div>
+      {/* the card ends with the one decision asked of him, right above the buttons that answer it. */}
+      {face.decision && (
+        <div className="mt-3 rounded-lg border border-emerald-700/40 bg-emerald-50/60 px-3 py-2 dark:border-emerald-400/40 dark:bg-emerald-950/30" data-testid="review-decision">
+          <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300">Your decision</div>
+          <div className="text-[15px] font-medium leading-snug text-foreground">
+            <CardText text={face.decision} item={item} />
           </div>
         </div>
-      ) : (
-        <div className="mt-3.5 flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons">
-          <Button size="sm" className={cn("flex-1 sm:flex-none", PHONE_TAP)} {...props(`complete:${mainHow}`)} onClick={() => complete(mainHow)} title={buttons[0].sub} data-testid={mainHow === "park" && next.length ? "review-complete-park" : "review-complete"}>
-            {mainLabel}
-          </Button>
-          <Button size="sm" variant="outline" className={cn("flex-1 sm:flex-none", PHONE_TAP)} {...props("changes", voice.busy || !files.ready)} onClick={notYet} data-testid="review-iteration">
-            Not yet
-          </Button>
-          <a className="ml-1 text-[13px] font-medium text-emerald-700 hover:underline dark:text-emerald-400" href={face.evidence.url} target="_blank" rel="noreferrer" data-testid="review-go">
-            {face.evidence.label} ↗
-          </a>
-        </div>
       )}
+      {/* The owner 2026-11-15 00:0xZ: "Isn't the feedback one of the options of the buttons? Why is there something in between?":
+          the buttons and the feedback box with its microphone are one group, nothing between, no text explaining them. */}
+      <div className="mt-3.5 grid min-w-0 gap-2" data-testid="review-answer" data-card-answer="">
+      <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons" data-card-buttons={choices ? "decision" : "review"}>
+        {choices ? (
+          choices.map((c) => (
+            <CardButton key={c.label} variant={c.recommended ? "default" : "outline"} className="h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]" {...props(`choice:${c.label}`)} onClick={() => choose(c)} title={c.sub} data-testid="review-choice" data-start={c.start ? "yes" : "no"}>
+              {c.label}
+            </CardButton>
+          ))
+        ) : (
+          <CardButton {...props(`complete:${mainHow}`)} onClick={() => complete(mainHow)} title={buttons[0].sub} data-testid={mainHow === "park" && next.length ? "review-complete-park" : "review-complete"}>
+            {mainLabel}
+          </CardButton>
+        )}
+        {/* E948-S83 iteration 2: Park on every card, beside its own buttons (a month, nothing decided, brought back any time). */}
+        {item.state === "review" && <ParkButton disabled={busy} onPark={() => parkReview(item, face.title, cardOf(item))} />}
+        <CardButton variant="outline" {...props("changes", voice.busy || !files.ready)} onClick={giveFeedback} data-testid="review-iteration">
+          Give feedback
+        </CardButton>
+      </div>
+      {/* E948-S60: the one feedback block, open on every card: words, a screenshot, the big microphone, Send (it goes back to the team as a new round). */}
+      <div className="grid" data-testid="review-note">
+        <FeedbackBlock
+          id={`note-review-${item.id}`}
+          value={feedback}
+          onChange={(v) => (setFeedback(v), setNeedWords(false))}
+          files={files}
+          voice={voice}
+          sending={pressing?.key === "changes" && pressing.phase === "sending"}
+          disabled={busy}
+          onSend={feedbackSend}
+          className="mt-0"
+          note={needWords ? "Say what should change: write, paste a screenshot, or speak, then press Send." : undefined}
+        />
+      </div>
+      </div>
       {landing && !err && (
         <div className="mt-2 text-sm text-muted-foreground" data-testid="review-landing">
           {landing}
@@ -933,15 +1102,12 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive" data-testid="review-error">
           <span className="min-w-0 flex-1">Nothing was changed. {err}</span>
           {last && (
-            <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
+            <CardButton variant="outline" className="h-7 text-xs" {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
               Retry
-            </Button>
+            </CardButton>
           )}
         </div>
       )}
-      <div className="mt-3 text-xs text-muted-foreground" data-testid="review-foot">
-        {face.project.name} · {face.goal.text} · {tasks}
-      </div>
     </article>
   );
 }
@@ -949,16 +1115,28 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
 /** A card from a server without the face (older release): its title and the live link, never a row code as text. */
 function OldCard({ item }: { item: Listed }) {
   return (
-    <article className="min-w-0 rounded-[14px] border bg-card p-4 [overflow-wrap:anywhere]" data-testid="review-card" data-review-id={item.id}>
-      <div className="font-medium">
+    <CardShell as="article" kind="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
+      <CardMeta kind="Review">
+        {milestoneLabel(item.milestoneTitle) && <span>{milestoneLabel(item.milestoneTitle)}</span>}
+        {item.createdAt && <RelTime iso={item.createdAt} />}
+      </CardMeta>
+      <div className={CARD_TITLE}>
         <CardText text={item.title} item={item} />
       </div>
       {item.liveUrl && (
-        <div className="mt-2 text-sm">
+        <div className="mt-1 text-sm">
           <A href={item.liveUrl}>{urlLabel(item.liveUrl)} ↗</A>
         </div>
       )}
-    </article>
+      {/* E948-S83 iteration 2: even a card from an older release can be parked. */}
+      {item.state === "review" && (
+        <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="review-buttons">
+          <ParkButton onPark={() => parkReview(item, item.title, cardOf(item))} />
+        </div>
+      )}
+      {/* E948-S60: even a card from an older release takes feedback; it goes back to the team as a new round. */}
+      <CardFeedback origin={`review-feedback:${item.id}`} title={item.title} refName={item.ref ?? item.id} send={(words, files) => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))} />
+    </CardShell>
   );
 }
 
@@ -1005,20 +1183,22 @@ export function PostReviewCard(card: CardProps) {
   const campaignHref = item.milestoneId ? `/milestones/${encodeURIComponent(item.milestoneId)}` : undefined;
   const where = [p.platform, p.community].filter(Boolean).join(", ");
   const when = slotWords(p.slot);
-  const BTN = cn("h-auto min-h-10 justify-start whitespace-normal px-4 py-2.5 text-left text-[15px] font-bold", PHONE_TAP);
+  const BTN = cn("h-auto min-h-10 justify-start whitespace-normal px-4 py-2.5 text-left text-[15px] font-bold [overflow-wrap:normal]", PHONE_TAP);
   return (
-    <article className={cn("min-w-0 rounded-[14px] border bg-card text-card-foreground [overflow-wrap:anywhere]")} data-testid="review-card" data-review-id={item.id} data-kind="post">
-      <div className="px-[18px] pb-1 pt-4 text-[13px] text-muted-foreground" data-testid="review-crumb">
-        {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>} › {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>} › <b className="text-foreground">Waiting for you</b>
-      </div>
-      <section className="px-[18px] pb-1 pt-2.5">
-        <Label>{p.kind === "outreach" ? "The reply waiting for you" : "The post waiting for you"}</Label>
-        <h3 className="text-lg font-bold leading-snug sm:text-xl" data-testid="review-title">
+    <CardShell as="article" kind="post" data-testid="review-card" data-review-id={item.id} data-kind="post">
+      {/* E948-S60: the one shell: the kind word first, then the project and the campaign, like every card. */}
+      <CardMeta kind={p.kind === "outreach" ? "Reply" : "Post"} data-testid="review-crumb">
+        {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>}
+        {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>}
+        <span>waiting for you</span>
+      </CardMeta>
+      <section>
+        <h3 className={CARD_TITLE} data-testid="review-title">
           {/* the post page's reading: the writer's notes (topic, idea codes) stay off the title */}
           <A href={p.pageUrl}>{splitTitle(p.title || item.title).title}</A>
         </h3>
       </section>
-      <section className="px-[18px] pb-1 pt-2.5">
+      <section className="pt-2.5">
         <Label>Where it goes</Label>
         <div data-testid="review-post-where">
           {p.kind === "outreach" && p.thread ? (
@@ -1034,7 +1214,7 @@ export function PostReviewCard(card: CardProps) {
           )}
         </div>
       </section>
-      <section className="px-[18px] pb-1 pt-2.5">
+      <section className="pt-2.5">
         <Label>What it says</Label>
         <div className="grid gap-2 rounded-[10px] border bg-muted/30 px-3 py-2" data-testid="review-post-text">
           {paragraphs(p.text ?? "").map((t, i) => (
@@ -1045,14 +1225,14 @@ export function PostReviewCard(card: CardProps) {
         </div>
       </section>
       {p.revisedFor && (
-        <section className="px-[18px] pb-1 pt-2.5">
+        <section className="pt-2.5">
           <div className="-mx-2 rounded-md bg-yellow-100 px-2 py-1 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-200" data-testid="review-post-revised">
             A new version after your words: “<CardText text={p.revisedFor} item={item} />”
           </div>
         </section>
       )}
       {p.images.length > 0 && (
-        <section className="px-[18px] pb-1 pt-2.5">
+        <section className="pt-2.5">
           <Label>The picture</Label>
           <div className="grid grid-cols-1 gap-2">
             {p.images.map((im) => (
@@ -1063,7 +1243,20 @@ export function PostReviewCard(card: CardProps) {
           </div>
         </section>
       )}
-      <div className="mt-3.5 border-t px-[18px] pb-4 pt-3.5">
+      <details className="mt-3 text-xs text-muted-foreground" data-testid="review-details">
+        <summary className="cursor-pointer select-none">Details</summary>
+        <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+          <dt>Post</dt>
+          <dd>
+            <A href={p.pageUrl}>{p.id}</A>
+          </dd>
+          <dt>Campaign files</dt>
+          <dd>{p.repo}</dd>
+        </dl>
+      </details>
+      {/* The owner 2026-11-15: "Isn't the feedback one of the options of the buttons? Why is there something in between?":
+          one answer block, the buttons then the feedback box, no line under a button explaining it (its words sit in its tooltip). */}
+      <div className="mt-3.5 grid min-w-0 gap-2" data-testid="review-answer" data-card-answer="">
         {denyOpen ? (
           <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.title)} page={`post ${item.ref ?? item.id}`} onCancel={() => setDenyOpen(false)} onDeny={() => act("decline", () => api.denyReviewItem(item.id, ""))} sub="The post is not sent. You can undo it from the campaign's posts." label={`✕ ${ACTION.decline.label}`} words={false} />
         ) : pickOpen ? (
@@ -1074,12 +1267,12 @@ export function PostReviewCard(card: CardProps) {
             <input id={`slot-${item.id}`} type="datetime-local" aria-label="New time (UTC)" className="w-fit rounded-md border bg-background px-2 py-1 text-sm" value={slot} onChange={(e) => setSlot(e.target.value)} />
             <span className="text-xs text-muted-foreground">It moves to Scheduled and goes out at this time.</span>
             <div className="flex flex-wrap items-start gap-2">
-              <Button size="sm" className={PHONE_TAP} {...props("pick-schedule", !slot)} onClick={() => void act("pick-schedule", () => api.completeReviewItem(item.id, { slot: `${slot.slice(0, 16)}Z` }))} data-testid="review-pick-schedule">
+              <CardButton {...props("pick-schedule", !slot)} onClick={() => void act("pick-schedule", () => api.completeReviewItem(item.id, { slot: `${slot.slice(0, 16)}Z` }))} data-testid="review-pick-schedule">
                 ✓ Schedule it
-              </Button>
-              <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy} onClick={() => (setSlot(""), setPickOpen(false))}>
+              </CardButton>
+              <CardButton variant="ghost" disabled={busy} onClick={() => (setSlot(""), setPickOpen(false))}>
                 Cancel
-              </Button>
+              </CardButton>
             </div>
           </div>
         ) : relaunchOpen ? (
@@ -1096,36 +1289,40 @@ export function PostReviewCard(card: CardProps) {
             onCancel={() => setRelaunchOpen(false)}
           />
         ) : (
-          <div className="flex min-w-0 flex-wrap items-start gap-3" data-testid="review-buttons">
+          <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons">
             {postButtons(p).map((b) => (
-              <div key={b.label} className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
-                <Button
-                  className={cn(BTN, b.go && "bg-green-600 text-white hover:bg-green-700")}
-                  variant={b.go ? "default" : "outline"}
-                  {...props(`schedule:${b.label}`)}
-                  onClick={() => (b.how === "pick" ? setPickOpen(true) : void act(`schedule:${b.label}`, () => api.completeReviewItem(item.id, b.slot ? { slot: b.slot } : {})))}
-                  data-testid={b.how === "pick" ? "review-pick" : "review-schedule"}
-                >
-                  {b.label}
-                </Button>
-                <span className="text-xs text-muted-foreground">{b.sub}</span>
-              </div>
+              <Button
+                key={b.label}
+                className={cn(BTN, b.go && "bg-green-600 text-white hover:bg-green-700")}
+                variant={b.go ? "default" : "outline"}
+                title={b.sub}
+                {...props(`schedule:${b.label}`)}
+                onClick={() => (b.how === "pick" ? setPickOpen(true) : void act(`schedule:${b.label}`, () => api.completeReviewItem(item.id, b.slot ? { slot: b.slot } : {})))}
+                data-testid={b.how === "pick" ? "review-pick" : "review-schedule"}
+              >
+                {b.label}
+              </Button>
             ))}
-            <div className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
-              <Button variant="secondary" className={BTN} disabled={busy} onClick={() => setRelaunchOpen(true)} data-testid="review-iteration">
-                ↻ {ACTION.changes.label}
-              </Button>
-              <span className="text-xs text-muted-foreground">The writer makes a new version with your words. It comes back to you.</span>
-            </div>
+            <Button variant="secondary" className={BTN} disabled={busy} title="The writer makes a new version with your words. It comes back to you." onClick={() => setRelaunchOpen(true)} data-testid="review-iteration">
+              ↻ {ACTION.changes.label}
+            </Button>
             {/* the third outcome: the held post is not sent. */}
-            <div className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:max-w-[320px]">
-              <Button variant="outline" className={BTN} disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
-                ✕ {ACTION.decline.label}
-              </Button>
-              <span className="text-xs text-muted-foreground">The post is not sent.</span>
-            </div>
+            <Button variant="outline" className={BTN} disabled={busy} title="The post is not sent." onClick={() => setDenyOpen(true)} data-testid="review-deny">
+              ✕ {ACTION.decline.label}
+            </Button>
           </div>
         )}
+        {/* E948-S60: the one feedback block on the held post too: the writer makes a new version with his words. */}
+        {!relaunchOpen && (
+          <CardFeedback
+            origin={`post-feedback:${item.id}`}
+            title={p.title || item.title}
+            className="mt-0"
+            refName={item.ref ?? item.id}
+            send={(words, files) => act("changes", () => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))).then((ok) => { if (!ok) throw new Error("the card did not take it"); })}
+          />
+        )}
+        {/* what a press did, after the answer block, never between the buttons and the feedback */}
         {landing && !err && (
           <div className="mt-2 text-sm text-muted-foreground" data-testid="review-landing">
             {landing}
@@ -1135,25 +1332,14 @@ export function PostReviewCard(card: CardProps) {
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive" data-testid="review-error">
             <span className="min-w-0 flex-1">Nothing was changed. {err}</span>
             {last && (
-              <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
+              <CardButton variant="outline" className="h-7 text-xs" {...props("retry")} onClick={() => void act("retry", last.fn)} data-testid="review-retry">
                 Retry
-              </Button>
+              </CardButton>
             )}
           </div>
         )}
-        <details className="mt-3 text-xs text-muted-foreground" data-testid="review-details">
-          <summary className="cursor-pointer select-none">Details</summary>
-          <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
-            <dt>Post</dt>
-            <dd>
-              <A href={p.pageUrl}>{p.id}</A>
-            </dd>
-            <dt>Campaign files</dt>
-            <dd>{p.repo}</dd>
-          </dl>
-        </details>
       </div>
-    </article>
+    </CardShell>
   );
 }
 
@@ -1173,14 +1359,14 @@ function ChangesPanel(p: { pressing?: Pressing; origin: string; to: string; page
       <WordsBox label="Your feedback" boxClassName="min-h-20" placeholder={p.placeholder} value={p.value} onChange={p.onChange} files={files} voice={voice} />
       <div className="flex flex-wrap items-start gap-2">
         <div className="grid gap-0.5">
-          <Button size="sm" className={PHONE_TAP} {...pressProps(p.pressing, "changes", voice.busy || !files.ready || (!p.value.trim() && !files.ids.length))} onClick={() => void send(p.value.trim())} data-testid="review-iteration-start">
+          <CardButton {...pressProps(p.pressing, "changes", voice.busy || !files.ready || (!p.value.trim() && !files.ids.length))} onClick={() => void send(p.value.trim())} data-testid="review-iteration-start">
             ↻ {ACTION.changes.send}
-          </Button>
+          </CardButton>
           <span className="text-xs text-muted-foreground">{p.hint}</span>
         </div>
-        <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy || voice.busy} onClick={p.onCancel}>
+        <CardButton variant="ghost" disabled={busy || voice.busy} onClick={p.onCancel}>
           Cancel
-        </Button>
+        </CardButton>
       </div>
     </div>
   );
@@ -1200,15 +1386,49 @@ function DenyPanel({ pressing, origin, to, page, onCancel, onDeny, sub, label = 
       {words && <WordsBox label="Why you decline it" boxClassName="min-h-16" placeholder={ACTION.decline.placeholder} value={why} onChange={setWhy} files={files} voice={voice} />}
       <div className="flex flex-wrap items-start gap-2">
         <div className="grid gap-0.5">
-          <Button size="sm" variant="destructive" className={PHONE_TAP} {...pressProps(pressing, "decline", voice.busy || !files.ready)} onClick={() => void deny(why.trim())} data-testid="review-deny-confirm">
+          <CardButton variant="destructive" {...pressProps(pressing, "decline", voice.busy || !files.ready)} onClick={() => void deny(why.trim())} data-testid="review-deny-confirm">
             {label}
-          </Button>
+          </CardButton>
           <span className="text-xs text-muted-foreground">{sub}</span>
         </div>
-        <Button size="sm" variant="ghost" className={PHONE_TAP} disabled={busy || voice.busy} onClick={onCancel}>
+        <CardButton variant="ghost" disabled={busy || voice.busy} onClick={onCancel}>
           Cancel
-        </Button>
+        </CardButton>
       </div>
     </div>
   );
 }
+
+/** "1 Dec 23:49" in the reader's own time when the line kept the time, else "1 Dec". */
+function noteWhen(n: CardPageNote): string {
+  const d = new Date(n.time ? `${n.date}T${n.time}:00Z` : `${n.date}T12:00:00Z`);
+  if (isNaN(d.getTime())) return n.date;
+  const day = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return n.time ? `${day} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}` : day;
+}
+
+/** his notes left in the page's own feedback box, newest first: when, his words, a link to the page. */
+export function PageNotes({ notes }: { notes: CardPageNote[] }) {
+  return (
+    <div className="mt-2 rounded-md border border-border/70 bg-muted/40 px-3 py-2 text-[13px] leading-snug" data-testid="review-page-notes">
+      {[...notes].reverse().map((n, i) => (
+        <p key={i} className={cn("[overflow-wrap:anywhere]", i > 0 && "mt-1.5")} data-testid="review-page-note">
+          <span className="font-medium text-foreground">{n.stuck ? "You marked it stuck on the page" : "Your note on the page"}</span>
+          <span className="text-muted-foreground"> · {noteWhen(n)}</span>
+          {n.url && (
+            <>
+              {" · "}
+              <a href={n.url} target="_blank" rel="noreferrer" className="underline decoration-foreground/30 underline-offset-2">
+                open the page
+              </a>
+            </>
+          )}
+          <span className="mt-0.5 line-clamp-3 block text-foreground/80" title={n.words}>
+            “{n.words}”
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+

@@ -252,7 +252,7 @@ function cardOf(a: LocatedAsk, rel: string): AlertAskCard {
     ...(a.impact ? { impact: a.impact } : {}),
     ...(a.risk ? { risk: a.risk } : {}),
     ...(a.why ? { whyYou: a.why } : {}),
-    ...(a.secret && a.ask === "provide" ? { secret: a.secret } : {}),
+    ...(a.secret ? { secret: a.secret } : {}),
     ...(a.since ? { since: a.since } : {}),
   };
 }

@@ -8,6 +8,7 @@ import type { Repo } from "./repos.js";
 import { asksFor, isJordis, rowMatches, snoozedNow, type HumanAsk, type LocatedAsk } from "../inbox/asks.js";
 import { DEFAULT_OWNER, DEFAULT_OWNER_INFO, isDefaultOwner, ownerPatterns, type OwnerInfo } from "../tenancy/owner.js";
 import { deployerName, ownerName } from "../identity.js";
+import { nightQueueSection } from "./nightQueue.js";
 
 /**
  * epic tree: the milestone's spine → child spines (spines.py --json) → Issue Ledger rows (backlogFor) →
@@ -828,7 +829,7 @@ export function answeredSection(t: Tree, cap = 20, referenced: AnsweredAsk[] = [
 }
 
 /** Wake-prompt section: the owner's answers first, then the milestone's non-green leaves as the to-do (cap 30, then "+N more"). */
-export function treeTodoSection(t: Tree, cap = 30, referenced: AnsweredAsk[] = []): string {
+export function treeTodoSection(t: Tree, cap = 30, referenced: AnsweredAsk[] = [], now = Date.now()): string {
   const leaves = todoLeaves(t);
   const c = t.counts;
   const lines = [
@@ -844,6 +845,7 @@ export function treeTodoSection(t: Tree, cap = 30, referenced: AnsweredAsk[] = [
   for (const l of leaves.slice(0, cap))
     lines.push(`- [${l.color}] ${l.id} — ${l.title.slice(0, 120)} — ${l.status.slice(0, 80)}${l.path ? ` — ${l.path}` : ""}${l.flags.length ? ` — flags: ${l.flags.join(", ")}` : ""}`);
   if (leaves.length > cap) lines.push(`- +${leaves.length - cap} more (GET /api/milestones/${t.milestoneId}/tree)`);
+  lines.push(...nightQueueSection(t, now)); // the night queue: evening wakes mark it, night wakes start it first
   return lines.join("\n");
 }
 

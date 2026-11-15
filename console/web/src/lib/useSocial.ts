@@ -16,14 +16,30 @@ export async function worldId(getMe = api.getMe): Promise<string> {
   if (!getMe) return homeWorld();
   const me = await getMe();
   lastWorld = me?.tenant?.id ?? homeWorld();
+  lastDoor = me?.identity?.kind === "session" && !!me.identity.door;
   try {
     localStorage.setItem(WORLD_KEY, lastWorld);
+    if (lastDoor) localStorage.setItem(DOOR_KEY, "1");
+    else localStorage.removeItem(DOOR_KEY);
   } catch {
     /* no storage (private mode): this tab still remembers */
   }
   return lastWorld;
 }
 const WORLD_KEY = "console.world";
+const DOOR_KEY = "console.door";
+/**
+ * the last /api/me said this is the door (the owner let into the home world on a customer site): the home world
+ * then shows the customer screens (its own world desk as Chat, never the private console's Team desk).
+ */
+let lastDoor: boolean = (() => {
+  try {
+    return localStorage.getItem(DOOR_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+export const knownDoor = (): boolean => lastDoor;
 let lastWorld: string | undefined = (() => {
   try {
     return localStorage.getItem(WORLD_KEY) ?? undefined;
@@ -40,8 +56,10 @@ export const knownWorld = (): string | undefined => lastWorld;
 /** Tests: forget it (each test is its own browser). */
 export const forgetWorld = () => {
   lastWorld = undefined;
+  lastDoor = false;
   try {
     localStorage.removeItem(WORLD_KEY);
+    localStorage.removeItem(DOOR_KEY);
   } catch {
     /* none */
   }

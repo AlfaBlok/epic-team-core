@@ -26,6 +26,29 @@ export interface CampaignCard {
   goal?: CampaignGoal;
   /** what waits on the owner here: open asks in its spine and posts held for his Approve. */
   waiting?: { asks: { code: string | null; question: string }[]; held: number; line: string };
+  /** per channel the account, its sign-in, cadence, what we post and the summed counts of its posts with the trend. */
+  channels?: CampaignChannel[];
+}
+export interface ChannelTotals {
+  views: number | null;
+  likes: number | null;
+  replies: number | null;
+}
+/** one channel of a campaign (server social/campaignRollup.ts). */
+export interface CampaignChannel {
+  key: string;
+  name: string;
+  account: string | null;
+  signIn: { state: "green" | "amber" | "red" | "grey"; line: string };
+  cadence: string | null;
+  what: string | null;
+  posts: number;
+  replyRows: number;
+  totals: ChannelTotals | null;
+  readLine: string;
+  readAt: string | null;
+  trend: (ChannelTotals & { since: string }) | null;
+  history: (ChannelTotals & { date: string; posts: number })[];
 }
 /** a campaign's one goal (`Goal sentence:`) and its number (`Metric:` line); the EpicTeam home reads the same. */
 export interface CampaignGoal {

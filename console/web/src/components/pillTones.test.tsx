@@ -7,6 +7,7 @@ import { Layout, SidebarNav } from "@/components/Layout";
 import { PILL_TONES } from "@/components/homeSection";
 import { CHAT_POLL_IDLE_MS, ChatPage, ChatView } from "@/pages/Chat";
 import { SkinProvider, SKINS } from "@/lib/skin";
+import { mockCampaignCard } from "@/api/mockCampaigns";
 
 /**
  * Team (sidebar and top bar) shows red = waiting on you to unblock and
@@ -108,8 +109,12 @@ describe("T48-S19 sidebar pills", () => {
   });
 
   it("the social skin shows the same pills (PLAN-34 L-5)", async () => {
+    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
+    localStorage.setItem("sidebar.more.open", "1");
     const [a] = await api.listMilestones();
     await seed({ [a.id]: 1 }, () => ({ review: 2, chat: 1, milestones: { [a.id]: { needsYou: 1, review: 2, chat: 1 } } }));
+    // the social menu lists campaigns only: this milestone is one.
+    vi.spyOn(api, "listCampaigns").mockResolvedValue({ tenantId: "t", campaigns: [{ ...mockCampaignCard(), milestoneId: a.id }] });
     render(
       <MemoryRouter>
         <SkinProvider skin={SKINS.social}>
@@ -118,7 +123,7 @@ describe("T48-S19 sidebar pills", () => {
       </MemoryRouter>,
     );
     const main = await screen.findByTestId("nav-main");
-    const team = () => main.querySelector('a[href="/"]')!; // Performance is first in the social product's menu
+    const team = () => main.querySelector('a[href="/inbox"]')!; // the pills sit on the Inbox entry
     await waitFor(() => expect(pills(team())).toEqual(["needs-you:1", "review:2"]));
     expect(pills(within(main).getByText("Chat").closest("a")!)).toEqual(["unread:1"]);
     const open = screen.queryByTestId("other-milestones-toggle");
@@ -136,14 +141,14 @@ describe("T48-S19 sidebar pills", () => {
     );
     const bar = await screen.findByTestId("topbar-pills");
     expect(pills(within(bar).getByTestId("topbar-team"))).toEqual(["needs-you:2", "review:4"]);
-    expect(within(bar).getByTestId("topbar-team").getAttribute("href")).toBe("/");
+    expect(within(bar).getByTestId("topbar-team").getAttribute("href")).toBe("/inbox");
     expect(pills(within(bar).getByTestId("topbar-chat"))).toEqual(["unread:1"]);
     expect(within(bar).getByTestId("topbar-chat").getAttribute("href")).toBe("/chat");
     await screen.findAllByTestId("chat-unread");
     expect(getCounts).toHaveBeenCalledTimes(1); // the top bar and the sidebar share one read
   });
 
-  it("nothing to show: no pills, but Home and Chat stay in the top bar (T18-S9)", async () => {
+  it("nothing to show: no pills, but Inbox and Chat stay in the top bar (T18-S9)", async () => {
     await seed({}, () => ({ needsYou: 0, review: 0, chat: 0 }));
     render(
       <MemoryRouter>
@@ -154,7 +159,7 @@ describe("T48-S19 sidebar pills", () => {
     await new Promise((r) => setTimeout(r, 20));
     const bar = screen.getByTestId("topbar-pills");
     expect(within(bar).queryAllByTestId("pills")).toHaveLength(0);
-    expect(within(bar).getByTestId("topbar-team").getAttribute("href")).toBe("/");
+    expect(within(bar).getByTestId("topbar-team").getAttribute("href")).toBe("/inbox");
     expect(within(bar).getByTestId("topbar-chat").getAttribute("href")).toBe("/chat");
     expect(within(bar).getByTestId("topbar-chat").getAttribute("aria-label")).toBe("Chat");
   });
@@ -170,8 +175,9 @@ describe("T48-S19 sidebar pills", () => {
     expect(top.className).not.toMatch(/(^| )md:hidden( |$)/);
     expect(within(top).getByTestId("topbar-brand").className).toMatch(/md:hidden/);
     expect(within(top).getByLabelText("Open menu").className).toMatch(/md:hidden/);
-    // on Chat, Home is one tap away and Chat is marked as the current page
-    expect(within(top).getByTestId("topbar-team").getAttribute("href")).toBe("/");
+    // on Chat, Home is one tap away (the mark) and Chat is marked as the current page
+    expect(within(top).getByTestId("topbar-brand").getAttribute("href")).toBe("/");
+    expect(within(top).getByTestId("topbar-team").getAttribute("href")).toBe("/inbox");
     expect(within(top).getByTestId("topbar-chat").className).toMatch(/bg-accent text-foreground/);
     await waitFor(() => expect(pills(within(top).getByTestId("topbar-chat"))).toEqual(["unread:2"]));
   });

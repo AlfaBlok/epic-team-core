@@ -3,6 +3,8 @@ import type { ReviewItem } from "./review-types";
 import { seed, type MockDb } from "./seed";
 import type { AddTeamServiceInput, CountsView, TeamServiceSecret, TeamService, TeamSkill, TicketSession, ChatRead, ChatAttachment, DeskChat, DeskMessage, RepoFreshness, ApprovalGrant, ApprovalsView, GrantInput, Assignment, AuthSite, HostsView, HostWake, AuthSync, Milestone, MilestoneStatus, MilestoneStatusView, MilestoneTree, PendingItem, StatusBatch, Run, Ticket, TreeColor, TreeNode, SocialWriteAction, SocialAssetUpload, TesterPayment, TesterWorldResult, FeedbackLink, FeedbackView } from "./types";
 import { nextRunAfter } from "@/lib/format";
+import type { PriorityModeView } from "./types";
+let mockPriority: PriorityModeView = { on: false, parked: [], log: [], focusRunning: [] };
 import { activeSeries, localDay } from "../../../server/src/activeAgents";
 import { hostSeries } from "../../../server/src/runHosts";
 import { milestoneRunStats, personaRunStats, runsForMilestone, wakesDidSomething } from "@/lib/derive";
@@ -548,6 +550,10 @@ const mockMail = () => ({
       const files = (attachments ?? []).map((a) => mockFiles.get(a)).filter((a) => !!a);
       if (files.length) text = [text.trim(), "", `📎 Attachments (${files.length}): Sam attached files.`, ...files.map((f) => `- ${f!.name} · ${f!.mime} · 1 KB · ${f!.path}`)].join("\n").trim();
       if (!text.trim()) throw new Error("message is required");
+      // dev check: localStorage mock.sendDelayMs = the console's answer as slow as T3 over the tunnel; mock.sendFail = it fails
+      const slow = Number((typeof localStorage !== "undefined" && localStorage.getItem("mock.sendDelayMs")) || 0);
+      if (slow) await new Promise((r) => setTimeout(r, slow));
+      if (typeof localStorage !== "undefined" && localStorage.getItem("mock.sendFail")) throw new Error(localStorage.getItem("mock.sendFail")!);
       desk.push({ id: id("dm"), role: "user", kind: "message", text: text.trim(), ...(page ? { page } : {}), status: "completed", at: stamp() });
       desk.push({ id: id("dm"), role: "assistant", kind: "message", text: "Noted (mock desk): I would place this in the tree and reply with a link.", status: "completed", at: stamp() });
       emit();
@@ -589,6 +595,25 @@ const mockMail = () => ({
       if (!message.trim()) throw new Error("message is required");
       run.steers = [...(run.steers ?? []), { at: stamp(), mode: "steer", message: message.trim() }];
       return ok({ run, threadId: run.threadId ?? "", mode: "steer" as const });
+    },
+    async getPriorityMode() {
+      return ok(mockPriority);
+    },
+    async startPriorityMode({ rows, reason }) {
+      if (mockPriority.on) throw new Error("priority mode is already on");
+      if (!rows.length || rows.length > 2) throw new Error("name one or two rows");
+      const at = stamp();
+      const parked = db.runs
+        .filter((r) => r.outcome === "running" && !rows.some((row) => r.summary.startsWith(row)))
+        .map((r) => ({ sessionId: "pm_mock", runId: r.id, kind: (r.parentRunId ? "worker" : "wake") as "worker" | "wake", ticket: /^([A-Z][A-Z0-9]*-[A-Z]*\d+)/.exec(r.summary)?.[1], assignmentId: r.assignmentId, rank: null, state: "asked" as const, parkedAt: at }));
+      mockPriority = { on: true, session: { id: "pm_mock", rows, by: "Owner", reason: reason ?? "", startedAt: at, assignments: [] }, parked, log: [{ at, event: "on", detail: `gave the machine to ${rows.join(" and ")}` }, ...parked.map((p) => ({ at, event: "park", runId: p.runId, ticket: p.ticket, detail: "asked to save state and stop" }))], focusRunning: [] };
+      return ok(mockPriority);
+    },
+    async resumePriorityMode(why) {
+      if (!mockPriority.on || !mockPriority.session) throw new Error("priority mode is off");
+      const at = stamp();
+      mockPriority = { ...mockPriority, on: false, session: { ...mockPriority.session, endedAt: at, endedBy: "Owner", endWhy: why ?? "Resume pressed" }, parked: mockPriority.parked.map((p) => (p.kind === "worker" ? { ...p, state: "resumed" as const, resumedAt: at } : p)), log: [...mockPriority.log, { at, event: "off", detail: why ?? "Resume pressed" }] };
+      return ok(mockPriority);
     },
     async stopRun(runId, { reason, withWorkers }) {
       const run = find(db.runs, runId, "run");
@@ -667,6 +692,42 @@ const mockMail = () => ({
     async listCompanyWorlds() {
       return ok({ worlds: SAMPLE_WORLDS });
     },
+    // a sample goal with its key results and lights, as the home repo's goal file gives it.
+    async listGoals() {
+      const rule = "Green: on pace for its date. Amber: behind pace. Red: no movement in 3 days, or its date has passed short of the target.";
+      return ok({
+        goals: [
+          {
+            id: "sample-testers", name: "5 testers using SocialApp", label: "5 testers using SocialApp", now: 1, target: 5, by: "2026-12-08", light: "amber" as const, why: "behind: pace says 2 by today", lightRule: rule,
+            keyResults: [
+              { id: "applications", label: "People apply to be testers", now: 4, target: 10, by: "2026-11-17", light: "green" as const, why: "on pace" },
+              { id: "visitors", label: "Visitors on the site", now: 120, target: 500, by: "2026-11-22", light: "amber" as const, why: "behind: pace says 180 by today" },
+              { id: "followers", label: "Followers on X", now: 0, target: 100, by: "2026-12-08", light: "red" as const, why: "no movement since 9 Nov" },
+            ],
+          },
+        ],
+      });
+    },
+    // a sample three-day experiment, as the home repo's experiment file gives it.
+    async listExperiments() {
+      return ok({
+        experiments: [
+          {
+            id: "memo",
+            headline: "Memo testers, three days: 0 applications from strangers, 1 of 10 testers",
+            name: "Memo testers, three days",
+            from: "2026-11-13",
+            to: "2026-11-15",
+            status: "running",
+            plan: "https://plan.example/",
+            keyResults: [
+              { id: "applications", label: "Tester applications from strangers", goal: 3, kind: "total" as const, baseline: 0, now: 0, gained: 0, onTrack: false, source: "public counts", sourceUrl: "https://counts.example/" },
+              { id: "replies", label: "Replies to our posts", goal: 30, kind: "gain" as const, baseline: 131, now: 140, gained: 9, onTrack: false, source: "metrics" },
+            ],
+          },
+        ],
+      });
+    },
     // the Operations numbers as the server shapes them (sample checks; the real ones come from the console's probe).
     async getCompanyOps(id) {
       return ok({ ...SAMPLE_OPS, company: id });
@@ -715,6 +776,105 @@ const mockMail = () => ({
     // the owner's pursuits, sample scorecards.
     async listPursuits() {
       return ok(SAMPLE_PURSUITS);
+    },
+    // the scorecard tree from the sample pursuits: each pursuit a scorecard, no epics inside.
+    async listScorecards() {
+      return ok({
+        nodes: SAMPLE_PURSUITS.pursuits.map((p) => ({ id: p.id, kind: "pursuit" as const, name: p.name, rank: p.rank ?? null, greens: p.greens, total: p.total, state: p.state, motion: p.motion, spines: [], children: [], rows: p.lines.map((l) => ({ label: l.label, state: l.state, value: l.value, kind: "check" as const })), objective: p.greenWhen })),
+        spineInfo: {},
+      });
+    },
+    // one sample one-off, in work.
+    async listOneOffs() {
+      return ok(SAMPLE_ONE_OFFS);
+    },
+    // two sample outcomes, today.
+    async listOutcomes(f?: import("./outcome-types").OutcomeFilter) {
+      const list = SAMPLE_OUTCOMES.filter((o) => (!f?.kind || o.kind === f.kind) && (!f?.persona || o.persona === f.persona) && (!f?.day || o.day === f.day));
+      const counts: Record<string, number> = {};
+      for (const o of list) counts[o.kind] = (counts[o.kind] ?? 0) + 1;
+      return ok({ outcomes: list, counts, kinds: ["delivered", "learning", "merged", "folded", "superseded", "released", "fixed", "asked", "other"], facets: { persona: ["Delivery manager", "Ticket worker"], product: ["EpicTeam"], kind: ["delivered", "learning"], day: ["2026-11-12"], repo: ["app"] } });
+    },
+    // the team's own inbox cards, samples (a digest, an idea, a goal conversation).
+    async listTeamCards(q: { scorecard?: string; kind?: import("./teamcard-types").TeamCardKind } = {}) {
+      const keep = (c: import("./teamcard-types").TeamCard) => (!q.scorecard || c.scorecard === q.scorecard) && (!q.kind || c.kind === q.kind);
+      const open = SAMPLE_TEAM_CARDS.filter((c) => !c.answer && keep(c));
+      const counts = { digest: 0, idea: 0, goal: 0, advisor: 0 };
+      for (const c of open) counts[c.kind]++;
+      return ok({ open, answered: SAMPLE_TEAM_CARDS.filter((c) => !!c.answer && keep(c)), counts, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
+    },
+    async answerTeamCard(id: string, a: import("./teamcard-types").TeamCardAnswer) {
+      const c = SAMPLE_TEAM_CARDS.find((x) => x.id === id);
+      if (!c) throw new Error("no such card");
+      c.answer = { at: new Date().toISOString(), text: a.text ?? "", via: a.via ?? "text", ...(a.pick !== undefined ? { pick: a.pick } : {}) };
+      return ok({ ok: true as const, card: c });
+    },
+    async advisorVerdict(id: string, v: import("./teamcard-types").AdvisorVerdictBody) {
+      const c = SAMPLE_TEAM_CARDS.find((x) => x.id === id);
+      if (!c?.advisor) throw new Error("no such set");
+      const at = new Date().toISOString();
+      const rows: Record<string, string> = {};
+      c.advisor.items = c.advisor.items.map((i, n) => {
+        if ((v.items && !v.items.includes(i.id)) || i.verdict || v.verdict === "note") return i;
+        if (v.verdict === "accept") rows[i.id] = i.row ?? `E1-S${90 + n}`;
+        return { ...i, verdict: { state: v.verdict === "accept" ? "accepted" : "declined", at, via: v.via ?? "button", ...(rows[i.id] ? { row: rows[i.id] } : {}) } };
+      });
+      return ok({ ok: true as const, card: c, rows });
+    },
+    async reorderPursuits(ids: string[]) {
+      SAMPLE_PURSUITS.pursuits.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+      return ok({ ok: true as const });
+    },
+    async parkPursuit(id: string, parked: boolean) {
+      const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
+      if (p) p.parked = parked;
+      return ok({ ok: true as const });
+    },
+    // one-off pages, a sample group.
+    async listPages() {
+      return ok(SAMPLE_PAGES);
+    },
+    async listPinnedPages() {
+      return ok({ pinned: SAMPLE_PAGES.pinned ?? [] });
+    },
+    async pinnedPageStatus() {
+      return ok({ refreshedAt: new Date(Date.now() - 12 * 60_000).toISOString(), refreshable: true, running: false });
+    },
+    async refreshPinnedPage() {
+      return ok({ refreshedAt: new Date(Date.now() - 12 * 60_000).toISOString(), refreshable: true, running: true });
+    },
+    async pinPage() {
+      return ok({ ok: true as const });
+    },
+    // the asks log: a sample count, two weeks.
+    async askLogSummary() {
+      return ok({ thisWeek: { week: "2026-11-09", asked: 3 }, byWeek: [{ week: "2026-11-02", asked: 5, done: 5, confusing: 2, clear: 1 }, { week: "2026-11-09", asked: 3, done: 1, confusing: 1, clear: 0 }], open: 2, page: "https://pages.example.com/asks/" });
+    },
+    async askVerdict() {
+      return ok({ added: 1 });
+    },
+    // his voice notes, two samples (one per product).
+    async listVoiceNotes(product?: string) {
+      const notes = SAMPLE_VOICE_NOTES.notes.filter((n) => !product || product === "all" || n.products.includes(product));
+      return ok({ ...SAMPLE_VOICE_NOTES, notes });
+    },
+    // X stats: one sample day, two accounts.
+    async getXStats() {
+      const totals = { likes: 1, replies: 2, reposts: 0, quotes: 0, views: 14 };
+      return ok({
+        dates: ["2026-11-13"],
+        day: { date: "2026-11-13", readAt: "2026-11-13T00:15:00Z", windowDays: 7, since: "2026-11-06T00:15:00Z", accounts: [
+          { handle: "@Alpha", product: "Alpha", state: "read", listedBy: "fxtwitter timeline", followers: 0, postsAllTime: 5, count: 1, totals, notes: [], readAt: "2026-11-13T00:15:00Z",
+            posts: [{ id: "1", url: "https://x.com/Alpha/status/1", at: "2026-11-12T20:35:00Z", kind: "post", text: "A first post.", likes: 1, replies: 2, reposts: 0, quotes: 0, views: 14, source: "fxtwitter" }] },
+          { handle: "@Beta", product: "Beta", state: "read", listedBy: "fxtwitter timeline", followers: 2, postsAllTime: 0, count: 0, totals: { likes: 0, replies: 0, reposts: 0, quotes: 0, views: 0 }, notes: [], readAt: "2026-11-13T00:15:00Z", posts: [] },
+        ] },
+        history: [{ date: "2026-11-13", accounts: { "@Alpha": { ...totals, count: 1, followers: 0, state: "read" } } }],
+      });
+    },
+    async getPursuitKit(id: string) {
+      const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id && x.kit);
+      if (!p) throw new Error("no kit");
+      return ok({ pursuit: { id: p.id, name: p.name }, kit: SAMPLE_KIT, files: "http://kits.example.com/sample/assets/" });
     },
     async listTicketSessions(milestoneId) {
       return ok([...ticketSessions.values()].filter((s) => s.milestoneId === milestoneId).map((s) => ({ ...s, launched: false })));
@@ -1528,6 +1688,26 @@ const mockMail = () => ({
     async listStepKeyPastes() {
       return { log: [] };
     },
+    async getTeamLogins() {
+      return { ask: "T1-A1", app: "agent-team-browser-signin", accounts: [], log: [] };
+    },
+    async listConnects() {
+      return ok({
+        connects: [
+          {
+            id: "sam-youtube",
+            title: "Connect Sam YouTube",
+            what: "The team posts Sam's approved Shorts and reads their views and comments.",
+            account: "sam@example.com",
+            channel: { name: "Sam", handle: "@SamShorts", id: "UC0000000000000000000001" },
+            gives: ["upload videos", "manage videos and comments", "read the channel", "read the channel's numbers"],
+            connected: false,
+            startUrl: "about:blank",
+            inbox: true,
+          },
+        ],
+      });
+    },
     async getMemoryCard(world?: string) {
       return ok(mockMemory(world));
     },
@@ -1602,7 +1782,7 @@ const mockMail = () => ({
       authSites.splice(i, 1);
       return ok(undefined);
     },
-    async startAuthSync({ patterns, browser }) {
+    async startAuthSync({ patterns, browser, profile }) {
       const token = `as${Date.now().toString(16)}${(seq++).toString(16)}`.padEnd(34, "0");
       const base = typeof location === "undefined" ? "http://127.0.0.1:8750" : location.origin;
       const s: AuthSync = {
@@ -1614,6 +1794,7 @@ const mockMail = () => ({
         expiresAt: new Date(now().getTime() + 10 * 60_000).toISOString(),
         command: `curl -sSL ${base}/auth-sync/${token}.sh | sh`,
         scriptUrl: `${base}/auth-sync/${token}.sh`,
+        ...(profile ? { targetProfile: profile } : {}),
       };
       syncs.set(token, s);
       return ok(s);
@@ -1768,7 +1949,7 @@ const SAMPLE_COMPANIES: import("./company-types").Company[] = [
   },
 ];
 
-/** a sample the social product world's open items, as GET /api/companies/worlds shapes them. */
+/** a sample the social product world's open items, as GET /api/worlds shapes them. */
 const SAMPLE_WORLDS: import("./company-types").WorldInbox[] = [
   {
     tenantId: socialWorld(),
@@ -1778,6 +1959,12 @@ const SAMPLE_WORLDS: import("./company-types").WorldInbox[] = [
     items: [
       { key: "ask:zs_a1", kind: "ask", id: "zs_a1", title: "Which of the two Reddit openings for the tester call?", repo: socialWorld(), code: "EPIC-906-A2", level: "high", since: "2026-11-10", milestoneId: "ms_zs1", project: "Memo testers", openUrl: "https://cloud.social.example/milestones/ms_zs1?tab=waiting&item=zs_a1" },
       { key: "review:zs_r1", kind: "review", id: "zs_r1", title: "Day in the life on Reddit is pinned with its twelve assignments.", repo: socialWorld(), code: "E900-S60", since: "2026-11-11", milestoneId: "ms_zs2", project: "Day in the life", openUrl: "https://cloud.social.example/" },
+    ],
+    // the world's live campaigns with their one number (the owner's Inbox lines, goal talk and since yesterday).
+    campaigns: [
+      { name: "Reddit awareness", milestoneId: "ms_zs3", openUrl: "https://cloud.social.example/milestones/ms_zs3", digest: { date: new Date().toISOString().slice(0, 10), line: "3 Reddit replies on our threads and 2 outreach comments went out; no post on X." } },
+      { name: "Day in the life", milestoneId: "ms_zs2", sentence: "People see a real day of an AI team at work.", metric: { label: "replies received", target: 100, now: 0, by: "2026-12-10", proposed: true, was: 0 }, openUrl: "https://cloud.social.example/milestones/ms_zs2" },
+      { name: "Memo testers", milestoneId: "ms_zs1", sentence: "Ten testers use Memo every day.", metric: { label: "testers signed up", target: 10, now: 1, by: "2026-11-22", proposed: false, was: 0 }, openUrl: "https://cloud.social.example/milestones/ms_zs1", digest: { date: new Date().toISOString().slice(0, 10), line: "3 Reddit replies on our threads and 2 outreach comments went out; no post on X." } },
     ],
   },
 ];
@@ -1814,6 +2001,100 @@ const SAMPLE_BUILD: import("./company-types").CompanyBuild = {
 };
 
 /** his four building lists as the server reads them (docs/building.json + the spines). */
+const SAMPLE_VOICE_NOTES: import("./pages-types").VoiceNotesBody = {
+  generatedAt: "2026-11-12T20:00:00Z",
+  windowHours: 48,
+  counts: { delivered: 1, open: 1 },
+  products: { alpha: 1, beta: 1 },
+  productNames: { alpha: "Alpha", beta: "Beta" },
+  notes: [
+    {
+      ref: "Log/2026-11-12.md#^e-aaaaaa", key: "e-aaaaaa", vn: "vn_sample01", source: "mcp", app: "Chat", at: "2026-11-12T19:00:00Z",
+      words: "Can the buttons on the cards say what they do?", chars: 46, products: ["alpha"], state: "open",
+      rows: [{ code: "E948-S1", repo: "home_repo", spine: "docs/spines/epic-948.md", epic: "EPIC-948", status: "ready", title: "Card buttons say what they do", via: "row" }],
+    },
+    {
+      ref: "Log/2026-11-12.md#^e-bbbbbb", key: "e-bbbbbb", source: "whatsapp", app: "WhatsApp", at: "2026-11-12T18:00:00Z",
+      words: "Posts in Beta should go out on time.", chars: 36, products: ["beta"], state: "delivered",
+      rows: [{ code: "E946-S4", repo: "home_repo", spine: "docs/spines/epic-946.md", epic: "EPIC-946", status: "done (approved)", title: "Posts on time", via: "row" }],
+    },
+  ],
+};
+const SAMPLE_PAGES: import("./pages-types").PagesBody = {
+  total: 2,
+  pinned: [{ port: 9242, url: "http://pages.example:9242/", title: "The daily reports", name: "Daily reports", pinned: true, slug: "daily", refresh: "daily.service", row: "E904-S6", repo: "team", epic: "EPIC-904" }],
+  groups: [
+    {
+      id: "team-EPIC-904",
+      repo: "team",
+      epic: "EPIC-904",
+      epicTitle: "Talk to the desk",
+      pages: [
+        { port: 9241, url: "http://pages.example:9241/", title: "What we did this week", row: "E904-S7", repo: "team", epic: "EPIC-904" },
+        { port: 9242, url: "http://pages.example:9242/", title: "The daily reports", row: "E904-S6", repo: "team", epic: "EPIC-904" },
+      ],
+    },
+  ],
+};
+
+const SAMPLE_OUTCOMES: import("./outcome-types").OutcomeLine[] = [
+  { at: "2026-11-12T22:40:00.000Z", day: "2026-11-12", kind: "delivered", text: "The One-offs page is live beside Pursuits.", row: "E907-S21", product: "EpicTeam", persona: "Ticket worker", repo: "app", source: "run", link: "https://team.example/one-offs" },
+  { at: "2026-11-12T21:10:00.000Z", day: "2026-11-12", kind: "learning", text: "L-60 added: one page per deliverable.", row: "E907-S19", product: "EpicTeam", persona: "Delivery manager", repo: "app", source: "backfill" },
+];
+const SAMPLE_ONE_OFFS: import("./oneoff-types").OneOffsBody = {
+  spine: "docs/spines/one-offs.md",
+  deliveredDays: 7,
+  counts: { filed: 0, "in work": 1, stuck: 0, "your card": 0, delivered: 0, parked: 0 },
+  oneOffs: [
+    {
+      id: "E938-S10",
+      name: "Glass dispute, a note to the host and one to the site",
+      detail: "Write both notes from his voice note: honest, calm, firm.",
+      stage: "in work",
+      status: "active",
+      epic: { repo: "app", path: "docs/spines/epic-938-rentals.md", code: "EPIC-938", title: "Airbnb acts" },
+      source: { ref: "Log/2026-11-12.md#^e-5bc524" },
+      next: "worker writes both notes",
+      date: "2026-11-12",
+    },
+  ],
+};
+const SAMPLE_TEAM_CARDS: import("./teamcard-types").TeamCard[] = [
+  {
+    id: "tc_sample_digest",
+    kind: "digest",
+    scorecard: "sample-testers",
+    scorecardName: "5 testers using SocialApp",
+    by: "Performance",
+    at: "2026-11-13T13:00:00Z",
+    day: "2026-11-13",
+    title: "5 testers using SocialApp went greener: 3 of 7 lines green, up from 2.",
+    digest: { greens: 3, total: 7, prevGreens: 2, prevTotal: 7, prevDay: "2026-11-12", trend: "greener", reasons: [{ text: "Two people applied to be testers", url: "https://example.com/testers/" }, { text: "The call went out on X" }] },
+  },
+  {
+    id: "tc_sample_idea",
+    kind: "idea",
+    scorecard: "sample-testers",
+    scorecardName: "5 testers using SocialApp",
+    by: "Strategist",
+    at: "2026-11-13T13:05:00Z",
+    day: "2026-11-13",
+    title: "Invite the five people who replied last week straight to a call.",
+    idea: { gain: "Testers a week sooner", recommend: "Do it this week: the team writes the invites, you send none." },
+  },
+  {
+    id: "tc_sample_goal",
+    kind: "goal",
+    scorecard: "sample-memory",
+    scorecardName: "Memory live",
+    by: "Gap finder",
+    at: "2026-11-13T13:10:00Z",
+    day: "2026-11-13",
+    title: "Memory live has no number for paying users yet.",
+    goal: { unset: "How many paying users, by when", options: [{ goal: "3 paying users by December 1", number: "3" }, { goal: "10 paying users by December 15", number: "10" }], recommend: 0 },
+  },
+];
+
 const SAMPLE_PURSUITS: import("./pursuit-types").PursuitsBody = {
   staleDays: 3,
   said: { source: "Log/2026-11-12.md#^e-1", words: "For me, the worst thing is the stale." },
@@ -1839,6 +2120,7 @@ const SAMPLE_PURSUITS: import("./pursuit-types").PursuitsBody = {
       ],
       motion: "moving",
       lastMove: { at: "2026-11-12T03:00:00Z", repo: "home_repo", subject: "Payment page built" },
+      kit: true,
     },
     {
       id: "vault",
@@ -1856,6 +2138,25 @@ const SAMPLE_PURSUITS: import("./pursuit-types").PursuitsBody = {
       lastMove: { at: "2026-11-07T10:00:00Z", repo: "home_repo", subject: "Registry updated" },
     },
   ],
+};
+const SAMPLE_KIT: import("./pursuit-types").SocialKit = {
+  id: "sample",
+  name: "Sample",
+  link: "https://example.com",
+  domain: "example.com",
+  tagline: "Agents that post for you.",
+  taglineSub: "You decide what it keeps.",
+  avatar: { note: "The S on white; every platform crops it round." },
+  page: { accent: "#7c3bed", ink: "#0e1f2c" },
+  colours: [
+    { name: "Violet", hex: "#7c3bed", use: "The mark and banners" },
+    { name: "Ink", hex: "#0e1f2c", use: "Text on light grounds" },
+  ],
+  accounts: [{ platform: "X", handle: "@sample", url: "https://x.com/sample", state: "made 9 Nov" }],
+  bios: [{ where: "X, 160 letters at most", text: "Agents that post for you." }],
+  templates: [{ id: "news", title: "Something new shipped", w: 1600, h: 900, for: "X and LinkedIn" }],
+  postTexts: [{ title: "Something new shipped", text: "New in Sample: {the one thing}." }],
+  versions: [{ version: "1, current", date: "12 Nov 2026", what: "The first full kit." }],
 };
 const SAMPLE_BUILDING: import("./building-types").BuildingList[] = [
   {

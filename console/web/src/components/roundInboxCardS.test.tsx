@@ -76,12 +76,13 @@ const answered = (itemId: string) => ({ id: "jr_1", itemId, kind: "answer" as co
 
 /** The one box: text area, paperclip and the voice note's microphone in one row. */
 async function oneBox(root: HTMLElement, label: string) {
-  const box = await within(root).findByTestId("words-box");
+  // E948-S60: a card's box is the feedback block (its big microphone); a panel's (Decline) and Chat's are the WordsBox
+  const box = await waitFor(() => (root.querySelector("[data-testid='card-feedback-box']") ?? within(root).getByTestId("words-box")) as HTMLElement);
   const area = within(box).getByLabelText(label);
   expect(area.tagName).toBe("TEXTAREA");
   const row = area.parentElement!;
   expect(within(row).getByRole("button", { name: "Attach a screenshot or file" }).className).toMatch(/max-sm:size-11/);
-  await waitFor(() => expect(within(row).getByTestId(/(answer-voice|note)-button/).className).toMatch(/max-sm:size-11/));
+  await waitFor(() => expect(within(row).getByTestId(/(answer-voice|note)-button/).className).toMatch(/max-sm:size-11|\bh-11\b/));
   return { box, area };
 }
 
@@ -94,7 +95,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
         <WaitingCard item={ask()} />
       </MemoryRouter>,
     );
-    const { box, area } = await oneBox(container, "Your answer");
+    const { box, area } = await oneBox(container, "Feedback");
     const press = within(container).getByTestId("answer") as HTMLButtonElement;
     expect(press.disabled).toBe(true);
     pasteFile(area);
@@ -117,7 +118,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
     // the first press of No opens the note; the next sends it with the note and the files
     fireEvent.click(await within(container).findByTestId("decline"));
     expect(respond).not.toHaveBeenCalled();
-    const { box, area } = await oneBox(container, "Your note");
+    const { box, area } = await oneBox(container, "Feedback");
     pasteItem(area, png("phone.png"));
     fireEvent.drop(box, { dataTransfer: { files: [png("dropped.png")], types: ["Files"] } });
     await waitFor(() => expect(within(box).getAllByTestId("chat-attach-item").map((e) => e.getAttribute("data-state"))).toEqual(["ready", "ready"]));
@@ -136,7 +137,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
       </MemoryRouter>,
     );
     fireEvent.click(await within(container).findByTestId("decline"));
-    await oneBox(container, "Your note");
+    await oneBox(container, "Feedback");
     fireEvent.click(within(container).getByTestId("decline"));
     await waitFor(() => expect(respond).toHaveBeenCalled());
     expect(respond.mock.calls[0][1]).toMatchObject({ kind: "deny", text: "" });
@@ -176,7 +177,7 @@ const ITEM = {
   },
 } as unknown as ReviewItem;
 
-describe("T18-S11 round 2: a review card's Not yet and Decline", () => {
+describe("T18-S11 round 2: a review card's Give feedback and Decline", () => {
   const mount = () => {
     vi.spyOn(api, "listReviewItems").mockImplementation(async (q?: { state?: string }) => (q?.state ? [] : [ITEM]));
     return render(
@@ -186,13 +187,13 @@ describe("T18-S11 round 2: a review card's Not yet and Decline", () => {
     );
   };
 
-  it("Not yet (was Changes wanted): the pasted screenshot goes with his words to the new round", async () => {
+  it("Give feedback (was Not yet): the pasted screenshot goes with his words to the new round", async () => {
     uploads();
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");
     fireEvent.click(within(c).getByTestId("review-iteration"));
-    const { box, area } = await oneBox(c, "Your note");
+    const { box, area } = await oneBox(c, "Feedback");
     pasteFile(area);
     await waitFor(() => expect(within(box).getByTestId("chat-attach-item").getAttribute("data-state")).toBe("ready"));
     fireEvent.change(area, { target: { value: "this was only in the main chat" } });

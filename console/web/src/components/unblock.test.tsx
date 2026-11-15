@@ -167,7 +167,7 @@ describe("Approve and grant write (M2-20)", () => {
     });
     const { container } = wrap(<WaitingCard item={item({})} />);
     expect(container.querySelector(`#${waitingAnchor("nj_f480d480")}`)).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Yes: go ahead" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Approve and grant write/ }));
     expect((screen.getByLabelText("Write scope") as HTMLTextAreaElement).value).toBe(nj().proposedAction);
     cleanup();

@@ -452,6 +452,10 @@ describe("cross-tenant refusal over every route (E22-1 evidence)", () => {
           "GET /landing", // a bare 302 to /landing/, which answers 404 to any world but the home world (landing.ts)
           "POST /api/public/testers", // the open signup form (writes only tester_signups, answers nothing of a world)
           "GET /api/public/pv", // epicspine.dev's page-view counter (a 1x1 image; counts known pages only, answers nothing of a world)
+          "GET /api/inbox/team-cards", // B is the social world, a card world: its own idea cards only (empty here), never A's
+          // B's owner logged in answers B's own idea cards (400 on an empty body); A's card ids are a 404; a token never (403)
+          ...(kind === "session" ? ["POST /api/inbox/team-cards/:id/answer"] : []),
+          "GET /api/public/steps-keep.js", // the steps kit's recorder keep (voice/keepJs.ts): a static script, no data
           "POST /api/public/stripe/tester", // the Stripe webhook (signature-checked; 503 here: no signing secret in tests)
           "POST /api/public/stripe/team", // Epic Team's Stripe webhook (signature-checked; 503 here: no signing secret in tests)
           "GET /api/me",

@@ -236,6 +236,14 @@ export type StatusService = ReturnType<typeof createStatus>;
  * with a read model, /status and /milestones/:id/status answer from the stored view (computed off the request
  * path, kept across restarts) plus `asOf`: when it was last known current. Without one, computed per request as before.
  */
+/** the world's open status rows as GET /status gives them (the stored view when there is one); the Inbox search reads them. */
+export async function statusRows(s: StatusService, store: Store, readModel?: ReadModelHost): Promise<{ items: unknown[] }> {
+  if (!readModel) return (await s.all({ includeSettled: false })) as unknown as { items: unknown[] };
+  const k: Extract<ViewKey, { kind: "status" }> = { kind: "status", world: store.tenant ?? "", includeSettled: false };
+  const v = await readModel.view(k, () => computeStatus(s, store, k) as ReturnType<StatusService["all"]>);
+  return (v.payload ?? { items: [] }) as unknown as { items: unknown[] };
+}
+
 export function mountStatus(api: Hono, s: StatusService, store: Store, readModel?: ReadModelHost) {
   api.get("/status", async (c) => {
     const includeSettled = ["true", "1"].includes(c.req.query("includeSettled") ?? "");

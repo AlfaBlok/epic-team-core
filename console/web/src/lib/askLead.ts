@@ -144,10 +144,10 @@ export function askLeadUrl(item: { question?: string; title?: string }): string 
 }
 
 /** the heading: one short line, a few words (about 70 characters at most), never the Why. */
-export function cardHeading(item: { question?: string; title?: string }): string {
+export function cardHeading(item: { question?: string; title?: string }, max = 72): string {
   const t = askText(item) || (item.title ?? "").trim();
   const one = firstSentence(t, 400);
-  if (one.length <= 72) return cap(one);
+  if (one.length <= max) return cap(one);
   // a long sentence: its first clause when that reads alone (a comma, a colon, a dash), else cut at a word
   const m = /^(.{24,72}?)(?:,\s|;\s|:\s|\s[—–-]\s|\s\()/.exec(one);
   return cap(m ? m[1].trim() : firstSentence(one, 72));

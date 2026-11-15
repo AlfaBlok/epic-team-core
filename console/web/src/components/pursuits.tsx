@@ -1,9 +1,15 @@
 import { useEffect } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
+import { Link, NavLink, Navigate, useLocation, useParams } from "react-router-dom";
 import { api } from "@/api";
 import type { Pursuit, PursuitLine, PursuitLineState, PursuitsBody, PursuitTotem } from "@/api/pursuit-types";
+import { pursuitTitle } from "@/api/pursuit-types";
 import { PageHeader } from "@/components/common";
+import { SOCIAL_KIT_TAB, setKitHref } from "@/components/socialKit";
+import { PursuitsMap, RankBadge, epicDeckHref } from "@/components/pursuitsMap";
 import { useQuery } from "@/lib/data";
+import { scorecardHref } from "@/lib/scorecards";
+import { useRoutes } from "@/lib/skin";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +20,10 @@ import { cn } from "@/lib/utils";
  * look follows docs/design/console.md: ink, grey and the one green; red only as the word of a red line or "stalled".
  */
 export const PURSUITS_PATH = "pursuits";
+/** each pursuit has its own page under Pursuits, its tabs Scorecard and (when it has one) Social kit. */
+export const PURSUIT_PATH = `${PURSUITS_PATH}/:id`;
+export const PURSUIT_TAB_PATH = `${PURSUITS_PATH}/:id/:tab`;
+export const pursuitHref = (id: string, tab?: string) => `/${PURSUITS_PATH}/${encodeURIComponent(id)}${tab ? `/${tab}` : ""}`;
 
 export function usePursuits() {
   return useQuery<PursuitsBody>(() => api.listPursuits(), [], { tag: "inbox" });
@@ -103,19 +113,77 @@ function Totem({ t }: { t: PursuitTotem }) {
   );
 }
 
-export function PursuitPanel({ p }: { p: Pursuit }) {
+/** Where it runs: each epic's deck (with the way back here) and the milestones and teams that carry it. */
+function RunsIn({ p }: { p: Pursuit }) {
+  const epics = (p.epics ?? []).filter((e) => e.code);
+  const ms = p.milestones ?? [];
+  if (!epics.length && !ms.length) return null;
+  const cls = "text-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground";
+  return (
+    <div className="mt-3 grid gap-2 border-t pt-3" data-testid="pursuit-runs-in">
+      {epics.length > 0 && (
+        <div className="grid gap-1">
+          <div className="text-xs text-muted-foreground">Epics, each opens its deck</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {epics.map((e) => (
+              <Link key={`${e.repo}/${e.path}`} to={epicDeckHref(e.repo, e.code!, p.id)} className={cls} data-testid="pursuit-epic" title={e.title}>
+                {e.code}
+                {e.title ? `: ${e.title.length > 60 ? `${e.title.slice(0, 58)}…` : e.title}` : ""}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+      {ms.length > 0 && (
+        <div className="grid gap-1">
+          <div className="text-xs text-muted-foreground">Milestones and their teams</div>
+          <ul className="grid gap-1">
+            {ms.map((m) => (
+              <li key={m.id} className="grid gap-0.5" data-testid="pursuit-milestone">
+                <Link to={`/milestones/${encodeURIComponent(m.id)}`} className={cls}>
+                  {m.title}
+                </Link>
+                <span className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {m.teams.length
+                    ? m.teams.map((t) => (t.enabled ? `${t.persona}: ${t.paceNow}${t.paceNow !== t.pace ? ` (set ${t.pace})` : ""}` : `${t.persona}: off`)).join(" · ")
+                    : "no team on it"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function PursuitPanel({ p, linkName = false }: { p: Pursuit; linkName?: boolean }) {
   return (
     <article id={p.id} className="min-w-0 scroll-mt-20 rounded-xl border bg-card p-4" data-testid="pursuit" data-pursuit={p.id}>
       <div className="flex items-start gap-3">
         <PursuitRing greens={p.greens} total={p.total} />
         <div className="grid min-w-0 flex-1 gap-0.5">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h2 className="text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">{p.name}</h2>
+            <h2 className="text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">
+              {linkName ? (
+                <Link to={pursuitHref(p.id)} className="underline decoration-border underline-offset-4 hover:decoration-foreground" data-testid="pursuit-open">
+                  {pursuitTitle(p)}
+                </Link>
+              ) : (
+                pursuitTitle(p)
+              )}
+            </h2>
             <StateWord state={p.state} />
             <span className="text-xs text-muted-foreground">·</span>
             <MotionWord p={p} />
+            {p.rank !== undefined && <RankBadge p={p} />}
           </div>
           <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">Green when {p.greenWhen.charAt(0).toLowerCase() + p.greenWhen.slice(1)}</p>
+          {p.effort && (
+            <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="pursuit-panel-effort">
+              {p.effort.words}
+            </p>
+          )}
         </div>
       </div>
       <ul className="mt-3 divide-y divide-border border-t" data-testid="pursuit-lines">
@@ -133,6 +201,7 @@ export function PursuitPanel({ p }: { p: Pursuit }) {
           </div>
         </div>
       )}
+      <RunsIn p={p} />
       <div className="mt-3 text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="pursuit-last-move">
         {p.lastMove ? `Last moved ${formatRelative(p.lastMove.at)} in ${p.lastMove.repo}: ${p.lastMove.subject}` : "No change found in what it watches."}
       </div>
@@ -149,16 +218,119 @@ export function PursuitsPage() {
   }, [hash, data]);
   const stale = data?.staleDays ?? 3;
   return (
-    <div className="mx-auto grid w-full max-w-3xl gap-3" data-testid="pursuits-page">
-      <PageHeader title="Pursuits" description={`Your big goals. The worst line sets the colour; stalled means nothing it watches changed in ${stale} days.`} />
+    <div className="mx-auto grid w-full min-w-0 max-w-6xl gap-3" data-testid="pursuits-page">
+      <PageHeader
+        title="Pursuits"
+        description={
+          data?.pursuits.length
+            ? `Your ${data.pursuits.length} big goals, most important first: ${data.pursuits[0].name} leads and gets the most effort; parked ones get none.`
+            : "Your big goals, most important first."
+        }
+      />
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the scorecards…</div>}
       {error && <div className="text-sm text-destructive">Could not read the pursuits: {error.message}</div>}
       {data && data.pursuits.length === 0 && <div className="text-sm text-muted-foreground">No pursuits yet: docs/pursuits.json names them.</div>}
-      {data?.pursuits.map((p) => <PursuitPanel key={p.id} p={p} />)}
+      {data && data.pursuits.length > 0 && <PursuitsMap data={data} />}
+      {data && data.pursuits.length > 0 && (
+        <h2 className="mt-2 text-sm font-semibold text-foreground" data-testid="pursuits-scorecards">
+          Scorecards, in the same order. The worst line sets the colour; stalled means nothing it watches changed in {stale} days.
+        </h2>
+      )}
+      {data?.pursuits.map((p) => <PursuitPanel key={p.id} p={p} linkName />)}
       {data?.said && (
         <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="pursuits-said">
           Your words: “{data.said.words}”
         </p>
+      )}
+    </div>
+  );
+}
+
+/** The way back and where he is: Pursuits › the pursuit › the tab, each part a link up. */
+function Crumbs({ p, tab }: { p?: Pursuit; tab?: string }) {
+  const link = "text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground";
+  return (
+    <nav className="flex min-w-0 flex-wrap items-center gap-1 text-sm" aria-label="Where you are" data-testid="pursuit-crumbs">
+      <Link to={`/${PURSUITS_PATH}`} className={link} data-testid="pursuit-back">
+        Pursuits
+      </Link>
+      {p && (
+        <>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          {tab ? (
+            <Link to={pursuitHref(p.id)} className={link}>
+              {pursuitTitle(p)}
+            </Link>
+          ) : (
+            <span className="text-foreground">{pursuitTitle(p)}</span>
+          )}
+        </>
+      )}
+      {p && tab && (
+        <>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className="text-foreground">{tab}</span>
+        </>
+      )}
+    </nav>
+  );
+}
+
+const tabClass = ({ isActive }: { isActive: boolean }) =>
+  cn("-mb-px border-b-2 px-1 pb-2 text-sm transition-colors", isActive ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground");
+
+/** The old kit address, in both skins (the pursuit pages are console-only): it leads to the goal set's Social kit tab. */
+export const PURSUIT_KIT_PATH = `${PURSUITS_PATH}/:id/${SOCIAL_KIT_TAB}`;
+export function PursuitKitRedirect() {
+  const { id = "" } = useParams();
+  return <Navigate to={setKitHref(id)} replace />;
+}
+
+/**
+ * An old /pursuits address. The console skin keeps its pursuit pages; a skin without them (the social one) opens the
+ * objective instead: /pursuits -> All objectives, /pursuits/<id> -> /sets/<id>, its social kit -> the Social kit tab.
+ */
+export function OldPursuitRoute({ page }: { page: JSX.Element }) {
+  const routes = useRoutes();
+  const { id, tab } = useParams();
+  // one pursuit opens as its wheel, with its tabs, the key results first, in both skins.
+  if (!id && routes("book")) return page;
+  if (!id) return <Navigate to={scorecardHref()} replace />;
+  return <Navigate to={tab === SOCIAL_KIT_TAB ? setKitHref(id) : scorecardHref(id)} replace />;
+}
+
+/** One pursuit's own page: its scorecard, and its social kit inside the console, never a page of its own. */
+export function PursuitPage() {
+  const { id = "", tab } = useParams();
+  const { data, error, loading } = usePursuits();
+  const p = data?.pursuits.find((x) => x.id === id);
+  // the kit is a tab of the goal set's page now (pursuits live in the sidebar as sets).
+  if (tab === SOCIAL_KIT_TAB) return <Navigate to={setKitHref(id)} replace />;
+  return (
+    <div className="mx-auto grid w-full min-w-0 max-w-3xl gap-3" data-testid="pursuit-page" data-pursuit={id}>
+      <Crumbs p={p} />
+      {loading && !data && <div className="text-sm text-muted-foreground">Reading the scorecard…</div>}
+      {error && <div className="text-sm text-destructive">Could not read the pursuits: {error.message}</div>}
+      {data && !p && (
+        <div className="text-sm text-muted-foreground" data-testid="pursuit-unknown">
+          No pursuit called “{id}”. <Link to={`/${PURSUITS_PATH}`} className="underline underline-offset-4">See every pursuit</Link>
+        </div>
+      )}
+      {p && (
+        <>
+          <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-2xl">{pursuitTitle(p)}</h1>
+          <nav className="flex gap-5 border-b" aria-label="Pursuit pages" data-testid="pursuit-tabs">
+            <NavLink to={pursuitHref(p.id)} end className={tabClass} data-testid="pursuit-tab-scorecard">
+              Scorecard
+            </NavLink>
+            {p.kit && (
+              <NavLink to={setKitHref(p.id)} className={tabClass} data-testid="pursuit-tab-kit">
+                Social kit
+              </NavLink>
+            )}
+          </nav>
+          <PursuitPanel p={p} />
+        </>
       )}
     </div>
   );
@@ -174,20 +346,32 @@ export function SidebarPursuits({ onNavigate }: { onNavigate?: () => void }) {
   if (!data?.pursuits.length) return null;
   return (
     <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-pursuits">
-      <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground">Pursuits</div>
+      {/* the heading opens every pursuit (a plain label did nothing when clicked). */}
+      <NavLink
+        to={`/${PURSUITS_PATH}`}
+        end
+        className={({ isActive }) => cn("rounded-md px-2.5 pb-1 pt-2 text-xs font-medium hover:text-foreground", isActive ? "text-foreground" : "text-muted-foreground")}
+        onClick={onNavigate}
+        data-testid="sidebar-pursuits-all"
+      >
+        Pursuits
+      </NavLink>
       {data.pursuits.map((p) => (
         <NavLink
           key={p.id}
-          to={`/${PURSUITS_PATH}#${p.id}`}
-          className={() => sideItem({ isActive: pathname === `/${PURSUITS_PATH}` && hash === `#${p.id}` })}
+          to={pursuitHref(p.id)}
+          className={() => sideItem({ isActive: pathname.startsWith(pursuitHref(p.id)) || (pathname === `/${PURSUITS_PATH}` && hash === `#${p.id}`) })}
           onClick={onNavigate}
           title={`${p.name}: ${STATE_WORD[p.state]}, ${p.greens} of ${p.total} lines green`}
           data-testid="sidebar-pursuit"
           data-pursuit={p.id}
         >
           <span className="grid min-w-0 flex-1 gap-0.5">
-            <span className="line-clamp-2 min-w-0 break-words text-[13px] font-medium text-foreground">{p.name}</span>
-            <MotionWord p={p} />
+            <span className="line-clamp-2 min-w-0 break-words text-[13px] font-medium text-foreground">
+              {typeof p.rank === "number" && <span className="mr-1 text-muted-foreground" data-testid="sidebar-pursuit-rank">{p.rank}.</span>}
+              {pursuitTitle(p)}
+            </span>
+            {p.parked ? <span className="text-xs text-muted-foreground">parked</span> : <MotionWord p={p} />}
           </span>
           <span className="mt-0.5 shrink-0 text-xs text-muted-foreground" data-testid="sidebar-pursuit-count">
             {p.greens}/{p.total}

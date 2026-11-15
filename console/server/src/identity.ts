@@ -161,6 +161,8 @@ export interface Sites {
   contact: string;
   /** the YouTube channel handles the YouTube Allow link may store keys for (auth/youtubeConnect.ts); none by default */
   youtubeChannels: string;
+  /** one-button connects (auth/connects.ts ConnectSpec): an account its owner connects with one tap; none by default */
+  connects: import("./auth/connects.js").ConnectSpec[];
   /** the console's state folder under the home directory (its database, job server state; stateDir()) */
   stateDir: string;
   /** the seat broker's folder under the home directory (seats, the T3 token, providers, the watchdog pause; seatDir()) */
@@ -195,6 +197,7 @@ export const NEUTRAL_SITES: Sites = {
   replyVoiceUrl: "http://127.0.0.1:18940",
   contact: "mailto:owner@example.com",
   youtubeChannels: "",
+  connects: [],
   stateDir: "team_console",
   seatDir: "team_m0",
   reposRoot: "",

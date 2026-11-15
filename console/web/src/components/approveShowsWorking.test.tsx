@@ -61,7 +61,7 @@ describe("Approve shows it is working", () => {
     vi.spyOn(api, "respondToWaiting").mockReturnValue(d.promise);
     const { rerender } = wrap(<WaitingCard item={item()} />);
     expect(screen.queryByRole("status")).toBeNull();
-    const approve = btn(/Approve/);
+    const approve = btn(/Yes: go ahead/);
     fireEvent.click(approve);
     expect(approve.textContent).toBe("Sending…");
     expect(approve.getAttribute("aria-busy")).toBe("true");
@@ -69,7 +69,7 @@ describe("Approve shows it is working", () => {
     expect(approve.querySelector('[data-testid="button-spinner"]')).not.toBeNull();
     expect(approve.querySelector(".animate-spin")).not.toBeNull();
     // the second button of an approve card is "No" (was Decline)
-    const deny = btn(/^No$/);
+    const deny = btn(/^No: drop it$/);
     expect(deny.disabled).toBe(true);
     expect(deny.getAttribute("aria-busy")).toBeNull();
     expect(deny.querySelector(".animate-spin")).toBeNull();
@@ -80,7 +80,7 @@ describe("Approve shows it is working", () => {
     await act(async () => d.resolve(response()));
     expect(screen.getByRole("status").textContent).toBe(SAVED_ANSWER);
     expect(screen.queryByTestId("button-spinner")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Yes: go ahead/ })).toBeNull();
 
     // The refresh brings the answered item: the controls go, and so do the spinner and the line.
     rerender(<MemoryRouter><WaitingCard item={item({ state: "answered", response: response() })} /></MemoryRouter>);
@@ -91,24 +91,24 @@ describe("Approve shows it is working", () => {
   it("an error stops the spinner and shows as before", async () => {
     vi.spyOn(api, "respondToWaiting").mockRejectedValue(new Error("spine write failed: push rejected"));
     wrap(<WaitingCard item={item()} />);
-    fireEvent.click(btn(/Approve/));
+    fireEvent.click(btn(/Yes: go ahead/));
     await vi.waitFor(() => expect(screen.getByText("spine write failed: push rejected")).toBeTruthy());
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByTestId("button-spinner")).toBeNull();
-    expect(btn(/Approve/).disabled).toBe(false);
+    expect(btn(/Yes: go ahead/).disabled).toBe(false);
   });
 
   it("a refresh that never changes the card releases it after SAVED_HOLD_MS (T72-S3: was 15 s)", async () => {
     vi.useFakeTimers();
     vi.spyOn(api, "respondToWaiting").mockResolvedValue(response());
     wrap(<WaitingCard item={item()} />);
-    fireEvent.click(btn(/Approve/));
+    fireEvent.click(btn(/Yes: go ahead/));
     await act(async () => {});
     expect(screen.getByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe(SAVED_ANSWER);
     await act(async () => vi.advanceTimersByTime(SAVED_HOLD_MS + 1));
     expect(screen.queryByRole("status")).toBeNull();
-    expect(btn(/Approve/).disabled).toBe(false);
+    expect(btn(/Yes: go ahead/).disabled).toBe(false);
   });
 });
 
@@ -118,8 +118,8 @@ describe("Answer (free text) shows it is working", () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockReturnValue(d.promise);
     // a question that needs words (not a yes/no "?") shows the "Your answer" box with one Answer button
     wrap(<WaitingCard item={item({ ask: "decide", decidable: false, options: undefined, question: "Say when to ship the logger." })} />);
-    fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "wait a week" } });
-    const answer = btn(/^\s*Answer$/);
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "wait a week" } });
+    const answer = btn(/^\s*Send$/);
     fireEvent.click(answer);
     expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "wait a week", milestoneId: "ms_1", wake: true });
     expect(answer.textContent).toBe("Sending…");
@@ -129,19 +129,19 @@ describe("Answer (free text) shows it is working", () => {
     await act(async () => d.resolve(response({ kind: "answer", text: "wait a week" })));
   });
 
-  it("an option's Send my pick gets the spinner too", async () => {
-    // options are a radio list; Send my pick sends the picked one, Not now waits
+  it("an option's own button gets the spinner too", async () => {
+    // E948-S69: each option is its own button; the pressed one sends and spins
     const spy = vi.spyOn(api, "respondToWaiting").mockReturnValue(new Promise(() => {}));
     wrap(<WaitingCard item={item({ ask: "decide", decidable: false, options: ["one", "two"] })} />);
-    fireEvent.click(screen.getAllByTestId("ask-option")[1]);
-    const send = screen.getByTestId("send-pick") as HTMLButtonElement;
+    const send = screen.getAllByTestId("ask-option")[1] as HTMLButtonElement;
     fireEvent.click(send);
     expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ kind: "answer", text: "two" }));
     expect(send.textContent).toBe("Sending…");
     expect(send.querySelector(".animate-spin")).not.toBeNull();
-    const notNow = screen.getByTestId("not-now") as HTMLButtonElement;
-    expect(notNow.querySelector(".animate-spin")).toBeNull();
-    expect(notNow.disabled).toBe(true);
+    // E948-S60: no Not now; the feedback block's Send waits while the pick is sending
+    const other = screen.getByTestId("card-feedback-send") as HTMLButtonElement;
+    expect(other.querySelector(".animate-spin")).toBeNull();
+    expect(other.disabled).toBe(true);
   });
 });
 

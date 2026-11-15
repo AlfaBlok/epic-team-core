@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type SignedInCheck } from "@/api";
-import { BrowserAuthPage } from "@/pages/BrowserAuth";
+import { authPunchline, BrowserAuthPage } from "@/pages/BrowserAuth";
+import type { AuthSite } from "@/api";
 
 afterEach(() => {
   cleanup();
@@ -43,6 +44,21 @@ describe("T86-S2 the hourly signed-in check on Browser auth", () => {
     expect(within(screen.getByTestId("check-youtube")).getByText("by its API")).toBeTruthy();
   });
 
+  it("keeps each label on one line: a long name ends in an ellipsis and keeps its full name in the title", async () => {
+    vi.spyOn(api, "listAuthSites").mockResolvedValue([]);
+    vi.spyOn(api, "listEgress").mockResolvedValue([]);
+    vi.spyOn(api, "listSignedInCheck").mockResolvedValue([row({ site: "x-examplehq_data", state: "not_synced", fix: FIX })]);
+    render(
+      <MemoryRouter>
+        <BrowserAuthPage />
+      </MemoryRouter>,
+    );
+    const label = within(await screen.findByTestId("check-x-examplehq_data")).getByTestId("check-label");
+    expect(label.textContent).toBe("x-examplehq_data");
+    expect(label.getAttribute("title")).toBe("x-examplehq_data");
+    expect(label.className).toMatch(/\btruncate\b/);
+  });
+
   it("shows nothing when the browser keeps no check", async () => {
     vi.spyOn(api, "listAuthSites").mockResolvedValue([]);
     vi.spyOn(api, "listEgress").mockResolvedValue([]);
@@ -54,5 +70,62 @@ describe("T86-S2 the hourly signed-in check on Browser auth", () => {
     );
     await screen.findByText(/No synced sites yet/);
     expect(screen.queryByTestId("signed-in-check")).toBeNull();
+  });
+});
+
+describe("the Browser auth page opens with its answer in two accents", () => {
+  const site = (o: Partial<AuthSite>): AuthSite => ({
+    id: o.pattern ?? "s",
+    pattern: "*.reddit.com",
+    domains: ["reddit.com"],
+    cookieCount: 9,
+    sourceBrowser: "Chrome",
+    sourceProfile: "example.com (Default)",
+    syncedAt: at,
+    loginCookie: "session",
+    loginExpiry: new Date(Date.now() + 90 * 86_400_000).toISOString(),
+    ...o,
+  });
+
+  it("says how many logins are in sync and which need a Re-sync", () => {
+    const reddit = site({});
+    const airbnb = site({ id: "a", pattern: "*.airbnb.com", session: "dead" });
+    const x = site({ id: "x", pattern: "*.x.com", accounts: ["OpsDesk"] });
+    expect(authPunchline([])).toMatch(/No logins synced yet/);
+    expect(authPunchline([reddit])).toBe("The 1 synced login is in sync.");
+    expect(authPunchline([reddit, x])).toBe("All 2 synced logins are in sync.");
+    expect(authPunchline([reddit, airbnb, x])).toBe("2 of 3 logins in sync, 1 needs a Re-sync: airbnb.com.");
+    const out = [row({ site: "x", state: "signed_out", pattern: "*.x.com" })];
+    expect(authPunchline([reddit, airbnb, x], out)).toBe("1 of 3 logins in sync, 2 need a Re-sync: airbnb.com, @OpsDesk.");
+  });
+
+  it("puts the answer box right under the title, the prose after the rows, and shows the laptop and API states as grey text", async () => {
+    vi.spyOn(api, "listAuthSites").mockResolvedValue([site({}), site({ id: "a", pattern: "*.airbnb.com", session: "dead" })]);
+    vi.spyOn(api, "listEgress").mockResolvedValue([]);
+    vi.spyOn(api, "listSignedInCheck").mockResolvedValue([
+      row({ site: "x", state: "held", pattern: "*.x.com" }),
+      row({ site: "youtube", state: "by_api" }),
+      row({ site: "airbnb", state: "error" }),
+    ]);
+    render(
+      <MemoryRouter>
+        <BrowserAuthPage />
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId("auth-punchline");
+    expect(box.textContent).toBe("1 of 2 logins in sync, 1 needs a Re-sync: airbnb.com.");
+    const h1 = screen.getByRole("heading", { level: 1 });
+    // nothing but the header's own row sits between the title and the answer: the prose comes after the rows
+    expect(h1.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const about = screen.getByTestId("auth-about");
+    expect(box.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("signed-in-check").compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(h1.parentElement!.textContent).toBe("Browser auth");
+    await screen.findByTestId("check-x");
+    for (const [id, text] of [["check-x", "waiting for the laptop"], ["check-youtube", "by its API"], ["check-airbnb", "could not check"]]) {
+      const el = within(screen.getByTestId(id)).getByText(text);
+      expect(el.className).toMatch(/text-muted-foreground/);
+      expect(el.className).not.toMatch(/amber|border|rounded/);
+    }
   });
 });

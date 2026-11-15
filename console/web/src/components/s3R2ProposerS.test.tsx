@@ -68,9 +68,9 @@ describe("T76-S2/S3 r2 a proposer's card", () => {
     const complete = vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
     render(<MemoryRouter><WaitingForReview fold="review" /></MemoryRouter>);
     const c = await screen.findByTestId("review-card");
-    // the button says "Send my choices"; what it does is its title
+    // E979-G20261113 iteration 2 (vn_78c963b6): the button names what it does, "Start <n>"; the details are its title
     const send = within(c).getByTestId("review-complete");
-    expect(send.textContent).toBe("Send my choices");
+    expect(send.textContent).toBe("Start 1");
     expect(send.getAttribute("title")).toBe("The goal you switched on starts, and a Delivery Manager is sent to it.");
     fireEvent.click(send);
     await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_i", { start: [0], park: [], why: [""] }));

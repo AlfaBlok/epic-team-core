@@ -36,7 +36,11 @@ export interface MovementDeps {
   waiting?: (m: Milestone) => Promise<WaitingItem[]>;
   /** Run now of an assignment with a note (cycle.runNowRequest); undefined = no cycle (tests, read-only consoles). */
   runNow?: (assignmentId: string, note: string) => Promise<Run & { startGuard?: string }>;
+  /** why the stall watch waits now (priority mode on); undefined = it may fire. */
+  paused?: () => string | undefined;
   enabled: boolean;
+  /** effort follows priority: the pursuit carrying an epic (repo, spine path); null = in no pursuit. */
+  effortFor?: (repo: string, path: string) => { parked: boolean; stallHours: number; pursuitName: string } | null;
   activity?: ReturnType<typeof spineActivity>;
   /**
    * GET /moving-now answers one world's strip from a build at most this old (ms; 0 = build per request, as
@@ -53,6 +57,13 @@ export function createMovement(d: MovementDeps) {
   const activity = d.activity ?? spineActivity();
   const now = d.now ?? Date.now;
   const personaName = (id: string) => d.store.getPersona(id)?.name;
+  const effortOf = (repo: string, p: string) => {
+    try {
+      return d.effortFor?.(repo, p) ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   async function movingOf(m: Milestone): Promise<MovingEpic[]> {
     if (!m.path) return [];
@@ -100,7 +111,7 @@ export function createMovement(d: MovementDeps) {
       const stuck = epics.some((e) => !e.ready.length || !isGoing(e.status));
       const waits = stuck && d.waiting ? await Promise.all([d.treeFor(m), d.waiting(m)]).then(([tree, items]) => epicWaits(m, tree, items)).catch(() => ({}) as ReturnType<typeof epicWaits>) : ({} as ReturnType<typeof epicWaits>);
       for (const epic of epics)
-        out.push(stallVerdict({ milestone: m, epic, manager, managerName: manager && personaName(manager.personaId), runs, seats, waits: waits[epic.path] }, t));
+        out.push(stallVerdict({ milestone: m, epic, manager, managerName: manager && personaName(manager.personaId), runs, seats, waits: waits[epic.path], effort: effortOf(m.repo, epic.path) }, t));
     }
     return out;
   }
@@ -109,6 +120,11 @@ export function createMovement(d: MovementDeps) {
   async function tick(): Promise<{ fired: { assignmentId: string; runId?: string; epics: string[]; queued?: boolean; error?: string }[] }> {
     const fired: { assignmentId: string; runId?: string; epics: string[]; queued?: boolean; error?: string }[] = [];
     if (!d.enabled || !d.runNow) return { fired };
+    const pause = d.paused?.();
+    if (pause) {
+      d.log?.(`stall watch: paused (${pause})`);
+      return { fired };
+    }
     const byManager = new Map<string, StallEval[]>();
     for (const e of await evaluate()) if (e.verdict === "fire" && e.assignmentId) byManager.set(e.assignmentId, [...(byManager.get(e.assignmentId) ?? []), e]);
     for (const [assignmentId, fires] of byManager) {

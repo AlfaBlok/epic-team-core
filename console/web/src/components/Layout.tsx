@@ -1,32 +1,35 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Settings, Sun, Ticket } from "lucide-react";
+import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin } from "lucide-react";
+import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
+import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
 import { useQuery } from "@/lib/data";
 import { blockedItems, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
-import { SidebarPursuits } from "@/components/pursuits";
+import { SidebarGoalSets } from "@/components/goalSets";
+import { SidebarCampaigns } from "@/components/campaignHome";
+import { INBOX_PATH } from "@/components/inboxLine";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { liveWorkers } from "@/components/status";
 import { MILESTONE_PAGE, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
 import { milestoneState, statusOf } from "@/lib/status";
-import { MilestoneDialog } from "@/components/dialogs";
+import { lazyPage } from "@/lib/lazyPage";
 import { milestoneName } from "@/lib/format";
-import { focusHeading, useShows, useSkin, useWords } from "@/lib/skin";
+import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
-import { NEW_CAMPAIGN_PATH } from "@/pages/Campaigns";
-import { GAP_FINDER_PATH } from "@/pages/GapFinder";
 import { COMPANY_PATH } from "@/lib/company";
+import { GAP_FINDER_PATH, NEW_CAMPAIGN_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
 import { SETTINGS_PATH, useOperatorPages } from "@/lib/settingsPath";
 import { useCompanyView } from "@/lib/companyView";
 import { useGapFinder } from "@/lib/gapFinder";
 import { reachSites, setupConnections } from "@/pages/Setup";
 import { worldId } from "@/lib/useSocial";
-import { repoLevelIds, useCampaigns } from "@/lib/campaign";
+import { campaignMilestones, useCampaigns } from "@/lib/campaign";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import { PERFORMANCE_PATH, PRODUCT_PATH } from "@/pages/social/nav";
 import { MESSAGES_PATH, useMessages } from "@/lib/messages";
@@ -36,6 +39,9 @@ import { TopBarVoice } from "@/voice/TopBarVoice";
 import { knownWorld } from "@/lib/useSocial";
 import { deskVoiceBase } from "@/voice/deskBase";
 import { homeWorld } from "@/lib/identity";
+
+// The New milestone dialog loads its script the first time it opens, not with the first screen.
+const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
 
 /**
  * the pills' numbers (GET /api/counts, one small answer, polled with the other queries). The Layout reads it once for
@@ -126,6 +132,8 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
 
 /** "Other milestones" open or folded, kept in localStorage (default folded). */
 const OTHERS_STORE = "sidebar.otherMilestones.open";
+/** the social skin's More fold open or folded, kept in localStorage (default folded). */
+const MORE_STORE = "sidebar.more.open";
 function useStoredFlag(key: string): [boolean, (v: boolean) => void] {
   const [v, setV] = useState(() => {
     try {
@@ -218,6 +226,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { entries: snoozing } = useSnoozes();
   const { cards: allCards } = useReviewCards();
   const [newOpen, setNewOpen] = useState(false);
+  // Mounted (and its script fetched) only once it has been opened
+  const [newEver, setNewEver] = useState(false);
+  useEffect(() => { if (newOpen) setNewEver(true); }, [newOpen]);
   const navigate = useNavigate();
   const { dark, toggle } = useTheme();
   // words and screen set come from the world's skin. Both skins render this one menu in the
@@ -232,10 +243,10 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // spines not read yet: no number (never a low count), as before
   const openNeeds = statuses?.loading ? null : blockedHere.length;
   const teamReview = reviewCards(allCards, { keep: project.keep }).length;
-  // the social skin lists campaigns and jobs, not a repo's own level (repoLevelIds).
+  // the social skin lists real campaigns and their jobs only (campaignMilestones): every other milestone of the world
+  // (a house decision, a server, taxes) is team work and stays on the team side.
   const { data: camps } = useCampaigns();
-  const repoLevel = campaigns ? repoLevelIds(camps?.campaigns) : undefined;
-  const { roots, rest } = splitBigRoots(repoLevel?.size ? milestones?.filter((m) => !repoLevel.has(m.id)) : milestones);
+  const { roots, rest } = splitBigRoots(campaigns ? campaignMilestones(camps?.campaigns, milestones) : milestones);
   const [othersOpen, setOthersOpen] = useStoredFlag(OTHERS_STORE);
   // about 20 milestones show in priority order (focus first, his order); Load more shows the next 20.
   const [limit, setLimit] = useState(MILESTONE_PAGE);
@@ -267,6 +278,28 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     </>
   );
   const operatorPages = useOperatorPages();
+  // the owner, 12 Nov 16:02Z: "I just want to see the thing that I put there": the social skin shows Home, Inbox, Chat
+  // and his pinned campaigns; everything else folds into More (default folded). The console skin draws it all, unfolded.
+  const [moreOpen, setMoreOpen] = useStoredFlag(MORE_STORE);
+  const fold = (body: ReactNode) =>
+    !campaigns ? (
+      body
+    ) : (
+      <div className="grid min-w-0 grid-cols-1 gap-4" data-testid="sidebar-more">
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-md border-t px-2.5 pb-1.5 pt-3 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          aria-expanded={moreOpen}
+          data-testid="sidebar-more-toggle"
+          onClick={() => setMoreOpen(!moreOpen)}
+        >
+          {moreOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          More
+          <span className="ml-auto text-xs">{moreOpen ? "" : "all else"}</span>
+        </button>
+        {moreOpen && body}
+      </div>
+    );
   const rootLink = (m: Milestone) => <BigRootLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={{ review: reviewOf(allCards, m.id) }} onNavigate={onNavigate} />;
 
   return (
@@ -279,20 +312,17 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         </span>
         {apiMode === "mock" && <span className="ml-auto rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:text-amber-400">mock</span>}
       </div>
+      {/* while priority mode is on, a chip says so and opens /priority (where it is switched off); the console skin only. */}
+      {shows("runs") && !campaigns && <PriorityModeChip onNavigate={onNavigate} />}
 
       {/* in the social skin projects are the
           headings of the campaign list below Home and Chat, no longer the first thing in the menu. */}
-      {!byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
+      {!byProject && !campaigns && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
 
       <nav className="grid min-w-0 grid-cols-1 gap-0.5" aria-label="Main" data-testid="nav-main">
         {/* in the
             social skin these pages sit under the project's name: every campaign of it together; each campaign's own
             Deck, Product, Waiting on me and Pipeline are its tabs. */}
-        {campaigns && project.current && !byProject && (
-          <div className="px-2.5 pb-1 text-xs font-medium text-muted-foreground" data-testid="nav-project-heading">
-            {project.current.name}: all campaigns
-          </div>
-        )}
         {/* first in the social product's menu. */}
         {shows("performance") && !campaigns && (
           <NavLink to={`/${PERFORMANCE_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-performance">
@@ -307,12 +337,19 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             Product
           </NavLink>
         )}
-        <NavLink to="/" end className={itemClass} onClick={onNavigate}>
+        {/* Home is the goals view (all goal sets), the Inbox its own entry with the pills, in both skins. */}
+        <NavLink to="/" end className={itemClass} onClick={onNavigate} data-testid="nav-home">
           <Home className="h-4 w-4" />
-          {/* Home in the social product. */}
-          {campaigns ? "Home" : w.team}
+          Home
+        </NavLink>
+        <NavLink to={`/${INBOX_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-inbox">
+          <InboxIcon className="h-4 w-4" />
+          Inbox
           {statuses?.loading && <CountLoading className="ml-auto" />}
           <Pills needsYou={openNeeds} review={teamReview} ids={{ needsYou: "waiting-count", review: "team-review-count" }} />
+          {/* the other product worlds' own asks and cards (violet): the social skin only; the owner ("inbox is inbox"):
+              the console skin shows nothing of them. */}
+          {campaigns && <OtherWorldsPill />}
         </NavLink>
         {/* no global Epic deck entry here;
             each milestone page has a Deck tab (round 3, pages/Milestone.tsx MilestoneDeckTab). /deck stays by URL. */}
@@ -333,19 +370,22 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         {/* in the social skin Team, Chat, Performance and the project's Product deck, in that order; the
             Pipeline is each campaign's tab (every campaign's board still opens at /pipeline by URL). */}
         {!campaigns && socialPages}
-        {/* the Gap finder works across every project,
-            so like Team and Chat it sits at the top level; its page lists its runs and says where it lives. */}
-        {/* only while the Gap finder is switched on. */}
-        {shows("book") && gapFinder?.on && (
-          <NavLink to={`/${GAP_FINDER_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-gap-finder">
-            <Radar className="h-4 w-4" />
-            Gap finder
-          </NavLink>
-        )}
       </nav>
 
+      {/* The social skin: his pinned campaigns, each its number ring, name and inbox pills, right under Home, Inbox and Chat. */}
+      {campaigns && <SidebarCampaigns onNavigate={onNavigate} />}
+
+      {fold(
+        <>
+      {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
       {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
-      {shows("book") && !campaigns && <SidebarPursuits onNavigate={onNavigate} />}
+      {/* every sidebar entry is a goal set, nested, All goal sets on top; both skins. */}
+      {shows("goalSets") && <SidebarGoalSets onNavigate={onNavigate} />}
+
+      {/* the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
+          microphone. The other things are in the sidebar." So every other page sits here, below the goal sets, in his
+          order: one-offs, the outcome log, every one-off page the team made, his voice notes, the Gap finder. */}
+      <SidebarMorePages onNavigate={onNavigate} gapFinderOn={!!gapFinder?.on} />
 
       <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-milestones">
         <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground" data-testid="sidebar-focus-heading">
@@ -443,6 +483,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             {w.runs}
           </NavLink>
         )}
+        {/* priority mode one tap away (the Runs page's panel alone), no top-bar button; the console skin only. */}
+        {shows("runs") && !campaigns && (
+          <NavLink to={`/${PRIORITY_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-priority">
+            <Crosshair className="h-4 w-4" />
+            Priority mode
+          </NavLink>
+        )}
         {shows("threads") && (
           <NavLink to="/threads" className={itemClass} onClick={onNavigate}>
             <MessagesSquare className="h-4 w-4" />
@@ -480,12 +527,14 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           {dark ? "Light mode" : "Dark mode"}
         </button>
       </nav>
+        </>,
+      )}
 
       <AccountBlock />
       {/* the worlds come last, in the flow of the menu, seen when you scroll to them. */}
       <WorldSwitcher />
 
-      <MilestoneDialog
+      {(newOpen || newEver) && <MilestoneDialog
         open={newOpen}
         onOpenChange={setNewOpen}
         offerCampaign={campaigns}
@@ -498,7 +547,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           onNavigate?.();
           navigate(`/milestones/${m.id}`);
         }}
-      />
+      />}
     </div>
   );
 }
@@ -784,7 +833,7 @@ export function WorldSwitcher() {
   );
 }
 
-/** a world's mark in the switcher: its capitals (EpicTeam ET, the social product ES, the memory service Z), else its words' first letters. */
+/** a world's mark in the switcher: its capitals (the console skin ET, the social product ES, the memory service Z), else its words' first letters. */
 export const worldMark = (name: string) => {
   const caps = name.match(/[A-Z]/g) ?? [];
   if (caps.length >= 2 && !/\s/.test(name.trim())) return caps.slice(0, 2).join("");
@@ -806,7 +855,7 @@ export const worldTint = (id: string) => TINTS[[...id].reduce((h, c) => (h * 31 
 export const initialOf = (who: string) => (/^[a-z0-9]/i.test(who) ? who[0].toUpperCase() : "•");
 
 /**
- * the "Open the social product / EpicTeam" link only for a login that uses both products (the owner: several worlds, or the
+ * the "Open the social product / the console skin" link only for a login that uses both products (the owner: several worlds, or the
  * team's own world the home world); a tester with one world never sees a product they have no part in.
  */
 export const showsSibling = (me: { tenant?: { id: string } | null; worlds?: unknown[] } | undefined) =>
@@ -824,19 +873,48 @@ export function Reconnecting() {
   );
 }
 
-/** an EpicTeam sign-up's world before its plan is paid says so on every page, in one line. */
+/**
+ * an the console skin sign-up's world before its plan is paid says so on every page, in one line, with the button that pays
+ * (the hosted checkout, a monthly plan; its paid event clears this note). Back from Stripe it says the payment is on its way.
+ */
 export function BillingNote() {
   const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
   if (me?.billing !== "awaiting_payment") return null;
+  const back = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("checkout") === "done";
+  const world = me?.tenant?.id;
+  const pay = async () => {
+    if (!world || !api.startPlanCheckout) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      window.location.assign((await api.startPlanCheckout(world)).url);
+    } catch (e) {
+      setError((e as Error).message || "The payment page did not open. Try again in a minute.");
+      setBusy(false);
+    }
+  };
   return (
     <div role="status" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-testid="billing-note">
-      Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid: €49 a month, payment opens here
-      soon and we will write to you when it does.
+      {back ? (
+        <p>Thank you. Stripe is confirming your payment. Your team starts as soon as it arrives, refresh in a moment.</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="min-w-0 flex-1">Welcome to the console skin. Your account is ready. Your team starts working once your plan is paid: €49 a month.</p>
+          {world && api.startPlanCheckout && (
+            <Button size="sm" onClick={pay} disabled={busy} pending={busy} pendingLabel="Opening…" data-testid="billing-pay">
+              Pay €49 a month
+            </Button>
+          )}
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs text-red-700 dark:text-red-400">{error}</p>}
     </div>
   );
 }
 
-/** "Open the social product" (or EpicTeam) with the sibling's mark, for a login that uses both products. */
+/** "Open the social product" (or the console skin) with the sibling's mark, for a login that uses both products. */
 export function SiblingLink({ appName }: { appName: string }) {
   const sib = siblingOf(brandOf(appName));
   return (
@@ -851,9 +929,25 @@ export function SiblingLink({ appName }: { appName: string }) {
   );
 }
 
+/** the md breakpoint (768 px), where the desktop sidebar shows; true where the browser cannot tell (tests, old browsers). */
+export const WIDE_QUERY = "(min-width: 768px)";
+export function useWide(win: Window | undefined = typeof window === "undefined" ? undefined : window): boolean {
+  const mq = win?.matchMedia?.(WIDE_QUERY);
+  const [wide, setWide] = useState(() => mq?.matches ?? true);
+  useEffect(() => {
+    if (!mq) return;
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win]);
+  return wide;
+}
+
 export function Layout() {
   const w = useWords();
-  // the tab title is the world's family name (EpicTeam / the social product).
+  // the tab title is the world's family name (the console skin / the social product).
   useEffect(() => {
     document.title = w.appName;
   }, [w.appName]);
@@ -862,28 +956,39 @@ export function Layout() {
   useEffect(() => setMobileOpen(false), [location.pathname]);
   // one read of the pills for the top bar and both sidebars.
   const { data: counts } = useQuery(() => api.getCounts(), [], { tag: "counts" });
+  // the console skin only: the social skin's worlds keep their menu as it was.
+  const showsRuns = useShows()("runs") && !useSkin().campaigns;
+  const wide = useWide();
 
   return (
     <CountsCtx.Provider value={{ counts }}>
+    {/* a held press on a card with a ticket code offers "Give this the machine" (priority mode). */}
+    {showsRuns && <PriorityLongPress />}
     <div className="flex min-h-dvh">
-      <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 overflow-hidden border-r bg-muted/30 pt-[env(safe-area-inset-top)] md:block">
-        <SidebarNav />
-      </aside>
+      {/* the desktop sidebar exists only at md and up: on a phone it was hidden by CSS yet mounted, so a first visit read
+          (and every 30 s re-read) ~150 KB of lists nobody saw, beside the screen's own data. The phone menu
+          mounts its own SidebarNav when opened. */}
+      {wide && (
+        <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 overflow-hidden border-r bg-muted/30 pt-[env(safe-area-inset-top)] md:block" data-testid="desktop-sidebar">
+          <SidebarNav />
+        </aside>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* the top bar shows on every screen (desktop too, where the sidebar already carries the menu and the brand),
-            so Home and Chat are one tap away from anywhere. */}
+            and holds only Inbox, Chat and the mic (plus the menu button and the mark on a phone), so it never crowds. */}
         {/* in the installed app the status bar is see-through: the bar pads under it (safe-area), so the clock sits on the
             bar's own background and nothing scrolls under it. */}
-        <header className="sticky top-0 z-40 flex h-[calc(52px+env(safe-area-inset-top))] items-center gap-2 border-b bg-background px-3 pt-[env(safe-area-inset-top)] md:h-[calc(2.75rem+env(safe-area-inset-top))] md:px-4" data-testid="topbar">
+        <header className="sticky top-0 z-40 flex h-[calc(52px+env(safe-area-inset-top))] items-center gap-2 border-b bg-background px-3 max-[379px]:gap-1 max-[379px]:px-1.5 pt-[env(safe-area-inset-top)] md:h-[calc(2.75rem+env(safe-area-inset-top))] md:px-4" data-testid="topbar">
           <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu" onClick={() => setMobileOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
           {/* the product's mark and name, as in the sidebar. */}
-          <span className="flex min-w-0 items-center gap-2 md:hidden" data-testid="topbar-brand">
+          {/* the mark is the way Home on a phone: the bar itself keeps only Inbox, Chat and the mic (vn_87528e51). */}
+          <NavLink to="/" end aria-label={`${w.appName} Home`} className="flex min-h-[40px] min-w-0 items-center gap-2 md:hidden" data-testid="topbar-brand">
             <BrandMark brand={brandOf(w.appName)} className="h-6 w-6" />
-            <span className="truncate font-brand text-[17px] font-semibold tracking-[-0.02em]">{w.appName}</span>
-          </span>
+            <span className="truncate font-brand text-[17px] font-semibold tracking-[-0.02em]" data-testid="topbar-brand-name">{w.appName}</span>
+          </NavLink>
           <TopBarPills counts={counts} />
         </header>
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -917,9 +1022,8 @@ export function Layout() {
  * mark: desk replies since he last opened Chat (/counts, cleared by markChatSeen).
  */
 function TopBarPills({ counts }: { counts: CountsView | undefined }) {
-  const words = useWords();
-  // the social product's first entry is Home, in the top bar as in the menu.
-  const w = useSkin().campaigns ? { ...words, team: "Home" } : words;
+  // only Inbox, Chat and the mic, at every width and in both skins (the owner, vn_87528e51); Home is the product mark,
+  // every other page is in the sidebar (SidebarMorePages).
   const shows = useShows();
   // inside Epic Social the phone's Team pills are the selected project's, as the menu's Team pills.
   // the same lists and functions as the menu's Team pills and the Team home sections (lib/inbox), never /counts.
@@ -932,12 +1036,13 @@ function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   // the same desk Chat opens (pages/Chat ChatPage): the home world's Team desk, or the world's own desk in its skin.
   const world = useQuery(() => worldId(), []);
   const link = ({ isActive }: { isActive: boolean }) =>
-    cn("flex min-h-[40px] items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground md:min-h-0", isActive && "bg-accent text-foreground");
+    cn("flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground max-[379px]:gap-1 max-[379px]:px-1.5 md:min-h-0", isActive && "bg-accent text-foreground");
   return (
-    <span className="ml-auto flex min-w-0 items-center gap-1" data-testid="topbar-pills">
-      <NavLink to="/" end className={link} aria-label={`${w.team}: ${needsYou ?? 0} waiting on you, ${review ?? 0} to review`} data-testid="topbar-team">
-        <Home className="h-4 w-4" />
-        <span className="hidden md:inline">{w.team}</span>
+    <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1 max-[379px]:gap-0" data-testid="topbar-pills">
+      {/* the full aggregated Inbox, one tap from any page, its red (waiting on you) and green (to review) counts on it. */}
+      <NavLink to={`/${INBOX_PATH}`} className={link} aria-label={`Inbox: ${needsYou ?? 0} waiting on you, ${review ?? 0} to review`} data-testid="topbar-team">
+        <InboxIcon className="h-4 w-4" />
+        <span className="hidden md:inline">Inbox</span>
         <Pills needsYou={needsYou} review={review} ids={{ needsYou: "topbar-needs-you", review: "topbar-review" }} className="ml-0" />
       </NavLink>
       {shows("chat") && (
@@ -954,6 +1059,65 @@ function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   );
 }
 
+type MorePage = { to: string; label: string; icon: typeof Home; testId: string };
+
+/**
+ * the sidebar's pages below the goal sets, in the owner's order: one-offs (jobs outside every goal set, from his voice
+ * note to delivered), the outcome log (what every persona got done), every one-off page the team made (by repo, then
+ * epic), his voice notes, the X stats of the team's accounts, the Gap finder while it is on (both skins). They left the top bar, which keeps Inbox, Chat and
+ * the mic. The console skin's pages; the social skin shows none of them (its own sit with its campaigns).
+ */
+export function morePages(shows: (s: ScreenId) => boolean, socialSkin: boolean, gapFinderOn: boolean): MorePage[] {
+  if (!shows("book")) return [];
+  const gap: MorePage[] = gapFinderOn ? [{ to: `/${GAP_FINDER_PATH}`, label: "Gap finder", icon: Radar, testId: "nav-gap-finder" }] : [];
+  if (socialSkin) return gap;
+  return [
+    { to: `/${ONE_OFFS_PATH}`, label: "One-offs", icon: Zap, testId: "nav-one-offs" },
+    { to: `/${OUTCOMES_PATH}`, label: "Outcomes", icon: ListChecks, testId: "nav-outcomes" },
+    { to: `/${PAGES_PATH}`, label: "Pages", icon: Files, testId: "nav-pages-list" },
+    { to: `/${VOICE_NOTES_PATH}`, label: "Voice notes", icon: Mic, testId: "nav-voice-notes" },
+    { to: `/${X_STATS_PATH}`, label: "X stats", icon: BarChart3, testId: "nav-x-stats" },
+    ...gap,
+  ];
+}
+
+/**
+ * the pages he pinned by name (docs/pages/registry.json `pinned`, `scripts/pages.py pin`), first under More pages,
+ * one tap each: the link is the page's short address on the console (the console/scorecard), which opens the page.
+ */
+function SidebarPinnedPages({ onNavigate }: { onNavigate?: () => void }) {
+  const { data } = useQuery(() => api.listPinnedPages(), []);
+  const pinned = data?.pinned ?? [];
+  if (!pinned.length) return null;
+  return (
+    <>
+      {pinned.map((p) => (
+        <a key={p.url} href={p.slug ? `/${p.slug}` : p.url} target="_blank" rel="noreferrer" className={itemClass({ isActive: false })} onClick={onNavigate} data-testid="nav-pinned-page" title={p.title}>
+          <Pin className="h-4 w-4" />
+          <span className="min-w-0 flex-1 truncate">{p.name}</span>
+        </a>
+      ))}
+    </>
+  );
+}
+
+function SidebarMorePages({ onNavigate, gapFinderOn }: { onNavigate?: () => void; gapFinderOn: boolean }) {
+  const shows = useShows();
+  const pages = morePages(shows, !!useSkin().campaigns, gapFinderOn);
+  if (!pages.length) return null;
+  return (
+    <nav className="grid min-w-0 grid-cols-1 gap-0.5" aria-label="More pages" data-testid="sidebar-more-pages">
+      <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground">More pages</div>
+      <SidebarPinnedPages onNavigate={onNavigate} />
+      {pages.map((p) => (
+        <NavLink key={p.to} to={p.to} className={itemClass} onClick={onNavigate} data-testid={p.testId}>
+          <p.icon className="h-4 w-4" />
+          {p.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
 
 /** the pages that use the screen's width: the Pipeline (every campaign's, and a campaign's Pipeline tab). */
 export const widePage = (path: string, search = "") => /\/pipeline\/?$/.test(path) || new URLSearchParams(search).get("tab") === "pipeline";

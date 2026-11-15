@@ -99,8 +99,8 @@ describe("T33-S9 answer progress on the card", () => {
   it("a stored answer from the click is held as working (no 'not delivered' error)", async () => {
     vi.spyOn(api, "respondToWaiting").mockResolvedValue(response());
     wrap(<WaitingCard item={item({ ask: "decide", options: ["yes", "no"] })} />);
-    // options are a radio list (the first pre-picked) sent with Send my pick
-    fireEvent.click(screen.getByTestId("send-pick"));
+    // E948-S69: each option is its own button, a bare yes named by its next step
+    fireEvent.click(screen.getByRole("button", { name: "Yes: go ahead" }));
     await vi.waitFor(() => expect(api.respondToWaiting).toHaveBeenCalledWith("wj_1", expect.objectContaining({ kind: "answer", text: "yes" })));
     expect(screen.queryByText(/not delivered/i)).toBeNull();
   });

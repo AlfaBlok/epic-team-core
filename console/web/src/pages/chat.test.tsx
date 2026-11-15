@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { api, type DeskChat, type DeskMessage } from "@/api";
-import { ChatPage, chatHref, forgetChats, chatScroll, CHAT_POLL_FAST_MS, CHAT_POLL_IDLE_MS, CHAT_POLL_STALE_MS, formatElapsed, sendsOnKey } from "@/pages/Chat";
+import { ChatPage, chatHref, forgetChats, chatScroll, CHAT_POLL_FAST_MS, CHAT_POLL_IDLE_MS, CHAT_POLL_STALE_MS, formatElapsed, sendsOnKey, OLDER_RETRY_MS, OLDER_SLOW } from "@/pages/Chat";
 import { blocks, chatLinkHref } from "@/lib/chatMarkdown";
 import { SidebarNav } from "@/components/Layout";
 
@@ -180,16 +180,23 @@ describe("T18-S2 Chat page", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("a failed send keeps the text and says why; messages T3 still holds show as waiting", async () => {
+  it("a failed send stays on its own bubble with why and Retry; messages T3 still holds show as waiting", async () => {
     vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ sending: 1 }));
-    vi.spyOn(api, "sendDeskMessage").mockRejectedValue(new Error("no seat available: all seats busy"));
+    const send = vi.spyOn(api, "sendDeskMessage").mockRejectedValueOnce(new Error("no seat available: all seats busy")).mockResolvedValue({ threadId: "th_desk", pending: true });
     renderChat();
     expect((await screen.findByTestId("chat-sending")).textContent).toContain("1 message waiting for T3");
     const box = screen.getByLabelText("Message to the Team desk") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: /Send/ }));
-    expect((await screen.findByTestId("chat-send-error")).textContent).toContain("no seat available");
-    expect(box.value).toBe("hello");
+    expect(box.value).toBe(""); // the box is free at once
+    const failed = await screen.findByTestId("chat-failed");
+    expect(failed.textContent).toContain("hello");
+    expect(within(failed).getByTestId("chat-failed-error").textContent).toContain("no seat available");
+    fireEvent.click(within(failed).getByTestId("chat-retry"));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1][2]).toBe(send.mock.calls[0][2]); // the same request id: T3 drops a copy it already took
+    await waitFor(() => expect(screen.queryByTestId("chat-failed")).toBeNull());
+    expect(screen.getByTestId("chat-posting").textContent).toContain("hello");
   });
 
   it("shows why the chat is unavailable instead of a broken page", async () => {
@@ -477,22 +484,39 @@ describe("T33-S10 Chat opens in under 1 s", () => {
     return out;
   };
 
-  it("asks for the newest 30 messages, and Show older messages puts the next older page on top", async () => {
+  it("asks for the newest 20 messages, and Show older messages puts the next older page on top", async () => {
     const get = vi.spyOn(api, "getDeskChat").mockImplementation(async (read) =>
-      read?.before !== undefined ? chat({ messages: range(100, 158), hasEarlier: false }) : chat({ messages: range(160, 218), hasEarlier: true }),
+      read?.before !== undefined ? chat({ messages: range(140, 178), hasEarlier: false }) : chat({ messages: range(180, 218), hasEarlier: true }),
     );
     renderChat();
     const t = await screen.findByTestId("chat-transcript");
-    expect(get).toHaveBeenCalledWith({ limit: 30 });
-    expect(within(t).getAllByRole("listitem").length).toBe(30);
+    expect(get).toHaveBeenCalledWith({ limit: 20 });
+    expect(within(t).getAllByRole("listitem").length).toBe(20);
     fireEvent.click(screen.getByTestId("chat-older"));
-    await waitFor(() => expect(get).toHaveBeenCalledWith({ before: 160, limit: 30 }));
-    await waitFor(() => expect(within(t).getAllByText(/^line \d+$/).length).toBe(60));
+    await waitFor(() => expect(get).toHaveBeenCalledWith({ before: 180, limit: 20 }));
+    await waitFor(() => expect(within(t).getAllByText(/^line \d+$/).length).toBe(40));
     const lines = within(t).getAllByText(/^line \d+$/).map((e) => e.textContent);
-    expect(lines[0]).toBe("line 100");
+    expect(lines[0]).toBe("line 140");
     expect(lines.at(-1)).toBe("line 218");
     expect(screen.queryByTestId("chat-older")).toBeNull(); // the chat's start is reached
   });
+
+  it("an older page the console is still reading says so quietly and retries by itself, never the red error", async () => {
+    let tries = 0;
+    const get = vi.spyOn(api, "getDeskChat").mockImplementation(async (read) => {
+      if (read?.before === undefined) return chat({ messages: range(180, 218), hasEarlier: true });
+      return ++tries < 3 ? chat({ messages: [], hasEarlier: true, loading: true }) : chat({ messages: range(140, 178), hasEarlier: false });
+    });
+    renderChat();
+    const t = await screen.findByTestId("chat-transcript");
+    fireEvent.click(screen.getByTestId("chat-older"));
+    expect((await screen.findByText(OLDER_SLOW)).textContent).toBe(OLDER_SLOW);
+    expect(screen.queryByText(/Could not load them/)).toBeNull();
+    await waitFor(() => expect(within(t).getAllByText(/^line \d+$/).length).toBe(40), { timeout: OLDER_RETRY_MS * 3 + 1000 });
+    expect(get.mock.calls.filter(([r]) => r?.before === 180)).toHaveLength(3);
+    expect(screen.queryByText(OLDER_SLOW)).toBeNull();
+    expect(screen.queryByText(/Could not load them/)).toBeNull();
+  }, 10_000);
 
   it("without positions (an older console) the note about the T3 thread stays", async () => {
     vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ hasEarlier: true }));
@@ -559,5 +583,62 @@ describe("T33-S10 a reload paints the last chat from this browser", () => {
     vi.spyOn(api, "getDeskChat").mockImplementation(() => new Promise(() => undefined));
     renderChat();
     expect(await screen.findByText("kept line", undefined, { timeout: 300 })).toBeTruthy();
+  });
+});
+
+describe("Send never waits", () => {
+  it("his message shows at once, the box clears and Send stays ready while the console has not answered", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const releases: (() => void)[] = [];
+    const send = vi.spyOn(api, "sendDeskMessage").mockImplementation(() => new Promise((r) => releases.push(() => r({ threadId: "th_desk", pending: true }))));
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    // shown before the console answers, box empty, no spinner on Send
+    expect(screen.getByTestId("chat-posting").textContent).toContain("first");
+    expect(box.value).toBe("");
+    fireEvent.change(box, { target: { value: "second" } });
+    const btn = screen.getByRole("button", { name: /Send/ }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(screen.getAllByTestId("chat-posting").map((e) => e.textContent)).toEqual([expect.stringContaining("first"), expect.stringContaining("second")]);
+    // one at a time, in his order
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0][0]).toBe("first");
+    await act(async () => releases[0]());
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1][0]).toBe("second");
+    await act(async () => releases[1]());
+  });
+
+  it("the bubble leaves once the transcript holds his message (no doubles)", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true });
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    get.mockResolvedValue(chat({ messages: [...chat().messages, msg({ id: "u9", role: "user", text: "landed now" })] }));
+    fireEvent.change(box, { target: { value: "landed now" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(screen.queryByTestId("chat-posting")).toBeNull());
+    expect(within(screen.getByTestId("chat-transcript")).getAllByText("landed now").length).toBe(1);
+  });
+
+  it("a failure the console found after its reply shows on that message, with Retry", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true });
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "will fail later" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    const crid = send.mock.calls[0][2] as string;
+    get.mockResolvedValue(chat({ sendError: { text: "thread compacting after 5 attempts", at: new Date().toISOString(), clientRequestId: crid } }));
+    const failed = await screen.findByTestId("chat-failed", undefined, { timeout: CHAT_POLL_FAST_MS + 2000 });
+    expect(failed.textContent).toContain("compacting");
+    expect(screen.queryByTestId("chat-send-error")).toBeNull(); // on the bubble, not a loose line
+    expect(within(failed).getByTestId("chat-retry")).toBeTruthy();
+    fireEvent.click(within(failed).getByTestId("chat-unsend"));
+    expect(box.value).toBe("will fail later"); // Edit puts his words back
   });
 });

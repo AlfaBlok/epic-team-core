@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { secureDeep } from "../steps/secureLinks.js";
+import { TEXT_WALL_PREFIX, textWallProblem } from "./pageShape.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -158,7 +160,7 @@ export const REVIEW_RULE =
   `Review is only for a finished outcome (root L-43) ${ownerName()} can open and judge himself: a page, a post, a feature on his phone. A step that only prepares an ask or the next build (proposal, mockup, guide, checklist page, prepared script) never goes to review: its ask is ${ownerName()}'s one card; once that ask is posted, close the row \`done (fed <ask code>)\` in the spine. ` +
   `When a step put a finished outcome live where ${ownerName()} uses it, set its ledger row's Status cell to \`review\`, with \`live <sha>\` in Latest Evidence when that commit must be deployed first. His review list is read from the spine (root L-45): the card appears once its evidence link answers (merged but not deployed never counts), and only his press closes it. Send no \`review\` on the run PATCH and never POST /api/review-items: nothing is stored there. ` +
   CARD_FIELDS_RULE +
-  " Nothing a card found may be lost: in the row's Next Action write `followups: started <code> (<what it covers>), …; start <title> — <why>; park <title> — <why>; confirm: yes — <why he must confirm it>` (items split by `;`, no `|`; `followups: none` when there are none). His Mark complete starts or parks each next step (ready or draft rows), never drops one. " +
+  " Nothing a card found may be lost: in the row's Next Action write `followups: started <code> (<what it covers>), …; start <title> — <why>; park <title> — <why>; confirm: yes — <why he must confirm it>` (items split by `;`, no `|`; `followups: none` when there are none). His Start press starts or parks each next step (ready or draft rows), never drops one. " +
   "After his New iteration with feedback the row reads `active (iteration <n>, …)`: keep `iteration <n>` in Latest Evidence when you set it back to review. " +
   `A row he denied reads \`superseded (denied by ${ownerName()} <date>: …)\`: it is closed, never reopen or redo it. ` +
   FEATURE_LIST_RULE;
@@ -185,6 +187,11 @@ export interface LiveCheckDeps {
    * the list. On a github.com 404 the console asks the GitHub API as itself (`gh api <path>`): true = it exists.
    */
   githubApi?: (apiPath: string) => Promise<boolean>;
+  /**
+   * root L-59: the hosts one-off pages are served on (docs/pages/registry.json `hosts`). A page there must open
+   * with a diagram or boxed summary; one that opens with text fails the check ("needs evidence").
+   */
+  pageHosts?: () => string[];
 }
 
 /** the GitHub API path that proves a github.com page exists (repo, file or folder, issue, PR), or undefined. */
@@ -216,10 +223,13 @@ export async function checkLive(url: string, commit: string | undefined, d: Live
   const own = (d.consoleHosts ?? consoleHostsFromEnv()).includes(u.hostname);
   const target = own && d.localOrigin ? `${d.localOrigin}${u.pathname}${u.search}` : url;
   let status = 0;
+  let wall: string | undefined;
   try {
     const res = await (d.fetch ?? fetch)(target, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(d.timeoutMs ?? 10_000) });
     status = res.status;
-    await res.body?.cancel().catch(() => undefined);
+    const page = status >= 200 && status < 400 && (d.pageHosts?.() ?? []).includes(u.hostname) && /html/i.test(res.headers?.get?.("content-type") ?? "html");
+    if (page) wall = textWallProblem(await res.text());
+    else await res.body?.cancel().catch(() => undefined);
   } catch (e) {
     return { ok: false, status: 0, error: `no answer: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) };
   }
@@ -228,6 +238,7 @@ export async function checkLive(url: string, commit: string | undefined, d: Live
     if (api && (await d.githubApi(api).catch(() => false))) return { ok: true, status: 200 };
   }
   if (status < 200 || status >= 400) return { ok: false, status, error: `answered ${status}` };
+  if (wall) return { ok: false, status, error: wall };
   if (commit && own) {
     const rev = d.revision?.();
     if (!rev) return { ok: false, status, error: `deployed revision unknown; cannot tell whether ${commit.slice(0, 7)} is live` };
@@ -248,6 +259,16 @@ export function liveCheckDepsFromEnv(o: { port: number; host?: string; repoDir?:
         return fs.readFileSync(revFile, "utf8").trim() || undefined;
       } catch {
         return undefined;
+      }
+    },
+    // the page hosts, read from the home repo's page list (no list = no page check)
+    pageHosts: () => {
+      if (!o.repoDir) return [];
+      try {
+        const reg = JSON.parse(fs.readFileSync(path.join(o.repoDir, "docs", "pages", "registry.json"), "utf8")) as { hosts?: unknown };
+        return Array.isArray(reg.hosts) ? reg.hosts.filter((h): h is string => typeof h === "string") : [];
+      } catch {
+        return [];
       }
     },
     // private GitHub pages, as the console host's signed-in gh (the owner on the main server).
@@ -452,6 +473,8 @@ export function createReview(db: DB, o: ReviewOptions) {
   /** a card whose evidence link was checked and does not open goes back to the agents (needs evidence). */
   function liveVerdict(r: ReviewRow, ok: boolean, links: ReviewLink[], err: string | undefined): ReviewVerdict {
     if (r.verdict.kind !== "card" || ok) return r.verdict;
+    const wall = links.find((l) => l.checkedAt && l.liveError?.startsWith(TEXT_WALL_PREFIX));
+    if (wall) return { kind: "needs-evidence", reason: wall.liveError! };
     if (links.some((l) => l.checkedAt && l.liveError)) return { kind: "needs-evidence", reason: `the evidence link does not open: ${err ?? "no answer"}` };
     return r.verdict;
   }
@@ -593,13 +616,13 @@ export function createReview(db: DB, o: ReviewOptions) {
    * the Delivery manager. `start` / `park` are suggestion indices; together they must name every suggestion (default:
    * park all, which is what the old Approve does).
    */
-  async function complete(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean } = {}): Promise<ActionResult> {
+  async function complete(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean; choice?: string; plan?: string } = {}): Promise<ActionResult> {
     if (parsePostCardId(id)) return postAction(o.posts?.(), (p) => p.schedule(id, pick));
     const row = fresh(id);
     const res = await completeRow(id, pick);
     return row ? approved(row, res) : res;
   }
-  async function completeRow(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean } = {}): Promise<ActionResult> {
+  async function completeRow(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean; choice?: string; plan?: string } = {}): Promise<ActionResult> {
     const r = fresh(id);
     if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
     const gate = notACard(r);
@@ -613,15 +636,20 @@ export function createReview(db: DB, o: ReviewOptions) {
     if (all.some((i) => !Number.isInteger(i) || i < 0 || i >= sug.length) || [...start].some((i) => park.has(i)) || new Set(all).size !== sug.length)
       return { error: 422, code: "followups_incomplete", message: `every suggested follow-up must be started or parked, none dropped (${sug.length} suggested); nothing changed`, item };
     if (sug.some((s) => s.target)) return completeSwitches(id, r, item, sug, start, pick.why ?? []);
-    const picks: FollowupPick[] = sug.map((s, i) => ({ title: s.title, ...(s.why ? { why: s.why } : {}), start: start.has(i) }));
+    // E948-S69: a decision card's button carries his pick (`Yes: plan it`): the started steps are planned first, and a
+    // decision with no next step starts its plan as a new row; the pick is written on the row's status.
+    const chose = pick.choice ? decisionWords(pick.choice) : undefined;
+    const planFirst = !!chose && /^[^:]*:\s*plan\b/i.test(chose);
+    const picks: FollowupPick[] = sug.map((s, i) => ({ title: planFirst && start.has(i) && !/^plan\b/i.test(s.title) ? `Plan: ${s.title}` : s.title, ...(s.why ? { why: s.why } : {}), start: start.has(i) }));
+    if (chose && pick.plan && !sug.length) picks.push({ title: decisionWords(pick.plan), why: `you chose ${chose}`, start: true });
     const by = who();
     let made: FollowupRow[] = [];
     const closesGoal = r.tag === "goal" || r.tag === "ask";
     const what = closesGoal ? (r.tag === "ask" ? "ask complete" : `goal ${r.closes.epic} closed`) : r.tag === "line" && r.line ? `${r.line.id} met` : "step complete";
     const w = await writeRow(
       r,
-      (date) => approveCell(r.ref, date, by),
-      `Review ${r.ref}: ${what}${picks.length ? `, ${picks.filter((p) => p.start).length} started, ${picks.filter((p) => !p.start).length} parked` : ""} (${by}, via console)`,
+      (date) => (chose ? choseCell(approveCell(r.ref, date, by), chose) : approveCell(r.ref, date, by)),
+      `Review ${r.ref}: ${chose ? `${by} chose "${chose}", ` : ""}${what}${picks.length ? `, ${picks.filter((p) => p.start).length} started, ${picks.filter((p) => !p.start).length} parked` : ""} (${by}, via console)`,
       `${by} marked "${r.title}" complete on the console's review list: row ${r.ref} in ${r.path} is done (the repo is the source).` +
         (picks.length ? `\n\nSuggested follow-ups (never dropped): ${picks.map((p) => `${p.start ? "started" : "parked"}: ${p.title}`).join("; ")}.` : "") +
         (r.tag === "line" && r.line ? `\n\nDone-means ${r.line.id} is met.` : "") +
@@ -933,7 +961,7 @@ export function createReview(db: DB, o: ReviewOptions) {
     return { item: done };
   }
 
-  async function snooze(id: string, until: string | undefined): Promise<ActionResult> {
+  async function snooze(id: string, until: string | undefined, park = false): Promise<ActionResult> {
     if (parsePostCardId(id)) return { error: 409, code: "not_snoozable", message: "a held post is not snoozed: it waits at its slot; nothing changed" };
     const r = fresh(id);
     if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
@@ -942,8 +970,13 @@ export function createReview(db: DB, o: ReviewOptions) {
     const w = await writeRow(
       r,
       () => snoozeCell(r.ref, until),
-      until ? `Review ${r.ref}: snoozed until ${until} (${who()}, via console)` : `Review ${r.ref}: unsnoozed (${who()}, via console)`,
-      until ? `${who()} snoozed "${r.title}" on the console's review list until ${until}: the card is hidden until then; the row stays in review.` : `${who()} unsnoozed "${r.title}": the card is back on the review list.`,
+      // E948-S83 iteration 2: Park is the card's own button (a month's snooze); the commit and Decisions say parked.
+      until ? `Review ${r.ref}: ${park ? "parked" : "snoozed"} until ${until} (${who()}, via console)` : `Review ${r.ref}: ${park ? "brought back" : "unsnoozed"} (${who()}, via console)`,
+      until
+        ? park
+          ? `${who()} parked "${r.title}" with the card's Park button: it left the inbox until ${until} and comes back by itself; the row stays in review, nothing was decided. Bring it back from Parked in the inbox.`
+          : `${who()} snoozed "${r.title}" on the console's review list until ${until}: the card is hidden until then; the row stays in review.`
+        : `${who()} ${park ? "brought back" : "unsnoozed"} "${r.title}": the card is back on the review list.`,
       false,
     );
     if (!w.ok) return w.result;
@@ -954,9 +987,10 @@ export function createReview(db: DB, o: ReviewOptions) {
   }
 
   /** the card's screenshot file (an image in the row's repo), for GET /review-items/:id/screenshot. */
-  async function screenshot(id: string): Promise<{ abs: string; type: string } | undefined> {
+  // E948-S62: `width` picks one of the quality check's live screens (390 = the phone one, 1280 = the laptop one)
+  async function screenshot(id: string, width?: number): Promise<{ abs: string; type: string } | undefined> {
     const r = (await rows()).find((x) => x.id === id) ?? fresh(id);
-    const rel = r?.face?.screenshot;
+    const rel = width ? r?.face?.qc?.shots.find((s) => s.width === width)?.path : r?.face?.screenshot;
     const dir = r ? repoDir(r) : undefined;
     if (!rel || !dir) return undefined;
     const abs = path.resolve(dir, rel);
@@ -1033,10 +1067,21 @@ const reviewSnoozeIn = z
     hours: z.literal(3).optional(),
     days: z.union([z.literal(3), z.literal(7), z.literal(30)]).optional(),
     until: z.string().regex(new RegExp(`^${SNOOZE_UNTIL}$`)).nullable().optional(),
+    /** E948-S83 iteration 2: pressed as Park (the card's own button), so the spine says parked. */
+    park: z.literal(true).optional(),
   })
   .strict()
   .refine((b) => [b.hours, b.days, b.until].filter((v) => v !== undefined).length === 1, { message: "one of hours, days or until" });
 // a held post's card also takes `slot` (a new time, UTC), `feedback` (schedule after this change), `now` (Post now)
+/** E948-S69: his pick in words a status cell holds (no brackets, pipes or semicolons, one line, at most 120). */
+export const decisionWords = (s: string) => s.replace(/[()|;\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+/** `done (approved by Sam 2026-11-13)` + his pick: `done (approved by Sam 2026-11-13, chose No: park it)`. */
+export const choseCell =
+  <T,>(cell: (status: string) => string | T, chose: string) =>
+  (status: string): string | T => {
+    const c = cell(status);
+    return typeof c === "string" && /^done \(approved by [^)]*\)$/.test(c) ? `${c.slice(0, -1)}, chose ${chose})` : c;
+  };
 const completeIn = z
   .object({
     start: z.array(z.number().int()).max(50).optional(),
@@ -1047,6 +1092,9 @@ const completeIn = z
     feedback: z.string().trim().max(2_000).optional(),
     now: z.boolean().optional(),
     release: z.boolean().optional(),
+    // E948-S69: the decision button he pressed, and a plan row to start when the decision has no next step
+    choice: z.string().trim().min(1).max(120).optional(),
+    plan: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
 /** `attachments` = ids of files he uploaded first (POST /api/chat/attachments); their links follow his words. */
@@ -1058,7 +1106,13 @@ export const HINT_MESSAGE =
   "nothing is stored here any more: the review list is read from the spine. Set the row's Status to `review` and put the live link in its Latest Evidence cell; the console re-read the spines.";
 
 /** `priorities` = the owner's levels from the repo (the Prioritizer's docs/priorities.json); the list sorts by them first. */
-export function mountReview(api: Hono, review: Review, store: Pick<Store, "listMilestones">, attachments?: Pick<Attachments, "cardText">, priorities?: () => PriorityLookup | undefined) {
+export function mountReview(
+  api: Hono,
+  review: Review,
+  store: Pick<Store, "listMilestones">,
+  attachments?: Pick<Attachments, "cardText">,
+  priorities?: () => PriorityLookup | undefined,
+) {
   /** his words with the links of the files he sent along (a world's file only; another world's id is a 404). */
   const withFiles = (text: string, ids: string[] | undefined) => {
     if (!ids?.length) return text;
@@ -1089,7 +1143,13 @@ export function mountReview(api: Hono, review: Review, store: Pick<Store, "listM
     const titles = new Map(ms.map((m) => [m.id, m.title]));
     const items = (await review.list({ state })).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.ref.localeCompare(b.ref));
     // the owner's level (high, normal, low) first, each card with its why.
-    return c.json(byMilestonePriority(items, storeRanks(store), priorities?.()).map((i) => (i.milestoneId && titles.has(i.milestoneId) ? { ...i, milestoneTitle: titles.get(i.milestoneId) } : i)));
+    // a card's links to a steps page (or a page beside it on its host) open its secure copy: Voice records at once
+    return c.json(
+      byMilestonePriority(items, storeRanks(store), priorities?.()).map((i) => {
+        const j = { ...i, links: secureDeep(i.links), ...(i.face ? { face: secureDeep(i.face) } : {}) };
+        return i.milestoneId && titles.has(i.milestoneId) ? { ...j, milestoneTitle: titles.get(i.milestoneId) } : j;
+      }),
+    );
   });
   // Snooze on a review card, as on an ask: `hours` (3), `days` (3, 7, 30) or `until`; `until: null` unsnoozes.
   api.post("/review-items/:id/snooze", async (c) => {
@@ -1097,7 +1157,7 @@ export function mountReview(api: Hono, review: Review, store: Pick<Store, "listM
     if (!p.success) return c.json({ error: { code: "validation_error", message: "send hours (3), days (3, 7 or 30), until (YYYY-MM-DD or YYYY-MM-DDTHH:MMZ) or until: null to unsnooze" } }, 400);
     const until = p.data.until === null ? undefined : (p.data.until ?? snoozeMinute((p.data.hours ?? 0) + (p.data.days ?? 0) * 24));
     if (until && !snoozedNow(until)) return c.json({ error: { code: "validation_error", message: "until must be later than now" } }, 400);
-    const r = await review.snooze(c.req.param("id"), until);
+    const r = await review.snooze(c.req.param("id"), until, p.data.park === true);
     if ("error" in r) return c.json(fail(r), r.error);
     return c.json({ ...r.item, snoozedUntil: r.item.snoozedUntil ?? null });
   });
@@ -1109,7 +1169,7 @@ export function mountReview(api: Hono, review: Review, store: Pick<Store, "listM
   });
   // the card's screenshot (it links to the live thing; the image itself is served from the repo)
   api.get("/review-items/:id/screenshot", async (c) => {
-    const f = await review.screenshot(c.req.param("id"));
+    const f = await review.screenshot(c.req.param("id"), Number(c.req.query("width")) || undefined);
     if (!f) return c.json({ error: { code: "not_found", message: "no screenshot for that card" } }, 404);
     return new Response(fs.readFileSync(f.abs), { headers: { "content-type": f.type, "cache-control": "private, max-age=300" } });
   });

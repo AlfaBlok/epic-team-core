@@ -162,6 +162,17 @@ export function passedLine(id: string, _from: DeskSide, to: DeskSide, about: str
   ].join("\n");
 }
 
+/**
+ * the receipt the desk that passed a part (the relay) gets once the line is in the other desk's chat, so the owner
+ * sees in the chat he used that it landed. `{at}` is filled at delivery.
+ */
+export function relayReceiptLine(id: string, to: DeskSide, about: string): string {
+  return [
+    `${CROSS_PASSED_HEAD} ${to.product} desk (${id}): landed in its chat, {at}, ${stop(about)}.`,
+    `The part of ${ownerName()}'s words this desk passed by the relay is now in his ${to.product} desk's chat (${to.url}), which acts on it there. Do nothing else. Reply in one line: "Landed at the ${to.product} desk: ${stop(about)}, {at}".`,
+  ].join("\n");
+}
+
 export interface CrossDeps {
   db: DB;
   /** The model check; absent = off. */
@@ -215,13 +226,13 @@ export function createDeskCross(d: CrossDeps) {
     const r = db.prepare("SELECT from_world, note, note_at, noted_at, said_head, at FROM desk_crossings WHERE id = ? AND state = 'passed'").get(id) as
       | { from_world: string; note: string; note_at: string | null; noted_at: string | null; said_head: string | null; at: string }
       | undefined;
-    if (!r || r.noted_at || !d.tell || (r.note_at && r.note_at > iso())) return;
+    if (!r || r.noted_at || !r.note || !d.tell || (r.note_at && r.note_at > iso())) return;
     const late = now() - Date.parse(r.at) >= CROSS_NOTE_MAX_WAIT_MS;
     if (!late && d.landed && r.said_head && !(await d.landed(r.from_world, r.said_head).catch(() => false))) {
       db.prepare("UPDATE desk_crossings SET note_at = ? WHERE id = ?").run(iso(now() + CROSS_NOTE_WAIT_MS), id);
       return;
     }
-    const told = await d.tell(r.from_world, r.note, `desk-cross-${id}-passed`).catch((e: Error) => e.message);
+    const told = await d.tell(r.from_world, r.note.replaceAll("{at}", `${iso().slice(11, 16)}Z`), `desk-cross-${id}-passed`).catch((e: Error) => e.message);
     if (told === true) db.prepare("UPDATE desk_crossings SET noted_at = ?, error = NULL WHERE id = ?").run(iso(), id);
     else db.prepare("UPDATE desk_crossings SET noted_at = ?, error = ? WHERE id = ?").run(iso(), `passed; the note back: ${String(told)}`.slice(0, 300), id);
   };
@@ -295,7 +306,7 @@ export function createDeskCross(d: CrossDeps) {
     },
     /**
      * the desk he spoke to passes a part of his words itself (it judged it the other desk's work). No model; the same
-     * delivery and retries; no line back (the desk tells him itself). Never twice for one requestId. undefined = no desk across.
+     * delivery and retries; once the line is in, the desk that passed it gets a receipt line. Never twice for one requestId. undefined = no desk across.
      */
     async pass(p: { world: string; about: string; quote: string; requestId?: string }): Promise<{ id: string; state: CrossState; to: DeskSide } | undefined> {
       const pair = across(p.world);
@@ -306,9 +317,9 @@ export function createDeskCross(d: CrossDeps) {
       const id = `dx_${createHash("sha256").update(msgKey).digest("hex").slice(0, 8)}`;
       const claimed = db
         .prepare(
-          "INSERT OR IGNORE INTO desk_crossings (id, msg_key, from_world, to_world, at, state, about, quote, line, note, next_at, noted_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?)",
+          "INSERT OR IGNORE INTO desk_crossings (id, msg_key, from_world, to_world, at, state, about, quote, line, note, next_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
         )
-        .run(id, msgKey, pair.from.world, pair.to.world, iso(), about.slice(0, 300), quote.slice(0, TRANSCRIPT_MAX), relayLine(id, pair.from, pair.to, about, quote), iso(), iso()).changes;
+        .run(id, msgKey, pair.from.world, pair.to.world, iso(), about.slice(0, 300), quote.slice(0, TRANSCRIPT_MAX), relayLine(id, pair.from, pair.to, about, quote), relayReceiptLine(id, pair.to, about), iso()).changes;
       if (claimed) await deliver(id);
       const state = (db.prepare("SELECT state FROM desk_crossings WHERE msg_key = ?").get(msgKey) as { state: CrossState }).state;
       return { id, state, to: pair.to };
@@ -318,7 +329,7 @@ export function createDeskCross(d: CrossDeps) {
       sweeping ??= (async () => {
         const due = db.prepare("SELECT id FROM desk_crossings WHERE state = 'pending' AND next_at <= ? ORDER BY next_at LIMIT 20").all(iso()) as { id: string }[];
         for (const r of due) await deliver(r.id);
-        const notes = db.prepare("SELECT id FROM desk_crossings WHERE state = 'passed' AND noted_at IS NULL AND (note_at IS NULL OR note_at <= ?) ORDER BY at LIMIT 20").all(iso()) as { id: string }[];
+        const notes = db.prepare("SELECT id FROM desk_crossings WHERE state = 'passed' AND noted_at IS NULL AND note IS NOT NULL AND (note_at IS NULL OR note_at <= ?) ORDER BY at LIMIT 20").all(iso()) as { id: string }[];
         for (const r of notes) await noteBack(r.id);
         return due.length + notes.length;
       })().finally(() => {

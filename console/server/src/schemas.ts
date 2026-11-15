@@ -38,7 +38,28 @@ export const personaCreate = z
 export const personaPatch = personaCreate.partial().strict();
 
 export const cadence = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("interval"), everyMinutes: z.number().int().min(1).max(60 * 24 * 31) }).strict(),
+  z
+    .object({
+      type: z.literal("interval"),
+      everyMinutes: z.number().int().min(1).max(60 * 24 * 31),
+      // no wake from `from` to `to` (HH:MM in timeZone, may cross midnight): a wake that would fall inside waits for `to`.
+      quiet: z
+        .object({
+          from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "quiet.from must be HH:MM (24h)"),
+          to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "quiet.to must be HH:MM (24h)"),
+          timeZone: z.string().refine((tz) => {
+            try {
+              new Intl.DateTimeFormat("en-US", { timeZone: tz });
+              return true;
+            } catch {
+              return false;
+            }
+          }, "quiet.timeZone must be an IANA time zone"),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z
     .object({
       type: z.literal("fixed_time"),

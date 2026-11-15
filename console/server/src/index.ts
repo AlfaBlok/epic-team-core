@@ -1,3 +1,4 @@
+import { timerPhasesOn } from "./timerPhase.js";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -87,7 +88,10 @@ const revision = (() => {
   }
 })();
 let pressWorker: PressWorker | undefined;
+// shared staging (the hosted layer) sets CONSOLE_PASSIVE=1: this console reads a database another console owns.
+const passive = process.env.CONSOLE_PASSIVE === "1";
 const app = createApp(db, {
+  passive,
   answers: { ack: process.env.CONSOLE_ANSWER_ACK === "done" ? "done" : "saved", onJobs: (j) => (answerJobs = j) },
   // one answer closes many, with the model check (CONSOLE_SETTLE=0 turns it off).
   settle: process.env.CONSOLE_SETTLE !== "0",
@@ -189,6 +193,8 @@ const app = createApp(db, {
     everyMs: staging || devCopy || process.env.CONSOLE_HOST_DISK === "0" ? 0 : 5 * 60_000,
     probe: vps3Ssh ? hooks.host.diskProbe(vps3Ssh) : undefined,
   },
+  // every hour, the T3 MCP tokens' expiry (warn 5 days before); a 401 from T3 alerts at once. CONSOLE_T3_TOKEN_WATCH=0 turns it off.
+  t3Tokens: { everyMs: staging || devCopy || process.env.CONSOLE_T3_TOKEN_WATCH === "0" ? 0 : 3600_000 },
   // every minute, the job servers' alerts from box/provision.py (the main server's the console dir); CONSOLE_JOB_SERVERS=0 turns it off.
   jobServers: {
     everyMs: devCopy || process.env.CONSOLE_JOB_SERVERS === "0" ? 0 : 60_000,
@@ -240,6 +246,7 @@ const app = createApp(db, {
   // the team mailbox (the owner's mail to owner+desk@our domain reaches the Team desk), polled every minute; never on
   // staging (no posting there); CONSOLE_TEAM_MAIL=0 turns it off.
   mcp: { mailTickMs: staging || process.env.CONSOLE_TEAM_MAIL === "0" || process.env.CONSOLE_SCHEDULER === "0" ? 0 : 60_000 },
+  timerPhases: timerPhasesOn(), // each 5/10-minute job at its own second (CONSOLE_TIMER_PHASES=0 = all at once)
   stallWatch: { enabled: process.env.CONSOLE_STALL_WATCH === "on" && process.env.CONSOLE_SCHEDULER !== "0", everyMs: Number(process.env.CONSOLE_STALL_WATCH_MS || 10 * 60_000) },
 });
 

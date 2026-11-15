@@ -475,9 +475,14 @@ export function stallVerdict(
     seats?: Seat[];
     /** the open asks the epic's open rows wait on (epicWaits), named as the reason it cannot move. */
     waits?: EpicWait[];
+    /** effort follows priority: the pursuit carrying this epic sets the patience; parked: never nudged. */
+    effort?: { parked: boolean; stallHours: number; pursuitName: string } | null;
   },
   now: number,
 ): StallEval {
+  const ef = i.effort;
+  const stallMs = ef && !ef.parked && ef.stallHours > 0 ? ef.stallHours * 3600_000 : STALL_MS;
+  const patience = `${Math.round((stallMs / 3600_000) * 10) / 10} h`;
   const { epic: e, manager: a } = i;
   const base = { milestoneId: i.milestone.id, repo: i.milestone.repo, path: e.path, title: e.title };
   const skip = (reason: string): StallEval => ({ ...base, verdict: "skip", reason });
@@ -487,6 +492,7 @@ export function stallVerdict(
   if (!e.ready.length) return held("");
   if (e.workers.length) return skip(`worker running (${e.workers.map((w) => w.ticket).join(", ")})`);
   if (i.milestone.settledAt || i.milestone.paused) return skip("milestone paused or settled");
+  if (ef?.parked) return skip(`pursuit ${ef.pursuitName} is parked: no nudges`);
   if (!a) return skip("no Delivery manager assigned");
   if (!a.enabled || a.parkedAt) return skip(`${i.managerName ?? "Delivery manager"} is switched off or parked: only ${ownerName()}'s Run now wakes it (L-10)`);
   const mine = i.runs.filter((r) => r.milestoneId === i.milestone.id || r.assignmentId === a.id);
@@ -499,12 +505,13 @@ export function stallVerdict(
     .pop();
   const last = [e.lastCommitAt, lastWorker].filter((x): x is string => !!x).map((x) => Date.parse(x)).filter(Number.isFinite);
   const moved = last.length ? Math.max(...last) : undefined;
-  if (moved !== undefined && now - moved < STALL_MS) return skip(`moved ${Math.round((now - moved) / 60_000)} min ago (commit or worker)`);
+  if (moved !== undefined && now - moved < stallMs) return skip(`moved ${Math.round((now - moved) / 60_000)} min ago (commit or worker)`);
   const fired = lastStallFire(mine, e.path);
-  if (fired && now - Date.parse(fired) < STALL_MS) return skip(`stall watch already fired at ${fired} (once per epic per 2 h)`);
+  if (fired && now - Date.parse(fired) < stallMs) return skip(`stall watch already fired at ${fired} (once per epic per ${patience})`);
   if (!freeSeat(i.seats)) return skip("no free seat");
   const idle = moved === undefined ? "no commit on record" : `no worker or commit for ${Math.round((now - moved) / 3600_000 * 10) / 10} h`;
-  return { ...base, verdict: "fire", reason: `${e.ready.length} ready row${e.ready.length === 1 ? "" : "s"} (${e.ready.slice(0, 5).join(", ")}), ${idle}`, assignmentId: a.id };
+  const rank = ef ? ` (${ef.pursuitName}: nudged after ${patience})` : "";
+  return { ...base, verdict: "fire", reason: `${e.ready.length} ready row${e.ready.length === 1 ? "" : "s"} (${e.ready.slice(0, 5).join(", ")}), ${idle}${rank}`, assignmentId: a.id };
 }
 
 /** The Run now note for one milestone's stalled epics (one Run now per milestone per tick). */

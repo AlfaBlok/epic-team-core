@@ -5,16 +5,16 @@ import { parseAsks, snoozedNow } from "./inbox/asks.js";
 import { hooks } from "./plug/hooks.js";
 import { DEFAULT_OWNER } from "./tenancy/owner.js";
 import { homeRepo } from "./identity.js";
+import { redLinesFile } from "./inbox/jordiPriority.js";
 
 /**
  * the EpicTeam home lists
  * what he builds. `docs/building.json` of the code repo names each list and the repos (or world) where its personas wake; the
  * rest is read from the spines, never typed: the named campaigns under each list (the campaign spines of its campaign repos,
  *) and how much waits on his hands there (open asks to him in `## Waiting on`, rows whose status reads `review`).
- * A list may take its repos from a red line in docs/priorities.json (`redLine`), so the Flywheel follows its items.
+ * A list may take its repos from a red line in docs/pursuits.json (else docs/priorities.json) (`redLine`), so the Flywheel follows its items.
  */
 export const BUILDING_FILE = "docs/building.json";
-const PRIORITIES_FILE = "docs/priorities.json";
 
 export interface BuildingLink {
   label: string;
@@ -100,7 +100,7 @@ export function parseBuilding(text: string): Declared[] {
   });
 }
 
-/** The repos a red line's items sit in (docs/priorities.json), in their order. */
+/** The repos a red line's items sit in (docs/pursuits.json when it holds them, else docs/priorities.json), in their order. */
 export function redLineRepos(prioritiesText: string, name: string): string[] {
   try {
     const doc = JSON.parse(prioritiesText) as { redLines?: { name?: string; items?: { repo?: string }[] }[] };
@@ -204,7 +204,7 @@ export function readBuilding(reposRoot: string, o: { home?: string; owner?: stri
     return [];
   }
   try {
-    priorities = fs.readFileSync(path.join(home.path, PRIORITIES_FILE), "utf8");
+    priorities = fs.readFileSync(path.join(home.path, redLinesFile(home.path)), "utf8");
   } catch {
     /* no red lines */
   }

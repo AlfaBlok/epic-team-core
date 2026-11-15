@@ -8,8 +8,11 @@ import { parseAsks, SNOOZE_ON_LINE, SNOOZE_UNTIL } from "../inbox/asks.js";
 import type { Milestone, Store } from "../store.js";
 import { parseFollowups, stepState, type StepState, type Suggestion } from "./followups.js";
 import { evidenceLabelOf, evidenceProblem, gateProblems } from "./card.js";
+import { qcFace, qcPicture, qcRequired, qcVerdict, readQc } from "./qc.js";
+import { createPagesReader, pageParentProblem } from "../pagesIndex.js";
 import { splitCardFiles } from "../desk/attachLimits.js";
 import { activeMark, noteMarksOf, type NoteMark } from "./noteMarks.js";
+import { pageNotesFor, pageNotesOf, type PageNote } from "./pageNotes.js";
 import { cardFor, goalSentenceOf, plainName, plainNamesOf, projectOf, repoCards, screenshotPath, targetGoals, treeOf, type CardFace, type TargetGoal, type Sibling } from "./face.js";
 import { ownerName } from "../identity.js";
 
@@ -141,7 +144,8 @@ export interface ReviewRow {
 }
 
 /** what becomes a card. Only `card` reaches the owner's list and counts. */
-export type VerdictKind = "card" | "closes-itself" | "needs-evidence" | "needs-rewriting" | "test";
+/** `fails-qc` (E948-S62): the quality check holds it: not what he asked, a failed look, or not checked yet. */
+export type VerdictKind = "card" | "closes-itself" | "needs-evidence" | "needs-rewriting" | "fails-qc" | "test";
 export interface ReviewVerdict {
   kind: VerdictKind;
   /** Plain words: why it closes itself, or what the agents must fix. */
@@ -241,6 +245,8 @@ export const DONE_UNREVIEWED = (status: string) => /^done\b/i.test(status) && !D
 export const DONE_UNREVIEWED_SINCE = "2026-11-02";
 /** A row whose card waits on the owner: in review, or done without his mark (only these take Approve / Relaunch / Snooze). */
 export const awaitsReview = (status: string) => REVIEW_STATUS.test(status) || DONE_UNREVIEWED(status);
+/** a part parked for later (a follow-up he parked, a deferred idea): it never holds its goal open (E948-S53). */
+export const PARKED_STATUS = /^(draft|deferred|parked|dropped|dismissed)\b/i;
 export const CLOSED_STATUS = /^(done|superseded|cancelled|canceled|moved)\b/i;
 
 /** The snooze on a status cell (` — snoozed until: 2026-11-05`), if any. */
@@ -393,6 +399,8 @@ interface FileRead {
   links: string[];
   /** the voice-note marks of its `## Decisions` table (noteMarks.ts). */
   noteMarks: NoteMark[];
+  /** his notes left in a page's own feedback box (pageNotes.ts). */
+  pageNotes: PageNote[];
 }
 
 const MD_FILE_LINK = /\]\(\s*<?([^)\s#>]+\.md)(?:#[^)\s>]*)?>?(?:\s+"[^"]*")?\s*\)/g;
@@ -456,6 +464,7 @@ function readFile(abs: string): FileRead | undefined {
     askOpen: new Map(all.filter((a) => a.code).map((a) => [a.code!, a.state === "open"])),
     links: [...new Set([...text.matchAll(MD_FILE_LINK)].map((m) => m[1]).filter((t) => !/^[a-z]+:/i.test(t)))],
     noteMarks: noteMarksOf(text),
+    pageNotes: pageNotesOf(text),
   };
   files.set(abs, r);
   return r;
@@ -511,7 +520,12 @@ const mdIn = (dir: string): string[] => {
  * tracks the same repo). Read from each milestone spine's folder: every spine file beside it. The milestone a row belongs
  * to is the one whose spine is the row's file or its nearest `Parent spine:` ancestor, else the repo's first milestone.
  */
+/** the home repo's page list per repos root (docs/pages/registry.json), read again when it changes. */
+const pageLists = new Map<string, ReturnType<typeof createPagesReader>>();
+
 export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoot: string, only: { repoDir?: string } = {}): ReviewPayload {
+  if (!pageLists.has(reposRoot)) pageLists.set(reposRoot, createPagesReader({ reposRoot }));
+  const pageList = pageLists.get(reposRoot)?.registry();
   const ms = store.listMilestones({}).filter((m) => !m.settledAt);
   const byRepo = new Map<string, { dir: string; name: string; github?: string; ms: Milestone[]; folders: Set<string> }>();
   for (const m of ms) {
@@ -634,9 +648,12 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
           const cf = cardFor(g.dir, rel, r.id, r.cells, cards);
           const card = cf?.fields;
           const completes = card?.completes ?? fu.completes;
-          const { line, tag } = tagOf(doc, completes, goal);
           const project = projectFor(rel);
           const shot = cf ? screenshotPath(g.dir, cf.rel, card?.screenshot) : undefined;
+          // E948-S62: the quality check's result beside the card (his words point by point, the live screens)
+          const qc = cf ? readQc(g.dir, r.id) : undefined;
+          const qcSeen = qcFace(g.dir, qc);
+          const cardRaw = cf ? (() => { try { return fs.readFileSync(path.join(g.dir, cf.rel)); } catch { return undefined; } })() : undefined;
           const siblings: Sibling[] = [];
           const sibSeen = new Set<string>();
           for (const x of doc.rows) {
@@ -644,6 +661,10 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
             sibSeen.add(x.id);
             siblings.push({ ref: x.id, status: x.cells[x.col.status] ?? "", name: doc.plainNames.get(x.id) ?? cardIndex.get(x.id)?.name });
           }
+          // E948-S53: the goal closes only from its last open part. Other parts still worked on (ready, active, blocked…)
+          // or still waiting for his own review keep this card a plain step; parked drafts do not hold the goal open.
+          const { working, reviewing } = goalStillOpen(siblings, r.id);
+          const { line, tag } = tagOf(doc, completes, goal, working.length + reviewing.length);
           const thisName = plainName(card?.name) ?? plainName(doc.plainNames.get(r.id)) ?? card?.title ?? titleCell;
           const tree = treeOf(siblings, r.id, thisName);
           // the card's next steps (plain words) win; `next: none` says there are none; else the row's followups
@@ -663,12 +684,23 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
                 taskGoal: card.goal ?? "",
                 delivered: card.delivered,
                 evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card) },
-                ...(shot ? { screenshot: shot } : {}),
+                // his card always shows the thing itself: the check's live screen once it passed, else the worker's picture
+                ...((qcPicture(qcSeen) ?? shot) ? { screenshot: qcPicture(qcSeen) ?? shot } : {}),
+                ...(qcSeen ? { qc: qcSeen } : {}),
                 tree: tree.lines,
                 ...(card.after ? { after: card.after } : {}),
                 next,
                 closesGoal: tag === "goal",
                 ...(card.from?.name ? { from: card.from } : {}),
+                ...(card.source ? { source: card.source } : {}),
+                ...(card.decision ? { decision: card.decision } : {}),
+                // a note he left inside the page itself shows here, so he sees it landed
+                ...(() => {
+                  const urls = [card.evidenceUrl, ...[...evidence.matchAll(/https?:\/\/[^\s)\]|>"]+/g)].map((x) => x[0])];
+                  const notes = pageNotesFor(doc.pageNotes, r.id, urls);
+                  return notes.length ? { pageNotes: notes.map(({ refs: _r, ...n }) => n) } : {};
+                })(),
+                ...(card.options?.length ? { options: card.options } : {}),
                 openInGoal: siblings
                   .filter((x) => x.ref !== r.id && !CLOSED_STATUS.test(stripInline(x.status)))
                   .map((x) => ({ ref: x.ref, ...(plainName(x.name) ? { name: plainName(x.name) } : {}) })),
@@ -683,10 +715,20 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
             if (card?.fed && doc.askOpen.get(card.fed) === false) return { kind: "closes-itself", reason: `the ask it fed, ${card.fed}, is answered` };
             if (card?.exampleOf) return { kind: "closes-itself", reason: `an example made for ${card.exampleOf}: that feature's card is the one card` };
             if (startedOwn.length && startedOwn.every((x) => x === "running" || x === "live") && !next.length) return { kind: "closes-itself", reason: "its next steps already run" };
-            const ev = card ? evidenceProblem(card, stripInline(status)) : undefined;
+            // a one-off page with no parent (no entry in the page list) is an island: never his card.
+            const ev = card ? (evidenceProblem(card, stripInline(status)) ?? pageParentProblem(card.evidenceUrl, pageList)) : undefined;
             if (ev) return { kind: "needs-evidence", reason: ev };
             const problems = gateProblems({ ...(card ? { card } : {}), ...(project ? { project: project.name } : {}), ...(doc.goalSentence ? { goalSentence: doc.goalSentence } : {}), screenshotFound: !!shot });
+            // E948-S53: a card that says it completes the goal while other parts are still worked on
+            // never reaches him; it would offer a close and then warn him against it.
+            if (completes === "goal" && working.length)
+              problems.push(
+                `the card says it completes the goal, but ${working.length} other ${working.length === 1 ? "part is" : "parts are"} still open (${working.map((x) => x.ref).join(", ")}): drop the \`completes: goal\` line, or finish them first`,
+              );
             if (problems.length) return { kind: "needs-rewriting", reason: "card needs rewriting", problems };
+            // E948-S62: did he get what he asked for, and does it look right at 390 and 1280: else back to its worker
+            const q = qcVerdict({ row: r.id, required: qcRequired(g.dir), qc, cardText: cardRaw });
+            if (q) return q;
             return { kind: "card" };
           })();
           const branch = r.col.pr >= 0 ? workBranchOf(r.cells[r.col.pr] ?? "") : undefined;
@@ -850,13 +892,26 @@ function goalOf(doc: FileRead, base: Pick<ReviewGoal, "key" | "code" | "repo" | 
  * Action followups), never from codes in its title text. `goal`, or the epic's last open Done-means line, is case C (the
  * card closes the goal); another open Done-means line is ticked when the card is marked complete; else it is a task.
  */
-function tagOf(doc: FileRead, completes: string | undefined, goal: ReviewGoal): { line?: DoneMeansLine; tag: ReviewTag } {
+/**
+ * E948-S53: the other parts of a goal that keep it open: `working` (not closed, not parked, not in review) and
+ * `reviewing` (in review, each its own card). Parked drafts (a follow-up he parked) never hold a goal open.
+ */
+export function goalStillOpen(siblings: Pick<Sibling, "ref" | "status">[], self: string): { working: Pick<Sibling, "ref" | "status">[]; reviewing: Pick<Sibling, "ref" | "status">[] } {
+  const others = siblings.filter((x) => x.ref !== self && !CLOSED_STATUS.test(stripInline(x.status)));
+  const reviewing = others.filter((x) => REVIEW_STATUS.test(stripInline(x.status)));
+  const working = others.filter((x) => !REVIEW_STATUS.test(stripInline(x.status)) && !PARKED_STATUS.test(stripInline(x.status)));
+  return { working, reviewing };
+}
+
+/** `open`: how many other parts of the goal still hold it open; while any do, no card closes the goal (E948-S53). */
+export function tagOf(doc: Pick<FileRead, "doneMeans">, completes: string | undefined, goal: Pick<ReviewGoal, "standalone">, open = 0): { line?: DoneMeansLine; tag: ReviewTag } {
   if (!completes) return { tag: "step" };
-  if (completes === "goal" || completes === "ask") return { tag: "goal" };
+  if (completes === "ask") return { tag: "goal" };
+  if (completes === "goal") return { tag: open ? "step" : "goal" };
   const line = doc.doneMeans.find((d) => d.id === completes);
   if (!line || line.met) return { tag: "step" };
   const lastOpen = doc.doneMeans.every((d) => d.met || d.id === line.id);
-  return { line, tag: lastOpen && !goal.standalone ? "goal" : "line" };
+  return { line, tag: lastOpen && !goal.standalone && !open ? "goal" : "line" };
 }
 
 /** test goals never reach a production list: a TEST repo or a T9xx row. */
@@ -906,6 +961,25 @@ export function computeClaims(store: Pick<Store, "listMilestones">, reposRoot: s
     }
   }
   return out;
+}
+
+/**
+ * the claim written in row `ref`'s Owner cell in the checkout `dir` (docs/spines/*.md, then docs/*.md, the folders
+ * claim.py searches), when the row is not closed: the dispatch-time check reads it before a worker starts.
+ */
+export function rowClaimIn(dir: string, ref: string): (ClaimedRow & { dir: string }) | undefined {
+  for (const folder of ["docs/spines", "docs"])
+    for (const f of mdIn(path.join(dir, folder))) {
+      const rel = path.posix.join(folder, f);
+      const doc = readFile(path.join(dir, rel));
+      const r = doc?.rows.find((x) => x.id === ref);
+      if (!r || r.col.owner < 0) continue;
+      const status = r.col.status >= 0 ? stripInline(r.cells[r.col.status] ?? "") : "";
+      const c = claimOf(r.cells[r.col.owner] ?? "");
+      if (!c || CLOSED_STATUS.test(status)) return undefined;
+      return { repo: path.basename(dir), dir, path: rel, ref, status, ...c };
+    }
+  return undefined;
 }
 
 /** a lease expired: Owner `unassigned (lease of <by> expired <UTC>: re-dispatch)`, Status `ready` (if it was active). */

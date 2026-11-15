@@ -20,6 +20,8 @@ export interface SpeakState {
 /** What the player needs from the page (tests fake all three). */
 export interface SpeakMedia {
   fetchPiece: (text: string, signal: AbortSignal) => Promise<Blob>;
+  /** have the worker server speak a piece ahead (nothing comes back), so a later fetchPiece finds it ready. */
+  warmPiece?: (text: string) => Promise<void>;
   audio: () => HTMLAudioElement;
   synth: () => SpeechSynthesis | undefined;
 }
@@ -44,27 +46,39 @@ export function speakable(text: string): string {
     .slice(0, 2500);
 }
 
-/** Short pieces at sentence ends (each at most 300 characters), so the first one starts within a second or two. */
+/**
+ * Short pieces at sentence ends, growing: the first at most 70 characters (a long first sentence is cut at a
+ * comma, else between words), so the worker server speaks it in under a second; the second at most 140, the rest at most
+ * 220, so each next piece is spoken while the one before plays.
+ */
+export const FIRST_PIECE = 70;
 export function pieces(text: string): string[] {
   const out: string[] = [];
+  const cap = () => (out.length === 0 ? FIRST_PIECE : out.length === 1 ? 140 : 220);
   const sentences = text.match(/[^.!?;:]+(?:[.!?;:]+|$)\s*/g) ?? [text];
   let cur = "";
   for (const s0 of sentences) {
     let s = s0.trim();
-    while (s.length > 300) {
-      const cut = s.lastIndexOf(" ", 300) > 100 ? s.lastIndexOf(" ", 300) : 300;
-      if (cur) out.push(cur), (cur = "");
+    if (!s) continue;
+    if (cur && cur.length + 1 + s.length > cap()) out.push(cur), (cur = "");
+    // a sentence longer than the piece it starts: cut at a comma (else between words) inside the cap
+    while (!cur && s.length > cap()) {
+      const c = cap();
+      const comma = s.lastIndexOf(", ", c - 1);
+      const space = s.lastIndexOf(" ", c);
+      const cut = comma >= 15 ? comma + 1 : space > c / 3 ? space : c;
       out.push(s.slice(0, cut).trim());
       s = s.slice(cut).trim();
     }
     if (!s) continue;
-    // the first piece stays short so it starts fast; later ones gather up to ~220 characters
-    if (cur && (out.length === 0 ? cur.length >= 60 : cur.length + s.length > 220)) out.push(cur), (cur = "");
     cur = cur ? `${cur} ${s}` : s;
   }
   if (cur) out.push(cur);
   return out.filter((p) => /\w/.test(p));
 }
+
+/** How many pieces a new reply has spoken ahead on the worker server (warm), so Play and the next piece start at once. */
+export const WARM_PIECES = 2;
 
 /** The device's best English voice: a natural, neural or enhanced one first; the novelty and compact voices never. */
 export function bestVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
@@ -90,6 +104,9 @@ function browserMedia(): SpeakMedia {
       const r = await fetch("/api/voice/speak", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }), signal });
       if (!r.ok) throw new Error(`reply voice ${r.status}`);
       return r.blob();
+    },
+    async warmPiece(text) {
+      await fetch("/api/voice/speak", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, warm: true }) });
     },
     audio: () => (el ??= new Audio()),
     synth: () => (typeof window !== "undefined" && "speechSynthesis" in window ? window.speechSynthesis : undefined),
@@ -241,8 +258,19 @@ export function createSpeaker(media: SpeakMedia) {
     }
   };
 
+  // a new reply's first pieces are spoken ahead, one after the other, once per reply (the last 50 remembered).
+  const warmed = new Set<string>();
+  const warm = (id: string, text: string) => {
+    if (!media.warmPiece || warmed.has(id)) return;
+    warmed.add(id);
+    if (warmed.size > 50) warmed.delete(warmed.values().next().value as string);
+    const ahead = pieces(speakable(text)).slice(0, WARM_PIECES);
+    void ahead.reduce((p, piece) => p.then(() => media.warmPiece!(piece)).catch(() => undefined), Promise.resolve());
+  };
+
   return {
     play: (id: string, text: string) => void play(id, text),
+    warm,
     pause,
     resume,
     stop,

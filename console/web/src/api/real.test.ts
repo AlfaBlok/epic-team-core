@@ -82,7 +82,7 @@ describe("real client", () => {
     expect(fetch.mock.calls.map((c) => [c[1]?.method, c[0]])).toEqual([
       ["GET", "/api/milestones"],
       ["GET", "/api/milestones?includeSettled=true"],
-      ["GET", "/api/waiting-on-owner?includeSettled=true"],
+      ["GET", "/api/waiting-on-owner?includeSettled=true&view=list"],
       ["POST", "/api/milestones/ms_1/settle"],
       ["POST", "/api/milestones/ms_1/unsettle"],
     ]);
@@ -192,7 +192,7 @@ describe("T44-S5: a GET during a console restart retries quietly", () => {
     await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000);
     expect(await p).toEqual([{ id: "w1" }]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/waiting-on-owner?includeSuperseded=true");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/waiting-on-owner?includeSuperseded=true&view=list");
     expect(seen).toEqual([true, false]);
     expect(isReconnecting()).toBe(false);
     off();
@@ -300,5 +300,53 @@ describe("T33-S9: an answer survives a dropped request (same key, retried ~60 s)
     const err = await createRealClient().respondToWaiting("w1", { kind: "answer", text: "x" }).catch((e) => e);
     expect([err.status, err.code]).toEqual([404, "not_found"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the Inbox's list is one request, the slim view", () => {
+  it("two readers asking for the same list at once make one request; a later ask makes a new one", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchMock = vi.fn(async (_url: string) => (await gate, new Response(JSON.stringify([{ id: "w1" }]), { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createRealClient();
+    const a = api.listWaitingOnOwner({ includeSuperseded: true });
+    const b = api.listWaitingOnOwner({ includeSuperseded: true });
+    release();
+    expect(await a).toEqual([{ id: "w1" }]);
+    expect(await b).toEqual([{ id: "w1" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/waiting-on-owner?includeSuperseded=true&view=list");
+    await api.listWaitingOnOwner({ includeSuperseded: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("an opened Answered row fetches its whole card by id", async () => {
+    const fetchMock = reply(200, { id: "wj_1" });
+    vi.stubGlobal("fetch", fetchMock);
+    await createRealClient().getWaitingItem!("wj_1", "ms_1");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/waiting-on-owner/wj_1?milestoneId=ms_1");
+  });
+});
+
+describe("the lists index.html started early", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("are taken once while fresh; a failed one is asked again the normal way; a stale one is dropped", async () => {
+    const early: Record<string, { at: number; p: Promise<unknown> }> = {
+      "/status": { at: Date.now(), p: Promise.resolve({ items: ["early"] }) },
+      "/laptop": { at: Date.now(), p: Promise.resolve(null) },
+      "/review-items": { at: Date.now() - 60_000, p: Promise.resolve(["stale"]) },
+    };
+    vi.stubGlobal("window", { __earlyGets: early, location: { pathname: "/" } });
+    const fetchMock = reply(200, { from: "network" });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = createRealClient();
+    expect(await api.listStatus()).toEqual({ items: ["early"] });
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    // taken once: the next ask goes to the network
+    expect(await api.listStatus()).toEqual({ from: "network" });
+    expect(await api.laptop!()).toEqual({ from: "network" });
+    expect(await api.listReviewItems()).toEqual({ from: "network" });
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(["/api/status", "/api/laptop", "/api/review-items"]);
   });
 });

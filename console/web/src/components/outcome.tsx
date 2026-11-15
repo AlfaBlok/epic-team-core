@@ -9,7 +9,7 @@ import { formatDateTime, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isWakeRun } from "@/lib/derive";
 import { hasInlineLinks, linkSegments } from "@/lib/mdlinks";
-import { InlineMd } from "@/pages/Milestone";
+import { InlineMd } from "@/components/inlineMd";
 
 const VERDICT_VARIANT: Record<string, BadgeProps["variant"]> = {
   accomplished: "green",

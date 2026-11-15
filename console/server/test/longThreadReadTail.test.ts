@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
+import { createApp, slowPath } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import { createStore } from "../src/store.js";
 import type { T3Client, T3MessagePage, T3ThreadMessage } from "../src/t3/client.js";
@@ -89,7 +89,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const deskOf = (o: { viewBudgetMs?: number } = {}) => {
+const deskOf = (o: { viewBudgetMs?: number; sendViewWaitMs?: number; sendWaitMs?: number; earlierBudgetMs?: number } = {}) => {
   migrateDesk(db);
   return createDesk({ db, store: createStore(db), t3, dispatcher: new FakeDispatcher(), publicUrl: BASE, reposRoot: dir, ...o });
 };
@@ -213,6 +213,52 @@ describe("T33-S10 a chat open never waits on a slow T3", () => {
     expect(v.messages.at(-1)!.text).toBe("hello desk");
   });
 
+  it("right after a send a slow T3 holds the view at most sendViewWaitMs, then the last good view answers", async () => {
+    const desk = deskOf({ viewBudgetMs: 10, sendViewWaitMs: 100, sendWaitMs: 20 });
+    await desk.view();
+    t3.delayMs = 1_500; // the worker server's tunnel dropping calls (41 s on production 2026-11-13)
+    const sent = await desk.send("hello desk");
+    expect(sent.pending).toBe(true);
+    const t0 = Date.now();
+    const v = await desk.view({ limit: 20 });
+    const took = Date.now() - t0;
+    expect(took).toBeGreaterThanOrEqual(90); // it did wait for his message first
+    expect(took).toBeLessThan(600);
+    expect(v.stale).toBe(true); // the page keeps his own bubble and reads again shortly
+    t3.delayMs = 0;
+    await sleep(3_500); // the send and the live read land
+    const next = await desk.view();
+    expect(next.messages.at(-1)!.text).toBe("hello desk");
+  });
+
+  it("only the first read after a send waits; the re-reads while T3 is still slow answer at the view budget", async () => {
+    const desk = deskOf({ viewBudgetMs: 10, sendViewWaitMs: 100, sendWaitMs: 20 });
+    await desk.view();
+    t3.delayMs = 1_500;
+    await desk.send("hello desk");
+    const t0 = Date.now();
+    const first = await desk.view();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(90);
+    expect(first.stale).toBe(true);
+    for (let i = 0; i < 3; i++) {
+      const t1 = Date.now();
+      const again = await desk.view(); // the page's 1 s stale re-read
+      expect(Date.now() - t1).toBeLessThan(60); // was 100 each (2 s each on production)
+      expect(again.stale).toBe(true);
+    }
+    t3.delayMs = 0;
+    await sleep(3_500);
+    expect((await desk.view()).messages.at(-1)!.text).toBe("hello desk");
+  });
+
+  it("the slow request line keeps a chat read's before and limit, and no other query value", () => {
+    expect(slowPath(new URL("http://x/api/desk/messages?before=-42&limit=20"))).toBe("/api/desk/messages?before=-42&limit=20");
+    expect(slowPath(new URL("http://x/api/tenants/w1/desk/messages?limit=20&token=secret"))).toBe("/api/tenants/w1/desk/messages?limit=20");
+    expect(slowPath(new URL("http://x/api/milestones/ms_1/chat/messages?before=7"))).toBe("/api/milestones/ms_1/chat/messages?before=7");
+    expect(slowPath(new URL("http://x/api/desk/messages"))).toBe("/api/desk/messages");
+    expect(slowPath(new URL("http://x/api/runs?limit=5&token=secret"))).toBe("/api/runs");
+  });
+
   it("concurrent opens share one live read", async () => {
     const desk = deskOf();
     await desk.view();
@@ -325,5 +371,45 @@ describe("T33-S10 HEAD and upstream read from .git, no git child", () => {
     g(repo, "worktree", "add", "-q", wt, "main");
     expect(headSha(wt)).toBeUndefined(); // a worktree's.git is a file: the caller asks git
     expect(headSha(path.join(dir, "nope"))).toBeUndefined();
+  });
+});
+
+describe("an older page never waits on a slow T3", () => {
+  it("past the budget it answers loading (no error), the read goes on, and the retry gets the page from the cache", async () => {
+    await longThread(300);
+    db.prepare("DELETE FROM desk_view_cache").run();
+    const desk = deskOf({ earlierBudgetMs: 50 });
+    await desk.view({ limit: 30 });
+    const before = t3.threads.get(desk.current()!.threadId)!.items - TAIL_WINDOW + 4; // the cached tail's edge: older needs T3
+    t3.delayMs = 200; // the worker server's tunnel is slow: every T3 read takes 200 ms
+    t3.calls = [];
+    const t0 = Date.now();
+    const slow = await desk.earlier(before, 30);
+    expect(Date.now() - t0).toBeLessThan(150);
+    expect(slow).toEqual({ messages: [], hasEarlier: true, loading: true });
+    const again = await desk.earlier(before, 30); // the chat's retry joins the read under way, never a second one
+    expect(again.loading).toBe(true);
+    await sleep(700);
+    const reads = t3.ops("readThreadMessages").length;
+    expect(reads).toBeGreaterThan(0);
+    const t1 = Date.now();
+    const page = await desk.earlier(before, 30);
+    expect(Date.now() - t1).toBeLessThan(50); // from the cache
+    expect(t3.ops("readThreadMessages").length).toBe(reads);
+    expect(page.loading).toBeUndefined();
+    expect(page.messages).toHaveLength(30);
+    expect(page.messages.every((m) => m.position! < before)).toBe(true);
+    expect(page.hasEarlier).toBe(true);
+  });
+
+  it("after a restart (nothing read yet) the older page reads back from where the chat is, not past the live thread", async () => {
+    const tid = await longThread(300);
+    const items = t3.threads.get(tid)!.items;
+    const desk = deskOf(); // a restarted console: the chat page still holds its newest messages and scrolls up
+    const before = items - 60;
+    const page = await desk.earlier(before, 30);
+    expect(page.messages).toHaveLength(30);
+    expect(page.messages.every((m) => m.position! < before && m.position! >= before - TAIL_WINDOW)).toBe(true);
+    expect(page.hasEarlier).toBe(true);
   });
 });

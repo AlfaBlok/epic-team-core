@@ -3,7 +3,7 @@ import { z } from "zod";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import { currentAuth } from "../auth/identity.js";
 import { sudoRead } from "../secretCache.js";
-import { inQuiet, localParts, teamLink, type Notifiable } from "./notice.js";
+import { inQuiet, localParts, markText, teamLink, type Notifiable } from "./notice.js";
 import { vapidFrom, webPushTransport, type PushMessage, type PushSub, type PushTransport, type Vapid } from "./webpushCrypto.js";
 import { keyFile, ownerName } from "../identity.js";
 
@@ -79,12 +79,15 @@ export function itemMessages(items: Notifiable[], maxEach = 3): { keys: string[]
     const asks = items.filter((i) => i.kind === "ask").length;
     const reviews = items.length - asks;
     const parts = [asks ? `${asks} new thing${asks === 1 ? "" : "s"} wait${asks === 1 ? "s" : ""} on you` : "", reviews ? `${reviews} done, waiting for your review` : ""].filter(Boolean);
-    return [{ keys: items.map((i) => i.key), msg: { title: "Team", body: `${parts.join(" and ")}.`, url: "/", tag: "team-items" } }];
+    // the summary says REAL, or TEST when every item is ours, or how many are tests.
+    const tests = items.filter((i) => i.test).length;
+    const title = tests === items.length ? "TEST · Team" : "Team";
+    return [{ keys: items.map((i) => i.key), msg: { title, body: `${parts.join(" and ")}.${tests && tests < items.length ? ` ${tests} of them our own test${tests === 1 ? "" : "s"}.` : ""}`, url: "/", tag: "team-items" } }];
   }
   return items.map((it) => ({
     keys: [it.key],
     msg: {
-      title: it.kind === "review" ? "Done, waiting for your review" : "Waiting on you",
+      title: markText(it.kind === "review" ? "Done, waiting for your review" : it.kind === "application" ? "New tester application" : "Waiting on you", it.test),
       body: oneLine(it.title),
       url: it.teamUrl.startsWith(teamLink()) ? it.teamUrl.slice(teamLink().length) || "/" : "/",
       tag: it.key.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 60),
@@ -198,7 +201,7 @@ export function createWebPush(db: DB, o: WebPushOptions) {
         return { sent: 0, note: "no device" };
       }
       const msg: PushMessage = {
-        title: fresh.length === 1 ? "The Team desk answered you" : `The Team desk answered you (${fresh.length} new)`,
+        title: markText(fresh.length === 1 ? "The Team desk answered you" : `The Team desk answered you (${fresh.length} new)`),
         body: peek.lastText ? oneLine(peek.lastText) : "Open Chat to read it.",
         url: "/chat",
         tag: "desk",
@@ -284,7 +287,7 @@ export function mountWebPush(api: Hono, p: WebPush, o: { now?: () => number; tes
     const subs = p.subsOf("tenant_id = ? AND user_id = ?", w.tenant, w.userId).filter((s) => typeof b.endpoint !== "string" || s.endpoint === b.endpoint);
     if (!subs.length) return c.json({ ok: false, error: "this device is not subscribed" }, 409);
     lastTest.set(k, clock());
-    const r = await p.deliver("test", ["test"], { title: "Team", body: "Notifications are on. This is how the desk and new asks will reach you.", url: "/chat", tag: "test" }, subs);
+    const r = await p.deliver("test", ["test"], { title: "TEST · Team", body: "Notifications are on. This is how the desk and new asks will reach you.", url: "/chat", tag: "test" }, subs);
     return c.json(r, r.ok ? 200 : r.error === "not_configured" ? 503 : 502);
   });
 }

@@ -1,10 +1,11 @@
+import { rowClaim, shortHolder } from "@/lib/claim";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, SquareArrowOutUpRight, X } from "lucide-react";
 import type { MilestoneTree, TreeColor, TreeNode } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { InlineMd } from "@/pages/Milestone";
+import { InlineMd } from "@/components/inlineMd";
 import { cn } from "@/lib/utils";
 import { HoldWord } from "@/components/planning";
 import { ownerLabel } from "@/lib/owner";
@@ -516,6 +517,7 @@ function Row({
                 {READY_IDLE_LABEL}
               </Badge>
             )}
+            {node.kind === "ticket" && !node.closed && <ClaimChip owner={node.owner} status={node.status} />}
             {ready === "worked" && (
               <Badge variant="blue" data-testid="ready-worked" title="A running child run works on this step">
                 worker running
@@ -606,5 +608,22 @@ function CollapsedSummary({ node }: { node: TreeNode }) {
         </span>
       ))}
     </span>
+  );
+}
+
+/** the claim beside the row: who holds it and until when, so nobody starts a second session on it. */
+export function ClaimChip({ owner, status, now }: { owner?: string; status?: string; now?: number }) {
+  const c = rowClaim(owner, now);
+  // a closed row (done, superseded, cancelled, moved) is nobody's any more: its old claim is not shown.
+  if (!c || /^\W*(done|superseded|cancell?ed|moved)\b/i.test(status ?? "")) return null;
+  return (
+    <Badge
+      variant={c.past ? "gray" : "blue"}
+      data-testid="row-claim"
+      data-holder={c.by}
+      title={`${c.by} claimed this row at ${c.at}; lease until ${c.until}. A second worker for it is refused at dispatch while the claim is live.`}
+    >
+      {c.past ? `claim by ${shortHolder(c.by)} ran out ${c.until.slice(11, 16)}Z` : `claimed by ${shortHolder(c.by)} until ${c.until.slice(11, 16)}Z`}
+    </Badge>
   );
 }

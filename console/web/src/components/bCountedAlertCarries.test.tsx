@@ -39,9 +39,9 @@ describe("T8-S36 (b) a counted alert carries the ask's own card and buttons", ()
     wrap(<MonitorAlertCard item={alert()} />);
     const card = within(screen.getByTestId("monitor-alert-ask-card"));
     expect(card.getByText("Approve about $11/month for a Mexico proxy?")).toBeTruthy();
-    expect(card.getByRole("button", { name: /^No$/ })).toBeTruthy();
+    expect(card.getByRole("button", { name: /^No: drop it$/ })).toBeTruthy();
     expect(card.getByRole("button", { name: /Snooze/ })).toBeTruthy();
-    const approve = card.getByRole("button", { name: /^Approve$/ }) as HTMLButtonElement;
+    const approve = card.getByRole("button", { name: /^Yes: go ahead$/ }) as HTMLButtonElement;
     fireEvent.click(approve);
     expect(spy).toHaveBeenCalledWith("wj_e46a4", expect.objectContaining({ kind: "approve", milestoneId: "ms_e46", relay: { milestoneId: "ms_zs", code: "T46-A4" } }));
     expect(approve.getAttribute("aria-busy")).toBe("true");

@@ -1,33 +1,35 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowDown, ExternalLink, Phone, Send, X } from "lucide-react";
+import { ArrowDown, ExternalLink, Mic, Phone, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, Loading, PHONE_TAP, RelTime, ThreadLink, threadHref } from "@/components/common";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { invalidate, pollWhileVisible, useQuery } from "@/lib/data";
-import { knownWorld, worldId } from "@/lib/useSocial";
+import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { useCallDock } from "@/voice/CallPanel";
-import { useVoiceNote, VoiceNoteBody } from "@/voice/VoiceNote";
+import { clockOf, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
 import { ReplyPlay, SpeakingBar, SpeakRepliesSwitch } from "@/voice/ReplyVoice";
 import { replySpeaker, stopOnTapOutside } from "@/voice/speak";
 import { SentFiles, splitAttachments, useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
 import { usePushToggle } from "@/components/PushToggle";
 import { deskVoiceBase } from "@/voice/deskBase";
-import { passedHead } from "@/lib/passed";
+import { passedHead, passedReply } from "@/lib/passed";
 import { PassedBubble } from "@/components/PassedBubble";
 import { homeWorld } from "@/lib/identity";
 
 /** Poll the transcript while the desk works or a send is in flight, slowly otherwise. */
 export const CHAT_POLL_FAST_MS = 2_500;
 export const CHAT_POLL_IDLE_MS = 15_000;
+/** a posted voice note's bubble waits at most this long for the transcript to show it back. */
+export const POSTED_SHOW_MS = 120_000;
 /** The page hint a "Chat about this" link carries: `/chat?page=<hint>`. */
 export const chatHref = (hint: string) => `/chat?page=${encodeURIComponent(hint)}`;
 
-/** a chat opens with its newest this many messages; scrolling up loads older ones, this many at a time. */
-export const CHAT_PAGE = 30;
+/** a chat opens with its newest this many messages; scrolling up loads older ones, this many at a time (20, was 30). */
+export const CHAT_PAGE = 20;
 /** the console answered from its last good read (T3 was slow): ask again this soon for the fresh one. */
 export const CHAT_POLL_STALE_MS = 1_000;
 /** the first read failed (console restarting, network gone): try again this soon, saying so, never a dead page. */
@@ -41,6 +43,12 @@ export const CHAT_EMPTY = {
 export const unreachableLine = (host: string) => `Can't reach ${host}, retrying… The messages below are the last ones read.`;
 /** within this many px of the top of the history, the next older page loads. */
 export const OLDER_PX = 300;
+/** an older page the console is still reading (T3 slow) or that failed: ask again this soon, by itself. */
+export const OLDER_RETRY_MS = 1_500;
+/** failed older-page reads retried quietly before the error shows. */
+export const OLDER_RETRIES = 5;
+/** the quiet line while an older page is still on its way. */
+export const OLDER_SLOW = "Older messages are still loading…";
 /**
  * the last read of each chat in this tab (key: the chat's voice root or milestone), so opening Chat again paints
  * at once while the fresh read runs. Memory only: gone on reload.
@@ -180,7 +188,8 @@ export function ChatPage() {
   if (w === undefined && world.loading) return <Loading />;
   // an unknown world (failing /api/me) is not the home world: show the error (the query retries), not the platform's desk.
   if (w === undefined && world.error) return <ErrorBox error={world.error} />;
-  return w && w !== homeWorld() ? <WorldDesk world={w} /> : <TeamDeskChat />;
+  // through the door (the owner on a customer site) the home world's Chat is its own world desk, as a customer's.
+  return w && (w !== homeWorld() || knownDoor()) ? <WorldDesk world={w} /> : <TeamDeskChat />;
 }
 
 /**
@@ -323,6 +332,21 @@ export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the n
 export const QUEUED_NOTE = "queued, sends when T3 is back";
 
 /**
+ * a message he sent that the transcript does not show yet. It shows at once ("sending…"), the console's reply
+ * comes later; a failure stays on its own bubble with Retry. It leaves when the transcript (or the T3-down queue) holds it.
+ */
+export type OutboxItem = { crid: string; text: string; page?: string; ids?: string[]; state: "sending" | "sent" | "failed"; error?: string; seen: string[] };
+/** the words of a message as the transcript shows them back (his files ride as a block under the words). */
+const wordsOf = (t: string) => splitAttachments(t).text.trim();
+/** the transcript (or the T3-down queue) holds this message: a user line not there when he sent it, with his words. */
+export function landed(o: OutboxItem, messages: DeskMessage[], queued: { text: string }[] = []): boolean {
+  const want = o.text.trim();
+  const seen = new Set(o.seen);
+  const same = (t: string) => (want ? wordsOf(t) === want || wordsOf(t).endsWith(want) : true);
+  return messages.some((m) => m.role === "user" && m.kind !== "seed" && !seen.has(m.id) && same(m.text)) || queued.some((q) => same(q.text));
+}
+
+/**
  * the chat itself (transcript, working…, sending, composer), shared by the Team desk page and every milestone's Chat tab:
  * a view on one T3 thread read back through `load`, sent to through `sendMessage`.
  */
@@ -383,6 +407,11 @@ export function ChatView({
   const [older, setOlder] = useState<{ messages: DeskMessage[]; hasEarlier: boolean } | undefined>();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | undefined>();
+  /** the console is still reading the older page (or a read failed): the chat asks again by itself, saying so quietly. */
+  const [olderSlow, setOlderSlow] = useState(false);
+  const olderFails = useRef(0);
+  const olderRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(olderRetry.current), []);
   const chatRef = useRef(chat);
   const olderRef = useRef(older);
   /** the history's height before an older page was put on top (the scroll position is kept across it). */
@@ -406,7 +435,12 @@ export function ChatView({
       /* storage off */
     }
   }, [draftKey, text]);
-  const [posting, setPosting] = useState<{ text: string; page?: string; files?: number } | undefined>();
+  // his messages not in the transcript yet (shown at once; the console's work runs after its reply).
+  const [outbox, setOutbox] = useState<OutboxItem[]>([]);
+  const outboxRef = useRef(outbox);
+  outboxRef.current = outbox;
+  /** his sends go to the console one after another, in the order he wrote them. */
+  const sendChain = useRef<Promise<unknown>>(Promise.resolve());
   const [sendFailed, setSendFailed] = useState<string | undefined>();
   const alive = useRef(true);
   /** the owner is at the latest line, so new lines keep him there; false once he scrolls up to read. */
@@ -471,7 +505,18 @@ export function ChatView({
     return () => document.removeEventListener("visibilitychange", mark);
   }, [seenKey, markSeen]);
 
-  const busy = !!chat?.working || (chat?.sending ?? 0) > 0 || !!posting || !!chat?.queued?.length;
+  const posting = outbox.some((o) => o.state !== "failed");
+  const busy = !!chat?.working || (chat?.sending ?? 0) > 0 || posting || !!chat?.queued?.length;
+  // a message leaves the outbox once the transcript shows it; a failure the console found after its reply lands on its bubble.
+  useEffect(() => {
+    if (!chat?.available || !outbox.length) return;
+    const all = older ? [...older.messages, ...chat.messages] : chat.messages;
+    const err = chat.sendError;
+    const next = outbox
+      .filter((o) => o.state === "failed" || !landed(o, all, chat.queued))
+      .map((o) => (err?.clientRequestId === o.crid && o.state !== "failed" ? { ...o, state: "failed" as const, error: err.text } : o));
+    if (next.length !== outbox.length || next.some((o, i) => o !== outbox[i])) setOutbox(next);
+  }, [chat, older, outbox]);
   useEffect(() => {
     if (!chat?.available) return;
     return pollWhileVisible(() => void load(), busy ? CHAT_POLL_FAST_MS : CHAT_POLL_IDLE_MS); // not while the tab is hidden
@@ -499,9 +544,18 @@ export function ChatView({
     setLoadingOlder(true);
     setOlderError(undefined);
     const el = panel ? scroller.current : (document.scrollingElement ?? document.documentElement);
+    clearTimeout(olderRetry.current);
+    const again = () => {
+      setOlderSlow(true);
+      olderRetry.current = setTimeout(() => void loadOlderRef.current(), OLDER_RETRY_MS);
+    };
     try {
       const page = await fetchChat({ before: oldest, limit: CHAT_PAGE });
       if (!alive.current) return;
+      // the console's read of the older page outlasted its budget: it reads on, ask again in a moment (never an error)
+      if (page.loading) return again();
+      olderFails.current = 0;
+      setOlderSlow(false);
       const have = new Set(shown.map((m) => m.id));
       const add = (page.messages ?? []).filter((m) => !have.has(m.id));
       anchor.current = el?.scrollHeight;
@@ -509,7 +563,11 @@ export function ChatView({
       olderRef.current = o;
       setOlder(o);
     } catch (e) {
-      if (alive.current) setOlderError((e as Error).message);
+      if (!alive.current) return;
+      if (++olderFails.current <= OLDER_RETRIES) return again();
+      olderFails.current = 0;
+      setOlderSlow(false);
+      setOlderError((e as Error).message);
     } finally {
       if (alive.current) setLoadingOlder(false);
     }
@@ -547,7 +605,7 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-attach when the panel mounts (after the first load)
   }, [panel, !!chat?.available]);
   const lastMsg = chat?.messages.at(-1);
-  const tail = `${chat?.messages.length ?? 0}|${lastMsg?.id}|${lastMsg?.status}|${lastMsg?.text.length}|${posting ? 1 : 0}|${chat?.working ? 1 : 0}|${chat?.available ? 1 : 0}|${chat?.queued?.length ?? 0}|${liveKey}`;
+  const tail = `${chat?.messages.length ?? 0}|${lastMsg?.id}|${lastMsg?.status}|${lastMsg?.text.length}|${outbox.length}|${chat?.working ? 1 : 0}|${chat?.available ? 1 : 0}|${chat?.queued?.length ?? 0}|${liveKey}`;
   useLayoutEffect(() => {
     if (!chat?.available) return;
     if (stuck.current) toBottom();
@@ -561,28 +619,60 @@ export function ChatView({
     toBottom();
   };
 
-  const files = useChatAttach({ enabled: attach, disabled: !!posting });
+  const files = useChatAttach({ enabled: attach });
+  const patchOut = (crid: string, p: Partial<OutboxItem>) => setOutbox((xs) => xs.map((o) => (o.crid === crid ? { ...o, ...p } : o)));
+  /** post one outbox message (behind his earlier ones); the transcript read after it shows it in place. */
+  const deliver = (o: OutboxItem) => {
+    const go = async () => {
+      try {
+        await sendMessage(o.text, o.page, o.crid, ...(o.ids?.length ? [o.ids] : []));
+        if (!alive.current) return;
+        patchOut(o.crid, { state: "sent" });
+        void load();
+      } catch (e) {
+        if (alive.current) patchOut(o.crid, { state: "failed", error: (e as Error).message });
+      }
+    };
+    sendChain.current = sendChain.current.then(go, go);
+  };
+  // Send never waits: his message shows at once, the box clears for the next one, the console's work runs after.
   const send = async () => {
     const body = text.trim();
     const ids = files.ids;
-    if ((!body && !ids.length) || posting || !files.ready) return;
+    if ((!body && !ids.length) || !files.ready) return;
     // His own send always brings him to the newest line (the effect scrolls once "sending…" renders).
     stuck.current = true;
     setAway(false);
     setUnseen(false);
-    setPosting({ text: body, ...(hint ? { page: hint } : {}), ...(ids.length ? { files: ids.length } : {}) });
     setSendFailed(undefined);
-    try {
-      await sendMessage(body, hint || undefined, `chat-${crypto.randomUUID?.() ?? Date.now()}`, ...(ids.length ? [ids] : []));
-      setText("");
-      files.clear();
-      if (hint) clearHint?.();
-      await load();
-    } catch (e) {
-      setSendFailed((e as Error).message);
-    } finally {
-      setPosting(undefined);
-    }
+    const all = older ? [...older.messages, ...(chat?.messages ?? [])] : (chat?.messages ?? []);
+    const o: OutboxItem = {
+      crid: `chat-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
+      text: body,
+      ...(hint ? { page: hint } : {}),
+      ...(ids.length ? { ids } : {}),
+      state: "sending",
+      seen: all.map((m) => m.id),
+    };
+    setOutbox((xs) => [...xs, o]);
+    setText("");
+    files.clear();
+    if (hint) clearHint?.();
+    deliver(o);
+  };
+  /** a failed message goes again (same request id: T3 drops a copy it already took). */
+  const retry = (crid: string) => {
+    const o = outboxRef.current.find((x) => x.crid === crid);
+    if (!o) return;
+    const again = { ...o, state: "sending" as const, error: undefined };
+    patchOut(crid, again);
+    deliver(again);
+  };
+  /** he gives up on a failed message: its words go back into the box. */
+  const unsend = (crid: string) => {
+    const o = outboxRef.current.find((x) => x.crid === crid);
+    setOutbox((xs) => xs.filter((x) => x.crid !== crid));
+    if (o?.text && !text.trim()) setText(o.text);
   };
 
   // rework: a voice note is sent like typed text (with the page hint), then the chat reloads to show it.
@@ -594,6 +684,9 @@ export function ChatView({
           ...(hint ? { page: hint } : {}),
           // files waiting in the tray go first, in one message that says the voice note follows
           beforeSend: () => {
+            // the note shows in the chat at once: bring him to it, like a typed send
+            stuck.current = true;
+            setAway(false);
             const ids = files.ids;
             if (!ids.length) return;
             files.clear();
@@ -608,6 +701,29 @@ export function ChatView({
         }
       : { state: async () => undefined },
   );
+  // his voice note shows in the chat the moment he taps Send (its words fill in once written) and leaves when
+  // the transcript holds it (the head line carries the note's id); the chat reads fast meanwhile and follows it down.
+  const voicePosting = note.posting;
+  useEffect(() => {
+    if (!voicePosting?.id || !chat) return;
+    const all = older ? [...older.messages, ...chat.messages] : chat.messages;
+    if (all.some((m) => m.role === "user" && m.text.includes(voicePosting.id!))) note.landed();
+  }, [chat, older, voicePosting?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // a posted note the transcript never shows back (another chat's wording) still leaves after two minutes
+    if (voicePosting?.state !== "sent") return;
+    const t = setTimeout(() => note.landed(), POSTED_SHOW_MS);
+    return () => clearTimeout(t);
+  }, [voicePosting?.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!voicePosting || !chat?.available || busy) return;
+    return pollWhileVisible(() => void load(), CHAT_POLL_FAST_MS);
+  }, [!!voicePosting, !!chat?.available, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (!voicePosting || !chat?.available) return;
+    if (stuck.current) toBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the bubble appearing or its words filling in
+  }, [voicePosting?.state, voicePosting?.words]);
   // a reply speaks only on Play; a tap anywhere else, a new message or leaving the chat stops it.
   useEffect(() => {
     const off = stopOnTapOutside();
@@ -622,6 +738,12 @@ export function ChatView({
     if (seenLast.current !== undefined && lastId !== seenLast.current) replySpeaker().stop();
     seenLast.current = lastId;
   }, [lastId]);
+  // the newest finished desk reply is spoken ahead on the worker server, so Play on it starts at once.
+  const warmId = lastMsg?.role === "assistant" && lastMsg.status === "completed" && !chat?.working ? lastMsg.id : undefined;
+  useEffect(() => {
+    // the same words Play says (a call's summary without its head line)
+    if (warmId && lastMsg) replySpeaker().warm(warmId, callHead(lastMsg.text)?.rest ?? lastMsg.text);
+  }, [warmId]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Speak replies" on: the desk's first finished answer after his voice note plays by itself, once (Pause and Stop by it).
   useEffect(() => {
     if (!note.speakAfter || !chat || chat.working) return;
@@ -678,8 +800,8 @@ export function ChatView({
           {canPage ? (
             // older messages load when the owner scrolls up to here (or taps)
             <p className="mb-2 text-center text-xs text-muted-foreground">
-              <button type="button" className="rounded px-2 py-1 underline hover:bg-accent disabled:no-underline" disabled={loadingOlder} onClick={() => void loadOlder()} data-testid="chat-older">
-                {loadingOlder ? "Loading older messages…" : "Show older messages"}
+              <button type="button" className="rounded px-2 py-1 underline hover:bg-accent disabled:no-underline" disabled={loadingOlder || olderSlow} onClick={() => void loadOlder()} data-testid="chat-older">
+                {olderSlow ? OLDER_SLOW : loadingOlder ? "Loading older messages…" : "Show older messages"}
               </button>
               {olderError && <span className="block text-destructive">Could not load them: {olderError}</span>}
             </p>
@@ -687,7 +809,7 @@ export function ChatView({
             hasEarlier && <p className="mb-2 text-center text-xs text-muted-foreground">Older messages are in the {short}'s T3 thread.</p>
           )}
           <ol className="grid min-w-0 gap-3 pb-4" aria-label={`Chat with the ${who}`} data-testid="chat-transcript">
-            {!shown.length && !chat.working && !posting && !chat.queued?.length && (
+            {!shown.length && !chat.working && !outbox.length && !chat.queued?.length && (
               // never a blank panel: say whether the chat is still loading or simply has nothing yet
               <li role="status" className="py-6 text-center text-sm text-muted-foreground" data-testid="chat-empty">
                 {chat.stale || chat.unreachable || chat.t3 ? CHAT_EMPTY.loading : CHAT_EMPTY.empty}
@@ -706,14 +828,32 @@ export function ChatView({
                 </div>
               </li>
             ))}
-            {posting && (
-              <li className="flex justify-end">
-                <div className="max-w-[85%] min-w-0 rounded-lg bg-primary/70 px-3 py-2 text-sm text-primary-foreground" data-testid="chat-posting">
-                  {posting.text && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{posting.text}</p>}
-                  <p className="mt-1 text-[11px] opacity-80">{posting.files ? `sending with ${posting.files} file${posting.files > 1 ? "s" : ""}…` : "sending…"}</p>
+            {outbox.map((o) => (
+              <li key={o.crid} className="flex justify-end" data-testid={o.state === "failed" ? "chat-failed" : "chat-posting"}>
+                <div className={cn("min-w-0 max-w-[92%] rounded-lg px-3 py-2 text-sm sm:max-w-[85%]", o.state === "failed" ? "border border-destructive bg-primary/60 text-primary-foreground" : "bg-primary/70 text-primary-foreground")}>
+                  {o.page && <p className="mb-1 text-[11px] opacity-80 [overflow-wrap:anywhere]">about: {o.page}</p>}
+                  {o.text && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{o.text}</p>}
+                  {o.state === "failed" ? (
+                    <div className="mt-1.5 rounded bg-background px-2 py-1.5 text-xs text-destructive" role="alert" data-testid="chat-failed-error">
+                      Not sent: {o.error}
+                      <span className="mt-1 flex gap-2">
+                        <Button size="sm" variant="outline" className={cn(PHONE_TAP, "h-8")} onClick={() => retry(o.crid)} data-testid="chat-retry">
+                          Retry
+                        </Button>
+                        <Button size="sm" variant="ghost" className={cn(PHONE_TAP, "h-8 text-muted-foreground")} onClick={() => unsend(o.crid)} data-testid="chat-unsend">
+                          Edit
+                        </Button>
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[11px] opacity-80" data-testid="chat-posting-state">
+                      {o.state === "sent" ? "sent" : o.ids?.length ? `sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "sending…"}
+                    </p>
+                  )}
                 </div>
               </li>
-            )}
+            ))}
+            {voicePosting && <PostingBubble p={voicePosting} />}
             {chat.working && <WorkingLine who={who} since={chat.workingSince} />}
             {live}
           </ol>
@@ -734,12 +874,12 @@ export function ChatView({
               </button>
             )}
             <SpeakingBar />
-            {chat.sending > 0 && !posting && (
+            {chat.sending > 0 && !posting && !outbox.length && (
               <p className="mb-2 text-xs text-amber-700 dark:text-amber-400" role="status" data-testid="chat-sending">
                 {chat.sending} message{chat.sending > 1 ? "s" : ""} waiting for T3 (the {short} is busy or compacting; retrying).
               </p>
             )}
-            {(sendFailed || chat.sendError) && (
+            {(sendFailed || (chat.sendError && !outbox.some((o) => o.crid === chat.sendError!.clientRequestId))) && (
               <p className="mb-2 text-xs text-destructive" role="alert" data-testid="chat-send-error">
                 Not sent: {sendFailed ?? chat.sendError!.text}
               </p>
@@ -769,12 +909,10 @@ export function ChatView({
                 }
               }}
               send={
-                /* the pressed Send spins until the console has the message. */
+                /* Send never spins: his message shows above at once and the box is free for the next one. */
                 <Button
                   className={cn(PHONE_TAP, "shrink-0 max-sm:size-11 max-sm:px-0")}
-                  disabled={(!text.trim() && !files.ids.length) || !!posting || !files.ready}
-                  pending={!!posting}
-                  pendingLabel={<span className="max-sm:sr-only">Sending…</span>}
+                  disabled={(!text.trim() && !files.ids.length) || !files.ready}
                   aria-label="Send"
                   onClick={() => void send()}
                 >
@@ -812,6 +950,31 @@ function WorkingLine({ who, since }: { who: string; since?: string }) {
   );
 }
 
+/** what the bubble of a voice note on its way says under it. */
+export const POSTING_TEXT: Record<PostingNote["state"], string> = {
+  writing: "writing out your words…",
+  sent: "sent",
+  kept: "saved on this phone, sends by itself",
+  failed: "not sent yet: Send again below",
+};
+
+/** his voice note in the chat from the moment he taps Send, like a typed message's "sending…" bubble. */
+function PostingBubble({ p }: { p: PostingNote }) {
+  return (
+    <li className="flex justify-end" data-testid="chat-voice-posting" data-state={p.state} data-at={p.at}>
+      <div className={cn("min-w-0 max-w-[92%] rounded-lg px-3 py-2 text-sm text-primary-foreground sm:max-w-[85%]", p.state === "failed" ? "border border-destructive bg-primary/60" : "bg-primary/70")}>
+        <p className="mb-1 flex items-center gap-x-1.5 text-[11px] opacity-90">
+          <Mic className="h-3 w-3" aria-hidden /> <span className="font-medium">Voice note</span> · {clockOf(p.seconds)}
+        </p>
+        {p.words && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="chat-voice-posting-words">{p.words}</p>}
+        <p className="mt-1 text-[11px] opacity-80" data-testid="chat-voice-posting-state">
+          {POSTING_TEXT[p.state]}
+        </p>
+      </div>
+    </li>
+  );
+}
+
 function Bubble({ m, threadUrl }: { m: DeskMessage; threadUrl: (id: string) => string }) {
   if (m.kind === "seed")
     return (
@@ -824,6 +987,15 @@ function Bubble({ m, threadUrl }: { m: DeskMessage; threadUrl: (id: string) => s
   // words the console or his other desk passed in are not his own message: shown apart, on the desk's side.
   const passed = m.role === "user" ? passedHead(m.text) : undefined;
   if (passed) return <PassedBubble p={passed} at={m.at} />;
+  // the desk's own "Passed to the EpicTeam desk: … (link)" line shows as passed on, with where it went
+  const passedOn = m.role === "assistant" ? passedReply(m.text) : undefined;
+  if (passedOn)
+    return (
+      <>
+        <PassedBubble p={passedOn.p} at={m.at} />
+        {passedOn.rest && <Bubble m={{ ...m, text: passedOn.rest }} threadUrl={threadUrl} />}
+      </>
+    );
   const mine = m.role === "user";
   // his files come back from the console's block under his words
   const sent = mine ? splitAttachments(m.text) : { text: m.text, files: [] };

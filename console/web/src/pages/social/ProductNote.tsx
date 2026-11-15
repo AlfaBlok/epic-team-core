@@ -73,7 +73,7 @@ export function ProductNoteBox({ m, s, notes, onFiled }: { m: Pick<Milestone, "i
       <section className="grid gap-2 rounded-lg border p-3" data-testid="product-note">
         <h3 className="text-sm font-semibold">Your answer or note on this slide</h3>
         <p className="text-xs text-muted-foreground">It is filed in the campaign's spine with this slide named, and the campaign chat acts on it.</p>
-        <WordsBox label="Your note on this slide" rows={2} boxClassName="min-h-16" value={text} onChange={setText} files={files} voice={voice} placeholder="For example: Yes to this metric, but count only paying testers." testid="product-note-box" />
+        <WordsBox label="Your note on this slide" rows={2} boxClassName="min-h-16" value={text} onChange={setText} files={files} voice={voice} placeholder="For example: Yes to this metric, but count only testers who log in." testid="product-note-box" />
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" disabled={busy || !files.ready || (!text.trim() && !files.ids.length)} pending={busy} pendingLabel="Sending…" onClick={send} data-testid="product-note-send">
             Send

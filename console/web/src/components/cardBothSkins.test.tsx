@@ -168,7 +168,7 @@ const CARDS: { name: string; mount: () => void; root: () => HTMLElement; open?: 
   // two buttons per card; the second's first press opens the note box (was Changes wanted's own box)
   { name: "an approval (Approve, No with its note)", mount: () => void inSkin(skinNow, <WaitingCard item={ask({ ask: "approve", decidable: true, question: "Ship the logger?" })} />), root: () => document.body, open: () => fireEvent.click(screen.getByTestId("decline")) },
   {
-    name: "a finished task (Mark complete, Not yet with its note)",
+    name: "a finished task (Mark complete, Give feedback with its note)",
     mount: () => {
       vi.spyOn(api, "listReviewItems").mockImplementation(async (q?: { state?: string }) => (q?.state ? [] : [ITEM]));
       inSkin(skinNow, <WaitingForReview fold="review" />);

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type RunHostsSeries } from "@/api";
+import { ApiError } from "@/api/real";
 import { RunsPage } from "@/pages/Runs";
 import { bandPath, edgePath, RunHostsSection } from "@/components/runHosts";
 
@@ -36,6 +37,17 @@ const series = (range: "24h" | "7d", unknown = 0): RunHostsSeries => {
 };
 
 describe("T48-S29 Live runs by host", () => {
+  it("through the door (403 platform_private) the section is not shown at all", async () => {
+    vi.spyOn(api, "getRunHosts").mockRejectedValue(new ApiError(403, "the platform is managed from the private console", "platform_private"));
+    render(
+      <MemoryRouter>
+        <RunHostsSection />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.queryByTestId("run-hosts")).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("stacks main and worker (unknown only when there is one), hovers per host, and switches to 7 d", async () => {
     const spy = vi.spyOn(api, "getRunHosts").mockImplementation(async ({ range }) => series(range, range === "7d" ? 1 : 0));
     render(

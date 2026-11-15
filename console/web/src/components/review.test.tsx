@@ -102,9 +102,14 @@ describe("T48-S26 the card, as the approved mockup", () => {
     // the heading is short; the body holds the full title, the Why line the task's goal
     const title = within(c).getByTestId("review-title");
     expect(title.tagName).toBe("BUTTON");
-    expect(title.textContent!.length).toBeLessThanOrEqual(73);
-    expect(FACE.title.startsWith(title.textContent!.replace(/…$/, ""))).toBe(true);
+    const computer = title.querySelector('[data-heading="computer"]')!;
+    expect(computer.textContent!.length).toBeLessThanOrEqual(73);
+    expect(FACE.title.startsWith(computer.textContent!.replace(/…$/, ""))).toBe(true);
     expect(within(c).getByTestId("review-body").textContent).toBe(FACE.title);
+    // a phone shows the whole title as the heading and leaves out the body that only repeats it
+    expect(title.querySelector('[data-heading="phone"]')!.textContent).toBe(FACE.title);
+    expect(computer.className).toContain("max-sm:hidden");
+    expect(within(c).getByTestId("review-body").className).toContain("max-sm:hidden");
     expect(within(c).getByTestId("review-task-goal").textContent).toBe(`Why: ${FACE.taskGoal}`);
     const lines = within(c).getByTestId("review-delivered").querySelectorAll("li");
     // drawn marks (a tick, a cross) instead of the ✓ / ✗ glyphs
@@ -114,11 +119,13 @@ describe("T48-S26 the card, as the approved mockup", () => {
       ["false", "not-done"],
     ]);
     expect(within(lines[0] as HTMLElement).getByText("memo.example.com/connect").getAttribute("href")).toBe("https://memo.example.com/connect");
-    // two buttons, the main one's sub-line is its title; the green evidence link beside them
+    // two buttons, the main one's sub-line is its title; the green evidence link its own line above them
     const buttons = within(c).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Not yet"]);
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Give feedback"]); // E948-S83 iteration 2: Park on every card
     expect(within(buttons).getByTestId("review-complete").getAttribute("title")).toBe("The goal stays open. Next the team lists Memo in the official MCP registry, once you say yes to publishing.");
-    const go = within(buttons).getByTestId("review-go");
+    const go = within(c).getByTestId("review-go");
+    expect(buttons.contains(go)).toBe(false);
+    expect(go.compareDocumentPosition(buttons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(go.getAttribute("href")).toBe("https://memo.example.com/connect");
     expect(go.textContent).toBe("Open memo.example.com/connect ↗");
     // folded: the evidence, the tree and the Details only open from the heading
@@ -149,9 +156,8 @@ describe("T48-S26 the card, as the approved mockup", () => {
     const section = screen.getByTestId("waiting-for-review");
     for (const t of allText(section)) expect(t).not.toMatch(/approv/i);
     // the confirm and the feedback box too
-    // the confirm, the note box (Not yet) and everything under More too
-    fireEvent.click(within(screen.getAllByTestId("review-card")[1]).getByTestId("review-complete"));
-    expect(within(screen.getAllByTestId("review-card")[1]).getByTestId("review-close-confirm")).toBeTruthy();
+    // the confirm, the note box (Give feedback) and everything under More too
+    expect(within(screen.getAllByTestId("review-card")[1]).getByTestId("review-parked-left")).toBeTruthy();
     fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-iteration"));
     expect(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-note")).toBeTruthy();
     for (const c of screen.getAllByTestId("review-card")) fireEvent.click(within(c).getByTestId("review-title"));
@@ -207,18 +213,31 @@ describe("T48-S26 the buttons", () => {
     for (const li of screen.getAllByTestId("review-feed-item")) expect(li.getAttribute("style") ?? "").not.toContain("opacity: 0");
   });
 
-  it("the last open piece: Mark this task complete and close the goal, a confirm names what is still open first", async () => {
+  it("the last open piece: Mark this task complete and close the goal closes it at once, parked parts named before the press (E948-S53)", async () => {
     list([card({}, { closesGoal: true, openInGoal: [{ ref: "E910-R5", name: "the registry listing" }, { ref: "E910-R6" }] })]);
     const complete = vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
     mount();
     const c = await screen.findByTestId("review-card");
     expect(within(c).getByTestId("review-complete").getAttribute("title")).toBe("This is the last open part of the goal, so the goal closes.");
+    expect(within(c).getByTestId("review-complete").textContent).toBe("Mark complete, close the goal");
+    const parked = within(c).getByTestId("review-parked-left");
+    expect(parked.textContent).toBe("Parked for later, kept with the goal: the registry listing, E910-R6.");
+    expect(within(parked).getByText("E910-R6").closest("a")).toBeTruthy();
     fireEvent.click(within(c).getByTestId("review-complete"));
-    const confirm = within(c).getByTestId("review-close-confirm");
-    expect(confirm.textContent).toContain("Other parts of this goal are still open: the registry listing, E910-R6.");
-    expect(within(confirm).getByText("E910-R6").closest("a")).toBeTruthy();
-    expect(complete).not.toHaveBeenCalled();
-    fireEvent.click(within(confirm).getByTestId("review-close-confirm-yes"));
+    // no confirm that warns against the close it just offered
+    expect(within(c).queryByTestId("review-close-confirm")).toBeNull();
+    await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_1", { start: [], park: [] }));
+  });
+
+  it("a step card never says it closes the goal and never asks to confirm a close (E948-S53)", async () => {
+    list([card({}, { closesGoal: false, openInGoal: [{ ref: "E910-R5", name: "the registry listing" }] })]);
+    const complete = vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
+    mount();
+    const c = await screen.findByTestId("review-card");
+    expect(within(c).getByTestId("review-complete").textContent).toBe("Mark complete");
+    expect(within(c).queryByTestId("review-parked-left")).toBeNull();
+    fireEvent.click(within(c).getByTestId("review-complete"));
+    expect(within(c).queryByTestId("review-close-confirm")).toBeNull();
     await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_1", { start: [], park: [] }));
   });
 
@@ -231,10 +250,10 @@ describe("T48-S26 the buttons", () => {
     expect(sw.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
     // one main button that counts what starts; its sub-line is its title
     const main = within(c).getByTestId("review-complete");
-    expect(main.textContent).toBe("Mark complete, start 1");
+    expect(main.textContent).toBe("Start 1");
     expect(main.getAttribute("title")).toBe("The team starts: Build the health page. The other next step is parked on the goal.");
     fireEvent.click(sw[1]);
-    expect(within(c).getByTestId("review-complete").textContent).toBe("Mark complete, start 2");
+    expect(within(c).getByTestId("review-complete").textContent).toBe("Start 2");
     fireEvent.click(within(c).getByTestId("review-complete"));
     await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_1", { start: [0, 1], park: [] }));
   });
@@ -244,27 +263,26 @@ describe("T48-S26 the buttons", () => {
     const complete = vi.spyOn(api, "completeReviewItem").mockResolvedValue({ ...ITEM, state: "approved" });
     mount();
     const c = await screen.findByTestId("review-card");
-    // Park every step and the main button is the park one ("Mark complete", nothing starts)
+    // Park every step and the main button is the park one ("Mark complete, start nothing")
     fireEvent.click(within(c).getByTestId("review-switch-park"));
     const park = within(c).getByTestId("review-complete-park");
-    expect(park.textContent).toBe("Mark complete");
+    expect(park.textContent).toBe("Close, start nothing");
     expect(park.getAttribute("title")).toBe("The next step is parked on the goal. Nothing new starts.");
     fireEvent.click(park);
     await waitFor(() => expect(complete).toHaveBeenCalledWith("rv_1", { start: [], park: [0] }));
   });
 
-  it("Not yet (was Changes wanted): the first press opens the note, a press with no words asks for them, then his words go back with the task", async () => {
+  it("Give feedback (was Not yet, Changes wanted): the first press opens the note, a press with no words asks for them, then his words go back with the task", async () => {
     list([ITEM]);
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");
-    expect(within(c).queryByTestId("review-note")).toBeNull();
-    fireEvent.click(within(c).getByTestId("review-iteration"));
+    // E948-S60: the feedback block is always open; Give feedback with no words asks for them
     expect(within(c).getByTestId("review-note")).toBeTruthy();
     fireEvent.click(within(c).getByTestId("review-iteration"));
-    expect(within(c).getByTestId("review-note").textContent).toContain("Say what should change, then press Not yet.");
+    expect(within(c).getByTestId("review-note").textContent).toContain("Say what should change: write, paste a screenshot, or speak, then press Send.");
     expect(relaunch).not.toHaveBeenCalled();
-    fireEvent.change(within(c).getByLabelText("Your note"), { target: { value: "show the Cursor steps first" } });
+    fireEvent.change(within(c).getByLabelText("Feedback"), { target: { value: "show the Cursor steps first" } });
     fireEvent.click(within(c).getByTestId("review-iteration"));
     await waitFor(() => expect(relaunch).toHaveBeenCalledWith("rv_1", "show the Cursor steps first"));
   });
@@ -308,7 +326,7 @@ describe("T48-S26 the buttons", () => {
   });
 });
 
-describe("T48-S26 the close-the-goal confirm", () => {
+describe("T48-S26 the parked parts named on a goal-closing card", () => {
   it("never names a task just marked complete on this page", async () => {
     const a = card({ id: "rv_a", ref: "E910-R5" }, { title: "The registry listing was made for you to check." });
     const c = card({ id: "rv_c", ref: "E910-R9" }, { closesGoal: true, openInGoal: [{ ref: "E910-R5", name: "the registry listing" }, { ref: "E910-R6", name: "the ChatGPT directory" }] });
@@ -319,8 +337,7 @@ describe("T48-S26 the close-the-goal confirm", () => {
     fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-complete"));
     await waitFor(() => expect(screen.getAllByTestId("review-card")).toHaveLength(1));
     const last = screen.getByTestId("review-card");
-    fireEvent.click(within(last).getByTestId("review-complete"));
-    expect(within(last).getByTestId("review-close-confirm").textContent).toContain("still open: the ChatGPT directory.");
+    expect(within(last).getByTestId("review-parked-left").textContent).toBe("Parked for later, kept with the goal: the ChatGPT directory.");
   });
 });
 
@@ -336,7 +353,10 @@ describe("T61-S2 a held post is the same card, in its own words", () => {
     await waitFor(() => expect(screen.getAllByTestId("review-card")).toHaveLength(2));
     expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("2");
     const c = screen.getAllByTestId("review-card").find((x) => x.getAttribute("data-kind") === "post")!;
-    expect(within(c).getByTestId("review-crumb").textContent).toBe("Memo on social media › Reddit awareness week 37 › Waiting for you");
+    // E948-S60: the one meta line: the kind word first, the project, the campaign
+    const crumb = within(c).getByTestId("review-crumb");
+    expect(crumb.querySelector("[data-card-kind-word]")?.textContent).toBe("Post");
+    for (const w of ["Memo on social media", "Reddit awareness week 37", "waiting for you"]) expect(crumb.textContent).toContain(w);
     expect(within(c).getByTestId("review-title").querySelector("a")!.getAttribute("href")).toBe("/posts/social/P-0063");
     expect(within(c).getByTestId("review-post-text").textContent).toContain("I build Memo, so I'm biased.");
     expect(within(c).getByTestId("review-post-where").textContent).toMatch(/^Reddit, r\/ClaudeCode, /);
@@ -387,12 +407,12 @@ describe("T61-S2 a held post is the same card, in its own words", () => {
 });
 
 describe("T48-S26 one flat list", () => {
-  it("every card fully shown: no goal groups, no older-rows fold, no Show 20 / 50 / all, no sort; the count is the cards", async () => {
+  it("every card fully shown: no goal groups, no older-rows fold, no Show 20 / 50 / all; the count is the cards (its Sort is back)", async () => {
     list(Array.from({ length: 25 }, (_, i) => card({ id: `rv_${i}` })));
     mount();
     await waitFor(() => expect(screen.getAllByTestId("review-card")).toHaveLength(25));
     expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("25");
-    for (const id of ["review-goal", "review-backlog", "review-pending", "waiting-for-review-limit", "waiting-for-review-sort"]) expect(screen.queryByTestId(id)).toBeNull();
+    for (const id of ["review-goal", "review-backlog", "review-pending", "waiting-for-review-limit"]) expect(screen.queryByTestId(id)).toBeNull();
   });
 
   it("empty says so; a world refused the list (403) shows no section", async () => {
@@ -437,5 +457,21 @@ describe("T48-S26 one flat list", () => {
   it("milestoneLabel reads a repeated name once", () => {
     expect(milestoneLabel("home_repo · home_repo")).toBe("home_repo");
     expect(milestoneLabel("ops · PLAN-15: Fleet stays green")).toBe("ops · PLAN-15: Fleet stays green");
+  });
+});
+
+describe("Home on a phone: the first cards, then one button for the rest", () => {
+  it("cards after the first five are hidden on a phone only, and Show N more to review brings them back", async () => {
+    list(Array.from({ length: 7 }, (_, n) => ({ ...ITEM, id: `rv_${n}` })));
+    mount();
+    const items = await screen.findAllByTestId("review-feed-item");
+    expect(items).toHaveLength(7);
+    expect(items.map((li) => li.className.includes("max-sm:hidden"))).toEqual([false, false, false, false, false, true, true]);
+    const more = screen.getByTestId("review-phone-more");
+    expect(more.textContent).toBe("Show 2 more to review");
+    expect(more.className).toContain("sm:hidden");
+    fireEvent.click(more);
+    expect(screen.getAllByTestId("review-feed-item").some((li) => li.className.includes("max-sm:hidden"))).toBe(false);
+    expect(screen.queryByTestId("review-phone-more")).toBeNull();
   });
 });

@@ -57,7 +57,7 @@ describe("AskSet", () => {
     const items = [rec("ROOT-A1", { response: { id: "jr_1", kind: "approve" } as WaitingItem["response"] }), rec("ROOT-A2", { response: { id: "jr_2", kind: "deny" } as WaitingItem["response"] }), rec("ROOT-A3")];
     render(<AskSet group={{ persona: "Advisor", items }} />);
     expect(screen.getAllByTestId("ask-set-done").map((d) => d.textContent)).toEqual(["✓ Accepted: it becomes a ready row", "✗ Said no"]);
-    expect(screen.getByTestId("accept-all").textContent).toMatch(/Accept all 1$/);
+    expect(screen.getByTestId("accept-all").textContent).toMatch(/Yes to all 1: make them tasks$/);
   });
   it("Accept all approves every one with asRow, in order, and says each becomes a ready row", async () => {
     const calls: unknown[] = [];
@@ -95,6 +95,6 @@ describe("AskSet", () => {
       ["wj_ROOT-A1", expect.objectContaining({ kind: "approve", asRow: true })],
       ["wj_ROOT-A2", expect.objectContaining({ kind: "feedback", text: "for which product?" })],
     ]);
-    expect(screen.getByTestId("accept-all").textContent).toMatch(/Accept all 1$/);
+    expect(screen.getByTestId("accept-all").textContent).toMatch(/Yes to all 1: make them tasks$/);
   });
 });

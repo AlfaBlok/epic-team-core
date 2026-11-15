@@ -27,6 +27,11 @@ import { homeRepo, ownerName, socialProduct } from "../identity.js";
 export const DESK_INBOX_DIR = "desk/inbox";
 /** a note that hands an approved improvement request to the world that builds it (inbox/improvement.ts). */
 export const IMPROVEMENT_KIND = "improvement-request";
+/**
+ * the owner's product feedback, said on the social product's desk (the one desk he talks to) about this team's products,
+ * passed on by that desk as one note quoting him (scripts/desk_note.py send --kind product-feedback).
+ */
+export const FEEDBACK_KIND = "product-feedback";
 
 export interface DeskNote {
   /** Path inside the repo, e.g. desk/inbox/2026-11-07-the home world-hello.md */
@@ -47,6 +52,8 @@ export interface DeskNote {
   row?: string;
   campaign?: string;
   doneMeans?: string;
+  /** product feedback: where and when he said it. */
+  source?: string;
   body: string;
 }
 
@@ -88,6 +95,7 @@ export function parseNote(file: string, text: string): DeskNote | undefined {
     ...(f.row ? { row: f.row } : {}),
     ...(f.campaign ? { campaign: f.campaign } : {}),
     ...(f["done-means"] ? { doneMeans: f["done-means"] } : {}),
+    ...(f.source ? { source: f.source } : {}),
     body: m[2].trim(),
   };
 }
@@ -134,6 +142,11 @@ export function deskInboxSection(notes: DeskNote[], repo: string): string | unde
     ...(open.some((n) => n.kind === IMPROVEMENT_KIND && !n.inReplyTo)
       ? [
           `An **improvement request** note (\`kind: improvement-request\`) is work ${ownerName()} already approved on his card in the sending world (${socialProduct()} never codes, so it hands builds to this desk). Do not ask him again: make ONE ledger row for it in the spine that owns that product or site (its \`done-means\` is the row's done means, cite the note path and its \`ask\`), then answer with \`python3 <${homeRepo()} checkout>/scripts/desk_note.py reply <this checkout>/<note> --to <its reply-to checkout> --from <this world> --reply-to <this repo> --request taken --row <row code> --body \"<row code, spine link, when>\"\`. Only when it cannot be built (outside every remit here, or unsafe) answer \`--request declined\` with why. When the row later closes, \`desk_note.py done\` tells the sender what is live (listed under Improvement requests taken).`,
+        ]
+      : []),
+    ...(open.some((n) => n.kind === FEEDBACK_KIND && !n.inReplyTo)
+      ? [
+          `A **product feedback** note (\`kind: product-feedback\`) is ${ownerName()}'s own words about this team's products (the console, EpicTeam, the ${socialProduct()} screens), said on his ${socialProduct()} desk: he talks only to that desk now and it passes his feedback here. Place it as you place his own voice notes (L-37, his ask is ready): his words quoted on the open row it is about, or ONE new row in the spine that owns that product (cite the note path and its \`source\`); never ask him to repeat it here. Then answer so his ${socialProduct()} desk can tell him where it landed: \`python3 <${homeRepo()} checkout>/scripts/desk_note.py reply <this checkout>/<note> --to <its reply-to checkout> --from <this world> --reply-to <this repo> --row <row code> --body \"<row code, spine link, what happens next>\"\`.`,
         ]
       : []),
     "An answer to a note this world sent (it has `in-reply-to`) needs no answer back: act on it, then mark it answered (`desk_note.py close <note> --note \"<what you did>\"`).",

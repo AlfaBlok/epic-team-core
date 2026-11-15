@@ -172,7 +172,7 @@ describe("E948-S6 (4) asked, no row yet", () => {
 });
 
 describe("E948-S6 (1) the Team desk and a milestone chat add on Sam's words", () => {
-  const mount = (o: { said?: string; chatSaid?: boolean } = {}) => {
+  const mount = (o: { said?: string; chatSaid?: boolean; wake?: () => Promise<{ runId: string } | { error: string }> } = {}) => {
     let text = SPINE;
     const commits: { msg: string; body: string }[] = [];
     const wakes: string[] = [];
@@ -195,7 +195,8 @@ describe("E948-S6 (1) the Team desk and a milestone chat add on Sam's words", ()
       invalidate: () => undefined,
       deskAsk: async (chat) => (o.said?.includes(chat) ? { text: o.said, at: "2026-11-01T10:00:00Z" } : "chat is not in Sam's newest desk message"),
       chatSaid: async (header, chat) => header === "repo-desk:ms_1" && !!o.chatSaid && chat.length > 3,
-      wake: async (_m, instructions) => (wakes.push(instructions), { runId: "run_dm" }),
+      wake: async (_m, instructions) => (wakes.push(instructions), o.wake ? o.wake() : { runId: "run_dm" }),
+      wakeWaitMs: 50,
     });
     const add = async (body: unknown, headers: Record<string, string>) => (await api.request("/milestones/ms_1/tree/add", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) })).json();
     return { add, text: () => text, commits, wakes };
@@ -209,6 +210,18 @@ describe("E948-S6 (1) the Team desk and a milestone chat add on Sam's words", ()
     expect(t.text()).toContain(`E9-6 (row E909-S3) ready on Sam's ask (L-37, Team desk: "add snooze to the inbox please")`);
     expect(t.commits[0].body).toContain("ready on Sam's ask (L-37, Team desk)");
     expect(t.wakes[0]).toMatch(/Sam added E9-6 \(row E909-S3\) under docs\/spines\/epic.md from the console, ready on his ask \(L-37\)/);
+  });
+
+  it("a slow wake does not hold the Add: the answer comes once the spine is written, the wake goes on", async () => {
+    let finish: (v: { runId: string }) => void = () => undefined;
+    const t = mount({ said: "add snooze to the inbox please", wake: () => new Promise((r) => (finish = r)) });
+    const t0 = Date.now();
+    const r = await t.add({ kind: "done_means", title: "Snooze", chat: "add snooze to the inbox" }, DESK);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(r).toMatchObject({ id: "E9-6", rowId: "E909-S3", ready: true });
+    expect(r.wake).toBeUndefined();
+    expect(t.wakes).toHaveLength(1);
+    finish({ runId: "run_late" });
   });
 
   it("the desk: words not his, or 'just register it' in his message: a draft, no wake", async () => {

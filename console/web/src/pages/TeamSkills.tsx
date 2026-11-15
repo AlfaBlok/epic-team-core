@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Empty, ErrorBox, Field, Loading, PageHeader } from "@/components/common";
 import { ownerName, homeRepo } from "@/lib/identity";
+import { TEAM_SKILLS_PATH } from "@/lib/routePaths";
+export { TEAM_SKILLS_PATH };
 
 /**
  * the team skills library. One list (the code repo skills/team-skills.json) installed on every seat; each
@@ -19,7 +21,6 @@ import { ownerName, homeRepo } from "@/lib/identity";
  * shown read-only with its use-when line and who uses it; below it the world's own skills, which its owner adds the same way
  * (into the world's repo) and removes. Personas tick either kind in their editor.
  */
-export const TEAM_SKILLS_PATH = "team-skills";
 
 const short = (sha?: string) => (sha ? sha.slice(0, 7) : "");
 

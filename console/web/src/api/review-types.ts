@@ -204,7 +204,7 @@ export interface PostCardInfo {
 export const postCardId = (repo: string | undefined, postId: string) => `post~${repo ?? ""}~${postId}`;
 
 export interface ReviewVerdict {
-  kind: "card" | "closes-itself" | "needs-evidence" | "needs-rewriting" | "test";
+  kind: "card" | "closes-itself" | "needs-evidence" | "needs-rewriting" | "fails-qc" | "test";
   reason?: string;
   problems?: string[];
 }
@@ -226,12 +226,38 @@ export interface CardFace {
   delivered: { ok: boolean; text: string }[];
   evidence: { url: string; label: string };
   screenshot?: string;
+  /** E948-S62 the quality check: his words beside the result point by point; the live screens (…/screenshot?width=390). */
+  qc?: {
+    checkedAt: string;
+    pass: boolean;
+    words: { said: string; where?: string; status: "met" | "declared" | "missed" | "elsewhere"; how?: string }[];
+    visual: { pass: boolean; problems: string[]; summary?: string };
+    shots: { width: number; path: string }[];
+  };
   tree: TreeLine[];
   after?: string;
   next: ReviewSuggestion[];
   closesGoal: boolean;
   openInGoal: { ref: string; name?: string }[];
   from?: CardFrom;
+  /** where it came from (his words with their date and a link, or who raised it and why): right under the title (vn_e751eeeb). */
+  source?: string;
+  /** the one decision asked of the owner, with the team's recommendation: the card ends with it, above the buttons. */
+  decision?: string;
+  /** notes he left in the page's own feedback box (typed or by voice), newest last: he sees they landed. */
+  pageNotes?: CardPageNote[];
+  /** E948-S69 a decision card's own buttons, `<label>: <what happens next>` (the card's `options:`). */
+  options?: string[];
+}
+
+/** a note left inside a page's own feedback box: date (YYYY-MM-DD), time (HH:MM UTC) when kept, his words, the page. */
+export interface CardPageNote {
+  date: string;
+  time?: string;
+  words: string;
+  url?: string;
+  step?: string;
+  stuck?: boolean;
 }
 
 /** the card a closed press was on (Add a last thought, Add comment and Bring it back file to its row or ask). */

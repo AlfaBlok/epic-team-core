@@ -54,9 +54,15 @@ export function isHostToken(raw: string): boolean {
  */
 export function hasOwnerPower(i: Identity | undefined, mode: AuthMode | undefined): boolean {
   if (!i || !mode || mode === "off") return true;
-  if (i.kind === "session") return i.role === "owner";
+  if (i.kind === "session") return i.role === "owner" && !i.door;
   if (i.kind === "legacy") return !!i.host || mode !== "on";
   return false;
+}
+
+/** this request comes through the door (a login let into the home world on a customer site): a customer's view, never the platform's. */
+export function doorSession(): boolean {
+  const i = currentAuth()?.identity;
+  return i?.kind === "session" && !!i.door;
 }
 
 /** The platform owner for the current request: the home world's owner login or its console host (host owner token). */
@@ -64,5 +70,6 @@ export function platformOwner(): boolean {
   const a = currentAuth();
   if (!a) return true; // auth off: today's console, every caller is the platform
   const i = a.identity;
+  if (i.kind === "session" && i.door) return false; // the door is a customer's way in, never the platform's
   return "tenant" in i && i.tenant === DEFAULT_TENANT && hasOwnerPower(i, a.mode);
 }

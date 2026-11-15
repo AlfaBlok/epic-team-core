@@ -7,7 +7,19 @@ import { ownerName } from "../identity.js";
  * This finds what breaks that rule in a steps page (HTML) or an ask or card (text): a command block meant for the owner.
  * A block is allowed when it is for the agent (`data-for="agent"`), or when it names where it runs (`data-runs-on`) and
  * was tested in both shells (`data-tested-in="zsh and bash"`); in text, when the ask carries `runs on: …` and names zsh and bash.
+ *
+ * Named exceptions: a command the owner himself chose to run as one copied line, by name only. A block marked
+ * `data-owner-command="<name>"` (HTML) or a text with `owner-command: <name>` passes when the name is in OWNER_COMMANDS;
+ * an unknown name is reported, so the marker never loosens the rule for anything else.
  */
+
+/** The owner's own one-line commands that stay a copy box. Add one only on his recorded words (the repo's rule records them). */
+export const OWNER_COMMANDS: Record<string, string> = {
+  // the owner asked for strictly the command here, not text for an agent
+  "sync-browser-auth": "the Sync browser auth command (curl -sSL …/auth-sync/<token>.sh | sh) on the console's Browser auth page",
+  // the owner asked for one command that runs every open agent ticket on his own computer
+  "run-mac-list": "the ticket runner (curl -fsSL …/mac/go.sh | sh) on the list of tickets for his computer",
+};
 
 /** Command words that start a terminal line (after an optional prompt `$ ` / `% ` and `sudo`). */
 const SHELL = new Set(
@@ -60,9 +72,11 @@ export function commandLine(text: string, inline = false): string | undefined {
 
 const attr = (tag: string, name: string) => new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(tag)?.slice(2).find((x) => x !== undefined);
 
-/** Allowed: for the agent, or it says where it runs and was tested in zsh and bash. */
+/** Allowed: for the agent, one of the owner's named commands, or it says where it runs and was tested in zsh and bash. */
 function allowed(openTag: string): boolean {
   if ((attr(openTag, "data-for") ?? "").toLowerCase() === "agent") return true;
+  const named = attr(openTag, "data-owner-command");
+  if (named !== undefined && Object.hasOwn(OWNER_COMMANDS, named.trim())) return true;
   const where = attr(openTag, "data-runs-on");
   const tested = (attr(openTag, "data-tested-in") ?? "").toLowerCase();
   return !!where?.trim() && /\bzsh\b/.test(tested) && /\bbash\b/.test(tested);
@@ -83,6 +97,9 @@ export function copyPasteInHtml(html: string): CopyPasteBlock[] {
       return "";
     });
   };
+  for (const m of rest.matchAll(/<[a-z]+\b[^>]*\sdata-owner-command\s*=\s*["']([^"']*)["'][^>]*>/gi)) {
+    if (!Object.hasOwn(OWNER_COMMANDS, m[1].trim())) out.push({ kind: "exception", line: `unknown owner-command "${m[1]}" (named exceptions: ${Object.keys(OWNER_COMMANDS).join(", ")})` });
+  }
   scan(/(<pre\b[^>]*>)([\s\S]*?)<\/pre>/gi, "pre");
   scan(/(<textarea\b[^>]*>)([\s\S]*?)<\/textarea>/gi, "pre");
   scan(/(<(?:div|p|span)\b[^>]*\sclass\s*=\s*["'][^"']*\b(?:cmd|command|terminal|shell)\b[^"']*["'][^>]*>)([\s\S]*?)<\/(?:div|p|span)>/gi, "cmd");
@@ -95,6 +112,12 @@ export function copyPasteInText(text: string): CopyPasteBlock[] {
   const out: CopyPasteBlock[] = [];
   // an ask that says where its one command runs and that it was tested in both shells keeps it (L-54's last resort)
   if (/\bruns on\s*:/i.test(text) && /\bzsh\b/i.test(text) && /\bbash\b/i.test(text)) return out;
+  // one of the owner's named commands: `owner-command: <name>`; an unknown name is reported
+  const named = /\bowner-command\s*:\s*([a-z0-9-]+)/i.exec(text);
+  if (named) {
+    if (Object.hasOwn(OWNER_COMMANDS, named[1])) return out;
+    out.push({ kind: "exception", line: `unknown owner-command "${named[1]}" (named exceptions: ${Object.keys(OWNER_COMMANDS).join(", ")})` });
+  }
   let rest = text.replace(/```[^\n]*\n([\s\S]*?)```/g, (_a, body: string) => {
     const line = commandLine(body);
     if (line) out.push({ kind: "fence", line });

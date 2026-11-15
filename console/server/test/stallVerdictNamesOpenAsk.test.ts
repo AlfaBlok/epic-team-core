@@ -83,7 +83,7 @@ Waiting on: Sam (PLAN-29-A1)
 
 ## Waiting on
 
-- [ask PLAN-29-A1: do @Sam since 2026-10-27 row T29-S0] Create the four accounts — why Sam: his phone and email
+- [ask PLAN-29-A1: do @Sam since 2026-10-27 row T29-S0] Create the four accounts at https://signup.example — why Sam: his phone and email
 
 ## Issue Ledger
 

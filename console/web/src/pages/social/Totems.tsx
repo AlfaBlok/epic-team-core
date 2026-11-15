@@ -837,7 +837,7 @@ function ProposalRow({ o, m, file, onDone }: { o: TotemObservation; m: Milestone
           Add to the brief
         </Button>
         <Button size="sm" variant="outline" disabled={!!busy} pending={busy === "notnow"} pendingLabel="Saving…" onClick={() => act("notnow")} data-testid="proposal-notnow">
-          Not now
+          Leave it out of the brief
         </Button>
         {note && (
           <span role="status" className={cn("text-xs", note.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>

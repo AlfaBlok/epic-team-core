@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import type { IndexerConfig } from "./core.js";
+import { identity } from "../identity.js";
 
 /**
  * the console starts its indexer (main.ts) as its own systemd user unit, niced and CPU-capped,
@@ -22,6 +23,15 @@ export interface IndexerLimits {
 
 export const INDEXER_LIMITS: IndexerLimits = { nice: 15, cpuQuota: "60%", cpuWeight: 20, memoryMax: "1500M" };
 
+/**
+ * the limits from the env, so each copy sets its own cap: CONSOLE_INDEXER_CPU_QUOTA (e.g. "20%" for a staging copy that
+ * shares a CPU-capped host with production). Anything else: the defaults.
+ */
+export function indexerLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): IndexerLimits {
+  const q = env.CONSOLE_INDEXER_CPU_QUOTA?.trim();
+  return { ...INDEXER_LIMITS, ...(q && /^\d{1,3}%$/.test(q) ? { cpuQuota: q } : {}) };
+}
+
 /** The bundle next to the server bundle (dist/indexer.mjs), else (tsx) indexer-dev.mjs, which loads main.ts. */
 export function indexerFile(): string | undefined {
   const here = import.meta.url;
@@ -37,7 +47,8 @@ export function indexerEnv(c: IndexerConfig, parentPid: number, env: NodeJS.Proc
   const keep = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "XDG_RUNTIME_DIR", "NODE_ENV", "CONSOLE_RESCAN_GAP_MS", "CONSOLE_SPINES_CONCURRENCY", "CONSOLE_INDEX_REPOS", "TZ"];
   const out: Record<string, string> = {};
   for (const k of keep) if (env[k] !== undefined) out[k] = env[k]!;
-  out.CONSOLE_INDEXER_CONFIG = JSON.stringify(c);
+  // the console's identity travels in the config (E996-S29): main.ts sets it before the indexer's modules load.
+  out.CONSOLE_INDEXER_CONFIG = JSON.stringify({ ...c, identity: c.identity ?? identity() });
   out.CONSOLE_INDEXER_PARENT = String(parentPid);
   return out;
 }

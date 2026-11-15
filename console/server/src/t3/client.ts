@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { t3UrlResolver } from "./url.js";
+import { isCredentialRefusal, reportRefusal } from "./tokenWatch.js";
 import { repoAliases } from "../adapters/repoNames.js";
 import { seatDir, sites } from "../identity.js";
 
@@ -339,7 +340,11 @@ export class McpT3Client implements T3Client {
       signal: AbortSignal.timeout(120_000),
     });
     const text = await res.text();
-    if (!res.ok) throw new T3Error(`T3 MCP HTTP ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) {
+      const msg = `T3 MCP HTTP ${res.status}: ${text.slice(0, 300)}`;
+      if (res.status === 401 && isCredentialRefusal(msg)) reportRefusal(this.tokenFile, msg); // an alert, not a silent retry
+      throw new T3Error(msg);
+    }
     let payload = text;
     for (const line of text.split("\n")) if (line.startsWith("data:")) payload = line.slice(5).trim();
     return { sid: res.headers.get("mcp-session-id") ?? undefined, body: payload.trim() ? JSON.parse(payload) : undefined };

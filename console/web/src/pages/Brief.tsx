@@ -22,6 +22,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { Empty, ErrorBox, Loading, PageHeader } from "@/components/common";
+import { BRIEF_PATH } from "@/lib/routePaths";
+export { BRIEF_PATH };
 
 /**
  * the Campaign brief, the standing layer every team member reads on every wake. Each field
@@ -29,7 +31,6 @@ import { Empty, ErrorBox, Loading, PageHeader } from "@/components/common";
  * through the `brief` write action (one commit as the owner) and shows the pack's 422 issue lines inline. Below it, the
  * Assets library (data/assets.md with computed "used by") and an upload to data/assets/. Social skin only.
  */
-export const BRIEF_PATH = "brief";
 export const BRIEF_LABEL = "Campaign brief";
 
 const ASSET_KINDS = ["diagram", "screenshot", "clip", "video", "logo"] as const;

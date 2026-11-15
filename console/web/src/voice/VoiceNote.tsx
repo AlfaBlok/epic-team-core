@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Mic } from "lucide-react";
-import type { NoteClock, NoteMedia, NotesApi, NoteStore } from "./noteEngine";
+import { KEPT_FAILED_TEXT, type NoteClock, type NoteMedia, type NotesApi, type NoteStore } from "./noteEngine";
 import { clockOf } from "./NoteProvider";
 import { useNote, type NoteState } from "./useNote";
 import { SpeakRepliesSwitch } from "./ReplyVoice";
 import { speakRepliesOn, unlockReplyAudio } from "./speak";
 import { useDeskVoiceBase } from "./deskBase";
 import { memoryName } from "@/lib/identity";
+import type { NoteView } from "./noteEngine";
 
 /**
  * rework (the owner's review, 2026-11-02): voice notes in every chat (the Team desk, a milestone's or campaign's chat; one
@@ -29,6 +30,36 @@ export interface VoiceNoteDock {
   /** When the last note was sent (ms), while "Speak replies" waits for the desk's answer. */
   speakAfter?: number;
   spoken: () => void;
+  /** the note on its way, shown in the chat the moment he taps Send; its words fill in once written. */
+  posting?: PostingNote;
+  /** the chat shows the posted note (or he gave it up): its bubble goes. */
+  landed: () => void;
+}
+
+/**
+ * a voice note between Send and the chat showing it. Its audio is already safe on this phone (the outbox), so
+ * the chat shows it at once ("writing out your words…"), then his words when the console has written them, until the
+ * transcript holds the message (same note id). Kept: not confirmed yet, it goes by itself.
+ */
+export interface PostingNote {
+  /** when he tapped Send (ms). */
+  at: number;
+  seconds: number;
+  state: "writing" | "sent" | "kept" | "failed";
+  id?: string;
+  words?: string;
+}
+
+/** the bubble's state for the note's phase (undefined: no bubble). */
+export function postingFor(prev: PostingNote | undefined, v: Pick<NoteView, "phase" | "elapsedS" | "info" | "note">, now: number): PostingNote | undefined {
+  if (v.phase === "sending") return { ...(prev ?? { at: now }), seconds: v.elapsedS, state: "writing" };
+  if (v.phase === "sent") {
+    if (!v.note || v.note.state === "empty" || !v.note.transcript?.trim()) return undefined;
+    return { at: prev?.at ?? now, seconds: v.note.seconds, state: "sent", id: v.note.id, words: v.note.transcript.trim() };
+  }
+  if (v.phase === "failed") return prev && { ...prev, state: v.info === KEPT_FAILED_TEXT ? "kept" : "failed" };
+  // a new note, or one he closed or threw away: a sent note's bubble stays until the chat shows it.
+  return prev?.state === "sent" ? prev : undefined;
 }
 
 export function useVoiceNote(props: {
@@ -79,7 +110,20 @@ export function useVoiceNote(props: {
   useEffect(() => {
     if (note.view.phase === "sent") onSent.current?.();
   }, [note.view.phase]);
-  return { button: note.button, strip: note.strip, ...(speakAfter && speakRepliesOn() ? { speakAfter } : {}), spoken: () => setSpeakAfter(undefined) };
+  const [posting, setPosting] = useState<PostingNote | undefined>();
+  const v = note.view;
+  useEffect(() => {
+    setPosting((p) => postingFor(p, v, Date.now()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the phase (and a note's own answer) moves the bubble
+  }, [v.phase, v.note, v.info]);
+  return {
+    button: note.button,
+    strip: note.strip,
+    ...(speakAfter && speakRepliesOn() ? { speakAfter } : {}),
+    spoken: () => setSpeakAfter(undefined),
+    ...(posting ? { posting } : {}),
+    landed: () => setPosting(undefined),
+  };
 }
 
 

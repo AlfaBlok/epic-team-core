@@ -4,8 +4,9 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { DB } from "../db.js";
 import { sudoRead } from "../secretCache.js";
 import { AuthError, outsideRequest, SESSION_COOKIE, SESSION_DAYS, type Auth } from "./identity.js";
-import { customerHosts, platformBlocked, PLATFORM_PRIVATE, productOf, requestHost, type Product } from "./gate.js";
+import { customerHosts, platformBlocked, PLATFORM_PRIVATE, productOf, requestHost, type DoorKey, type Product } from "./gate.js";
 import { keyFile, sites } from "../identity.js";
+import { scopeName, validConnects, type ConnectSpec, type ConnectView } from "./connects.js";
 import { ENABLE_SCOPE, expectedChannels, projectNumberOf, resultPage, YOUTUBE_KEY_NAMES, YOUTUBE_SCOPES, youtubeGoogle, type StoreKey } from "./youtubeConnect.js";
 
 /**
@@ -91,6 +92,10 @@ export interface OAuthOptions {
   now?: () => number;
   /** store one key in the console's store (app agent-team-console); unset = the YouTube connect stores nothing. */
   storeKey?: StoreKey;
+  /** whether a key is in the console's store (names only; default: its file reads non-empty, cached a minute) */
+  hasKey?: (name: string) => Promise<boolean>;
+  /** the one-button connects (auth/connects.ts); default sites().connects */
+  connects?: ConnectSpec[];
 }
 
 /**
@@ -179,9 +184,9 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   `);
 
   /** Pending hops to a provider, by sha256(state); in memory (a restart in the 10 minutes means pressing the button again). */
-  const states = new Map<string, { provider: ProviderId; host: string; next: string; verifier: string; visitSource?: string; exp: number; purpose?: "youtube" | "youtube-enable"; pending?: string }>();
+  const states = new Map<string, { provider: ProviderId; host: string; next: string; verifier: string; visitSource?: string; exp: number; purpose?: "youtube" | "youtube-enable" | "connect"; pending?: string; connect?: string }>();
   /** a YouTube Allow held while its project's APIs are switched on, by a random id (10 minutes, in memory). */
-  const ytPending = new Map<string, { refresh: string; host: string; exp: number; enabled?: boolean }>();
+  const ytPending = new Map<string, { refresh: string; host: string; exp: number; enabled?: boolean; connect?: string }>();
   /** One-time world choices (a login in several worlds), by sha256(token). */
   const picks = new Map<string, { userIds: string[]; host: string; next: string; exp: number; via?: string }>();
   /** TEST provider: one-time codes from its page. */
@@ -233,28 +238,118 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   let ytStarts: number[] = [];
   const ytPage = (c: Context, o: Parameters<typeof resultPage>[0], status: 200 | 400 | 409 | 502 | 503 = 200) => c.html(resultPage(o), status);
   const ytAgain = { href: "/api/access/oauth/youtube/start", label: "Try again" };
-  const ytHop = async (c: Context, host: string, purpose: "youtube" | "youtube-enable", pending?: string) => {
+
+  // the one-button connects (auth/connects.ts): config entries, each a card with one button.
+  db.exec(`CREATE TABLE IF NOT EXISTS oauth_connects (id TEXT PRIMARY KEY, detail TEXT NOT NULL, at TEXT NOT NULL)`);
+  const connectList = () => validConnects(o.connects ?? sites().connects);
+  const connectById = (id?: string) => (id ? connectList().find((x) => x.id === id) : undefined);
+  const connectAgain = (spec: ConnectSpec) => ({ href: `/api/access/oauth/connect/${spec.id}/start`, label: "Try again" });
+  const inboxUrl = () => `${(env.CONSOLE_TEAM_URL || sites().teamUrl).replace(/\/$/, "")}/inbox`;
+  const markConnected = (id: string, detail: string) =>
+    db.prepare("INSERT INTO oauth_connects (id, detail, at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET detail = excluded.detail, at = excluded.at").run(id, detail, new Date(now()).toISOString());
+  const keySeen = new Map<string, { v: boolean; at: number }>();
+  const hasKey =
+    o.hasKey ??
+    (async (name: string) => {
+      const c = keySeen.get(name);
+      if (c && now() - c.at < 60_000) return c.v;
+      const v = !!(await sudoRead(keyFile(name)).catch(() => undefined))?.trim();
+      keySeen.set(name, { v, at: now() });
+      return v;
+    });
+  /** the customer site that carries a connect's callback: the first EpicTeam customer site (cloud.epicteam.app) */
+  const connectHost = () => env.CONSOLE_CONNECT_HOST?.trim() || [...customers].find(([, p]) => p === "team")?.[0] || [...customers.keys()][0];
+  const connectView = async (spec: ConnectSpec): Promise<ConnectView> => {
+    const row = db.prepare("SELECT detail, at FROM oauth_connects WHERE id = ?").get(spec.id) as { detail: string; at: string } | undefined;
+    const yt = spec.check === "youtube-channel" ? (db.prepare("SELECT channel, at FROM youtube_connect WHERE id = 1").get() as { channel: string; at: string } | undefined) : undefined;
+    const keys = (await Promise.all([spec.keys.clientId, spec.keys.clientSecret, spec.keys.refreshToken].map(hasKey))).every(Boolean);
+    const at = row?.at ?? yt?.at;
+    const host = connectHost();
+    return {
+      id: spec.id,
+      title: spec.title,
+      what: spec.what,
+      account: spec.account,
+      ...(spec.channel ? { channel: spec.channel } : {}),
+      gives: [...new Set(spec.scopes.map(scopeName))],
+      connected: keys && !!at,
+      ...(keys && at ? { at } : {}),
+      startUrl: host ? `https://${host}/api/access/oauth/connect/${spec.id}/start` : `/api/access/oauth/connect/${spec.id}/start`,
+      inbox: spec.inbox !== false,
+    };
+  };
+  api.get("/connects", async (c) => c.json({ connects: await Promise.all(connectList().map(connectView)) }));
+  api.get("/access/oauth/connect/:id/start", async (c) => {
+    sweep();
+    const spec = connectById(c.req.param("id"));
+    const host = hostOf(c);
+    if (!spec) return ytPage(c, { title: "No such connect", lines: ["Open the Connect button on the console's inbox again."], button: { href: inboxUrl(), label: "Open the inbox" } }, 400);
+    // the button lives on the console; the provider's web client lists only the customer site's callback: hop there first
+    if (!customers.has(host) || !(await enabled("google", host))) {
+      const to = connectHost();
+      if (to && to !== host && customers.has(to)) return c.redirect(`https://${to}/api/access/oauth/connect/${spec.id}/start`, 302);
+      return ytPage(c, { title: "Not on this address", lines: ["The team's Google app is not set up here. The team has been told."] }, 400);
+    }
+    ytStarts = ytStarts.filter((t) => t > now() - 3600_000);
+    if (ytStarts.length >= 30) return ytPage(c, { title: "Too many tries", lines: ["Wait an hour, then press the button again."] }, 409);
+    ytStarts.push(now());
+    return ytHop(c, host, spec.check === "youtube-channel" ? "youtube" : "connect", undefined, spec);
+  });
+  /** a plain connect's answer: every scope given, the named account, then its three keys into the store. */
+  const connectFinish = async (c: Context, host: string, spec: ConnectSpec | undefined, t: { access: string; refresh?: string; scopes: string[] }) => {
+    if (!spec) return ytPage(c, { title: "This page has expired", lines: ["Press the Connect button in the inbox again."], button: { href: inboxUrl(), label: "Open the inbox" } }, 400);
+    const again = connectAgain(spec);
+    const missing = spec.scopes.filter((x) => !t.scopes.includes(x));
+    if (missing.length || !t.refresh) {
+      await yt.revoke(t.refresh ?? t.access);
+      return ytPage(c, { title: "Tick every box", lines: ["Google's screen has a box for each thing the team needs. Press Try again, tick every box, then Allow."], button: again }, 400);
+    }
+    const u = await http("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${t.access}` } });
+    const email = u.ok ? String(((await u.json().catch(() => ({}))) as { email?: string }).email ?? "").toLowerCase() : "";
+    if (email !== spec.account.toLowerCase()) {
+      await yt.revoke(t.refresh);
+      return ytPage(c, { title: "That is not the right Google account", lines: [`You picked ${email || "another account"}. Nothing was stored and that permission was given back.`, `Press Try again and pick ${spec.account}.`], button: again }, 409);
+    }
+    if (!o.storeKey) return ytPage(c, { title: "Nothing stored", lines: ["This console has no key store. The team has been told."] }, 503);
+    const k = (await creds("google", productOf(host, env)))!;
+    for (const [name, value] of [[spec.keys.clientId, k.clientId], [spec.keys.clientSecret, k.clientSecret], [spec.keys.refreshToken, t.refresh]] as const) {
+      const r = await o.storeKey(name, value, `${spec.title}: Allow by ${spec.account} on ${host}`);
+      if (!r.ok) {
+        console.error(`connect ${spec.id}: ${name} not stored: ${r.message}`);
+        return ytPage(c, { title: "Allowed, but not stored", lines: ["Google said yes, but the team's key store refused. The team has been told; you do not need to do anything."] }, 502);
+      }
+    }
+    keySeen.clear();
+    markConnected(spec.id, spec.account);
+    console.log(`connect ${spec.id}: connected, three keys stored (names only)`);
+    return ytPage(c, { ok: true, title: `Done: ${spec.title.replace(/^Connect /, "")} is connected`, lines: [spec.what, "Take it back any time in your Google account, Security, Third-party access."], button: { href: inboxUrl(), label: "Back to the inbox" } });
+  };
+  const ytHop = async (c: Context, host: string, purpose: "youtube" | "youtube-enable" | "connect", pending?: string, spec?: ConnectSpec) => {
     const k = (await creds("google", productOf(host, env)))!;
     const state = random();
     const verifier = random(48);
-    states.set(sha256(state), { provider: "google", host, next: "/", verifier, exp: now() + STATE_MS, purpose, ...(pending ? { pending } : {}) });
+    states.set(sha256(state), { provider: "google", host, next: "/", verifier, exp: now() + STATE_MS, purpose, ...(pending ? { pending } : {}), ...(spec ? { connect: spec.id } : {}) });
+    // a connect names its account: Google opens on it (signed in) or asks for exactly it, no account picker to guess at
+    const scopes = purpose === "youtube" ? YOUTUBE_SCOPES : purpose === "connect" ? [...new Set(["openid", "email", ...(spec?.scopes ?? [])])] : [ENABLE_SCOPE];
     setCookie(c, STATE_COOKIE, state, { httpOnly: true, sameSite: "Lax", path: "/api/access/oauth", secure: secure(c, host), maxAge: STATE_MS / 1000 });
     const q = new URLSearchParams({
       client_id: k.clientId,
       redirect_uri: callbackUrl(c, host, "google", k.callbackHost),
       response_type: "code",
-      scope: purpose === "youtube" ? YOUTUBE_SCOPES.join(" ") : ENABLE_SCOPE,
+      scope: scopes.join(" "),
       state,
       code_challenge: crypto.createHash("sha256").update(verifier).digest("base64url"),
       code_challenge_method: "S256",
-      prompt: "consent select_account",
-      ...(purpose === "youtube" ? { access_type: "offline" } : {}),
+      prompt: spec ? "consent" : "consent select_account",
+      ...(spec ? { login_hint: spec.account } : {}),
+      ...(purpose !== "youtube-enable" ? { access_type: "offline" } : {}),
     });
     return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`, 302);
   };
   /** The held Allow's channel: stored when it is ours, refused (and taken back) when not, another switch-on when the APIs are off. */
-  const ytFinish = async (c: Context, host: string, refresh: string, w: { enabled?: boolean; access?: string } = {}) => {
+  const ytFinish = async (c: Context, host: string, refresh: string, w: { enabled?: boolean; access?: string; connect?: string } = {}) => {
     const k = (await creds("google", productOf(host, env)))!;
+    const spec = connectById(w.connect);
     let ch = await yt.channel(w.access ?? (await yt.refresh({ refresh, clientId: k.clientId, clientSecret: k.clientSecret })));
     // a switch-on takes a little while to spread: a few tries inside the request, then a Check again button
     for (let i = 0; w.enabled && ch.kind === "api_off" && i < 4; i++) {
@@ -263,7 +358,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     }
     if (ch.kind === "api_off") {
       const id = random(18);
-      ytPending.set(id, { refresh, host, exp: now() + STATE_MS, ...(w.enabled ? { enabled: true } : {}) });
+      ytPending.set(id, { refresh, host, exp: now() + STATE_MS, ...(w.enabled ? { enabled: true } : {}), ...(spec ? { connect: spec.id } : {}) });
       if (w.enabled)
         return ytPage(c, { title: "Almost there", lines: ["YouTube is switched on for the team's Google app, but Google takes a minute to spread it.", "Wait one minute, then press Check again."], button: { href: `/api/access/oauth/youtube/finish?p=${id}`, label: "Check again" } });
       if (!projectNumberOf(k.clientId)) return ytPage(c, { title: "YouTube is off in the team's Google app", lines: ["The team could not tell which Google project to switch it on in. Nothing was stored; the team has been told."] }, 503);
@@ -278,11 +373,13 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     if (ch.kind === "none" || !want.includes(ch.handle)) {
       await yt.revoke(refresh);
       const which = ch.kind === "none" ? "a Google login with no YouTube channel" : `the channel ${ch.title || ch.handle} (@${ch.handle})`;
-      return ytPage(c, { title: "That is not the team's channel", lines: [`You picked ${which}. Nothing was stored and that permission was given back.`, want.length ? `Press Try again and pick @${want[0]}.` : "This console names no YouTube channel yet: the team has been told."], button: ytAgain }, 409);
+      const pick = spec ? `Press Try again and pick the Google account ${spec.account}${spec.channel ? `, channel ${spec.channel.name} ${spec.channel.handle}` : ""}.` : want.length ? `Press Try again and pick @${want[0]}.` : "This console names no YouTube channel yet: the team has been told.";
+      return ytPage(c, { title: "That is not the team's channel", lines: [`You picked ${which}. Nothing was stored and that permission was given back.`, pick], button: spec ? connectAgain(spec) : ytAgain }, 409);
     }
     if (!o.storeKey) return ytPage(c, { title: "Nothing stored", lines: ["This console has no key store. The team has been told."] }, 503);
     const note = `YouTube Allow for @${ch.handle} on ${host}`;
-    for (const [name, value] of [[YOUTUBE_KEY_NAMES.clientId, k.clientId], [YOUTUBE_KEY_NAMES.clientSecret, k.clientSecret], [YOUTUBE_KEY_NAMES.refreshToken, refresh]] as const) {
+    const names = spec?.keys ?? YOUTUBE_KEY_NAMES;
+    for (const [name, value] of [[names.clientId, k.clientId], [names.clientSecret, k.clientSecret], [names.refreshToken, refresh]] as const) {
       const r = await o.storeKey(name, value, note);
       if (!r.ok) {
         console.error(`youtube connect: ${name} not stored: ${r.message}`);
@@ -290,8 +387,10 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
       }
     }
     db.prepare("INSERT INTO youtube_connect (id, channel, at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET channel = excluded.channel, at = excluded.at").run(ch.handle, new Date(now()).toISOString());
+    keySeen.clear();
+    if (spec) markConnected(spec.id, `@${ch.handle}`);
     console.log(`youtube connect: @${ch.handle} connected, three keys stored (names only)`);
-    return ytPage(c, { ok: true, title: "Done: YouTube is connected", lines: [`The team can now read @${ch.handle}'s numbers and post its approved Shorts.`, "You can close this page. Take it back any time in your Google account, Security, Third-party access."] });
+    return ytPage(c, { ok: true, title: "Done: YouTube is connected", lines: [`The team can now read @${ch.handle}'s numbers and post its approved Shorts.`, "Take it back any time in your Google account, Security, Third-party access."], button: { href: inboxUrl(), label: "Back to the inbox" } });
   };
   api.get("/access/oauth/youtube/status", async (c) => {
     const host = hostOf(c);
@@ -322,14 +421,14 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     if (!p || p.host !== host) return ytPage(c, { title: "This page has expired", lines: ["Open the link again and tap Allow."], button: ytAgain }, 400);
     ytPending.delete(id);
     try {
-      return await ytFinish(c, host, p.refresh, { enabled: true });
+      return await ytFinish(c, host, p.refresh, { enabled: true, connect: p.connect });
     } catch (e) {
       console.error(`youtube connect finish: ${(e as Error).message}`);
       return ytPage(c, { title: "Google did not answer", lines: ["Nothing was stored. Open the link again in a few minutes."], button: ytAgain }, 502);
     }
   });
   /** Google's answer for a YouTube hop (from the shared callback). */
-  const ytCallback = async (c: Context, host: string, st: { purpose?: "youtube" | "youtube-enable"; pending?: string; verifier: string }, code: string) => {
+  const ytCallback = async (c: Context, host: string, st: { purpose?: "youtube" | "youtube-enable" | "connect"; pending?: string; verifier: string; connect?: string }, code: string) => {
     const k = await creds("google", productOf(host, env));
     if (!k) return ytPage(c, { title: "Not on this address", lines: ["Open the link the team sent you."] }, 400);
     const redirect = callbackUrl(c, host, "google", k.callbackHost);
@@ -346,14 +445,15 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
           console.error(`youtube connect: switch-on refused (${done.status})`);
           return ytPage(c, { title: "Google refused to switch YouTube on", lines: ["That Google login cannot change the team's Google app. Press Try again and pick the Google login that owns the app."], button: ytAgain }, 409);
         }
-        return await ytFinish(c, host, p.refresh, { enabled: true });
+        return await ytFinish(c, host, p.refresh, { enabled: true, connect: p.connect });
       }
+      if (st.purpose === "connect") return await connectFinish(c, host, connectById(st.connect), t);
       const missing = YOUTUBE_SCOPES.filter((s) => !t.scopes.includes(s));
       if (missing.length || !t.refresh) {
         await yt.revoke(t.refresh ?? t.access);
         return ytPage(c, { title: "Tick every box", lines: ["Google's screen has a box for each thing the team needs. Press Try again, tick every box, then Allow."], button: ytAgain }, 400);
       }
-      return await ytFinish(c, host, t.refresh, { access: t.access });
+      return await ytFinish(c, host, t.refresh, { access: t.access, connect: st.connect });
     } catch (e) {
       console.error(`youtube connect: ${(e as Error).message}`);
       return ytPage(c, { title: "Google did not answer", lines: ["Nothing was stored. Open the link again in a few minutes."], button: ytAgain }, 502);
@@ -475,8 +575,11 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   };
   const skinOf = (tenant: string) => (db.prepare("SELECT skin FROM tenants WHERE id = ?").get(tenant) as Row | undefined)?.skin as string | undefined;
   const fits = (tenant: string, product: Product) => (skinOf(tenant) === "social") === (product === "social");
+  const loginEmail = (userId: string) => (db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as Row | undefined)?.email as string | undefined;
+  /** the door is passed by a Google or GitHub sign-in of a login it names (gate.ts throughDoor). */
+  const doorKey = (userId: string, via: string): DoorKey => ({ email: loginEmail(userId), via });
   const startSession = (c: Context, host: string, userId: string, tenant: string, via?: string) => {
-    if (platformBlocked(host, tenant, env)) throw new AuthError(403, PLATFORM_PRIVATE.code, PLATFORM_PRIVATE.message);
+    if (platformBlocked(host, tenant, env, { email: loginEmail(userId), via: via ?? "" })) throw new AuthError(403, PLATFORM_PRIVATE.code, PLATFORM_PRIVATE.message);
     const s = auth.createSession(userId, tenant, { via, host }); // the scorecard's proof of a provider sign-in
     setCookie(c, SESSION_COOKIE, s.id, { httpOnly: true, sameSite: "Lax", path: "/", secure: secure(c, host), maxAge: SESSION_DAYS * 86400 });
   };
@@ -519,7 +622,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
         const all = logins.flatMap((u) => auth.memberships(u).map((m) => ({ ...m, userId: u })));
         // the platform world is never signed into on a customer site (the owner's Google maps to his the home world login):
         // a person whose only world it is is refused there, never linked and never signed up as someone new.
-        const worlds = all.filter((w) => !platformBlocked(host, w.tenantId, env));
+        const worlds = all.filter((w) => !platformBlocked(host, w.tenantId, env, doorKey(w.userId, p)));
         if (all.length && !worlds.length) return back(c, PLATFORM_PRIVATE.code);
         if (worlds.length) {
           const fitting = worlds.filter((w) => fits(w.tenantId, product));
@@ -568,12 +671,12 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     if (!v || v.exp < now() || v.host !== host) throw new AuthError(400, "invalid_pick", "this sign-in has expired: sign in again");
     return { k, v };
   };
-  const worldsOf = (userIds: string[], host: string) =>
-    userIds.flatMap((u) => auth.memberships(u).map((m) => ({ ...m, userId: u }))).filter((w) => !platformBlocked(host, w.tenantId, env));
+  const worldsOf = (userIds: string[], host: string, via: string) =>
+    userIds.flatMap((u) => auth.memberships(u).map((m) => ({ ...m, userId: u }))).filter((w) => !platformBlocked(host, w.tenantId, env, doorKey(w.userId, via)));
   api.post("/access/oauth/pick/peek", async (c) => {
     try {
       const { v } = pickOf((await body(c)).token, hostOf(c));
-      return c.json({ choose: worldsOf(v.userIds, v.host).map(({ tenantId, tenantName }) => ({ tenantId, tenantName })) });
+      return c.json({ choose: worldsOf(v.userIds, v.host, String(v.via ?? "")).map(({ tenantId, tenantName }) => ({ tenantId, tenantName })) });
     } catch (e) {
       if (e instanceof AuthError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
       throw e;
@@ -584,7 +687,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     try {
       const b = await body(c);
       const { k, v } = pickOf(b.token, host);
-      const w = worldsOf(v.userIds, host).find((x) => x.tenantId === b.tenant);
+      const w = worldsOf(v.userIds, host, String(v.via ?? "")).find((x) => x.tenantId === b.tenant);
       if (!w) throw new AuthError(403, "not_member", "pick one of your worlds");
       picks.delete(k);
       startSession(c, host, w.userId, w.tenantId, v.via);

@@ -42,7 +42,7 @@ describe("Chat in another world", () => {
         </Routes>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(world).toHaveBeenCalledWith("social", { limit: 30 }));
+    await waitFor(() => expect(world).toHaveBeenCalledWith("social", { limit: 20 }));
     expect(screen.queryByTestId("desk-campaign")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Campaign" })).toBeNull();
     expect(campaign).not.toHaveBeenCalled();

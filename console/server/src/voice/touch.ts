@@ -29,6 +29,14 @@ export const TOUCH_MODEL = process.env.CONSOLE_NOTE_TOUCH_MODEL || SPILL_MODEL;
 export const TOUCH_HEAD = "🗂 Your note touched";
 /** About two minutes of speech: shorter notes are answers or single asks, placed by the desk as before. */
 export const TOUCH_MIN_WORDS = 250;
+/**
+ * A typed Team desk message is read at this length: the owner types what he means, so a typed line about a card makes
+ * it stale as surely as a long voice note. Shorter is an answer ("yes go ahead").
+ * CONSOLE_NOTE_TOUCH_TYPED_MIN overrides.
+ */
+export const TOUCH_MIN_TYPED_WORDS = Number(process.env.CONSOLE_NOTE_TOUCH_TYPED_MIN) || 15;
+/** A desk message he typed (not a voice note, not a console or persona line). */
+export const isTyped = (text: string) => !/^\s*🎙/u.test(text);
 /** The characters the model reads (a 40-minute note is about 50,000). */
 const CHARS_MAX = 90_000;
 /** Cards the model is shown at most (newest first is the caller's order). */
@@ -66,6 +74,8 @@ export interface TouchNote {
   at?: string;
   /** Where the note lives (the memory service ref, `vn_…`). */
   ref?: string;
+  /** He typed it in the Team desk Chat: read from TOUCH_MIN_TYPED_WORDS words, not only long voice notes. */
+  typed?: boolean;
 }
 
 export interface Touched {
@@ -167,9 +177,9 @@ export function citesOf(key: string, ref?: string): string[] {
 }
 
 /** What the Delivery manager is told for its cards. */
-export function wakeText(n: { at: string; where: string; ref: string }, list: { card: TouchCard; t: Touched }[]): string {
+export function wakeText(n: { at: string; where: string; ref: string; typed?: boolean }, list: { card: TouchCard; t: Touched }[]): string {
   return [
-    `${ownerName()}'s voice note of ${n.at} (${n.where}${n.ref ? `, ${n.ref}` : ""}) touches ${list.length} card(s) of yours in his inbox. Each card now shows the mark below until you act on it:`,
+    `${ownerName()}'s ${n.typed ? "typed message" : "voice note"} of ${n.at} (${n.where}${n.ref ? `, ${n.ref}` : ""}) touches ${list.length} card(s) of yours in his inbox. Each card now shows the mark below until you act on it:`,
     ...list.map(
       ({ card, t }) =>
         `- ${card.ref} (${card.repo} ${card.path}), ${t.how === "stale" ? "STALE: his note changed what it is about" : "UPDATED: his note adds to it"}. He said: "${oneLine(t.quote).slice(0, 600)}"${t.why ? ` (${oneLine(t.why).slice(0, 200)})` : ""}`,
@@ -206,7 +216,7 @@ export function createNoteTouch(d: TouchDeps) {
       const words = n.words.trim();
       if (!words || SKIP_HEADS.some((h) => words.startsWith(h))) return undefined;
       const count = wordCount(words);
-      if (count < TOUCH_MIN_WORDS) return undefined;
+      if (count < (n.typed ? TOUCH_MIN_TYPED_WORDS : TOUCH_MIN_WORDS)) return undefined;
       const key = noteKey(n);
       const at = spokenAt(n, now());
       // claim the note first: a second arrival (chat note + its filing, a retry) never judges twice
@@ -264,7 +274,7 @@ export function createNoteTouch(d: TouchDeps) {
       const woken: string[] = [];
       if (d.wake)
         for (const [mid, group] of byMs) {
-          const r = await d.wake(mid, wakeText({ at, where: n.where, ref }, group), `note-touch:${key}:${mid}`).catch((e: Error) => e.message);
+          const r = await d.wake(mid, wakeText({ at, where: n.where, ref, typed: n.typed }, group), `note-touch:${key}:${mid}`).catch((e: Error) => e.message);
           if (r === true) woken.push(mid);
           else errors.push(`wake ${mid}: ${String(r).slice(0, 160)}`);
         }

@@ -32,7 +32,7 @@ export function worldParity(world: string, checkout: string): WorldParity {
   const byKind: Record<string, number> = {};
   for (const r of rows) byKind[r.verdict.kind] = (byKind[r.verdict.kind] ?? 0) + 1;
   const stopped = rows
-    .filter((r) => r.verdict.kind === "needs-rewriting" || r.verdict.kind === "needs-evidence")
+    .filter((r) => r.verdict.kind === "needs-rewriting" || r.verdict.kind === "needs-evidence" || r.verdict.kind === "fails-qc")
     .map((r) => ({ ref: r.ref, kind: r.verdict.kind, ...(r.verdict.reason ? { reason: r.verdict.reason } : {}), ...(r.verdict.problems?.length ? { problems: r.verdict.problems } : {}) }));
   const file = path.join(checkout, PRIORITIES_FILE);
   const has = existsSync(file);

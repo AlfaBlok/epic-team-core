@@ -11,7 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { DeckAboutBlock } from "@/components/pageAbout";
 import { MadeList } from "@/components/bookMade";
+import { PursuitBackBar } from "@/components/pursuitsMap";
+import { epicPagesLink, usePages } from "@/components/pagesIndex";
 import { ownerName, homeRepo } from "@/lib/identity";
+import { EPIC_DECK_PATH, DECK_INDEX_PATH } from "@/lib/routePaths";
+export { EPIC_DECK_PATH, DECK_INDEX_PATH };
 
 /**
  * the epic deck, one numbered slide deck per high-level epic (L-19), in the house paper style
@@ -22,8 +26,6 @@ import { ownerName, homeRepo } from "@/lib/identity";
  * /book link leads here (pages/BookRedirect.tsx) and the book's index lives on as "Every epic" (/deck/all).
  * `/deck/<repo>/<code>` (stable: the spine's code), `?slide=<n>` or `?slide=<key>` (`where`, `made`…); `/deck` lists the decks.
  */
-export const EPIC_DECK_PATH = `${DECK_PATH}/:repo/:code`;
-export const DECK_INDEX_PATH = DECK_PATH;
 
 /** One height for every slide, so Previous and Next never move (as the campaign Brief deck). */
 const SLIDE_HEIGHT = "h-[34rem] sm:h-[32rem]";
@@ -465,6 +467,8 @@ export function EpicDeckPage() {
 export function EpicDeckView({ repo, code, embedded }: { repo: string; code: string; embedded?: { links?: ReactNode } }) {
   const { data, error, loading } = useLiveBook(() => api.getEpicDeck(repo, code).then((v) => ({ book: v.deck, building: v.building, about: v.about, live: v.live })), [repo, code], `epic-deck:${repo}/${code}`);
   const [params, setParams] = useSearchParams();
+  const pages = usePages();
+  const pagesLink = epicPagesLink(pages.data, repo, code);
   const d = data?.book ?? null;
   const slides = d ? deckSlides(d) : [];
   const asked = params.get("slide");
@@ -506,6 +510,7 @@ export function EpicDeckView({ repo, code, embedded }: { repo: string; code: str
   return (
     <div className="mx-auto min-w-0 max-w-5xl" data-testid="epic-deck" data-embedded={embedded ? "true" : undefined}>
       {!embedded && params.get("from") === "home" && <BackToHome draft={/^(draft|proposed)\b/i.test(d.status)} />}
+      {!embedded && <PursuitBackBar repo={d.ref.repo} code={d.ref.code} />}
       {(() => {
         const meta = (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -514,6 +519,12 @@ export function EpicDeckView({ repo, code, embedded }: { repo: string; code: str
               {data?.building && " (refreshing)"}.
             </span>
             {embedded?.links}
+            {/* down to this epic's one-off pages on the Pages list; each page links back up here. */}
+            {pagesLink && (
+              <Link to={pagesLink.href} className="underline" data-testid="deck-pages-link">
+                {pagesLink.count === 1 ? "1 page" : `${pagesLink.count} pages`}
+              </Link>
+            )}
             {embedded && (
               <Link to={deckHref(d.ref.repo, d.ref.code)} className="underline" data-testid="deck-open-page">
                 Open as a page

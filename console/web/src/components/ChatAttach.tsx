@@ -43,6 +43,8 @@ export interface PendingFile {
   state: "uploading" | "ready" | "failed";
   attachment?: ChatAttachment;
   error?: string;
+  /** how much of it has left the phone, 0 to 1, while uploading. */
+  sent?: number;
 }
 
 const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -51,18 +53,40 @@ const dropUrl = (u?: string) => {
   if (u && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(u);
 };
 
-/** A phone photo over the limit: drawn again at most 2560 px wide as JPEG, so it still fits. Anything else stays as it is. */
-export async function fitImage(f: File): Promise<File> {
-  if (f.size <= ATTACH_MAX_BYTES || !/^image\/(png|jpe?g|webp)$/i.test(f.type) || typeof createImageBitmap !== "function") return f;
+/** a photo leaving a phone is drawn again at most this many px on its long side, as JPEG of this quality. */
+export const PHONE_PHOTO_PX = 1600;
+export const PHONE_PHOTO_QUALITY = 0.8;
+/** a phone photo already this small and within PHONE_PHOTO_PX goes as it is (redrawing it would only lose detail). */
+export const PHONE_PHOTO_KEEP_BYTES = 300 * 1024;
+/** a finger is the pointer: a phone or a tablet, where the upload rides a mobile link. */
+export const onPhone = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+
+/**
+ * the picture as it leaves. on his phone a 402 KB screenshot took 54 s to upload while the console
+ * wrote it in milliseconds (the link, not the server), so on a phone every PNG, JPEG or WebP over 1600 px or 300 KB is drawn
+ * again at most 1600 px as JPEG 0.8 (a 1080x2400 screenshot: about 520 KB down to about 100 KB), kept only when smaller.
+ * On a computer only a file over the 10 MB limit is redrawn (2560 px, JPEG 0.85). GIF, HEIC and other files stay as they are.
+ */
+export async function fitImage(f: File, phone = onPhone()): Promise<File> {
+  const over = f.size > ATTACH_MAX_BYTES;
+  if ((!over && !phone) || !/^image\/(png|jpe?g|webp)$/i.test(f.type) || typeof createImageBitmap !== "function") return f;
   try {
     const bmp = await createImageBitmap(f);
-    const scale = Math.min(1, 2560 / Math.max(bmp.width, bmp.height));
+    const scale = Math.min(1, (phone ? PHONE_PHOTO_PX : 2560) / Math.max(bmp.width, bmp.height));
+    if (!over && scale === 1 && f.size <= PHONE_PHOTO_KEEP_BYTES) return f;
     const c = document.createElement("canvas");
     c.width = Math.round(bmp.width * scale);
     c.height = Math.round(bmp.height * scale);
-    c.getContext("2d")?.drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.85));
-    return blob ? new File([blob], f.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : f;
+    const g = c.getContext("2d");
+    if (!g) return f;
+    // a PNG's clear parts turn black in a JPEG: paint them white first
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close?.();
+    const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", phone ? PHONE_PHOTO_QUALITY : 0.85));
+    if (!blob || (!over && blob.size >= f.size)) return f;
+    return new File([blob], f.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
   } catch {
     return f;
   }
@@ -121,8 +145,9 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
         const f = await fitImage(raw);
         if (f.size > ATTACH_MAX_BYTES) return patch(key, { state: "failed", error: `Too big: ${kb(f.size)} (10 MB at most).` });
         try {
-          const r = await api.uploadChatAttachment(f, f.name || base.name);
-          patch(key, { state: "ready", attachment: r.attachment, size: f.size });
+          patch(key, { size: f.size, sent: 0 });
+          const r = await api.uploadChatAttachment(f, f.name || base.name, (sent, total) => patch(key, { sent: total ? Math.min(1, sent / total) : 0 }));
+          patch(key, { state: "ready", attachment: r.attachment, size: f.size, sent: 1 });
         } catch (e) {
           patch(key, { state: "failed", error: (e as Error).message });
         }
@@ -187,8 +212,13 @@ export function useChatAttach({ enabled, disabled }: { enabled: boolean; disable
           >
             {f.preview ? <img src={f.preview} alt={f.name} className="h-full w-full object-cover" /> : <FileText className="h-6 w-6" aria-hidden />}
             {f.state === "uploading" && (
-              <span className="absolute inset-0 flex items-center justify-center rounded-md bg-background/60" aria-label="Uploading">
+              <span
+                className="absolute inset-0 flex flex-col items-center justify-center rounded-md bg-background/60"
+                aria-label={f.sent !== undefined ? `Uploading, ${Math.round(f.sent * 100)}% sent` : "Uploading"}
+                data-testid="chat-attach-progress"
+              >
                 <Loader2 className="h-5 w-5 animate-spin" />
+                {f.sent !== undefined && <span className="mt-0.5 text-[10px] font-medium tabular-nums text-foreground">{Math.round(f.sent * 100)}%</span>}
               </span>
             )}
           </div>

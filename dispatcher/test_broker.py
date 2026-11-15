@@ -50,6 +50,7 @@ def run(fixture, *args, prog=BROKER, home=None, mem_mb=12000, extra_env=None, lo
         if k not in (extra_env or {}):
             env.pop(k, None)
     env["BROKER_REFRESH_CMD"] = (extra_env or {}).get("BROKER_REFRESH_CMD", "true")  # never a real claude turn
+    env["BROKER_AUTH_CMD"] = (extra_env or {}).get("BROKER_AUTH_CMD", "echo {}")  # never a real claude auth status
     if fixture is not None:
         fx = os.path.join(home, "fixture.json")
         json.dump(fixture, open(fx, "w"))
@@ -76,6 +77,10 @@ def seed(busy):
              for n, k in busy.items()}
     json.dump({"beat": 0, "seats": seats}, open(os.path.join(home, ".epic-team", "broker", "seats.json"), "w"))
     return home
+
+
+def parse_ts(t):
+    return datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def check(name, cond, got):
@@ -131,6 +136,47 @@ h = seed({"seat1": 0, "seat2": 0})  # fresh home: no cached usage
 run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude Code did not answer the MCP server registration.", home=h)
 g, _ = run({"seat1": usage(27, None), "seat2": usage(95, None)}, "pick", home=h)
 check("E39-f the cooldown is soft: seat2 ineligible -> seat1 still picked", g["seat"] == "seat1", g)
+# a seat that cannot sign in is set aside 30 min (not eligible), the next best seat is picked, pick names it
+NOLOGIN = "seat1: ~/.claude_seat1 has no .credentials.json, new threads say Not logged in"
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", NOLOGIN, home=h)
+st = json.load(open(os.path.join(h, ".epic-team", "broker", "seats.json")))["seats"]
+left = (parse_ts(st["seat1"]["auth_failed_until"]) - datetime.now(timezone.utc)).total_seconds() if st["seat1"]["auth_failed_until"] else 0
+g, _ = run(TONIGHT, "pick", "--from", "other-host", home=h)
+check("S101a done --fail 'Not logged in' -> seat1 set aside ~30 min, pick takes seat2 and names seat1 in set_aside",
+      g["seat"] == "seat2" and 1700 < left <= 1800 and list(g.get("set_aside", {})) == ["seat1"] and not st["seat1"]["maxed_until"], [g, left])
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "T3 turn failed: Claude could not authenticate. Run /login", home=h)
+g, _ = run({"seat1": usage(5, 10), "seat2": usage(95, None)}, "pick", home=h)
+check("S101b the set-aside is hard: seat2 ineligible -> no seat (retryable), reason names the set-aside",
+      g["id"] is None and g["retryable"] and "seat1 set aside until" in g["reason"] and "sign-in failed" in g["reason"], g)
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude could not authenticate", home=h)
+d = json.load(open(os.path.join(h, ".epic-team", "broker", "seats.json")))
+d["seats"]["seat1"]["auth_failed_until"] = "2000-01-01T00:00:00Z"
+json.dump(d, open(os.path.join(h, ".epic-team", "broker", "seats.json"), "w"))
+g, _ = run({"seat1": usage(5, 10), "seat2": usage(60, None)}, "pick", home=h)
+check("S101c after 30 min the seat is pickable again (most headroom wins)", g["seat"] == "seat1" and "set_aside" not in g, g)
+h = seed({"seat1": 1, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude could not authenticate", home=h)
+run(TONIGHT, "done", "seat1", home=h)
+st = json.load(open(os.path.join(h, ".epic-team", "broker", "seats.json")))["seats"]
+check("S101d a later ok done clears the set-aside", st["seat1"]["auth_failed_until"] is None, st["seat1"]["auth_failed_until"])
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude could not authenticate", home=h)
+g, _ = run(TONIGHT, "status", home=h)
+check("S101e status names the set-aside and counts seat1 unavailable",
+      list(g.get("set_aside", {})) == ["seat1"] and "seat1" not in g["free"] and g["seats"]["seat1"]["auth_failed_until"], g)
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude API rate limit reached. Try again later.", home=h)
+st = json.load(open(os.path.join(h, ".epic-team", "broker", "seats.json")))["seats"]
+check("S101f a usage-limit signal is not a sign-in failure", not st["seat1"]["auth_failed_until"] and st["seat1"]["maxed_until"], st["seat1"])
+h = seed({"seat1": 0, "seat2": 0})
+run(TONIGHT, "done", "seat1", "--fail", "--signal", "Claude could not authenticate", home=h)
+g, _ = run(TONIGHT, "pick", "--from", "other-host", prog=ADAPTER, home=h)
+gs, _ = run(TONIGHT, "status", prog=ADAPTER, home=h)
+check("S101g the adapter passes set_aside on pick and status", g["id"] == "seat2" and list(g.get("set_aside", {})) == ["seat1"]
+      and list(gs.get("set_aside", {})) == ["seat1"], [g, gs])
 # the console's usage-limit signal (T3's error + its reset) sets maxed_until to that reset; "hit your 5-hour limit" too
 h = seed({"seat1": 0, "seat2": 0})
 run(TONIGHT, "done", "seat1", "--fail", "--signal",
@@ -434,7 +480,7 @@ T3ENV = {"T3_MCP_URL": "http://127.0.0.1:%d/mcp" % t3srv.server_address[1]}
 g, _ = run(fx, "sessions", home=t3home, extra_env=T3ENV)
 lists = [c for c in FakeT3.calls if c[2] == "t3_thread_list"]
 check("S48-i real T3 read: 3 active threads over 2 projects (deleted skipped), bearer token, subagents included",
-      g["live"] == 3 and g["turns"] == 3 and [c[3]["projectId"] for c in lists] == ["p1", "p2"]
+      g["live"] == 3 and g["turns"] == 3 and sorted(c[3]["projectId"] for c in lists) == ["p1", "p2"]  # read in parallel: any order
       and all(c[0] == "Bearer tok-x" for c in FakeT3.calls), [g, FakeT3.calls])
 n = len(FakeT3.calls)
 g, _ = run(fx, "pick", home=t3home, extra_env=dict(T3ENV, BROKER_MAX_SESSIONS="3"))
@@ -517,6 +563,19 @@ check("S60m no expired seat: no refresh session", "token_refresh_started" not in
 g, h = run(None, "refresh-token", "seat3", extra_env=RX)
 check("S60n refresh-token runs the command and logs it", g == {"seat": "seat3", "result": "rc=0"}
       and "token refresh session for seat3: rc=0" in open(os.path.join(h, ".epic-team", "broker", "heartbeat.log")).read(), g)
+
+# a seat whose usage cannot be read gets its sign-in rechecked on pick; signed out -> "logged out"
+home = tempfile.mkdtemp(prefix="broker-test-")
+authsh = os.path.join(home, "auth.sh")
+open(authsh, "w").write("#!/bin/sh\ncase \"$CLAUDE_CONFIG_DIR\" in *seat1) echo '{\"loggedIn\": false}';; *) echo '{\"loggedIn\": true}';; esac\n")
+os.chmod(authsh, 0o755)
+AX = {"BROKER_AUTH_CMD": authsh}
+g, home = run({"seat1": {"error": "usage endpoint HTTP 429", "http": 429}, "seat2": usage(10, 0)}, "pick", home=home, extra_env=AX)
+d = json.load(open(os.path.join(home, ".epic-team", "broker", "seats.json")))
+check("S111a unknown-usage seat rechecked: signed out shows logged out", d["seats"]["seat1"]["logged_in"] is False
+      and d["seats"]["seat2"].get("auth_checked") is None and g["seat"] == "seat2", g)
+g, _ = run({"seat1": {"error": "usage endpoint HTTP 429", "http": 429}, "seat2": usage(10, 0)}, "status", home=home, extra_env=AX)
+check("S111b status shows seat1 signed out and not free", g["seats"]["seat1"]["logged_in"] is False and g["free"] == ["seat2"], g)
 
 print("\n%d failed" % len(FAIL) if FAIL else "\nall passed")
 sys.exit(1 if FAIL else 0)

@@ -49,11 +49,12 @@ describe("WaitingCard", () => {
     // The row title is not repeated; no code without a code.
     expect(screen.queryByText("T4 Pick the logger layout")).toBeNull();
     expect(screen.queryByTestId("ask-code")).toBeNull();
-    // a question has its options and Send my pick / Not now, never Approve, No or Changes wanted beside them.
-    expect(screen.getAllByTestId("ask-option").map((o) => o.closest("label")!.textContent)).toEqual(["one · recommended", "two"]);
-    expect((screen.getAllByTestId("ask-option")[0] as HTMLInputElement).checked).toBe(true); // the recommended one is pre-picked
+    // E948-S69: a question's options are its buttons, the recommended one first and filled, never Send my pick, Approve, No or Changes wanted.
     const buttons = [...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent);
-    expect(buttons).toEqual(["Send my pick", "Not now"]);
+    expect(buttons).toEqual(["one", "two", "Park"]); // E948-S83 iteration 2: Park beside the options
+    expect(screen.getAllByTestId("ask-option")[0].className).not.toMatch(/border-input/);
+    expect(screen.getAllByTestId("ask-option")[1].className).toMatch(/border-input/);
+    expect(screen.queryByTestId("send-pick")).toBeNull();
     expect(screen.queryByTestId("decline")).toBeNull();
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
     expect(screen.queryByTestId("hint-answer")).toBeNull(); // no hint lines under the buttons
@@ -66,14 +67,27 @@ describe("WaitingCard", () => {
     expect(details.textContent).toMatch(/Owner: Delivery Manager/);
     expect(details.textContent).not.toMatch(/waiting/); // the age is in the meta line
     expect((screen.getByText("why").closest("a") as HTMLAnchorElement).href).toMatch(/notes\.md#loggers$/);
-    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Yes: go ahead/ })).toBeNull();
   });
 
-  it("Send my pick answers with the picked option and the note; free text stays available (Not now sends the note)", async () => {
+  it("E948-S70: a three-option decide answers with the one option pressed, never the whole options line", async () => {
+    const opts = ["500 Stars a month", "250 Stars a month", "keep it closed for now"];
+    const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_3", itemId: "wj_1", kind: "answer", text: opts[1]!, delivery: "sent", createdAt: new Date().toISOString() });
+    wrap(<WaitingCard item={item({ question: "What does the weekly digest cost?", options: opts, recommendation: opts[0] })} />);
+    for (const o of opts) expect(screen.getByRole("button", { name: o })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /·/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: opts[1]! }));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "250 Stars a month", milestoneId: "ms_1", wake: true }));
+    cleanup();
+    // the old shape, the options read as one: no lone button sends the whole line as the answer
+    wrap(<WaitingCard item={item({ options: [opts.join(" · ")], recommendation: undefined })} />);
+    expect(screen.queryByRole("button", { name: opts.join(" · ") })).toBeNull();
+  });
+
+  it("E948-S69: an option's button answers with that option and the note; free text stays available", async () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_1", itemId: "wj_1", kind: "answer", text: "two", delivery: "sent", createdAt: new Date().toISOString() });
     const { rerender } = wrap(<WaitingCard item={item()} />);
-    fireEvent.click(screen.getByRole("radio", { name: "two" }));
-    fireEvent.click(screen.getByTestId("send-pick"));
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "two", milestoneId: "ms_1", wake: true }));
     // saved: the card says so at once, in place of the controls
     await vi.waitFor(() => expect(screen.getByTestId("saved-line")).toBeTruthy());
@@ -81,18 +95,18 @@ describe("WaitingCard", () => {
     // The refresh brings the item back still open (here: the answer was not delivered): the controls are live again.
     const failed = { id: "jr_1", itemId: "wj_1", milestoneId: "ms_1", kind: "answer" as const, text: "two", delivery: "failed" as const, createdAt: new Date().toISOString() };
     rerender(<MemoryRouter><WaitingCard item={item({ response: failed })} /></MemoryRouter>);
-    await vi.waitFor(() => expect((screen.getByTestId("send-pick") as HTMLButtonElement).disabled).toBe(false));
+    await vi.waitFor(() => expect((screen.getByRole("button", { name: "two" }) as HTMLButtonElement).disabled).toBe(false));
     // the note (under More) goes with the pick, still "two"...
     fireEvent.click(screen.getByTestId("ask-lead"));
-    fireEvent.change(screen.getByLabelText("Your note"), { target: { value: "after the audit" } });
-    fireEvent.click(screen.getByTestId("send-pick"));
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "after the audit" } });
+    fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(spy).toHaveBeenLastCalledWith("wj_1", { kind: "answer", text: "two. after the audit", milestoneId: "ms_1", wake: true }));
     cleanup();
-    //... and a typed answer alone goes with Not now
+    //... and a typed answer alone goes with the feedback block's Send (E948-S60: Not now is gone)
     wrap(<WaitingCard item={item()} />);
-    fireEvent.click(screen.getByTestId("ask-lead"));
-    fireEvent.change(screen.getByLabelText("Your note"), { target: { value: "neither, wait a week" } });
-    fireEvent.click(screen.getByTestId("not-now"));
+    expect(screen.queryByTestId("not-now")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "neither, wait a week" } });
+    fireEvent.click(screen.getByTestId("card-feedback-send"));
     await vi.waitFor(() => expect(spy).toHaveBeenLastCalledWith("wj_1", { kind: "answer", text: "neither, wait a week", milestoneId: "ms_1", wake: true }));
   });
 
@@ -128,9 +142,9 @@ describe("WaitingCard", () => {
     expect(screen.getByText("Unblocks:").parentElement!.textContent).toBe("Unblocks: S2, S3; each day waiting loses a day of ticks");
     expect(screen.getByText("Effort:").parentElement!.textContent).toBe("Effort: ~10 min");
     expect(screen.getByText("Recommended:").parentElement!.textContent).toBe("Recommended: do it tonight");
-    // Order: kind word, heading, steps, More, controls, foot with the code.
+    // Order: kind word, heading, steps, More, foot with the code, then the controls (the buttons and the feedback, one group).
     const card = screen.getByTestId("waiting-card");
-    const order = ["card-kind", "ask-lead", "ask-steps", "ask-more", "waiting-details", "answer-buttons", "card-foot", "ask-code"].map((id) => card.innerHTML.indexOf(`data-testid="${id}"`));
+    const order = ["card-kind", "ask-lead", "ask-steps", "card-foot", "ask-code", "ask-more", "waiting-details", "answer-buttons", "card-feedback"].map((id) => card.innerHTML.indexOf(`data-testid="${id}"`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     fireEvent.click(screen.getByTestId("done"));
@@ -147,13 +161,13 @@ describe("WaitingCard", () => {
     expect(screen.getByText("persona request")).toBeTruthy();
     fireEvent.click(screen.getByTestId("ask-lead"));
     expect(screen.getByText("deploy T4")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Yes: go ahead/ }));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("nj_1", { kind: "approve", text: "", milestoneId: "ms_1", wake: true }));
     expect(await screen.findByText(/Recorded, not delivered: no one to deliver to, attach a persona/)).toBeTruthy();
     cleanup();
     wrap(<WaitingCard item={item({ code: "PLAN-4-A1", ask: "approve", options: undefined, recommendation: "approve, with both small answers yes" })} />);
-    expect(screen.getByRole("button", { name: /Approve/ })).toBeTruthy();
-    expect(screen.getByTestId("decline").textContent).toBe("No");
+    expect(screen.getByRole("button", { name: /Yes: go ahead/ })).toBeTruthy();
+    expect(screen.getByTestId("decline").textContent).toBe("No: drop it");
     fireEvent.click(screen.getByTestId("ask-lead"));
     expect(screen.getByText("Recommended:").parentElement!.textContent).toBe("Recommended: approve, with both small answers yes");
   });
@@ -162,27 +176,26 @@ describe("WaitingCard", () => {
 
   it("a persona request with options shows the options, never Approve; T72-S7: a question, so no No or Changes wanted", () => {
     wrap(<WaitingCard item={item({ id: "nj_2", source: "needs_jordi", ask: "approve", decidable: true, options: ["Yes, ship", "Wait"], recommendation: "Wait" })} />);
-    expect(screen.getByRole("radio", { name: /Yes, ship/ })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: /Wait/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Yes, ship/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Wait/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Yes: go ahead/ })).toBeNull();
     expect(screen.queryByTestId("decline")).toBeNull();
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
-    expect(screen.getByTestId("send-pick")).toBeTruthy();
+    expect(screen.queryByTestId("send-pick")).toBeNull();
   });
 
-  it("T72-S7, E948-S52: an approve ask has Approve and No, no hint lines, no Answer and no box until asked; a note goes with Approve", async () => {
+  it("T72-S7, E948-S52: an approve ask has Approve and No, no hint lines, no Answer, the feedback block open; a note goes with Approve", async () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_7", itemId: "wj_1", kind: "approve", text: "simpler", delivery: "sent", createdAt: new Date().toISOString() });
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined, recommendation: "yes" })} />);
     const set = screen.getByTestId("answer-buttons");
-    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Approve", "No"]);
+    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Yes: go ahead", "No: drop it", "Park"]);
     expect(set.textContent).not.toContain("Yes. The team goes ahead.");
     expect(set.textContent).not.toContain("It closes as a no. A reason is optional.");
     expect(screen.queryByRole("button", { name: /^\s*Answer$/ })).toBeNull();
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
-    // the note (shown with More) travels with the button he presses
-    fireEvent.click(screen.getByTestId("ask-lead"));
-    fireEvent.change(screen.getByLabelText("Your note"), { target: { value: "another iteration later, simpler" } });
+    // E948-S60: the feedback block is always open; the note travels with the button he presses
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "another iteration later, simpler" } });
     fireEvent.click(screen.getByTestId("approve"));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "approve", text: "another iteration later, simpler", milestoneId: "ms_1", wake: true }));
   });
@@ -192,7 +205,7 @@ describe("WaitingCard", () => {
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined })} />);
     fireEvent.click(screen.getByTestId("decline"));
     expect(screen.getByTestId("answer-decline-box")).toBeTruthy();
-    expect(screen.getByLabelText("Your note")).toBeTruthy();
+    expect(screen.getByLabelText("Feedback")).toBeTruthy();
     expect(spy).not.toHaveBeenCalled();
     const no = screen.getByTestId("decline") as HTMLButtonElement;
     expect(no.disabled).toBe(false); // the reason is optional
@@ -201,14 +214,14 @@ describe("WaitingCard", () => {
     cleanup();
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined })} />);
     fireEvent.click(screen.getByTestId("decline"));
-    fireEvent.change(screen.getByLabelText("Your note"), { target: { value: "not now" } });
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "not now" } });
     fireEvent.click(screen.getByTestId("decline"));
     await vi.waitFor(() => expect(spy).toHaveBeenLastCalledWith("wj_1", { kind: "deny", text: "not now", milestoneId: "ms_1", wake: true }));
   });
 
   it("T72-S7, E948-S52: a do step has Done and Stuck, in that order, no hint line", () => {
     wrap(<WaitingCard item={item({ ask: "do", options: undefined, question: "Scan the QR code" })} />);
-    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck"]);
+    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck", "Park"]);
     expect(screen.queryByTestId("hint-yes")).toBeNull();
   });
 
@@ -309,7 +322,7 @@ describe("WaitingCard", () => {
   it("answering an ask posts the answer and names the refusal reason on the card, not an error line", async () => {
     vi.spyOn(api, "respondToWaiting").mockResolvedValue({ ...response, delivery: "queued", deliveryError: "dirty", spine: { status: "skipped", reason: "dirty" } });
     wrap(<WaitingCard item={item()} />);
-    fireEvent.click(screen.getByTestId("send-pick"));
+    fireEvent.click(screen.getByRole("button", { name: "one" }));
     await vi.waitFor(() => expect(api.respondToWaiting).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "one", milestoneId: "ms_1", wake: true }));
     expect(screen.queryByText(/Recorded, not delivered/)).toBeNull();
   });
@@ -522,7 +535,8 @@ describe("FYI cards (decided by a persona)", () => {
     wrap(<WaitingOnYou milestoneId="ms_1" />);
     fireEvent.click(await screen.findByTestId("decided-for-you-toggle")); // Decided for you folds closed by default
     const card = await screen.findByTestId("fyi-card");
-    expect(card.textContent).toContain("Decided by Delivery Manager");
+    expect(card.textContent).toContain("Decided");
+    expect(card.textContent).toContain("by Delivery Manager");
     expect(card.textContent).toContain("Restart the relay?");
     expect(card.textContent).toContain("rollback: systemctl start relay");
     expect(within(screen.getByTestId("decided-for-you")).getByTestId("decided-for-you-toggle")).toBeTruthy();

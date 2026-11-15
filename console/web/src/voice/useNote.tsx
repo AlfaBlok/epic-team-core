@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView, SentNote } from "./noteEngine";
-import { KEPT_FAILED_TEXT, KEPT_TEXT, MIC_BUSY_TEXT } from "./noteEngine";
+import { DEFAULT_MAX_MIN, KEPT_FAILED_TEXT, KEPT_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
 import { useDeskVoiceBase } from "./deskBase";
 import { CancelNote, clockOf, LevelMeter, LiveDot, noteOn, outText, useNoteTab, type HeldNote } from "./NoteProvider";
 
@@ -102,7 +102,7 @@ export function withVoiceNote(typed: string, note: Pick<SentNote, "id" | "transc
   return `${words} (voice note ${note.id}${note.audio ? `, audio ${note.audio}` : ""})`;
 }
 
-const IDLE: NoteView = { phase: "idle", elapsedS: 0, level: 0, costUsd: 0, estUsd: 0, usdPerMin: 0.003, maxMin: 30, segments: 0, uploaded: 0 };
+const IDLE: NoteView = { phase: "idle", elapsedS: 0, level: 0, costUsd: 0, estUsd: 0, usdPerMin: 0.003, maxMin: DEFAULT_MAX_MIN, segments: 0, uploaded: 0 };
 const nothing = () => () => undefined;
 const idle = () => IDLE;
 
@@ -133,6 +133,8 @@ export function useNote(props: {
   idleLabel?: string;
   /** Test ids' prefix ("note" in Chat, "answer-voice" on cards). */
   tid?: string;
+  /** E948-S60: the card feedback block's microphone, big and labelled on every screen (never an icon alone). */
+  big?: boolean;
   disabled?: boolean;
   /** Chat: called as he taps Send (read the reply aloud needs the tap). */
   beforeSend?: () => void;
@@ -199,8 +201,8 @@ export function useNote(props: {
     <Button
       type="button"
       data-testid={`${tid}-button`}
-      variant={on ? "destructive" : "ghost"}
-      className={cn(PHONE_TAP, "shrink-0 gap-1.5", on ? "max-sm:h-11 max-sm:px-3" : "max-sm:size-11 max-sm:px-0", card && "h-8")}
+      variant={on ? "destructive" : props.big ? "outline" : "ghost"}
+      className={cn(PHONE_TAP, "shrink-0 gap-1.5", props.big ? "h-11 px-4 text-sm font-medium [&_svg]:size-5" : on ? "max-sm:h-11 max-sm:px-3" : "max-sm:size-11 max-sm:px-0", card && !props.big && "h-8")}
       disabled={props.disabled || capped || sending || v.phase === "starting"}
       pending={sending}
       pendingLabel={<span className="max-sm:sr-only">Sending…</span>}
@@ -210,7 +212,7 @@ export function useNote(props: {
     >
       {/* while recording it is a labelled red Send on a phone too, never mistaken for the box's own send. */}
       {on ? <SendHorizontal /> : <Mic />}
-      <span className={cn(!on && "max-sm:sr-only")}>{on ? "Send note" : (props.idleLabel ?? "Voice note")}</span>
+      <span className={cn(!on && !props.big && "max-sm:sr-only")}>{on ? "Send note" : (props.idleLabel ?? "Voice note")}</span>
     </Button>
   );
 
@@ -234,7 +236,7 @@ export function useNote(props: {
           </span>
           <LevelMeter engine={held?.engine} phase={v.phase} value={v.level} tid={tid} />
           <span className="tabular-nums text-muted-foreground" data-testid={`${tid}-cost`}>
-            ≈ {money0(v.estUsd)} · max {v.maxMin} min
+            ≈ {money0(v.estUsd)} · max {lengthText(v.maxMin)}
           </span>
           {v.phase === "paused" && (
             <Button type="button" size="sm" variant="outline" className={cn(PHONE_TAP, "h-7 gap-1")} data-testid={`${tid}-resume`} onClick={() => void held?.engine.resume()}>
@@ -271,6 +273,12 @@ export function useNote(props: {
         <Button type="button" size="sm" variant="outline" className={cn(PHONE_TAP, "h-7")} data-testid={`${tid}-again`} onClick={() => (out?.note ? void tab.send(held!, out.note) : void held?.engine.finish())}>
           {v.info === KEPT_FAILED_TEXT ? "Send now" : "Send again"}
         </Button>
+      )}
+      {v.warn && on && (
+        // the warning before the cap, in plain sight while he talks.
+        <span role="alert" className="basis-full font-medium text-amber-700 dark:text-amber-400" data-testid={`${tid}-warn`}>
+          {v.warn}
+        </span>
       )}
       {v.info && (v.phase === "paused" || v.phase === "sent" || v.phase === "recording" || (v.phase === "failed" && v.info === KEPT_FAILED_TEXT)) && (
         <span className="basis-full text-muted-foreground" data-testid={`${tid}-info`}>

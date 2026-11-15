@@ -154,17 +154,18 @@ describe("E948-S24 the card knows where it sits (acceptance 3)", () => {
     const store = createStore(db);
     store.createMilestone({ title: "home_repo", repo: "home_repo", path: "docs/spines/root.md", owner: "", paused: false });
     const rows = computeReviewRows(store, tmp).rows;
-    // is the epic's last open line: only the last card closes the goal (case C)
+    // is the epic's last open line, but other parts of the goal are still open: neither card closes the goal (E948-S53),
+    // the last one meets the line
     expect(["E959-S3", "E959-S5"].map((ref) => { const r = rows.find((x) => x.ref === ref)!; return [r.tag, r.lineWith, r.face?.closesGoal]; })).toEqual([
       ["step", ["E959-S5"], false],
-      ["goal", ["E959-S3"], true],
+      ["line", ["E959-S3"], false],
     ]);
     const { review } = setup();
     const s3 = await byRef(review, "E959-S3");
     const r = await review.complete(s3.id);
     if ("error" in r) throw new Error(r.message);
     expect(repo.read(EPIC)).toContain("- [ ] E59-2"); // a step: the line stays open
-    expect((await byRef(review, "E959-S5")).tag).toBe("goal"); // now the last one
+    expect((await byRef(review, "E959-S5")).tag).toBe("line"); // now the last card; other parts still open, so not the goal
   });
 
   it("the last open piece completes the goal only with an explicit completes (never worked out)", () => {
@@ -249,5 +250,43 @@ describe("E948-S24 closing a goal hides its open items until it is reopened (acc
     expect(repo.originLog()[0]).toBe("Goal EPIC-959: reopened (Sam, via console)");
     expect((await review.list({ state: "feed" })).map((i) => i.ref).sort()).toEqual(before);
     expect(await review.closedGoals()).toEqual([]);
+  });
+});
+
+// E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "when we have decisions, then the buttons need to be the decisions ... what
+// I'm clicking is what's the next step"): a decision button closes the card with his pick written on the row.
+describe("E948-S69 a decision button writes his pick", () => {
+  it("Yes: plan it starts every next step as a plan, and the row says what he chose", async () => {
+    const { review, woke } = setup();
+    const s3 = await byRef(review, "E959-S3");
+    const r = await review.complete(s3.id, { start: [0, 1], park: [], choice: "Yes: plan it" });
+    if ("error" in r) throw new Error(r.message);
+    expect(r.item.followupRows?.map((x) => [x.title, x.status])).toEqual([
+      ["Plan: Confirm and fix leads N1-N4", "ready"],
+      ["Plan: Isolated box per customer", "ready"],
+    ]);
+    expect(repo.rowLine(EPIC, "E959-S3")).toContain(`| done (approved by Sam ${today()}, chose Yes: plan it) |`);
+    expect(repo.originLog()[0]).toBe('Review E959-S3: Sam chose "Yes: plan it", step complete, 2 started, 0 parked (Sam, via console)');
+    expect(woke).toHaveLength(1);
+  });
+
+  it("No: park it parks every next step, wakes nobody, and the row says No", async () => {
+    const { review, woke } = setup();
+    const s3 = await byRef(review, "E959-S3");
+    const r = await review.complete(s3.id, { park: [0, 1], choice: "No: park it" });
+    if ("error" in r) throw new Error(r.message);
+    expect(r.item.followupRows?.map((x) => x.status)).toEqual(["draft", "draft"]);
+    expect(repo.rowLine(EPIC, "E959-S3")).toContain(`| done (approved by Sam ${today()}, chose No: park it) |`);
+    expect(woke).toEqual([]);
+  });
+
+  it("a decision with no next step starts its plan as a new ready row; brackets and pipes in a pick are made safe", async () => {
+    const { review, woke } = setup();
+    const s5 = await byRef(review, "E959-S5");
+    const r = await review.complete(s5.id, { choice: "Yes: plan it (now) | x", plan: "Plan: build the used-car price lookup for Spain" });
+    if ("error" in r) throw new Error(r.message);
+    expect(r.item.followupRows).toEqual([{ ref: expect.stringMatching(/^E959-S\d+$/), title: "Plan: build the used-car price lookup for Spain", status: "ready" }]);
+    expect(repo.rowLine(EPIC, "E959-S5")).toContain(`done (approved by Sam ${today()}, chose Yes: plan it now x)`);
+    expect(woke).toHaveLength(1);
   });
 });

@@ -8,13 +8,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { githubRepoUrl, homeRepo, socialProduct, siteDomain } from "@/lib/identity";
+import { FEEDBACK_PATH } from "@/lib/routePaths";
+export { FEEDBACK_PATH };
 
 /**
  * customers and testers leave voice notes through their own link; each one is
  * transcribed (the audio is dropped), summed up and filed in the repo as feedback/voice/<day>-<id>.md, where the team
  * reads it. Here the owner makes a link for someone, copies it to send, and reads every filed item: who, summary, asks, bugs.
  */
-export const FEEDBACK_PATH = "feedback";
 
 const SENTIMENT: Record<string, string> = { positive: "bg-emerald-600 text-white", mixed: "bg-amber-500 text-white", negative: "bg-red-600 text-white", neutral: "bg-slate-500 text-white" };
 

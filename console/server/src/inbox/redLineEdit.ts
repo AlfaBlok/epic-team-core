@@ -5,7 +5,7 @@ import { resolveRepo } from "../adapters/repos.js";
 import { anthropicJson } from "../textModel.js";
 import { credentialWorld } from "../auth/identity.js";
 import { DEFAULT_TENANT } from "../db.js";
-import { PRIORITIES_FILE } from "./jordiPriority.js";
+import { OBJECTIVES_FILE, redLinesFile } from "./jordiPriority.js";
 import type { EditInput, FileEdit, SpineWrite, SpineWriter } from "./spineWrite.js";
 import { homeRepo } from "../identity.js";
 
@@ -13,7 +13,7 @@ import { homeRepo } from "../identity.js";
  * (the owner 2026-11-10 20:45Z, vn_ffa4783d, Log/2026-11-10.md#^e-4807be: "the two red lines take up a lot of space
  * vertically, so they should be like more like one row each, and I should have a button to edit, and when I press that
  * button, something unfolds where I can type or I can leave a voice note to edit the red line. I can also delete it"):
- * his edit and his delete of a red line, written into the repo (root L-45): `docs/priorities.json` (the line changed, or
+ * his edit and his delete of a red line, written into the repo (root L-45): `docs/pursuits.json` (the one objectives file; the line changed, or
  * moved to `removedRedLines` with who and when), the root spine's `Red line:` lines, and one Decisions row quoting
  * him, in ONE commit. The Prioritizer re-reads the file on its next run: a line he changed is his (`state: "changed"`,
  * never proposed again), a line he deleted is never put back unless he names it again.
@@ -120,7 +120,7 @@ export function applyChange(text: string, c: Change): Applied {
   try {
     f = JSON.parse(text) as File;
   } catch {
-    return { skip: `${PRIORITIES_FILE} is not valid JSON` };
+    return { skip: `${OBJECTIVES_FILE} is not valid JSON` };
   }
   const lines = linesOf(f);
   const k = c.name.trim().toLowerCase();
@@ -138,7 +138,7 @@ export function applyChange(text: string, c: Change): Applied {
     return { text: JSON.stringify(f, null, 2) + "\n", line: back };
   }
   const i = lines.findIndex((l) => keyOf(l) === k);
-  if (i < 0) return { skip: `no red line “${c.name}” in ${PRIORITIES_FILE}` };
+  if (i < 0) return { skip: `no red line “${c.name}” in ${OBJECTIVES_FILE}` };
   const before = lines[i];
   if (c.how === "delete") {
     lines.splice(i, 1);
@@ -171,7 +171,7 @@ export function spineLine(r: Raw): string {
   if (r.target) bits.push(`by ${String(r.target)}`);
   const refs = (Array.isArray(r.items) ? (r.items as Raw[]) : []).map((i) => String(i.ref)).join(", ");
   const name = r.name ? `${String(r.name).trim()}: ` : "";
-  return `Red line: ${name}${String(r.sentence ?? "").trim()} (${bits.join(", ")}; on it: ${refs}; docs/priorities.json)`;
+  return `Red line: ${name}${String(r.sentence ?? "").trim()} (${bits.join(", ")}; on it: ${refs}; docs/pursuits.json)`;
 }
 
 /** The root spine with its `Red line:` lines rewritten from the file (all of them taken out when no line is left). */
@@ -216,10 +216,10 @@ export function decisionRow(c: Change, line: Raw, before?: Raw): string {
   const day = c.at.slice(0, 10);
   const name = String((before ?? line).name ?? (before ?? line).sentence ?? "");
   if (c.how === "edit")
-    return `| ${day} | decided | ${cell(`${c.by} changed the red line “${name}” on Team home (${c.note ? `voice note ${c.note}` : "typed"}): “${c.words.slice(0, 600)}”`)} | ${cell(`now “${String(line.name ?? "")}”: ${String(line.sentence)}${line.target ? ` (by ${String(line.target)})` : ""}, state changed: his line, the Prioritizer keeps it and never proposes it again`)} | ${PRIORITIES_FILE} | when he edits it again |`;
+    return `| ${day} | decided | ${cell(`${c.by} changed the red line “${name}” on Team home (${c.note ? `voice note ${c.note}` : "typed"}): “${c.words.slice(0, 600)}”`)} | ${cell(`now “${String(line.name ?? "")}”: ${String(line.sentence)}${line.target ? ` (by ${String(line.target)})` : ""}, state changed: his line, the Prioritizer keeps it and never proposes it again`)} | ${OBJECTIVES_FILE} | when he edits it again |`;
   if (c.how === "delete")
-    return `| ${day} | decided | ${cell(`${c.by} deleted the red line “${name}” on Team home at ${c.at}`)} | ${cell(`its items leave the top of the inbox; kept in removedRedLines with who and when, and the Prioritizer never puts it back unless he names it again`)} | ${PRIORITIES_FILE} | if he brings it back |`;
-  return `| ${day} | decided | ${cell(`${c.by} brought back the red line “${name}” on Team home (Undo) at ${c.at}`)} | ${cell(`the line is on top of the inbox again, in its old place`)} | ${PRIORITIES_FILE} | — |`;
+    return `| ${day} | decided | ${cell(`${c.by} deleted the red line “${name}” on Team home at ${c.at}`)} | ${cell(`its items leave the top of the inbox; kept in removedRedLines with who and when, and the Prioritizer never puts it back unless he names it again`)} | ${OBJECTIVES_FILE} | if he brings it back |`;
+  return `| ${day} | decided | ${cell(`${c.by} brought back the red line “${name}” on Team home (Undo) at ${c.at}`)} | ${cell(`the line is on top of the inbox again, in its old place`)} | ${OBJECTIVES_FILE} | — |`;
 }
 
 // ---------- the routes ----------
@@ -245,11 +245,11 @@ export function mountRedLineEdit(api: Hono, d: RedLineEditDeps): void {
     const label = `red line ${c.how}`;
     const verb = c.how === "edit" ? "changed" : c.how === "delete" ? "deleted" : "brought back";
     const msg = `${c.by} ${verb} the red line “${c.name}” (Team home)`;
-    const body = `${c.by} ${verb} the red line “${c.name}” from its row on top of Team home. ${PRIORITIES_FILE} holds the line (or removedRedLines, with who and when), the root spine's Red line lines follow it and the red lines' epic's Decisions row quotes him. The Prioritizer reads the file on its next run.`;
+    const body = `${c.by} ${verb} the red line “${c.name}” from its row on top of Team home. ${OBJECTIVES_FILE} holds the line (or removedRedLines, with who and when), the root spine's Red line lines follow it and the red lines' epic's Decisions row quotes him. The Prioritizer reads the file on its next run.`;
     const edits: EditInput[] = [
       {
         repoDir: repo.path,
-        path: PRIORITIES_FILE,
+        path: redLinesFile(repo.path),
         label,
         edit: (text): FileEdit => {
           got = applyChange(text, c);
@@ -306,7 +306,7 @@ export function mountRedLineEdit(api: Hono, d: RedLineEditDeps): void {
     const repo = resolveRepo(d.reposRoot, d.repo ?? homeRepo());
     let cur: Raw | undefined;
     try {
-      const f = JSON.parse(fs.readFileSync(path.join(repo?.path ?? "", PRIORITIES_FILE), "utf8")) as File;
+      const f = JSON.parse(fs.readFileSync(path.join(repo?.path ?? "", redLinesFile(repo?.path ?? "")), "utf8")) as File;
       cur = linesOf(f).find((l) => keyOf(l) === name.toLowerCase());
     } catch {
       cur = undefined;

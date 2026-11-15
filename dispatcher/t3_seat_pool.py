@@ -53,6 +53,8 @@ def main(argv: list[str]) -> int:
     if cmd == "status":
         got = json.loads(broker(path, "status"))  # broker status is JSON: name, capacity, available, seats
         out = {k: got[k] for k in ("name", "capacity", "available", "ceiling", "open") if k in got}
+        if got.get("set_aside"):  # only while a seat is set aside, so older answers stay identical
+            out["set_aside"] = got["set_aside"]
     elif cmd == "pick":
         # the broker refuses on the team ceiling and, for local calls, on low memory here; `--from <host>` means
         # that host already checked its own memory, so the broker skips this host's check
@@ -62,6 +64,8 @@ def main(argv: list[str]) -> int:
             out = {"id": got["seat"], "via": "t3_delegate_task", "providerInstanceId": got["providerInstanceId"]}
         else:
             out = refusal("paused" if got.get("paused") else got.get("reason") or "all seats busy or maxed", got)
+        if got.get("set_aside"):  # seats set aside after a failed sign-in, {seat: until}
+            out["set_aside"] = got["set_aside"]
     elif cmd in ("sessions", "probe"):
         out = json.loads(broker(path, cmd))
     elif cmd == "done":

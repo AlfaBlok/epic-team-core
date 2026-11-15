@@ -202,7 +202,7 @@ export interface PersonaTemplate {
 export type PersonaInput = Pick<Persona, "name" | "remit" | "skills" | "model" | "mayWrite" | "host">;
 
 export type Cadence =
-  | { type: "interval"; everyMinutes: number }
+  | { type: "interval"; everyMinutes: number; quiet?: { from: string; to: string; timeZone: string } }
   | { type: "fixed_time"; timeOfDay: string; weekdays: number[] };
 
 export interface Assignment {
@@ -585,12 +585,21 @@ export interface AuthSite {
   loginCookie?: string;
   sourceBrowser: string;
   sourceProfile: string;
+  /** The browser profile this entry came from ("Chrome/Profile 5"); one entry per (pattern, profile). */
+  profileKey?: string;
+  /** The accounts this profile holds (the Team Browser's profile map) and the profile's own name. */
+  accounts?: string[];
+  profileLabel?: string;
+  /** Reads that name no account use this entry. */
+  defaultForReads?: boolean;
   syncedAt: string;
   lastUsedAt?: string;
   lastUsedBy?: string;
   /** Last logged-in read by the Team Browser: "dead" = rejected (403 / login redirect), re-sync needed. */
   session?: "ok" | "dead";
   sessionReason?: string;
+  /** the row is on the owner's Mac list: its Run all re-syncs it (Re-sync pressed, or out of sync). */
+  resync?: { reason: "pressed" | "out-of-sync"; why: string; requestedAt: string; lastTryAt?: string; lastError?: string };
 }
 
 /** A sign-in as Setup sees it (GET /api/auth/reach): an AuthSite's metadata, `via` = the world whose browser lends it. */
@@ -646,12 +655,15 @@ export interface AuthSync {
   /** Copy-paste command for the Mac terminal. */
   command: string;
   scriptUrl: string;
+  /** A row's Re-sync: the profile the command opens and syncs ("Chrome/Profile 5"). */
+  targetProfile?: string;
   error?: string;
   result?: {
     browser: string;
     profile: string;
     profileName?: string;
-    sites: { id?: string; pattern: string; cookieCount: number; domains: string[] }[];
+    /** keptBeside: other profiles' entries for the same site, left untouched. */
+    sites: { id?: string; pattern: string; cookieCount: number; domains: string[]; keptBeside?: string[] }[];
   };
 }
 
@@ -1184,7 +1196,8 @@ export interface DeskChat {
   workingSince?: string;
   /** Messages T3 has not accepted yet (a busy thread retries for minutes). */
   sending: number;
-  sendError?: { text: string; at: string };
+  /** `clientRequestId` names the message that failed after its request answered. */
+  sendError?: { text: string; at: string; clientRequestId?: string };
   messages: DeskMessage[];
   hasEarlier: boolean;
   /** T3 is down (`maintenance` = stopped on purpose): the messages are the last good read; one quiet line says so. */
@@ -1197,6 +1210,8 @@ export interface DeskChat {
   host?: string;
   /** that host's T3 cannot be reached now: the messages are the last good read, the chat says so and keeps retrying. */
   unreachable?: string;
+  /** an older page only: T3 was slow, the console reads on, ask again in a moment (the chat retries by itself). */
+  loading?: boolean;
 }
 
 /** a ticket's own T3 session (POST /api/tickets/session, GET /api/tickets/sessions): one thread per ledger row, run by its assignee persona in chat mode. */
@@ -1866,6 +1881,17 @@ export interface CreditBurnDay {
   notionalCredits: number;
 }
 /** GET /api/tenants/:id/credits (world-scoped: another world's id is a 404). */
+/** GET /api/tenants/:id/plan: may this world buy the paid plan from the console, and has it paid. */
+export interface PlanState {
+  tenantId: string;
+  plan: string;
+  canBuy: boolean;
+  paid: boolean;
+  awaiting: boolean;
+  price: { name: string; eurPerMonth: number };
+  subscription?: { status: string; since: string; testMode: boolean };
+}
+
 export interface Credits {
   tenantId: string;
   plan: string;
@@ -1915,7 +1941,8 @@ export type AuthMode = "off" | "shadow" | "on";
 
 /** who the console thinks is calling. `legacy` = a tailnet/loopback caller with no login, served as the home world (today's trust). */
 export type MeIdentity =
-  | { kind: "session"; tenantId: string; email: string; name: string; role: "owner" | "member" }
+  /** door: the owner let into the home world on a customer site; the web app shows the customer screens. */
+  | { kind: "session"; tenantId: string; email: string; name: string; role: "owner" | "member"; door?: true }
   | { kind: "token"; tenantId: string; label: string }
   | { kind: "legacy"; tenantId: string }
   | { kind: "none" };
@@ -2133,6 +2160,25 @@ export interface TeamServicesView {
 /** option A: GET /api/connections/memory: a world's "Voice notes from the memory service" card (server a hosted services module). */
 export type MemoryNoteFilter = "all" | "team";
 /** one key pasted in a steps page's private box: names and outcome only, never a value. */
+/** one ask of the Team Browser's sign-in act to read a team login; never a value. */
+export interface TeamLoginRead {
+  id: number;
+  at: string;
+  runId?: string;
+  persona?: string;
+  account: string;
+  label?: string;
+  name?: string;
+  outcome: "granted" | "refused" | "failed";
+  detail?: string;
+}
+export interface TeamLoginsView {
+  ask: string;
+  app: string;
+  accounts: { account: string; label: string; name: string }[];
+  log: TeamLoginRead[];
+}
+
 export interface StepKeyPaste {
   at: string;
   page: { id: string; title: string };
@@ -2142,6 +2188,23 @@ export interface StepKeyPaste {
   ask: string;
   outcome: "stored" | "refused" | "failed";
   detail?: string;
+}
+
+/** GET /api/connects: one-button connects (an account its owner connects with one tap; server auth/connects.ts). */
+export interface ConnectCard {
+  id: string;
+  title: string;
+  what: string;
+  /** the exact account to pick on Google's page */
+  account: string;
+  channel?: { name: string; handle: string; id?: string };
+  /** plain names of what the Allow gives */
+  gives: string[];
+  connected: boolean;
+  at?: string;
+  /** the button: Google's consent page, through the customer site that carries the callback */
+  startUrl: string;
+  inbox: boolean;
 }
 
 export interface MemoryCard {
@@ -2199,6 +2262,8 @@ export interface BookEpic {
   title: string;
   depth: number;
   parent: string | null;
+  /** view-only fold (docs/epic-folds.json): drawn inside this parent epic (its path), not as its own epic. */
+  foldedInto?: string;
   status: string;
   state: BookState;
   goal: string | null;
@@ -2356,6 +2421,8 @@ export interface BookTreeNode {
   title: string;
   parent: string | null;
   depth: number;
+  /** view-only fold (docs/epic-folds.json): drawn inside its parent's row, not as its own row. */
+  foldedInto?: string;
   state: BookState;
   status: string;
   dod: { done: number; total: number };
@@ -2910,4 +2977,28 @@ export interface Onboarding {
   accounts: OnboardingAccount[];
   vault?: OnboardingVaultItem[];
   readAt: string;
+}
+
+/** Priority mode: the machine given to one or two rows (GET /api/priority-mode). */
+export interface PriorityPark {
+  sessionId: string;
+  runId: string;
+  kind: "worker" | "wake";
+  ticket?: string;
+  assignmentId: string;
+  parentRunId?: string;
+  threadId?: string;
+  rank: number | null;
+  state: "asked" | "ask_failed" | "resumed" | "resume_failed" | "handed_to_manager" | "skipped";
+  parkedAt: string;
+  resumeRunId?: string;
+  resumedAt?: string;
+  note?: string;
+}
+export interface PriorityModeView {
+  on: boolean;
+  session?: { id: string; rows: string[]; by: string; reason: string; startedAt: string; assignments: string[]; endedAt?: string; endedBy?: string; endWhy?: string };
+  parked: PriorityPark[];
+  log: { at: string; event: string; runId?: string; ticket?: string; detail: string }[];
+  focusRunning: string[];
 }

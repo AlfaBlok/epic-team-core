@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { memoryName } from "@/lib/identity";
+import { GOAL_GRAPH_PATH, memoryPagePath } from "@/lib/routePaths";
+export { GOAL_GRAPH_PATH, memoryPagePath };
 
 /**
  * the repo pages under /landing/ (docs/landing/, built by build.py) open inside
@@ -17,9 +19,7 @@ import { memoryName } from "@/lib/identity";
  * The page itself stays a repo file (L-45), served by the console's /landing/ route; a direct visit to a /landing/ page
  * redirects here (server landing.ts), so every old link opens inside the console.
  */
-export const GOAL_GRAPH_PATH = "goal-graph";
 /** the memory page's console path: the memory service's name and "-memory" */
-export const memoryPagePath = (): string => `${memoryName().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-memory`;
 
 /** The /landing/ file a console path shows: /goal-graph → index, /goal-graph/notes/<id> → that report, /memory-memory → memory. */
 export function landingFileOf(consolePath: string): string | undefined {

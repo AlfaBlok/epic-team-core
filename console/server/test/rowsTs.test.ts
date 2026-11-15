@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -188,6 +189,27 @@ describe("E962-S2 the review list is the spine", () => {
     expect(repo.rowLine(EPIC, "E959-S2")).toContain("| review (waits Sam) |");
     expect(repo.originLog()[0]).toBe("Review E959-S2: unsnoozed (Sam, via console)");
     expect((await call("GET", "/api/review-items")).json.map((i: ReviewItem) => i.ref)).toEqual(["E959-S1", "E959-S2"]);
+  });
+
+  // E948-S83 iteration 2 (the owner 2026-11-14 23:38Z: "There should always be one button which is to park"): Park is a month's
+  // snooze written as parked, so the commit and the spine's Decisions say what he pressed; Bring it back takes it off.
+  it("Park writes a month on the row as parked, out of the list; Bring it back puts it back", async () => {
+    const { call } = boot();
+    await milestone(call);
+    const s2 = (await listed(call)).find((i) => i.ref === "E959-S2")!;
+    expect((await call("POST", `/api/review-items/${s2.id}/snooze`, { days: 30, park: true, extra: 1 })).status).toBe(400);
+    const p = await call("POST", `/api/review-items/${s2.id}/snooze`, { days: 30, park: true });
+    expect(p.status).toBe(200);
+    expect(p.json.snoozedUntil).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/);
+    expect(Date.parse(p.json.snoozedUntil) - Date.now()).toBeGreaterThan(29 * 86_400_000);
+    expect(repo.rowLine(EPIC, "E959-S2")).toContain(`| review (waits Sam) — snoozed until: ${p.json.snoozedUntil} |`);
+    expect(repo.originLog()[0]).toBe(`Review E959-S2: parked until ${p.json.snoozedUntil} (Sam, via console)`);
+    expect(execFileSync("git", ["-C", repo.bare, "log", "--format=%b", "-1", "main"], { encoding: "utf8" })).toMatch(/Sam parked "[^"]+" with the card's Park button: it left the inbox until \S+ and comes back by itself; the row stays in review, nothing was decided/);
+    expect((await call("GET", "/api/review-items")).json.map((i: ReviewItem) => i.ref)).toEqual(["E959-S1"]);
+    const back = await call("POST", `/api/review-items/${s2.id}/snooze`, { until: null, park: true });
+    expect(back.status).toBe(200);
+    expect(repo.rowLine(EPIC, "E959-S2")).toContain("| review (waits Sam) |");
+    expect(repo.originLog()[0]).toBe("Review E959-S2: brought back (Sam, via console)");
   });
 
   it("a refused or failed spine write changes nothing: the row and the list stay; the press is saved and says it is landing (E972-S1)", async () => {

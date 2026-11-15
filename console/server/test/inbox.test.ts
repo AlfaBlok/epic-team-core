@@ -134,7 +134,7 @@ function setup(over: Partial<CycleOptions> = {}) {
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : undefined };
   };
-  return { call };
+  return { call, app };
 }
 
 async function seed(call: ReturnType<typeof setup>["call"], withPersona = true) {
@@ -271,6 +271,49 @@ describe("GET /api/waiting-on-owner", () => {
   });
 });
 
+describe("the Inbox search box", () => {
+  it("GET /api/inbox/search finds asks by title, card text and his answer; no match says so; a long query is refused", async () => {
+    const { call } = setup();
+    await seed(call);
+    const logger = (await call("GET", "/api/inbox/search?q=LOGGER")).json as any;
+    expect(logger.total).toBeGreaterThan(0);
+    expect(logger.hits.every((h: any) => h.section === "blocked" || h.section === "done")).toBe(true);
+    const list = (await call("GET", "/api/waiting-on-owner")).json as any[];
+    const ask = list.find((i) => /logger/i.test(i.question));
+    expect(logger.hits.map((h: any) => h.id)).toContain(ask.id);
+    expect(logger.hits.find((h: any) => h.id === ask.id).where).toContain("card");
+    const none = (await call("GET", "/api/inbox/search?q=Condesa")).json as any;
+    expect(none).toMatchObject({ q: "Condesa", total: 0, hits: [], counts: { blocked: 0, review: 0, done: 0 } });
+    expect(typeof none.tookMs).toBe("number");
+    expect((await call("GET", `/api/inbox/search?q=${"x".repeat(101)}`)).status).toBe(400);
+    // one letter is no search (the box needs two).
+    expect(((await call("GET", "/api/inbox/search?q=l")).json as any).total).toBe(0);
+  });
+});
+
+describe("the Inbox's list sends what the screen shows", () => {
+  it("?view=list keeps open and answered cards whole; GET /:id gives one item whole; the list goes out gzipped", async () => {
+    const { call, app } = setup();
+    const { m } = await seed(call);
+    const full = (await call("GET", "/api/waiting-on-owner")).json as any[];
+    const list = (await call("GET", "/api/waiting-on-owner?view=list")).json as any[];
+    // open and answered items are the same cards (nothing here is done yet).
+    expect(list.map((i) => i.id)).toEqual(full.map((i) => i.id));
+    const open = list.find((i) => i.source === "ask" && i.state === "open");
+    expect(open).toEqual(full.find((i) => i.id === open.id));
+    expect(open.slim).toBeUndefined();
+    // the card behind one id, whole (a folded Answered row opens it).
+    const one = await call("GET", `/api/waiting-on-owner/${open.id}?milestoneId=${m.id}`);
+    expect(one.status).toBe(200);
+    expect(one.json).toMatchObject({ id: open.id, question: "Ship with one logger or two?", options: ["one", "two"] });
+    expect((await call("GET", "/api/waiting-on-owner/wj_nope")).status).toBe(404);
+    // the browser takes gzip: the list goes out packed (it was 1.78 MB of plain JSON on production).
+    const res = await app.request("/api/waiting-on-owner?view=list", { headers: { "Accept-Encoding": "gzip" } });
+    expect(res.status).toBe(200);
+    if (JSON.stringify(list).length > 1024) expect(res.headers.get("content-encoding")).toBe("gzip");
+  });
+});
+
 describe("responses", () => {
   it("answers an ask: stored, never messages the owner thread (M2-23); a checkout that is not git refuses the spine write with the reason, in Activity", async () => {
     const { call } = setup();
@@ -391,6 +434,24 @@ describe("spines.py waiting_on: v1 JSON falls back to the markdown, v2 JSON is t
     expect(asks[0].contextLinks[1].url).toMatch(/^https:\/\/github\.com\/Acme\/epicspine-skill\/blob\/HEAD\/docs\/EPIC-904-DOCTRINE-2\.md\?plain=1#L\d+$/);
     // Current State "Waiting on: the owner (1 ask, see Waiting on)" is covered by the ask: no heuristic duplicate for the file.
     expect(items.filter((i) => i.source === "heuristic" && i.path === EPIC4 && i.signal === "waiting_on")).toEqual([]);
+  });
+
+  it("E996-S29: a key ask labelled needs Mac agent stays in the inbox list with its box (T9-A10 sat folded under Needs Mac agent)", async () => {
+    const spines = structuredClone(SPINES_EPIC4) as any;
+    const node = spines.nodes.find((n: any) => n.path === EPIC4);
+    const v2 = { steps: null, effort: null, options: [], recommend: null, context: null, since: "2026-10-21", row: null, state: "open", answer: null, who: "Sam" };
+    node.waiting_on = [
+      { ...v2, code: "T9-A10", ask: "provide", question: "Create one Cloudflare key", unblocks: "the deploy — secret: acme CLOUDFLARE_WORKERS_TOKEN — label: needs Mac agent" },
+      { ...v2, code: "T9-A11", ask: "do", question: "Open the Mac list", unblocks: "the laptop step — label: needs Mac agent" },
+    ];
+    db = openDb(path.join(reposRoot, "e96s29.db"));
+    const store = createStore(db);
+    const m = store.createMilestone({ title: "EPIC-904", repo: M4.repo, path: EPIC4, owner: "Sam", paused: false });
+    const items = (await waitingForMilestone({ store, reposRoot, treeFor: async () => buildTree(reposRoot, { ...M4, id: m.id }, spines), blame: async () => undefined }, m)).filter((i) => i.source === "ask");
+    const key = items.find((i) => i.code === "T9-A10")!;
+    expect(key.secret).toEqual({ app: "acme", name: "CLOUDFLARE_WORKERS_TOKEN" });
+    expect(key.macAgent).toBeUndefined();
+    expect(items.find((i) => i.code === "T9-A11")!.macAgent).toBe(true);
   });
 
   it("uses v2 waiting_on only (markdown asks ignored), answered entries with null ask/since/row, local context → blob URL", async () => {

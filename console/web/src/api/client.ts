@@ -1,7 +1,11 @@
 import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef } from "./review-types";
-import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox } from "./company-types";
+import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { PursuitsBody } from "./pursuit-types";
+import type { PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
+import type { OneOffsBody } from "./oneoff-types";
+import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
+import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
+import type { AskLogSummary, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
 import type {
   BookView,
   RunStatsView,
@@ -27,6 +31,7 @@ import type {
   SocialWriteResult,
   SocialAssetUpload,
   Credits,
+  PlanState,
   CreditGrantInput,
   CreditGrantResult,
   Tenant,
@@ -51,6 +56,7 @@ import type {
   MovingEpic,
   StampResult,
   StopResult,
+  PriorityModeView,
   AddInput,
   AddResult,
   AskedNoRowItem,
@@ -77,7 +83,9 @@ import type {
   TeamService,
   TeamServicesView,
   StepKeyPaste,
+  TeamLoginsView,
   MemoryCard,
+  ConnectCard,
   MemoryNoteFilter,
   TeamSkillsView,
   WhatsAppHolderView,
@@ -111,7 +119,7 @@ import type {
   ChatHistory,
   MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
 import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult } from "./campaign-types";
-import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem } from "./inbox-types";
+import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult } from "./inbox-types";
 
 /** GET /api/push. */
 export interface PushInfo {
@@ -157,6 +165,10 @@ export interface ApiClient {
   steerRun(runId: string, message: string, clientRequestId?: string): Promise<{ run: Run; threadId: string; mode: "steer" | "auto" }>;
   /** interrupt a running run now and close it `stopped` with the reason; `withWorkers` also stops its running child runs. */
   stopRun(runId: string, input: { reason: string; withWorkers?: boolean }): Promise<StopResult>;
+  /** Priority mode: its state, start it for one or two rows (parks every other running session), resume. */
+  getPriorityMode(): Promise<PriorityModeView>;
+  startPriorityMode(input: { rows: string[]; reason?: string }): Promise<PriorityModeView>;
+  resumePriorityMode(why?: string): Promise<PriorityModeView>;
   /** Add on a tree node: a ledger row, Done-means line or child epic, written to the spine (commit + push); ready unless `draft`. */
   addToTree(milestoneId: string, input: AddInput): Promise<AddResult>;
   /** open Done-means lines in runnable epics no ledger row covers ("Asked, no row yet" on the Team home). */
@@ -173,6 +185,10 @@ export interface ApiClient {
   setCompany(id: string, input: CompanyInput): Promise<CompanySaved>;
   /** the open asks and cards of the social product worlds the login belongs to, read only (each opens in its own app). */
   listCompanyWorlds(): Promise<{ worlds: WorldInbox[] }>;
+  /** the home repo's live experiments (headline, key results now against goal), read only. */
+  listExperiments?(): Promise<{ experiments: Experiment[] }>;
+  /** the home repo's goals (docs/goals/*.json): the goal, its key results, a traffic light each, read only. */
+  listGoals?(): Promise<{ goals: Goal[] }>;
   /** the Operations wheel's numbers of one company (uptime, down minutes, visits, conversions; support, spend, revenue), read live. */
   getCompanyOps(id: string): Promise<CompanyOps>;
   /** the Build wheel's numbers from the ledgers of one company. */
@@ -189,6 +205,40 @@ export interface ApiClient {
   listBuilding(): Promise<{ lists: BuildingList[] }>;
   /** the owner's pursuits: scorecard, totems, moving or stalled (docs/pursuits.json). */
   listPursuits(): Promise<PursuitsBody>;
+  /** the goal sets: the scorecard tree (pursuits, their epics inside), each spine's queue and codes. */
+  listScorecards(): Promise<ScorecardsBody>;
+  /** his order of the pursuits (every id once); one commit in docs/pursuits.json. */
+  reorderPursuits(ids: string[]): Promise<{ ok: true; sha?: string }>;
+  /** park or resume one pursuit (parked: no wakes, no workers); one commit. */
+  parkPursuit(id: string, parked: boolean): Promise<{ ok: true; sha?: string }>;
+  /** single jobs outside every pursuit, by stage (rows titled `One-off:` and docs/spines/one-offs.md). */
+  listOneOffs(): Promise<OneOffsBody>;
+  /** the outcome log: one line per real outcome every persona logged at the end of a wake, filtered. */
+  listOutcomes(f?: OutcomeFilter): Promise<OutcomesBody>;
+  /** the team's own inbox cards: a digest per scorecard a day, strategic ideas, goal conversations (docs/inbox/cards.json). */
+  listTeamCards(q?: { scorecard?: string; kind?: TeamCardKind }): Promise<TeamCardsBody>;
+  /** his answer on one of them (words, voice, a picked goal); one commit. */
+  answerTeamCard(id: string, a: TeamCardAnswer): Promise<{ ok: true; card: TeamCard; sha?: string }>;
+  /** his verdict on the Senior advisor's suggestions: accept writes a ready row on each one's spine first. */
+  advisorVerdict(id: string, v: AdvisorVerdictBody): Promise<{ ok: true; card: TeamCard; rows?: Record<string, string>; failed?: { item: string; reason: string }[]; sha?: string }>;
+  /** every one-off page the team serves, by repo and epic (docs/pages/registry.json). */
+  listPages(): Promise<PagesBody>;
+  /** when a pinned page last refreshed, and its Refresh button. */
+  listPinnedPages(): Promise<{ pinned: PageView[] }>;
+  pinnedPageStatus(port: number): Promise<PinnedStatus>;
+  refreshPinnedPage(port: number): Promise<PinnedStatus>;
+  /** pin, rename or unpin a page by a plain name (one commit to docs/pages/registry.json). */
+  pinPage(b: { port?: number; url?: string; pinned: boolean; name?: string }): Promise<{ ok: true; sha?: string }>;
+  /** the asks log: asks to the owner this week and by week (docs/asks/log.jsonl). */
+  askLogSummary(): Promise<AskLogSummary>;
+  /** his one tap on a closed ask: was it clear or confusing. */
+  askVerdict(id: string, verdict: "clear" | "confusing"): Promise<{ status?: number; added?: number }>;
+  /** his voice notes of the last two days with the rows made from each (docs/voice-notes/index.json); product filters. */
+  listVoiceNotes(product?: string): Promise<VoiceNotesBody>;
+  /** the team's X accounts: per post likes, replies, reposts and views, one file a day (data/x-stats). */
+  getXStats(date?: string): Promise<XStatsBody>;
+  /** one pursuit's social kit, shown inside the console on the pursuit's page. */
+  getPursuitKit(id: string): Promise<PursuitKitBody>;
   /** the milestone's live ticket sessions from before (no new ones are launched; a row that closed meanwhile is left out). */
   listTicketSessions(milestoneId: string): Promise<TicketSession[]>;
   /** the Team desk chat (user + assistant text read back from its T3 thread; launches the thread on first open). */
@@ -198,7 +248,8 @@ export interface ApiClient {
   /** `attachments` = ids from uploadChatAttachment; the console adds their links to the message. */
   sendDeskMessage(text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean; queued?: boolean }>;
   /** one file for a chat message (a screenshot from the phone), uploaded before the message is sent. */
-  uploadChatAttachment(file: Blob, name: string): Promise<{ attachment: ChatAttachment }>;
+  /** `onProgress(sent, total)` as the bytes leave the phone (the bubble shows how far a slow upload is). */
+  uploadChatAttachment(file: Blob, name: string, onProgress?: (sent: number, total: number) => void): Promise<{ attachment: ChatAttachment }>;
   /** the line of links of uploaded files, for a box whose own route takes only words (it goes after his words). */
   attachmentLine(ids: string[]): Promise<{ line: string }>;
   /** a milestone's Chat tab, a view on its own repo-desk T3 thread (launched on first open, reused across restarts). */
@@ -247,6 +298,10 @@ export interface ApiClient {
 
   /** everything blocked on the owner (all milestones, or one milestone's subtree from nodeKey down). */
   listWaitingOnOwner(f?: { milestoneId?: string; nodeKey?: string; includeSettled?: boolean; includeSuperseded?: boolean } & Partial<SpineRef>): Promise<WaitingItem[]>;
+  /** one item whole (the card behind a folded Answered row, fetched when it opens). */
+  getWaitingItem?(id: string, milestoneId?: string): Promise<WaitingItem>;
+  /** the search box on top of the Inbox: which items match every word (titles, card text, his notes). */
+  searchInbox?(q: string): Promise<InboxSearchResult>;
   /** grantWrite: approve a Needs the owner item and give the asking run's assignment write, limited to scope. */
   respondToWaiting(
     itemId: string,
@@ -255,7 +310,7 @@ export interface ApiClient {
   ): Promise<OwnerResponse>;
   redeliverResponse(responseId: string): Promise<OwnerResponse>;
   /** snooze an open ask for `days` (3 / 7 / 30) or until a date; `until: null` unsnoozes. The date is written on its spine line. */
-  snoozeWaiting(itemId: string, input: { hours?: SnoozeHours; days?: SnoozeDays; until?: string | null; milestoneId?: string; relay?: AskRelay }): Promise<{ id: string; snoozedUntil: string | null }>;
+  snoozeWaiting(itemId: string, input: { hours?: SnoozeHours; days?: SnoozeDays; until?: string | null; milestoneId?: string; relay?: AskRelay; park?: true }): Promise<{ id: string; snoozedUntil: string | null }>;
   /** paste a key into a key ask; the server stores it with `secret put` (the value is never returned or kept). */
   saveKey(itemId: string, input: { value: string; milestoneId?: string; wake?: boolean; relay?: AskRelay }): Promise<SaveKeyResult>;
   /** change an answer before the owner acts on it (rewrites the spine line, or sends a correction to the thread). */
@@ -366,8 +421,12 @@ export interface ApiClient {
   pollTeamMailbox(): Promise<{ posted: number; ignored: number; inbox: TeamMailView["inbox"] }>;
   /** a world's Voice notes from the memory service card; Connect (the URL of the memory service's consent), settings, test note, Disconnect. */
   getMemoryCard(world?: string): Promise<MemoryCard>;
+  /** the one-button connects and whether each is connected. */
+  listConnects(): Promise<{ connects: ConnectCard[] }>;
   /** keys pasted on steps pages (names and outcome only). */
   listStepKeyPastes(): Promise<{ log: StepKeyPaste[] }>;
+  /** the team logins the browser sign-in act may read and each read. */
+  getTeamLogins(): Promise<TeamLoginsView>;
   connectMemory(world?: string): Promise<{ url: string }>;
   setMemorySettings(input: { desk?: string; filter?: MemoryNoteFilter }, world?: string): Promise<MemoryCard>;
   testMemory(world?: string): Promise<{ ok: boolean; message: string; card: MemoryCard }>;
@@ -445,6 +504,10 @@ export interface ApiClient {
   getCredits(tenantId: string): Promise<Credits>;
   /** platform only (the home world): a top-up / grant we make by hand; releases held wakes when back above zero. */
   grantCredits(tenantId: string, input: CreditGrantInput): Promise<CreditGrantResult>;
+  /** an owner starts the €49 a month Epic Team checkout for their world; answers the Stripe-hosted page's address. */
+  startPlanCheckout?(tenantId: string): Promise<{ url: string }>;
+  /** may this world buy the paid plan (the Buy button), and has it paid ("You're on <plan>"). */
+  getPlan?(tenantId: string): Promise<PlanState>;
   /** platform only: the per-world gate (the home world is never held either way). */
   setCreditsGate(tenantId: string, on: boolean): Promise<{ credits: Credits }>;
   /** worlds the caller can see (the platform's Credits page picks one). */
@@ -461,7 +524,8 @@ export interface ApiClient {
   clearAuthSite(id: string): Promise<void>;
   /** Setup: the sign-ins the world's team can use, from its own browser and any it borrows (metadata only). */
   authReach(): Promise<AuthReach>;
-  startAuthSync(input: { patterns: string[]; browser: string }): Promise<AuthSync>;
+  /** `profile`: a row's Re-sync, "Chrome/Profile 5"; the command stays the same one line. */
+  startAuthSync(input: { patterns: string[]; browser: string; profile?: string }): Promise<AuthSync>;
   getAuthSync(token: string): Promise<AuthSync>;
   /** the Team Browser egresses' online state (Sign-ins shows the laptop's). */
   /** `posting`: the egresses the world's posts go out through (its own Team Browser, then the one it borrows). */
@@ -490,9 +554,9 @@ export interface ApiClient {
   reopenGoal(key: string): Promise<{ goal: ClosedGoal; sha?: string }>;
   /** Complete a card; `start` / `park` are suggestion indices, together every suggestion (none dropped). */
   /** a held post's card also takes `slot` (UTC), `feedback` (schedule after this change) or `now` (Post now). */
-  completeReviewItem(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean }): Promise<ReviewItem>;
+  completeReviewItem(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean; choice?: string; plan?: string }): Promise<ReviewItem>;
   /** Snooze on a review card (`hours`, `days` or `until`); `until: null` unsnoozes. */
-  snoozeReviewItem(id: string, input: { hours?: SnoozeHours; days?: SnoozeDays; until?: string | null }): Promise<Omit<ReviewItem, "snoozedUntil"> & { snoozedUntil: string | null }>;
+  snoozeReviewItem(id: string, input: { hours?: SnoozeHours; days?: SnoozeDays; until?: string | null; park?: true }): Promise<Omit<ReviewItem, "snoozedUntil"> & { snoozedUntil: string | null }>;
   approveReviewItem(id: string): Promise<ReviewItem>;
   relaunchReviewItem(id: string, feedback: string, attachments?: string[]): Promise<ReviewItem>;
   /** Deny, the third outcome: the row closes as denied (a held post is not posted). */

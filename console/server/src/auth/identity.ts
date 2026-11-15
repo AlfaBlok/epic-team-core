@@ -21,7 +21,7 @@ export const authModeFromEnv = (env: NodeJS.ProcessEnv = process.env): AuthMode 
 
 export type Role = "owner" | "member";
 export type Identity =
-  | { kind: "session"; tenant: string; userId: string; email: string; name: string; role: Role }
+  | { kind: "session"; tenant: string; userId: string; email: string; name: string; role: Role; /** a login let into the home world on a customer site by CONSOLE_PLATFORM_DOOR (judged like a customer world, no owner powers) */ door?: true }
   | { kind: "token"; tenant: string; tokenId: string; label: string; /** only these paths (undefined = the whole world). */ paths?: string[]; /** the persona a seat token acts as with no console run. */ personaId?: string }
   | { kind: "legacy"; tenant: string; peer: string; /** the console host's own call (host owner token, auth/owner.ts): owner powers */ host?: true }
   | { kind: "none"; peer?: string };

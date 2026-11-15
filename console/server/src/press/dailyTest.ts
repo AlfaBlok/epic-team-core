@@ -127,6 +127,8 @@ export const cardFile = (r: TestRow) =>
     "  - ✓ Nothing real depends on it.",
     `evidence: [Open the test page](${sites().teamUrl}/)`,
     `screenshot: ${SHOT}`,
+    "source: The daily press test made it, to check that every button works.",
+    "decision: Press any button. The team recommends Mark complete.",
     "name: the test card",
     "confirm: yes",
     "---",

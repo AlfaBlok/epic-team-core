@@ -73,7 +73,7 @@ export function mountCounts(api: Hono, d: CountsDeps) {
     const worlds: WorldCounts[] = [];
     // on a customer site the platform world is never listed (its sign-in is refused there).
     const host = requestHost((n) => c.req.header(n));
-    for (const m of d.memberships(i.userId).filter((w) => !platformBlocked(host, w.tenantId))) {
+    for (const m of d.memberships(i.userId).filter((w) => !platformBlocked(host, w.tenantId, process.env, { email: i.email }))) {
       const scoped = { ...ctx, identity: { ...i, tenant: m.tenantId, role: m.role }, scope: m.tenantId };
       const n = m.tenantId === here ? await own() : await runWithAuth(scoped, own).catch(() => ({ needsYou: null, review: 0 }));
       worlds.push({ tenantId: m.tenantId, tenantName: m.tenantName || m.tenantId, role: m.role, current: m.tenantId === here, ...n });

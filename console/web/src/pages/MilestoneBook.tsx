@@ -9,6 +9,8 @@ import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/comm
 import { formatDateTime } from "@/lib/format";
 import { MadeList } from "@/components/bookMade";
 import { deckCodeOf, deckHref } from "@/lib/deck";
+import { MILESTONE_BOOK_PATH } from "@/lib/routePaths";
+export { MILESTONE_BOOK_PATH };
 
 /**
  * one milestone's Epic Book, the human page (the spine is for agents). Goal, where we are, the
@@ -18,7 +20,6 @@ import { deckCodeOf, deckHref } from "@/lib/deck";
  * we are, Plan, Next steps, then's "Everything made for this" (section id `made`, one fold per epic), then's
  * capabilities table (section id `capabilities`, the code repo's book), then Lately.
  */
-export const MILESTONE_BOOK_PATH = `${BOOK_PATH}/:key`;
 
 const ROW = 36;
 const W = 640;

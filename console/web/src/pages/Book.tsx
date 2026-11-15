@@ -45,7 +45,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function Epic({ e, repo }: { e: BookEpic; repo: BookRepo }) {
+function Epic({ e, repo, folded = [] }: { e: BookEpic; repo: BookRepo; folded?: BookEpic[] }) {
   const stuck = e.state === "stuck";
   const commitHref = (sha: string) => (repo.remote ? `https://github.com/${repo.remote}/commit/${sha}` : undefined);
   return (
@@ -69,6 +69,16 @@ function Epic({ e, repo }: { e: BookEpic; repo: BookRepo }) {
             </span>
           )}
           {!stuck && e.next && e.state === "moving" && <span className="mt-1 block truncate text-sm text-muted-foreground">Next: {e.next}</span>}
+          {folded.length > 0 && (
+            <span className="mt-1 block text-sm text-muted-foreground" data-testid="book-folded">
+              Folded in: {folded.map((f, i) => (
+                <span key={f.path} id={f.code} title={`${f.code} ${titleRest(f)} (${f.status})`}>
+                  {i > 0 && ", "}
+                  <span className="font-mono text-xs">{f.code}</span> {titleRest(f)}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
       </summary>
       <div className="grid grid-cols-1 gap-3 border-t p-3">
@@ -543,9 +553,11 @@ export function BookPage() {
             ))}
             {r.capabilities && <Capabilities t={r.capabilities} />}
             <div className="grid grid-cols-1 gap-2">
-              {epics.map((e) => (
-                <Epic key={e.path} e={e} repo={r} />
-              ))}
+              {epics
+                .filter((e) => !e.foldedInto)
+                .map((e) => (
+                  <Epic key={e.path} e={e} repo={r} folded={r.epics.filter((f) => f.foldedInto === e.path)} />
+                ))}
             </div>
           </Card>
         ))}

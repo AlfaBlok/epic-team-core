@@ -565,7 +565,7 @@ describe("E919-S1 milestone Chat tab", () => {
     const { m } = await renderPage("?tab=chat");
     expect((await screen.findByRole("tab", { name: "Chat" })).getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByText("Repo desk ready.")).toBeTruthy();
-    expect(get).toHaveBeenCalledWith(m.id, { limit: 30 });
+    expect(get).toHaveBeenCalledWith(m.id, { limit: 20 });
     expect(desk).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: /Open in T3/ }).getAttribute("href")).toContain(`repo-desk-${m.id}`);
     fireEvent.change(screen.getByLabelText("Message to the Repo desk"), { target: { value: "what happened today?" } });

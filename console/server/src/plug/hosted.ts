@@ -8,6 +8,7 @@ import type { SpineWriter } from "../inbox/spineWrite.js";
 import type { SecretPut, WorldKeys } from "./keys.js";
 import type { Assignment, Milestone, Run, Store } from "../store.js";
 import type { T3Client } from "../t3/client.js";
+import type { ObjectivesInput } from "../objectives.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import type { Vps3Target } from "../t3/remoteHost.js";
 import type { RunT3State } from "../cycle/reconcile.js";
@@ -43,7 +44,7 @@ export interface HostedContext {
   notify?: (text: string, id: string) => Promise<true | string>;
   /** Whether a world (tenant) exists. */
   hasTenant: (id: string) => boolean;
-  /** Make a paying tester's world (the tester flow owns it). */
+  /** Make a tester's world (the tester flow owns it). */
   makeWorld?: (signup: Record<string, any>, payment: "stripe") => Promise<any>;
 }
 
@@ -126,6 +127,8 @@ export interface ServicesContext {
   api: Hono;
   db: DB;
   options?: object;
+  /** where the repo checkouts live (a services plug may read a file of the home repo). */
+  reposRoot?: string;
 }
 
 /** A the memory service helper's answer wording (hosted: a hosted services module AskWorder). */
@@ -135,6 +138,25 @@ export type AskWorderShape = (question: string, context: string, names: string[]
 export interface Notifier {
   alert(kind: string, text: string): Promise<unknown>;
   tick(): Promise<unknown>;
+  /** the objectives' key results as the page shows them; one short WhatsApp when one turns green or red. */
+  keyResults?(list: KeyResultNow[], objectives?: () => Promise<ObjectivesInput | undefined>): Promise<unknown>;
+  /** one message marked TEST in the key-result alert's shape (the proof); nothing is recorded as told. */
+  keyResultTest?(list: KeyResultNow[], objectives?: () => Promise<ObjectivesInput | undefined>): Promise<{ ok: boolean; error?: string; receipt?: string; text?: string; picture?: string }>;
+  /** a picture of the objectives' lights (the changed key results ringed), kept and linked; the evening brief reuses it. */
+  /** where the evening brief (skill/report with `picture`) reads the objectives for its picture. */
+  useObjectives?(fn: () => Promise<ObjectivesInput | undefined>): void;
+  lightsPicture?(objectives: ObjectivesInput | undefined, o?: { changes?: { key: string; label: string; objective: string; from: string; to: string }[]; test?: boolean }): Promise<{ id: string; url: string; bytes: number } | undefined>;
+}
+/** one key result of an objective, now. */
+export interface KeyResultNow {
+  key: string;
+  objective: string;
+  label: string;
+  state: string;
+  value?: string;
+  note?: string;
+  doneMeans?: string;
+  test?: boolean;
 }
 
 /** the memory service's connections per world as core uses them (hosted: a hosted services module, a hosted services module). */

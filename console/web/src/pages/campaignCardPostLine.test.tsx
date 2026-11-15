@@ -122,7 +122,7 @@ describe("T58-S4 Chat: the world's team desk; each campaign's chat is its page's
         </MemoryRouter>
       </SkinProvider>,
     );
-    await waitFor(() => expect(world).toHaveBeenCalledWith("social", { limit: 30 }));
+    await waitFor(() => expect(world).toHaveBeenCalledWith("social", { limit: 20 }));
     expect(screen.queryByTestId("desk-campaign")).toBeNull();
     const box = await screen.findByLabelText(/Message to the Team desk/);
     fireEvent.change(box, { target: { value: "Which campaign needs me?" } });

@@ -5,6 +5,7 @@ import { section, stripInline, tables } from "../adapters/markdown.js";
 import type { SpineNode, SpinesJson } from "../adapters/spines.js";
 import { FEATURES_FILE, readFeatureLists, type FeatureList } from "./features.js";
 import { deliverablesFor, firstDates, readCards, readDocEntries, readNotedPreviews, type Deliverable, type PreviewEntry } from "./deliverables.js";
+import { applyFolds, readFolds } from "../folds.js";
 
 /**
  * the Epic Book, one page that answers "where are we". Built from `spines.py --json` (goal,
@@ -46,6 +47,8 @@ export interface BookEpic {
   title: string;
   depth: number;
   parent: string | null;
+  /** view-only fold (docs/epic-folds.json): the parent epic's path this one is shown inside; `parent` is that path too. */
+  foldedInto?: string;
   status: string;
   state: BookState;
   goal: string | null;
@@ -382,7 +385,8 @@ export function buildRepoBook(
   // read once per repo, shared by every epic's "everything made for this".
   const docEntries = readDocEntries(repo.path);
   const made = { fileDates: firstDates(commits), cards: readCards(repo.path), docEntries, noted: readNotedPreviews(repo.path, docEntries), previews: opts.previews ?? [] };
-  const epics: BookEpic[] = spines.nodes.map((n) => {
+  const nodes = applyFolds(spines.nodes, readFolds(repo.path));
+  const epics: BookEpic[] = nodes.map((n) => {
     const d = n.parent && depth.has(n.parent) ? depth.get(n.parent)! + 1 : 0;
     depth.set(n.path, d);
     const cs = (n.current_state ?? {}) as Record<string, unknown>;
@@ -405,6 +409,7 @@ export function buildRepoBook(
       title: n.title || path.basename(n.path, ".md"),
       depth: d,
       parent: n.parent,
+      ...(n.folded_into ? { foldedInto: n.folded_into } : {}),
       status,
       state,
       goal: clean(n.goal),

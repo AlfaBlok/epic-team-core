@@ -12,6 +12,15 @@ import type { StartGate } from "../cycle/startGate.js";
 import { type HostId, mainHost, ownerName, workerHost, hostReposRoot } from "../identity.js";
 
 /**
+ * The desk's replies once opened with a `Plot: …` line, a name the owner never asked for ("I never asked you for any
+ * feature that has the word plot in it"): the chat drops that
+ * first line from the replies that still carry it, so he no longer reads it anywhere.
+ */
+export function dropLabelLine(text: string): string {
+  return text.replace(/^Plot:[^\n]*\n*/, "");
+}
+
+/**
  * the keyed chat-session engine shared by the Team desk (key `team`) and every milestone's repo desk (key
  * `milestone:<id>`). Each key has ONE long-lived T3 thread run by a persona: the console only records which thread that is
  * (`desk_session`, one live row per key); the transcript is the T3 thread, read back on demand through a settled cursor. The
@@ -37,8 +46,23 @@ export const CACHED_MESSAGES = 40;
 const UNSETTLED_MAX_MS = 10 * 60_000;
 /** Pages of 100 items read per call before giving up on a very long thread (the next call continues from the cursor). */
 const MAX_PAGES = 40;
-/** A send that T3 keeps refusing (compaction) runs on in the background; the request answers after this long. */
-export const SEND_WAIT_MS = 20_000;
+/**
+ * the owner's send answers after at most this long (`pending: true`), the T3 work (thread check, send, busy
+ * retries) runs on after the reply; a failure lands on `sendError` with his message's clientRequestId. Was 20 s, which
+ * held his phone's Send on three T3 calls over the worker server's tunnel (0.2 to 2.2 s each, measured 2026-11-12).
+ */
+export const SEND_WAIT_MS = 1_200;
+/**
+ * right after a send the next view waits for T3 at most this long (so his message shows from the thread), then the last good
+ * view answers (`stale: true`) and his own bubble stays on the page until a later read shows it. Was unbounded: on
+ * 2026-11-13 a read after his send held the Chat for 41 s while the worker server's tunnel dropped calls.
+ */
+export const SEND_VIEW_WAIT_MS = 2_000;
+/**
+ * an older page (scrolling up) waits for T3 at most this long; past it the page answers `loading: true` with nothing, the read
+ * runs on into the cache and the chat retries by itself. Was unbounded: on 2026-11-14 Team desk reads took 10.5 to 56.4 s.
+ */
+export const EARLIER_BUDGET_MS = 2_000;
 const WORKING = new Set(["preparing", "queued", "starting", "running"]);
 /**
  * the start of the turn in progress: the active run (by id, else the newest unfinished one), startedAt else
@@ -191,7 +215,8 @@ export interface DeskView {
   workingSince?: string;
   /** Messages the owner sent that T3 has not accepted yet (a busy thread retries for minutes). */
   sending: number;
-  sendError?: { text: string; at: string };
+  /** the last send that failed after its request answered; `clientRequestId` names his message. */
+  sendError?: { text: string; at: string; clientRequestId?: string };
   messages: DeskMessage[];
   /** Older messages exist beyond the tail returned. */
   hasEarlier: boolean;
@@ -222,6 +247,8 @@ export interface ViewOpts {
 export interface EarlierPage {
   messages: DeskMessage[];
   hasEarlier: boolean;
+  /** T3 did not answer within EARLIER_BUDGET_MS: the read goes on into the cache, ask again in a moment (never an error). */
+  loading?: boolean;
 }
 /** `?limit=&before=` of a chat read (absent or not a number = unset). */
 export function viewOpts(q: (name: string) => string | undefined): ViewOpts {
@@ -265,6 +292,10 @@ export interface SessionDeps {
   sendWaitMs?: number;
   /** how long a chat view waits for T3 before the last good view answers (tests). */
   viewBudgetMs?: number;
+  /** how long the first view after a send waits for T3 before the last good view answers (tests). */
+  sendViewWaitMs?: number;
+  /** how long an older page waits for T3 before it answers `loading: true` (tests). */
+  earlierBudgetMs?: number;
   /** why T3 is down (default: the maintenance markers under the console user's home). */
   t3DownReason?: () => "restarting" | "maintenance";
   /**
@@ -484,7 +515,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
       return { ...base, kind: "seed", text: "", session: seq, ...(note ? { note } : {}) };
     }
     const hint = m.role === "user" ? PAGE_PREFIX.exec(m.text) : null;
-    const said = m.role === "user" ? splitSince(hint ? m.text.slice(hint[0].length) : m.text) : { text: m.text };
+    const said = m.role === "user" ? splitSince(hint ? m.text.slice(hint[0].length) : m.text) : { text: dropLabelLine(m.text) };
     return { ...base, kind: "message", text: said.text, ...(hint ? { page: hint[1] } : {}), ...(said.since ? { since: said.since } : {}) };
   };
 
@@ -723,6 +754,30 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     return { messages: out, hasEarlier: more };
   }
 
+  /**
+   * the page of messages older than `before` (a position) of the live session `s`, newest `n` of them. Reads back from T3 only
+   * what the cache does not hold yet; past the live thread's start it goes on into the earlier sessions.
+   */
+  async function readEarlier(s: DeskSession, before: number, n: number): Promise<EarlierPage> {
+    // a negative position is an earlier session's (the chat scrolled up past the live thread's start)
+    if (before < 0) return historyPage(s, before, n);
+    const k = cacheFor(s.threadId);
+    // a cache that has read nothing yet (a restart, while the chat page kept its older pages) reads back from `before`, not from 0
+    if (k.cursor === undefined && k.byItem.size === 0 && k.from === 0) k.from = before;
+    const older = () => visible([...k.byItem.values()].sort((a, b) => a.position - b.position)).filter((m) => m.position < before);
+    let have = older();
+    while (have.length <= n && k.from > 0) {
+      await readBack(k, Math.max(0, Math.min(k.from, before) - TAIL_WINDOW));
+      have = older();
+    }
+    const nth = ordinal(s.seq);
+    const mine = have.slice(-n).map((m) => present(m, nth, { rowSeq: s.seq }));
+    if (have.length > n || k.from > 0) return { messages: mine, hasEarlier: true };
+    // the live thread's start: the chat goes on into its earlier sessions
+    const h = await historyPage(s, undefined, n - mine.length);
+    return { messages: [...h.messages, ...mine], hasEarlier: h.hasEarlier };
+  }
+
   // ----: tell the live thread the current endpoint list, once per seed version ----
   let syncing: Promise<void> | undefined;
   let syncError: string | undefined;
@@ -737,7 +792,8 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     syncing ??= (async () => {
       const s = current();
       if (!s || s.seedVersion >= p.seedVersion || !d.t3) return;
-      // the seat is limited / logged out: the update waits for headroom (a later open sends it; a move seeds the new list)
+      // the seat is limited / logged out: the update waits for headroom (it never reaches the owner, so it never moves the
+      // chat by itself; the next owner send or console note moves it, and a move seeds the new list)
       if (blocked(s)) return;
       // the main server at its session cap: the update waits (the next open of this chat tries again)
       if (await capFull(s.host)) return;
@@ -781,7 +837,9 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
 
   // ---- sends in flight ----
   let sending = 0;
-  let sendError: { text: string; at: string } | undefined;
+  let sendError: { text: string; at: string; clientRequestId?: string } | undefined;
+  /** the owner's sends reach T3 one at a time, in the order he wrote them. */
+  let sendChain: Promise<unknown> = Promise.resolve();
 
   /** Frame the owner's text with the page hint he sent it from. */
   const frame = (text: string, page?: string) => {
@@ -798,6 +856,10 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   /** the desk_view_cache row last written by this process. */
   let persisted: string | undefined;
   const viewBudgetMs = d.viewBudgetMs ?? VIEW_BUDGET_MS;
+  const sendViewWaitMs = d.sendViewWaitMs ?? SEND_VIEW_WAIT_MS;
+  const earlierBudgetMs = d.earlierBudgetMs ?? EARLIER_BUDGET_MS;
+  /** older-page reads in flight, by `before|n`: a retry joins the read under way instead of starting another. */
+  const olderReads = new Map<string, Promise<EarlierPage>>();
   const downReason = () => (d.t3DownReason ?? t3DownReason)();
 
   interface OutboxRow {
@@ -910,8 +972,13 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     sessions,
     ensureSession,
     syncSeed,
-    /** why the live session's seat cannot take a turn now (console notes wait for headroom), else undefined. */
+    /** why the live session's seat cannot take a turn now (still blocked after moveIfBlocked = no seat with headroom), else undefined. */
     blocked: () => blocked(),
+    /**
+     * a console note that must reach the owner (the 20:00 digest, the evening scorecard, a delivered note) moves off
+     * a limited / logged-out seat exactly like his own send; no seat with headroom keeps the old session.
+     */
+    moveIfBlocked,
     syncError: () => syncError,
     jordiMessages,
     newestUserMessage,
@@ -948,18 +1015,23 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     /**
      * The chat as the owner sees it. Launches the thread on first open (that is its one-time creation). The newest
      * `limit` messages (default TAIL_MESSAGES); T3 gets VIEW_BUDGET_MS, then the last good view answers (`stale: true`)
-     * while the live read finishes for the next poll. Right after a send it waits for T3, so his message shows.
+     * while the live read finishes for the next poll. Right after a send it waits for T3 up to SEND_VIEW_WAIT_MS, so his message shows.
      */
     async view(o: ViewOpts = {}): Promise<DeskView> {
       const idle = { working: false, sending: 0, messages: [], hasEarlier: false };
       if (!d.t3) return { available: false, reason: p.unavailable, ...idle };
       const limit = Math.max(1, Math.min(TAIL_MESSAGES, Math.floor(o.limit ?? TAIL_MESSAGES)));
       const live = freshView();
-      const last = mustWait ? undefined : lastView();
+      const last = lastView();
       if (!last) return shape(await live, limit);
+      // right after a send it waits longer (his message should come from the thread), never unbounded
+      const budget = mustWait ? sendViewWaitMs : viewBudgetMs;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const won = await Promise.race([live, new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), viewBudgetMs)))]).finally(() => clearTimeout(timer));
+      const won = await Promise.race([live, new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), budget)))]).finally(() => clearTimeout(timer));
       if (won) return shape(won, limit);
+      // one waited read per send. The page keeps his own bubble and re-reads every second while stale; were
+      // mustWait left on, each of those re-reads would wait sendViewWaitMs again (14 reads of 2 s in a row on 2026-11-14).
+      mustWait = false;
       live.catch((e) => console.warn(`desk ${p.key}: background read failed: ${errorText(e)}`));
       const q = queued();
       const { queued: _q, sendError: _e, ...rest } = last;
@@ -968,27 +1040,26 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
 
     /**
      * the page of messages older than `before` (a position), newest `limit` of them, for the owner scrolling up.
-     * Reads back from T3 only what the cache does not hold yet. Never launches a thread.
+     * T3 gets EARLIER_BUDGET_MS, then `loading: true` answers and the read finishes into the cache for the chat's retry.
+     * Never launches a thread.
      */
     async earlier(before: number, limit = 30): Promise<EarlierPage> {
       const s = current();
       if (!s || !d.t3) return { messages: [], hasEarlier: false };
       const n = Math.max(1, Math.min(TAIL_MESSAGES, Math.floor(limit)));
-      // a negative position is an earlier session's (the chat scrolled up past the live thread's start)
-      if (before < 0) return historyPage(s, before, n);
-      const k = cacheFor(s.threadId);
-      const older = () => visible([...k.byItem.values()].sort((a, b) => a.position - b.position)).filter((m) => m.position < before);
-      let have = older();
-      while (have.length <= n && k.from > 0) {
-        await readBack(k, Math.max(0, Math.min(k.from, before) - TAIL_WINDOW));
-        have = older();
+      const key = `${s.threadId}|${before}|${n}`;
+      let read = olderReads.get(key);
+      if (!read) {
+        read = readEarlier(s, before, n).finally(() => olderReads.delete(key));
+        olderReads.set(key, read);
       }
-      const nth = ordinal(s.seq);
-      const mine = have.slice(-n).map((m) => present(m, nth, { rowSeq: s.seq }));
-      if (have.length > n || k.from > 0) return { messages: mine, hasEarlier: true };
-      // the live thread's start: the chat goes on into its earlier sessions
-      const h = await historyPage(s, undefined, n - mine.length);
-      return { messages: [...h.messages, ...mine], hasEarlier: h.hasEarlier };
+      const r = read;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const won = await Promise.race([r, new Promise<undefined>((ok) => (timer = setTimeout(() => ok(undefined), earlierBudgetMs)))]).finally(() => clearTimeout(timer));
+      if (won) return won;
+      // the read runs on into the cache (the chat's retry finds it there); its failure is logged, never shown red
+      r.catch((e) => console.warn(`desk ${p.key}: older page before ${before} failed: ${errorText(e)}`));
+      return { messages: [], hasEarlier: true, loading: true };
     },
 
     /** deliver the sends queued while T3 was down (the desk tick calls it too). */
@@ -1017,42 +1088,53 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
         void flushQueued().catch(() => undefined);
         return out;
       }
-      let s: DeskSession;
-      try {
-        s = await moveIfBlocked(await ensureSession()); // off a limited seat first
-      } catch (e) {
-        if (isT3Unavailable(e)) return queue();
-        throw e;
-      }
-      const c = client(s);
-      sending++;
+      // the thread check and the send run after the reply (never longer than sendWaitMs), behind his earlier sends.
+      let threadId = current()?.threadId ?? "";
       mustWait = true; // the next view waits for T3, so his message shows (not the view from before it)
-      gateFor(s.host)?.mark(`desk ${p.key} ${ownerName()}'s message`); // never waits, but the next automated start keeps its distance
-      const job = c.sendToThread(s.threadId, message, crid, "auto").then(
-        () => {
-          sendError = undefined;
-          return "done" as const;
-        },
-        (e) => {
+      sending++;
+      const run = async (): Promise<"done" | "queued"> => {
+        let s: DeskSession;
+        try {
+          s = await moveIfBlocked(await ensureSession()); // off a limited seat first
+        } catch (e) {
           if (isT3Unavailable(e)) {
             enqueue(crid, body, page, message);
-            return "queued" as const;
+            return "queued";
           }
-          sendError = { text: errorText(e), at: iso() };
           throw e;
-        },
-      );
-      const settled = job.finally(() => {
-        sending--;
-      });
-      const outcome = await Promise.race([
-        settled,
-        new Promise<"wait">((r) => setTimeout(() => r("wait"), sendWaitMs)),
-      ]).catch((e) => {
-        throw new DeskError(502, "t3_error", errorText(e));
-      });
-      if (outcome === "wait") settled.catch(() => undefined); // keep retrying; the failure is on sendError
-      return { threadId: s.threadId, pending: outcome !== "done", ...(outcome === "queued" ? { queued: true } : {}) };
+        }
+        threadId = s.threadId;
+        gateFor(s.host)?.mark(`desk ${p.key} ${ownerName()}'s message`); // never waits, but the next automated start keeps its distance
+        try {
+          await client(s).sendToThread(s.threadId, message, crid, "auto");
+        } catch (e) {
+          if (isT3Unavailable(e)) {
+            enqueue(crid, body, page, message);
+            return "queued";
+          }
+          throw e;
+        }
+        sendError = undefined;
+        return "done";
+      };
+      const job = sendChain.then(run, run);
+      sendChain = job.catch(() => undefined);
+      const settled = job
+        .catch((e) => {
+          sendError = { text: errorText(e), at: iso(), clientRequestId: crid };
+          throw e;
+        })
+        .finally(() => {
+          sending--;
+        });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([settled, new Promise<"wait">((r) => (timer = setTimeout(() => r("wait"), sendWaitMs)))])
+        .catch((e) => {
+          throw e instanceof DeskError ? e : new DeskError(502, "t3_error", errorText(e));
+        })
+        .finally(() => clearTimeout(timer));
+      if (outcome === "wait") settled.catch(() => undefined); // keeps going; a failure is on sendError with his clientRequestId
+      return { threadId: threadId || (current()?.threadId ?? ""), pending: outcome !== "done", ...(outcome === "queued" ? { queued: true } : {}) };
     },
   };
 

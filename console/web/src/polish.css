@@ -32,9 +32,10 @@ main section > div.min-h-11 > button, main section > div.min-h-11 h2 { font-size
 main section > .border-t.px-3 { padding: 16px !important; }
 main button.h-8, main a.h-8 { border-radius: 8px !important; }
 main .rounded-md.border.px-2, main .rounded-md.border.px-1\.5 { border-radius: 6px !important; }
-/* grid children may shrink; badges inside cards wrap instead of pushing a card past the screen */
+/* grid children may shrink; badges inside cards wrap instead of pushing a card past the screen (never a button: a
+   card button keeps its label on one line, components/ui/cardButton.tsx) */
 main .grid > * { min-width: 0; }
-main .rounded-xl .whitespace-nowrap.rounded-md, main .rounded-lg .whitespace-nowrap.rounded-md { white-space: normal !important; }
+main .rounded-xl .whitespace-nowrap.rounded-md:not(button, a, [data-card-button]), main .rounded-lg .whitespace-nowrap.rounded-md:not(button, a, [data-card-button]) { white-space: normal !important; }
 main .grid:has(> [data-testid="milestone-card"]), main .grid:has(> .rounded-xl), main .grid:has(> .rounded-lg), main .grid:has(> section) { align-items: start; }
 
 /* R1-3. Sidebar: a quieter ground, 14 px items, 12 px headings, thin progress bars. */
@@ -48,7 +49,10 @@ main a, main code, main .font-mono { overflow-wrap: anywhere; }
 [data-testid="monitor-alert-line"] { overflow-wrap: anywhere; }
 [data-testid="monitor-alert-line"] * { white-space: normal !important; }
 [data-testid="monitor-alert-line"] > div { flex-wrap: wrap !important; align-items: baseline !important; row-gap: 4px; }
-[data-testid="monitor-alert-line-why"] { flex: 1 1 0 !important; min-width: 0 !important; color: inherit !important; font-weight: 500; }
+/* who and what on the first line, what unblocks it on its own full-width line under them (three side-by-side
+   columns squashed it to one word a line on a phone) */
+[data-testid="monitor-alert-line-why"] { order: 1; flex: 1 1 100% !important; min-width: 0 !important; color: inherit !important; font-weight: 500; }
+[data-testid="monitor-alert-line-what"] { flex: 1 1 12rem !important; }
 /* an alarm under "Nothing waiting on you" reads as an alarm (an amber notice), not grey small print */
 [data-testid="monitor-alert-line"][data-state="alarm"] { background: hsl(38 92% 95%); color: hsl(28 80% 26%) !important; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
 .dark [data-testid="monitor-alert-line"][data-state="alarm"] { background: hsl(38 60% 12%); color: hsl(38 90% 80%) !important; }
@@ -164,3 +168,51 @@ main .border-amber-500\/40, main .border-amber-500\/60 { border-color: hsl(38 85
 .dark [data-testid="waiting-card"] .text-muted-foreground, .dark [data-testid="review-card"] .text-muted-foreground { color: hsl(240 5% 70%) !important; }
 /* the Why line 15 px, the rest of a card 14 px. */
 [data-testid="ask-why"], [data-testid="review-task-goal"] { font-size: 15px !important; line-height: 1.5 !important; }
+
+/* the phone Home (the owner: the social Home "on the mobile … a total mess"): on a touch screen
+   every button, select and button-like link on either skin is at least 40 px (both products: one engine, two skins), so a finger hits it.
+   scripts/social_qc.mjs measures it at 390 and 768 px. */
+@media (pointer: coarse) {
+  main :is(button, select, input:not([type="checkbox"]):not([type="radio"]), [role="button"], summary, a.inline-flex) { min-height: 40px; }
+  main :is(button, [role="button"]) { min-width: 40px; }
+  /* a link standing on its own (a card's Open link, its project in the card's top line, a step's link) and the menu,
+     topbar and sidebar links: a finger-sized row, the words unchanged */
+  /* (a whole-row link marked data-line, the Inbox's goal lines, is taller than 40 px already and keeps its own layout) */
+  main :is(a[data-testid$="-go"], li > a:only-child:not([data-line])),
+  :is(nav, aside, [data-testid="topbar"]) :is(a, button) { display: inline-flex; align-items: center; min-height: 40px; }
+  [data-testid="topbar"] :is(a, button) { min-width: 40px; justify-content: center; }
+  :is(nav, aside) a { display: flex; }
+  :is(nav, aside) button { min-width: 40px; min-height: 40px; }
+  /* any link that stands alone (a flex or grid item, so not inside running text) is finger-tall; a link inside a
+     sentence stays inline and is not touched */
+  main a { min-height: 40px; }
+  /* the team's cards in the Inbox: their links stand alone on a line */
+  main :is([data-testid="team-card"] a, a[data-testid="digest-open"]) { display: inline-flex; align-items: center; min-height: 40px; }
+  /* a card's top line stays ONE row on a phone (the owner 22:43Z: the inbox "is broken completely on the phone"): its
+     taps are 40 px tall but tucked into the line with a negative margin, as the priority word does */
+  main [data-card-meta] :is(a, button) { display: inline-flex; align-items: center; min-height: 40px; margin-block: -11px !important; }
+  /* one row even when the line is long: the project name gives way (ends in …, its full name in its tooltip) */
+  /* only a line that holds a tap (a link or a button) is held to one row; a plain-text line wraps as on EpicTeam */
+  main [data-card-meta]:has(a, button) { flex-wrap: nowrap; }
+  main [data-card-meta]:has(a, button) > * { flex-shrink: 0; }
+  main [data-card-meta] { min-width: 0; max-width: 100%; }
+  /* plain text in the line gives way too (a week, "from the Senior advisor"); the kind word, buttons and age stay */
+  main [data-card-meta]:has(a, button) > span:not([data-card-kind-word]) { flex-shrink: 1; min-width: 1.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  main [data-card-meta]:has(a, button) > a { flex-shrink: 1; min-width: 2.5rem; display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+/* the finger-sized rows above set display on top bar links; from tablet width up, what the top bar hides (the menu
+   button and the brand, the sidebar shows them) stays hidden */
+@media (pointer: coarse) and (min-width: 768px) {
+  [data-testid="topbar"] .md\:hidden { display: none !important; }
+}
+@media (pointer: coarse) and (max-width: 480px) {
+  /* on a phone a line with a priority word has no room for the age too: the age goes, the card's own page keeps it */
+  main [data-card-meta]:has(> button) > time { display: none; }
+}
+
+/* a card with a ticket code takes a long-press (priority mode): the phone's own callout and text selection
+   would cover it. Touch screens only, so text on a laptop still selects. */
+@media (pointer: coarse) {
+  [data-row] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  [data-row] :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
+}

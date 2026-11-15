@@ -62,5 +62,33 @@
 /* on a phone the note row wraps (box on its own line, Voice and Send under it) and never pushes Stuck or Send past the card. */
 .sk-note { flex-wrap: wrap; }
 .sk-note textarea { flex: 1 1 100%; min-width: 0; width: 0; }
+/* the box holds three lines at every width (phones and the narrow Mac ticket cards), so its whole hint shows. */
+.sk-note textarea { min-height: 4.6rem; line-height: 1.35; }
 .sk-voice, .sk-send { flex: 1 1 auto; }
 @media (min-width: 560px) { .sk-note { flex-wrap: nowrap; } .sk-note textarea { flex: 1 1 auto; } .sk-voice, .sk-send { flex: none; } }
+/* the note box records in place and takes pictures, the same on every steps page. */
+.sk-voice, .sk-pic { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.sk-pic { font: 600 .9rem system-ui, sans-serif; padding: .55rem .8rem; border: 1px solid var(--sk-accent, #1f4d3a); border-radius: 8px; background: #fff; color: var(--sk-accent, #1f4d3a); cursor: pointer; white-space: nowrap; }
+.sk-pic:hover { background: #eef3ef; }
+.sk-pic:disabled, .sk-voice:disabled { opacity: .55; cursor: default; }
+.sk-voice-dot { display: none; width: .65rem; height: .65rem; border-radius: 50%; background: #fff; }
+.sk-voice.on { background: #9b2c1f; border-color: #9b2c1f; color: #fff; }
+.sk-voice.on .sk-voice-dot { display: inline-block; animation: sk-blink 1s infinite; }
+.sk-voice.is-ready:not(.on) { box-shadow: 0 0 0 3px #f4d58d; }
+@keyframes sk-blink { 50% { opacity: .25; } }
+.sk-rec { display: flex; align-items: center; gap: .7rem; padding: .45rem .65rem; border-radius: 8px; background: #f8e5df; color: #5c1a12; font-size: .9rem; }
+.sk-rec[hidden] { display: none; }
+.sk-rec-time { font: 700 1.05rem ui-monospace, Menlo, monospace; }
+.sk-rec-say { flex: 1; min-width: 0; }
+.sk-rec-cancel { background: none; border: 0; color: #5c1a12; text-decoration: underline; cursor: pointer; font: inherit; }
+.sk-files { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.sk-files[hidden] { display: none; }
+.sk-file-item { display: flex; align-items: center; gap: .4rem; padding: .25rem .35rem; border: 1px solid var(--sk-line, #c9c1ae); border-radius: 8px; background: #fff; font-size: .82rem; color: var(--sk-muted, #4a554e); max-width: 100%; }
+.sk-file-item img { width: 3rem; height: 3rem; object-fit: cover; border-radius: 5px; flex: none; }
+.sk-file-item.is-up span::before { content: ""; display: inline-block; width: .7em; height: .7em; margin-right: .3em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -.1em; animation: sk-spin .8s linear infinite; }
+.sk-file-item.err { border-color: #9b2c1f; color: #9b2c1f; }
+.sk-file-item button { border: 0; background: none; font-size: 1.15rem; line-height: 1; cursor: pointer; color: inherit; padding: 0 .2rem; }
+.sk-notes a { color: var(--sk-accent, #1f4d3a); }
+.sk-voice, .sk-pic, .sk-send { min-height: 2.6rem; }
+.sk-pic { flex: 1 1 auto; }
+@media (min-width: 560px) { .sk-pic { flex: none; } }

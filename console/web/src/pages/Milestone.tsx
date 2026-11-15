@@ -29,6 +29,7 @@ import { BriefTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab }
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
 import { CampaignGoalBlock } from "@/components/CampaignGoal";
+import { CampaignChannels } from "@/components/CampaignChannels";
 import { CampaignProvider, campaignsByMilestone, repoLevelIds, useCampaigns } from "@/lib/campaign";
 import { CampaignForceReview, PipelinePage } from "@/pages/social/Pipeline";
 import { HistoryPage } from "@/pages/social/History";
@@ -54,6 +55,8 @@ import { openAskCodes } from "@/lib/status";
 import { useBlocked, useMilestoneStatus } from "@/lib/inbox";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
+import { InlineMd } from "@/components/inlineMd";
+export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
 const CAMPAIGN_TABS = ["pipeline", "brief", "history"] as const;
@@ -246,6 +249,8 @@ export function MilestonePage() {
       <MilestoneStrip status={status} waitingHref={five ? "?tab=waiting" : tabHref("waiting", node)} />
       {/* a campaign is tracked by its name and its one goal: the goal, the number toward it, what waits on the owner. */}
       {card?.goal && <CampaignGoalBlock card={card} />}
+      {/* per channel the account, its sign-in, cadence, objective, metric and the summed counts with the trend. */}
+      {card?.channels?.length ? <CampaignChannels card={card} /> : null}
       {five && scope ? (
         <>
           <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "deck" ? {} : { tab: t }, { replace: true })} />
@@ -897,28 +902,6 @@ export function MilestoneDeckTab({ m, epic }: { m: Milestone; epic?: string }) {
 // ---------- Overview ----------
 
 export const UNTRACKED_NOTE = "These criteria aren't checkboxes, so progress can't be tracked. Make them `- [ ]` items under `## Definition Of Done` to track them.";
-
-/** Inline markdown for spine text: **bold** and `code`; links shown as their label. */
-export function InlineMd({ text }: { text: string }) {
-  const parts = text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((p, i) =>
-        p.startsWith("**") && p.endsWith("**") && p.length > 4 ? (
-          <strong key={i} className="font-semibold">
-            {p.slice(2, -2)}
-          </strong>
-        ) : p.startsWith("`") && p.endsWith("`") && p.length > 2 ? (
-          <code key={i} className="rounded bg-muted px-1 font-mono text-[0.85em]">
-            {p.slice(1, -1)}
-          </code>
-        ) : (
-          p
-        ),
-      )}
-    </>
-  );
-}
 
 export function DodCard({ m }: { m: Milestone }) {
   const dod = m.dod ?? { done: 0, total: 0, items: [] };

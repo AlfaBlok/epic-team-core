@@ -24,3 +24,20 @@ export function expiryState(iso: string | undefined, now: Date = new Date()): Ex
   if (left <= 0) return "expired";
   return left < 3 * 86_400_000 ? "soon" : "ok";
 }
+
+/**
+ * A row's sync state in the owner's words. Out of sync = what makes the browser service send a reminder: the
+ * session reads dead, or the login (its login cookies, else the earliest cookie) runs out within 3 days. The line is
+ * the reminder's own first words ("Out of sync: @SamNews, lives in profile example.com (ops@)."), so the
+ * page shows its form before any login goes stale.
+ */
+export function syncState(
+  site: { pattern: string; accounts?: string[]; profileLabel?: string; sourceProfile?: string; session?: string; loginCookie?: string; loginExpiry?: string; earliestExpiry?: string },
+  now: Date = new Date(),
+): { stale: boolean; line: string } {
+  const exp = site.loginCookie ? site.loginExpiry : site.earliestExpiry;
+  const stale = site.session === "dead" || ["soon", "expired"].includes(expiryState(exp, now));
+  const who = site.accounts?.length ? site.accounts.map((a) => "@" + a.replace(/^@/, "")).join(", ") : site.pattern.replace(/^\*\./, "");
+  const where = site.profileLabel ?? site.sourceProfile;
+  return { stale, line: `${stale ? "Out of sync" : "In sync"}: ${who}${where ? `, lives in profile ${where}` : ""}.` };
+}

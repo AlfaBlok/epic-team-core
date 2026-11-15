@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ParkButton, parkAsk } from "@/components/parkButton";
+import { useSlotReady } from "@/components/slot";
 import { OwnerPriorityTag } from "./ownerPriority";
 import { NoteMarkBand } from "./noteMark";
 import { Link } from "react-router-dom";
@@ -8,7 +10,8 @@ import { StampButton } from "@/components/planning";
 import { LinkedText } from "@/components/outcome";
 import { api, ASK_VERB, codeLabel, SNOOZE_CHOICES, isStructured, jobActive, needsAnswer, type OwnerActivity, type OwnerResponse, type MilestoneStatusView, type MonitorAlertAsk, type PendingItem, type SnoozeChoice, type SpineRef, type StatusBatch, type WaitingItem, type WakeResult } from "@/api";
 import { askBookLink } from "@/lib/book";
-import { invalidate, mutate, useQuery } from "@/lib/data";
+import { invalidate, mutate, useQuery, useWaitingList } from "@/lib/data";
+import { useInboxSearch } from "@/lib/inboxSearch";
 import { onReconnecting } from "@/api/real";
 import { clearSnoozeError, relayOf, snoozeItem, unsnoozeItem, useSnoozes, withSnoozes } from "@/lib/snooze";
 import { formatDateTime, formatRelative, milestoneName } from "@/lib/format";
@@ -18,9 +21,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, ErrorBox, IssuedAge, PHONE_TAP, RelTime, threadHref, ThreadLink } from "@/components/common";
+import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach, wordsWithFiles } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
+import { CardFeedback, FeedbackBlock, type FeedbackTarget } from "@/components/cardFeedback";
+import { CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { GrantWriteAction, waitingAnchor } from "@/components/unblock";
 import { ACTION, PRESS } from "@/components/cardActions";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
@@ -29,10 +35,11 @@ import { pendingAction } from "@/lib/pending";
 import { blockedItems, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
-import { LaptopSwitch, laptopRows, MacCards } from "@/components/laptopSwitch";
+import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
 import { showClosed } from "@/lib/afterClose";
 import { DEFAULT_SKIN, useWords } from "@/lib/skin";
 import { AskSet, askSets } from "@/components/askSet";
+import { AskVerdictTap } from "@/components/askLog";
 import { askLead, askLeadUrl, cardBody, cardHeading, KIND_WORD, projectLabel, splitSteps } from "@/lib/askLead";
 import { deployerName, sites } from "@/lib/identity";
 
@@ -194,6 +201,25 @@ function HumanSections({ item, linkOnly }: { item: WaitingItem; linkOnly?: boole
         ))}
     </dl>
   );
+}
+
+/** E948-S60: an option that asks for his own words ("your own number", "something else"): picked, it opens its own box. */
+export const isOwnOption = (o: string) => /^(?:\(?[a-z1-9]\)\s*)?(?:your own|own|other|something else|another)\b/i.test(o.trim());
+
+/**
+ * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "the buttons need to be the decisions ... what I'm clicking is what's the
+ * next step"): every decision button names what happens next. An option that is a bare word (Yes, No, OK) gets its next
+ * step; one that already says it ("No, use the logo") stays as written. The answer sent is still the option itself.
+ */
+export const YES_LABEL = "Yes: go ahead";
+/** an option's own words may be long: its button wraps inside the card (never clipped), the label left-aligned. */
+export const OPTION_BUTTON = "h-auto min-h-8 max-w-full shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]";
+export const NO_LABEL = "No: drop it";
+export function optionLabel(o: string): string {
+  const t = o.trim().replace(/[.!]$/, "");
+  if (/^(?:yes|yep|ok|okay|sure|go|approve)$/i.test(t)) return YES_LABEL;
+  if (/^(?:no|nope|decline|not now)$/i.test(t)) return NO_LABEL;
+  return o;
 }
 
 /** Recommended option first, then the rest in the order written. */
@@ -403,41 +429,41 @@ export function FyiCard({ item, showMilestone = false, qualify = false }: { item
     }
   };
   return (
-    <Card className="min-w-0 border-border [overflow-wrap:anywhere]" data-testid="fyi-card" id={waitingAnchor(item.id)}>
-      <CardContent className="grid grid-cols-1 gap-1 p-3 text-sm">
-        {/* one meta line in plain words, the code as a light tag, the actions pinned right. */}
-        <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto]" data-testid="fyi-head">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-muted-foreground" data-testid="fyi-meta">
-            <span>Decided by {decidedByName(item.decidedBy)}</span>
-            {code && <span className="rounded-[5px] bg-muted px-1.5 py-px font-mono text-xs font-medium text-foreground/80">{code}</span>}
-            {showMilestone && (
-              <Link className="text-foreground hover:underline" to={`/milestones/${item.milestoneId}`}>
-                {onceTitle(item.milestoneTitle)}
-              </Link>
-            )}
-            {item.since && <RelTime iso={item.since} />}
-          </div>
-          {r ? (
-            <span className="text-xs text-muted-foreground" data-testid="fyi-reversed">
-              You asked to reverse this <RelTime iso={r.createdAt} />
-              {r.delivery !== "sent" ? ` (not delivered: ${r.deliveryError ?? r.delivery})` : ""}
-            </span>
-          ) : (
-            <span className="flex min-w-0 items-center justify-between gap-2 sm:justify-end" data-testid="fyi-actions">
-              <WakeToggle item={item} checked={wake} onChange={setWake} disabled={busy} />
-              <Button size="sm" variant="outline" className="shrink-0" disabled={busy} pending={busy} pendingLabel="Reversing…" onClick={reverse}>
-                <RotateCw /> Reverse
-              </Button>
-            </span>
-          )}
-        </div>
-        <div className="mt-1 text-[15px] font-semibold leading-snug">{item.question}</div>
-        {item.answer && <div className="text-muted-foreground">{item.answer}</div>}
-        {item.rubric && <div className="text-xs text-muted-foreground" data-testid="fyi-rubric">{item.rubric}</div>}
-        {r?.wake && <WakeNote wake={r.wake} responseId={r.delivery === "sent" ? r.id : undefined} thread />}
-        {error && <div className="text-xs text-red-600">{error}</div>}
-      </CardContent>
-    </Card>
+    <CardShell kind="decided" className="text-sm" data-testid="fyi-card" id={waitingAnchor(item.id)}>
+      {/* E948-S60: the one shell: the kind word first, then who decided, the code, the project, the age. */}
+      <CardMeta kind="Decided" data-testid="fyi-meta">
+        <span>by {decidedByName(item.decidedBy)}</span>
+        {code && <span>{code}</span>}
+        {showMilestone && (
+          <Link className="hover:text-foreground hover:underline" to={`/milestones/${item.milestoneId}`}>
+            {onceTitle(item.milestoneTitle)}
+          </Link>
+        )}
+        {item.since && <RelTime iso={item.since} />}
+      </CardMeta>
+      <div className={CARD_TITLE}>{item.question}</div>
+      {item.answer && <p className="mt-1 text-sm leading-relaxed text-foreground/85">{item.answer}</p>}
+      {item.rubric && <div className="mt-1 text-xs text-muted-foreground" data-testid="fyi-rubric">{item.rubric}</div>}
+      <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="fyi-head">
+        {r ? (
+          <span className="text-xs text-muted-foreground" data-testid="fyi-reversed">
+            You asked to reverse this <RelTime iso={r.createdAt} />
+            {r.delivery !== "sent" ? ` (not delivered: ${r.deliveryError ?? r.delivery})` : ""}
+          </span>
+        ) : (
+          <span className="flex min-w-0 flex-wrap items-center gap-2" data-testid="fyi-actions">
+            <CardButton variant="outline" disabled={busy} pending={busy} pendingLabel="Reversing…" onClick={reverse}>
+              <RotateCw /> Reverse
+            </CardButton>
+            <WakeToggle item={item} checked={wake} onChange={setWake} disabled={busy} />
+          </span>
+        )}
+      </div>
+      {r?.wake && <WakeNote wake={r.wake} responseId={r.delivery === "sent" ? r.id : undefined} thread />}
+      {error && <div className="text-xs text-red-600">{error}</div>}
+      {/* E948-S60: a decision made for him still takes his words, short of reversing it. */}
+      <CardFeedback origin={`fyi-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} />
+    </CardShell>
   );
 }
 
@@ -485,6 +511,47 @@ export function SavedLine() {
   );
 }
 
+/**
+ * E996-S29: on a key card every step that says where the key goes points to this card's own box, never to a box
+ * elsewhere (T9-A10's steps said "the secret card", a private T3 card that had timed out).
+ */
+const ELSEWHERE_BOX = /\b(in|into)\s+(?:the|a)\s+(?:private\s+)?(?:T3\s+)?(?:request_secret|secret|key)\s+(?:card|box)\b(?:\s+the\s+Delivery\s+Manager\s+sends\s+you)?/gi;
+// "…, not in the console card, which has no secret box while this ask is on the Mac list" (T9-A10, 13 Nov): the card has one.
+const DENIES_BOX = /,?\s*(?:not\s+(?:in|into)\s+(?:the\s+)?(?:console\s+)?card,?\s+)?which\s+has\s+no\s+(?:secret\s+|private\s+|key\s+|paste\s+)?box\b[^.;:"—)]*/gi;
+/** E996-S29: a key card's words point to its own box, never to a box elsewhere, never "this card has no box". */
+export function keyWordsHere(text: string, item: Pick<WaitingItem, "secret" | "state">): string {
+  if (!text || !item.secret || item.state !== "open") return text;
+  return text.replace(DENIES_BOX, "").replace(ELSEWHERE_BOX, "$1 the box Paste the key here on this card");
+}
+export function keyStepsHere<T extends { list: string[] } | undefined>(steps: T, item: Pick<WaitingItem, "secret" | "state">): T {
+  if (!steps || !item.secret || item.state !== "open") return steps;
+  return { ...steps, list: steps.list.map((s) => keyWordsHere(s, item)) };
+}
+
+/**
+ * E996-S29: open asks that store the same key (same app and name) are one card and one box: the first keeps its card and
+ * names the others (`sameKey`), the others leave the list; Save key answers them all (the server's save does).
+ */
+export function foldSameKey(list: WaitingItem[]): { items: WaitingItem[]; folded: Set<string> } {
+  const lead = new Map<string, WaitingItem>();
+  const folded = new Set<string>();
+  const out: WaitingItem[] = [];
+  for (const i of list) {
+    const keyOnly = i.state === "open" && i.secret ? `${i.secret.app}\u0000${i.secret.name}` : undefined;
+    const first = keyOnly ? lead.get(keyOnly) : undefined;
+    if (first && keyOnly) {
+      folded.add(i.id);
+      const merged = { ...first, sameKey: [...(first.sameKey ?? []), i.code ?? i.id] };
+      lead.set(keyOnly, merged);
+      out[out.indexOf(first)] = merged;
+      continue;
+    }
+    if (keyOnly) lead.set(keyOnly, i);
+    out.push(i);
+  }
+  return { items: out, folded };
+}
+
 export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem & { secret: { app: string; name: string } }; disabled?: boolean; wake?: boolean }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -516,10 +583,14 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
         void save();
       }}
     >
-      <label className="text-xs text-muted-foreground" htmlFor={`secret-${item.id}`}>
-        Paste the key here once. It goes straight to the secret store for <span className="font-mono">{item.secret.app}</span> as{" "}
-        <span className="font-mono">{item.secret.name}</span> and is never shown or kept by the console.
+      {/* E996-S29 (the owner, 12 Nov: "it doesn't tell me where to paste it"): the box says plainly that this is where it goes. */}
+      <label className="text-sm font-medium text-foreground" htmlFor={`secret-${item.id}`} data-testid="secret-box-label">
+        Paste the key here
       </label>
+      <p className="text-xs text-muted-foreground">
+        It goes straight to the secret store for <span className="font-mono">{item.secret.app}</span> as <span className="font-mono">{item.secret.name}</span>
+        {item.sameKey?.length ? <> and answers {[item.code, ...item.sameKey].filter(Boolean).join(" and ")} at once</> : null}. The console never shows or keeps it.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
           id={`secret-${item.id}`}
@@ -534,14 +605,14 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
           data-lpignore="true"
           data-form-type="other"
           className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-sm max-sm:h-11 max-sm:text-base"
-          placeholder="Paste the key"
+          placeholder="Paste the key here"
           value={value}
           disabled={busy || disabled}
           onChange={(e) => setValue(e.target.value)}
         />
-        <Button size="sm" type="submit" disabled={busy || disabled || !value.trim()} aria-busy={busy || undefined} className={cn(busy && WORKING)}>
+        <CardButton type="submit" disabled={busy || disabled || !value.trim()} aria-busy={busy || undefined} className={cn(busy && WORKING)}>
           {busy ? <Spinner /> : <Check />} Save key
-        </Button>
+        </CardButton>
       </div>
       {busy && <WorkingLine text="Saving key…" />}
       {note && (
@@ -595,10 +666,12 @@ export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a w
   const error = useSnoozes().errors.get(id);
   return (
     <div className={cn("relative", className)} data-testid="snooze">
-      <Button
-        size="sm"
+      <CardButton
         variant="ghost"
-        className={cn("h-7 px-2 text-xs text-muted-foreground", PHONE_TAP)}
+        // on a phone it is its 44 px tap target without making the card's meta line 44 px taller (the
+        // negative margin), and only its clock, so it stays on the meta line instead of dropping to a line of its own
+        className="h-7 px-2 text-xs text-muted-foreground max-sm:-my-3 max-sm:px-1.5"
+        aria-label="Snooze"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
@@ -607,8 +680,8 @@ export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a w
         }}
         title={title}
       >
-        <AlarmClock /> Snooze <ChevronDown className="h-3 w-3" />
-      </Button>
+        <AlarmClock /> <span className="max-sm:hidden">Snooze</span> <ChevronDown className="h-3 w-3" />
+      </CardButton>
       {open && (
         <div role="menu" className="absolute right-0 z-20 mt-1 grid w-36 grid-cols-1 rounded-md border bg-popover p-1 text-sm shadow-md" data-testid="snooze-menu">
           {SNOOZE_CHOICES.map((c) => (
@@ -771,10 +844,10 @@ function SnoozedRow({ item, qualify, showMilestone }: { item: WaitingItem; quali
         {snoozing && !snoozing.done ? (
           <WorkingLine text="Snoozing…" />
         ) : (
-          <Button size="sm" variant="outline" className={cn("h-7 shrink-0 text-xs", PHONE_TAP, busy && WORKING)} disabled={busy} aria-busy={busy || undefined} onClick={unsnooze} data-testid="unsnooze">
+          <CardButton variant="outline" className={cn("h-7 shrink-0 text-xs", busy && WORKING)} disabled={busy} aria-busy={busy || undefined} onClick={unsnooze} data-testid="unsnooze">
             {busy && <Spinner />}
             {busy ? "Unsnoozing…" : "Unsnooze"}
-          </Button>
+          </CardButton>
         )}
       </div>
       {error && <div className="text-xs text-red-700 dark:text-red-400">{error}</div>}
@@ -811,8 +884,11 @@ export function WaitingCard({
   const [open, setOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [pick, setPick] = useState<string>();
+  const [ownWords, setOwnWords] = useState("");
   /** wake (or steer) the persona who asked with the answer; on by default. */
   const [wake] = useState(true);
+  const sendAsRef = useRef<[string, "answer" | "feedback"]>(["answer", "answer"]);
+  const sendAs = () => sendAsRef.current;
   const r = item.response;
   /**
    * the card's box takes files like Chat's
@@ -825,15 +901,19 @@ export function WaitingCard({
    * at once through that box's own button, with what is typed before the spoken words; the reply names the note. Sent from the
    * floating pill on another page, it still lands here.
    */
-  const voiceAs: [string, "answer" | "feedback" | "deny"] = box === "changes" ? ["feedback", "feedback"] : box === "decline" ? ["deny", "deny"] : ["answer", "answer"];
+  // E948-S60: with no box opened, a spoken note on an approve card is feedback (changes wanted), as its Send is.
+  const voiceAs = (): [string, "answer" | "feedback" | "deny"] =>
+    box === "changes" ? ["feedback", "feedback"] : box === "decline" ? ["deny", "deny"] : !box && sendAs()[1] === "feedback" ? ["feedback", "feedback"] : ["answer", "answer"];
   const voice = useAnswerVoice({
+    big: true,
     origin: `card:${item.id}`,
     to: shortTo(item.question || item.title),
     page: cardPage(item.code ?? item.id, item.question || item.title),
     typed: answer,
     deliver: async (reply) => {
       setAnswer("");
-      if (!(await respond(voiceAs[0], voiceAs[1], reply))) throw new Error("the card did not take it, open the card to see why");
+      const [as, kind] = voiceAs();
+      if (!(await respond(as, kind, reply))) throw new Error("the card did not take it, open the card to see why");
     },
     disabled: !!pending,
   });
@@ -870,7 +950,9 @@ export function WaitingCard({
   const keyNotStored = !!item.secret && item.state === "open" && r?.delivery === "failed";
   const sha = r?.spine?.status === "written" ? r.spine.sha : undefined;
   const code = codeLabel(item, qualify);
-  const options = item.ask === "decide" || item.source === "needs_jordi" ? orderedOptions(item) : [];
+  // E948-S60 (the owner on E946-A29: "Send my pick where there is only one choice, which is ridiculous"): a pick needs two choices or more.
+  const listed = item.ask === "decide" || item.source === "needs_jordi" ? orderedOptions(item) : [];
+  const options = listed.length > 1 ? listed : [];
   // A recommendation that is not one of the option buttons is shown as text above the controls.
   // one set of answer controls. Options (when the item has any) replace Approve / Deny, never sit beside them.
   // answered from the console and delivered (the spine line, or the thread), not yet acted on by the owner.
@@ -893,6 +975,8 @@ export function WaitingCard({
   // one Answer, nothing else.
   const approveCard = canDecide || item.ask === "do";
   const canDeny = !item.decidedBy && approveCard;
+  /** E948-S60: what the feedback block's Send does with his words: changes wanted on an approve card, else his answer. */
+  sendAsRef.current = approveCard && item.ask !== "do" ? ["feedback", "feedback"] : ["answer", "answer"];
   const recommendText = item.recommendation && !options.includes(item.recommendation) ? item.recommendation : undefined;
   // an ask in the human format (v6) reads as labelled plain sections; older asks render as before.
   const human = isHumanFormat(item);
@@ -1033,53 +1117,46 @@ export function WaitingCard({
   // line (the kind as a word, the project, the age, Snooze), a short normal-weight heading, the ask in plain text, the Why
   // on its own grey line, a Do card's numbered steps, two buttons (the note goes with the one he presses), one grey foot.
   const heading = cardHeading(item);
-  const body = cardBody(item, heading);
+  const body = keyWordsHere(cardBody(item, heading) ?? "", item) || undefined;
   const kindWord = KIND_WORD[lead.kind];
-  const steps = splitSteps(item.steps);
+  const steps = keyStepsHere(splitSteps(item.steps), item);
   const project = projectLabel(item.milestoneTitle);
   const asker = item.asker?.personaName ?? (item.owner.kind !== "none" ? item.owner.label : undefined);
   const go = goLink(item);
   const doCard = item.ask === "do" && !canDecide;
   const pickOf = pick ?? (options.includes(item.recommendation ?? "") ? item.recommendation! : options[0]);
   // a yes or no question (no options, ends with "?"): Yes or No, the note with it
-  const yesNo = !approveCard && !options.length && item.ask !== "provide" && /\?\s*$/.test(heading);
+  // E948-S69 (the owner on E946-A31: "decide cards with no decide options … only ask feedback"): a decide ask is never words only.
+  const yesNo = !approveCard && !options.length && item.ask !== "provide" && (/\?\s*$/.test(heading) || (item.ask === "decide" && /\?/.test(item.question)));
   // a question that needs words (give, a free question): the note box is the answer, always shown
   const wordsAnswer = !approveCard && !options.length && !yesNo;
-  const noteShown = open || noteOpen || wordsAnswer || !!answer || files.ids.length > 0;
+  // the "your own number" kind of option takes his words in its own box when picked
+  const ownPicked = !!pick && isOwnOption(pick);
   const withNote = (word: string) => (answer.trim() ? `${word}. ${answer.trim()}` : word);
   const openNote = (forBox: "changes" | "decline" | "answer") => {
     setBox(forBox);
     setNoteOpen(true);
     setTimeout(() => document.getElementById(`note-${item.id}`)?.querySelector("textarea")?.focus(), 0);
   };
-  const notNow = () => {
-    if (answer.trim() || files.ids.length) return void respond("answer", "answer");
-    if (canSnooze) {
-      void snoozeItem(item, { days: 3 });
-      showClosed({ said: "Snoozed", title: item.question || item.title, back: async () => (await unsnoozeItem(item), { back: true, line: "It is back in your inbox." }) });
-      return;
-    }
-    openNote("answer");
-  };
-  const btn = cn("flex-1 sm:flex-none", PHONE_TAP);
-  const main = (action: string, label: string, onClick: () => void, testId?: string, cur?: boolean) => (
-    <Button size="sm" className={cn(btn, working(action) && WORKING)} disabled={busy || voice.busy || !files.ready} onClick={onClick} data-testid={testId} {...workProps(action)}>
+  const main = (action: string, label: string, onClick: () => void, testId?: string, cur?: boolean, off?: boolean, extra?: string) => (
+    <CardButton className={cn(extra, working(action) && WORKING)} disabled={busy || voice.busy || !files.ready || !!off} onClick={onClick} data-testid={testId} {...workProps(action)}>
       {label}
       {cur ? " (current)" : ""}
-    </Button>
+    </CardButton>
   );
-  const second = (action: string, label: string, onClick: () => void, testId?: string, cur?: boolean) => (
-    <Button size="sm" variant="outline" className={cn(btn, working(action) && WORKING)} disabled={busy || voice.busy || !files.ready} onClick={onClick} data-testid={testId} {...workProps(action)}>
+  const second = (action: string, label: string, onClick: () => void, testId?: string, cur?: boolean, extra?: string) => (
+    <CardButton variant="outline" className={cn(extra, working(action) && WORKING)} disabled={busy || voice.busy || !files.ready} onClick={onClick} data-testid={testId} {...workProps(action)}>
       {label}
       {cur ? " (current)" : ""}
-    </Button>
+    </CardButton>
   );
   // the second button: first press opens the note (what happened, why not), the next sends it with the note
   const secondPress = (forBox: "changes" | "decline" | "answer", send: () => void) => () => (noteOpen || open ? send() : openNote(forBox));
 
   return (
     <Card
-      className={cn("min-w-0 border-border [overflow-wrap:anywhere]", item.state === "done" && "opacity-80")}
+      className={cn("min-w-0 border-border shadow-none [overflow-wrap:anywhere]", item.state === "done" && "opacity-80")}
+      data-card-shell={lead.kind}
       data-testid="waiting-card"
       data-pending-id={item.id}
       data-inbox-card={`ask:${item.id}`}
@@ -1087,8 +1164,8 @@ export function WaitingCard({
       id={waitingAnchor(item.id)}
     >
       <CardContent className="grid grid-cols-1 p-4">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="card-meta">
-          <span className="font-medium text-foreground" data-testid="card-kind">
+        <div className={CARD_META} data-card-meta="" data-testid="card-meta">
+          <span className="font-medium text-foreground" data-card-kind-word="" data-testid="card-kind">
             {kindWord}
           </span>
           {project &&
@@ -1137,6 +1214,11 @@ export function WaitingCard({
                 </li>
               ))}
             </ol>
+            {item.secret && item.state === "open" && (
+              <p className="mt-2 text-[13px] font-medium text-foreground" data-testid="ask-key-where">
+                Then paste the key in the box below, Paste the key here{item.sameKey?.length ? `: one key answers ${[item.code, ...item.sameKey].filter(Boolean).join(" and ")}` : ""}.
+              </p>
+            )}
             {steps.done && (
               <p className="mt-2 text-[13px] text-muted-foreground" data-testid="ask-done-looks">
                 Done looks like: <LinkedText text={steps.done} />
@@ -1145,20 +1227,29 @@ export function WaitingCard({
           </>
         )}
         {item.improvement && <ImprovementFacts improvement={item.improvement} />}
-        {showControls && options.length > 0 && (
-          <div className="mt-2.5 grid" role="radiogroup" aria-label="Options" data-testid="ask-options">
-            {options.map((o, i) => (
-              <label key={o} className={cn("flex cursor-pointer items-baseline gap-2.5 py-1.5 text-sm text-foreground/85", i > 0 && "border-t")}>
-                <input type="radio" className="accent-foreground" checked={pickOf === o} onChange={() => setPick(o)} disabled={busy} data-testid="ask-option" />
-                <span>
-                  {o}
-                  {o === item.recommendation && <span className="text-[13px] text-muted-foreground"> · recommended</span>}
-                  {current("answer", o) && <span className="text-[13px] text-muted-foreground"> · your answer now</span>}
-                </span>
-              </label>
-            ))}
+        {/* E948-S69: the options are the buttons themselves (below); a "your own" option takes its words here. */}
+        {showControls && options.length > 0 && ownPicked && (
+          <div className="mt-2.5 grid" data-testid="ask-options">
+            <input
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+              placeholder="Yours: write it here, then press it again"
+              aria-label={pickOf}
+              value={ownWords}
+              onChange={(e) => setOwnWords(e.target.value)}
+              disabled={busy}
+              data-testid="ask-option-own"
+            />
           </div>
         )}
+        {/* who asked: context, above the answered line, the link and the buttons, never between the buttons and the feedback */}
+        <div className="mt-3 text-xs text-muted-foreground" data-testid="card-foot">
+          {[project, asker ? `asked by the ${asker}` : undefined].filter(Boolean).join(" · ")}
+          {code && (
+            <span className="ml-2" data-testid="ask-code">
+              {code}
+            </span>
+          )}
+        </div>
         {open && (
           <div className="mt-3 grid grid-cols-1 gap-2 border-t pt-3 text-sm" data-testid="ask-more">
             {item.referencedBy && item.referencedBy.length > 0 && (
@@ -1190,9 +1281,9 @@ export function WaitingCard({
             )}
             <Details item={item} showMilestone={showMilestone} />
             {!editing && item.source === "needs_jordi" && item.needsJordiId && (
-              <Button size="sm" variant="ghost" className={cn("h-7 w-max px-2 text-xs text-muted-foreground", working("supersede") && WORKING)} disabled={busy} title="Replaced by a coded ask, or moot: retires this item without answering it" onClick={supersede} {...workProps("supersede")}>
+              <CardButton variant="ghost" className={cn("h-7 w-max px-2 text-xs text-muted-foreground", working("supersede") && WORKING)} disabled={busy} title="Replaced by a coded ask, or moot: retires this item without answering it" onClick={supersede} {...workProps("supersede")}>
                 Supersede
-              </Button>
+              </CardButton>
             )}
           </div>
         )}
@@ -1219,6 +1310,8 @@ export function WaitingCard({
             {item.answer ? ` (you answered: ${item.answer})` : ""}. The owner acted on it and marked the line done (or removed it) in the spine.
           </p>
         )}
+        {/* the asks log: his one tap on a closed coded ask (clear or confusing), logged on the asks log */}
+        {(item.state === "done" || item.state === "answered") && !editing && item.source === "ask" && item.code && <AskVerdictTap code={item.code} />}
         {r && active && !editing && <AnswerProgress r={r} item={item} />}
         {r && item.state === "open" && !editing && !active && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground" data-testid="answer-state">
@@ -1239,9 +1332,9 @@ export function WaitingCard({
             </span>
             {/* a line still pending in the repo's PR is not answered either: Retry checks the spine again. */}
             {!keyNotStored && (refused || pendingPr || (!r.spine && r.delivery !== "sent")) && (
-              <Button size="sm" variant="outline" disabled={busy} onClick={retry} {...workProps("retry")} className={cn(working("retry") && WORKING)}>
+              <CardButton variant="outline" disabled={busy} onClick={retry} {...workProps("retry")} className={cn(working("retry") && WORKING)}>
                 {icon("retry", <RotateCw />)} {r.spine ? "Retry spine write" : "Retry delivery"}
-              </Button>
+              </CardButton>
             )}
           </div>
         )}
@@ -1262,9 +1355,9 @@ export function WaitingCard({
         )}
         {canChange && !editing && (
           <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="change-answer">
-            <Button size="sm" variant="outline" disabled={busy} onClick={startChange}>
+            <CardButton variant="outline" disabled={busy} onClick={startChange}>
               Change answer
-            </Button>
+            </CardButton>
             {r?.ownerRunSince && (
               <span className="text-xs text-muted-foreground" data-testid="owner-ran">
                 The owner may already have read the old answer (a run started <RelTime iso={r.ownerRunSince} />); the change is written as a correction.
@@ -1286,29 +1379,11 @@ export function WaitingCard({
                 <SecretBox item={item as WaitingItem & { secret: { app: string; name: string } }} disabled={busy} wake={wake} />
               </div>
             )}
-            {noteShown && (
-              <div className="mt-3 grid gap-1" id={`note-${item.id}`} data-testid={`answer-${box ?? "answer"}-box`}>
-                <WordsBox
-                  label={wordsAnswer ? "Your answer" : "Your note"}
-                  rows={wordsAnswer ? 2 : 1}
-                  boxClassName="min-h-10"
-                  placeholder={
-                    item.secret
-                      ? "Or answer in words (never paste the key here)…"
-                      : doCard
-                        ? "What happened? Say it, or paste a screenshot"
-                        : wordsAnswer
-                          ? item.ask === "provide"
-                            ? "Paste what is needed, a screenshot, or say where it is…"
-                            : "Write your answer…"
-                          : "Add a note, it goes with the button you press"
-                  }
-                  value={answer}
-                  onChange={setAnswer}
-                  files={files}
-                  voice={voice}
-                />
-              </div>
+            {/* the link to check sits above the buttons, so he sees the thing before he answers. */}
+            {go && (
+              <a className={CARD_LINK} href={go.href} target="_blank" rel="noreferrer" data-testid="card-go">
+                {go.label} ↗
+              </a>
             )}
             <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="answer-buttons">
               {doCard ? (
@@ -1318,39 +1393,32 @@ export function WaitingCard({
                 </>
               ) : approveCard ? (
                 <>
-                  {main("approve", ACTION.approve.label, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"))}
-                  {canDeny && second("deny", "No", secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"))}
+                  {main("approve", YES_LABEL, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"))}
+                  {canDeny && second("deny", NO_LABEL, secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"))}
                 </>
               ) : options.length > 0 ? (
                 <>
-                  {main(`option:${pickOf}`, editing ? "Change to this" : "Send my pick", () => void respond(`option:${pickOf}`, "answer", withNote(pickOf)), "send-pick")}
-                  {!editing && second("notnow", "Not now", notNow, "not-now")}
+                  {/* E948-S69: one button per option, named by what happens next, the recommended one filled; never a lone Send my pick. */}
+                  {options.map((o) => {
+                    const own = isOwnOption(o);
+                    // a "your own" option first opens its box, the next press sends his words with it
+                    const press = () => (own && !(pick === o && ownWords.trim()) ? setPick(o) : void respond(`option:${o}`, "answer", withNote(own ? `${o}: ${ownWords.trim()}` : o)));
+                    const lead = o === pickOf && !ownPicked;
+                    const cur = current("answer", o);
+                    return <Fragment key={o}>{lead ? main(`option:${o}`, optionLabel(o), press, "ask-option", cur, false, OPTION_BUTTON) : second(`option:${o}`, optionLabel(o), press, "ask-option", cur, OPTION_BUTTON)}</Fragment>;
+                  })}
                 </>
               ) : yesNo ? (
                 <>
-                  {main("yes", "Yes", () => void respond("yes", "answer", withNote("Yes")), "yes", current("answer", "Yes"))}
-                  {second("no", "No", () => void respond("no", "answer", withNote("No")), "no", current("answer", "No"))}
+                  {main("yes", YES_LABEL, () => void respond("yes", "answer", withNote("Yes")), "yes", current("answer", "Yes"))}
+                  {second("no", NO_LABEL, () => void respond("no", "answer", withNote("No")), "no", current("answer", "No"))}
                 </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    className={cn(btn, working("answer") && WORKING)}
-                    disabled={busy || voice.busy || !files.ready || (!answer.trim() && !files.ids.length)}
-                    onClick={() => void respond("answer", "answer")}
-                    data-testid="answer"
-                    {...workProps("answer")}
-                  >
-                    {editing ? "Change to this" : ACTION.answer.label}
-                  </Button>
-                  {!editing && canSnooze && second("notnow", "Not now", notNow, "not-now")}
-                </>
-              )}
+              ) : null}
+              {/* E948-S83 iteration 2: Park beside the card's own buttons (a month on its spine line, nothing decided). */}
+              {canSnooze && <ParkButton disabled={busy} onPark={() => parkAsk(item)} />}
               {editing && (
-                <Button
-                  size="sm"
+                <CardButton
                   variant="ghost"
-                  className={PHONE_TAP}
                   disabled={busy}
                   onClick={() => {
                     setEditing(false);
@@ -1361,30 +1429,45 @@ export function WaitingCard({
                   }}
                 >
                   Cancel
-                </Button>
+                </CardButton>
               )}
               {canDecide && !editing && <GrantWriteAction item={item} />}
-              {go && (
-                <a className="ml-1 text-[13px] font-medium text-emerald-700 hover:underline dark:text-emerald-400" href={go.href} target="_blank" rel="noreferrer" data-testid="card-go">
-                  {go.label} ↗
-                </a>
-              )}
             </div>
           </>
         )}
+        {/* The owner 2026-11-15 00:0xZ: the buttons and the feedback box with its microphone are one group, nothing between
+            and no text explaining them. E948-S60: an answered, done or read-only card still takes feedback. */}
+        {showControls ? (
+              <div className="grid" data-testid={`answer-${box ?? "answer"}-box`}>
+                <FeedbackBlock
+                  id={`note-${item.id}`}
+                  className="mt-2"
+                  note={item.secret ? "Never paste the key here: use the private box above." : undefined}
+                  value={answer}
+                  onChange={setAnswer}
+                  files={files}
+                  voice={voice}
+                  sending={working(wordsAnswer ? "answer" : "feedback")}
+                  disabled={busy}
+                  sendTestId={wordsAnswer ? "answer" : "card-feedback-send"}
+                  onSend={() => (wordsAnswer ? void respond("answer", "answer") : void respond("feedback", sendAs()[1]))}
+                />
+              </div>
+        ) : (
+          <CardFeedback origin={`card-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} />
+        )}
         {pending && (pending.held ? <SavedLine /> : pending.status !== PRESS.sending && <WorkingLine text={pending.status} />)}
         {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
-        <div className="mt-3 text-xs text-muted-foreground" data-testid="card-foot">
-          {[project, asker ? `asked by the ${asker}` : undefined].filter(Boolean).join(" · ")}
-          {code && (
-            <span className="ml-2" data-testid="ask-code">
-              {code}
-            </span>
-          )}
-        </div>
       </CardContent>
     </Card>
   );
+}
+
+/** E948-S60: where feedback on an ask goes when it takes no answer now: its spine line and owner, else the Team desk. */
+export function askTarget(item: WaitingItem): FeedbackTarget {
+  if (item.source === "ask" && item.repo && item.path && item.code)
+    return { kind: "card", card: { kind: "ask", repo: item.repo, path: item.path, ref: item.code, title: item.question || item.title, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } };
+  return { kind: "desk", page: cardPage(item.code ?? item.id, item.question || item.title) };
 }
 
 /** the card's one green link: the page the ask opens with, its steps page, or its first link that is not a spine line. */
@@ -1396,7 +1479,10 @@ function goLink(item: WaitingItem): { href: string; label: string } | undefined 
   if (l) return { href: l.url, label: "Open" };
   // a link inside a short question (the heading is plain text): the first one is the card's green link
   const any = /https?:\/\/[^\s<>"')\]]+/.exec(item.question || "")?.[0]?.replace(/[.,;:]+$/, "");
-  return any ? { href: any, label: `Open ${any.replace(/^https?:\/\//, "").split(/[/?#]/)[0]}` } : undefined;
+  if (!any) return undefined;
+  // a server's own address (a tailnet name, an IP, a port) says nothing to him: those say Open the page
+  const host = any.replace(/^https?:\/\//, "").split(/[/?#]/)[0];
+  return { href: any, label: /:\d+$|\.ts\.net$|^\d+\.\d+\.\d+\.\d+|^localhost/i.test(host) ? "Open the page" : `Open ${host}` };
 }
 
 const linkHref = (l: WaitingItem["contextLinks"][number]) => (l.threadId ? threadHref(l.threadId, l.environmentId) : l.url);
@@ -1460,7 +1546,10 @@ export function WaitingOnYou({
   fold,
   laptop = false,
   part = "all",
+  only,
 }: {
+  /** a goal set lists its own asks only. */
+  only?: (i: WaitingItem) => boolean;
   milestoneId?: string;
   nodeKey?: string;
   scopeLabel?: string;
@@ -1478,30 +1567,54 @@ export function WaitingOnYou({
    */
   part?: "all" | "blocked" | "rest";
 }) {
-  const { data: fetchedAll, error, loading } = useQuery(
-    () => api.listWaitingOnOwner(spine ? { ...spine, nodeKey } : { milestoneId, nodeKey, includeSuperseded: true }),
-    [milestoneId, nodeKey, spine?.repo, spine?.path],
-    { tag: "inbox" },
-  );
+  // one shared fetch for the Blocked part, the rest part and the page around them (same filter, same answer).
+  const { data: fetchedAll, error, loading } = useWaitingList(spine ? { ...spine, nodeKey } : { milestoneId, nodeKey, includeSuperseded: true });
   // the count is the server's open items (the Team badge's list), not this list's own filter; an untracked spine has none.
   // the same fetch the pills read (one per key), so the pill and this list never show two moments.
-  const { data: statusAll } = useStatusFor(milestoneId, !!spine);
+  const { data: statusAll, loading: statusLoading } = useStatusFor(milestoneId, !!spine);
   // the world-wide list (Team home, Blocked) shows the selected project's asks only.
   const project = useProject();
   const skinWords = useWords();
   const narrowed = !milestoneId && !spine && !!project.current;
-  const fetched = narrowed && fetchedAll ? fetchedAll.filter((i) => project.keep(i.milestoneId)) : fetchedAll;
-  const status = narrowed && statusAll ? { ...statusAll, items: statusAll.items.filter((i) => project.keep(i.milestoneId)) } : statusAll;
+  const fetchedKept = narrowed && fetchedAll ? fetchedAll.filter((i) => project.keep(i.milestoneId)) : fetchedAll;
+  const fetched = only && fetchedKept ? fetchedKept.filter(only) : fetchedKept;
+  const statusKept = narrowed && statusAll ? { ...statusAll, items: statusAll.items.filter((i) => project.keep(i.milestoneId)) } : statusAll;
+  // a scorecard's count is its own list's open asks.
+  const onlyIds = only && fetched ? new Set(fetched.map((i) => i.id)) : undefined;
+  const status = onlyIds && statusKept ? { ...statusKept, items: statusKept.items.filter((i) => onlyIds.has(i.id) || only!(i as unknown as WaitingItem)) } : statusKept;
   // an ask being snoozed is out of the cards and the count at once (and back if the write fails).
   const { entries: snoozes } = useSnoozes();
-  const data = withSnoozes(fetched, snoozes);
+  // the Inbox's search box keeps only the items the server's search names (titles, card text, his notes),
+  // plus done items older than this list's window as their rows. Only on the world-wide Inbox (no milestone, no spine).
+  const search = useInboxSearch();
+  const hits = !milestoneId && !spine && search.active ? search.hits : undefined;
+  const unfiltered = withSnoozes(fetched, snoozes);
+  const data = useMemo(() => {
+    if (!hits || !unfiltered) return unfiltered;
+    const kept = unfiltered.filter((i) => hits.has(i.id));
+    const have = new Set(unfiltered.map((i) => i.id));
+    // the same ask written in two spines of one repo (an epic and its parent) is one line: a row whose repo and code
+    // the shown matches (or an earlier row) already hold is left out, so Answered never shows it twice
+    const key = (i: WaitingItem) => (i.code ? `${i.repo ?? ""}|${i.code}` : `id|${i.id}`);
+    const keys = new Set(kept.map(key));
+    const rows = search.rows.filter((r) => {
+      if (have.has(r.id) || keys.has(key(r)) || (narrowed && !project.keep(r.milestoneId))) return false;
+      keys.add(key(r));
+      return true;
+    });
+    return [...kept, ...rows];
+  }, [hits, unfiltered, search.rows, narrowed, project]);
+  /** while a search is on, every section shows its matches open. */
+  const searching = !!hits;
   const [sendOpen, setSendOpen] = useState(false);
   const [comingOpen, setComingOpen] = useState(false);
   const [supersededOpen, setSupersededOpen] = useState(false);
   const [answeredOpen, setAnsweredOpen] = useState(false);
   const [snoozedOpen, setSnoozedOpen] = useState(false);
   const [macOpen, setMacOpen] = useState(false);
-  const { data: laptopView } = useQuery(() => (laptop && api.laptop ? api.laptop() : Promise.resolve(undefined)), [laptop], { tag: "inbox" });
+  const { data: laptopView, loading: laptopLoading } = useQuery(() => (laptop && api.laptop ? api.laptop() : Promise.resolve(undefined)), [laptop], { tag: "inbox" });
+  // this section holds its place (Slot) until its list, its count and the laptop switch are all in.
+  useSlotReady(!!error || (!!data && !laptopLoading && (!!spine || (!statusLoading && !statusAll?.loading))));
   const laptopOn = !!laptopView?.session && (!laptopView.session.until || Date.parse(laptopView.session.until) > Date.now());
   // each folded list, open, sits in the shared scroll pane with its own Show 20 / 50 / all (remembered).
   const [comingLimit, setComingLimit] = useListLimit("coming-up");
@@ -1522,7 +1635,7 @@ export function WaitingOnYou({
   const snoozed = (data ?? []).filter((i) => i.state === "open" && !!i.snoozedUntil).sort((a, b) => a.snoozedUntil!.localeCompare(b.snoozedUntil!));
   // asks labelled `needs Mac agent` leave the list and the count for the Mac list (run in one sitting on his laptop).
   const mac = (data ?? []).filter((i) => i.state === "open" && i.macAgent && !i.snoozedUntil);
-  const items = (data ?? []).filter((i) => i.state !== "superseded" && !(i.state === "open" && (i.snoozedUntil || i.macAgent)));
+  const { items, folded: sameKeyFolded } = foldSameKey((data ?? []).filter((i) => i.state !== "superseded" && !(i.state === "open" && (i.snoozedUntil || i.macAgent))));
   const blocksRun = (i: WaitingItem) => !!(i.blocksRunId || i.blocksPersona);
   // an answer whose spine write was refused still needs the owner (Retry): it stays up top and counts.
   const refusedWrite = (i: WaitingItem) => i.state === "open" && !!i.response?.spine && i.response.spine.status !== "written";
@@ -1533,7 +1646,7 @@ export function WaitingOnYou({
   // the open items are `blockedItems`, the function the red pills count with: one row per item, a card when this
   // list has one for it, else its status row, so the count and the rows are the same list (before, an item with a list
   // entry but no card, a guessed line, was counted and shown nowhere).
-  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }) : undefined;
+  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && (!hits || hits.has(st.id))) : undefined;
   const blockedIds = blocked && new Set(blocked.map((i) => i.id));
   const isOpen = (i: WaitingItem) => (blockedIds ? blockedIds.has(i.id) : pending(i));
   // a Mark ready item (the owner's ready stamp) is the status row with the stamp button, never a guessed card.
@@ -1567,7 +1680,7 @@ export function WaitingOnYou({
   const { data: milestones } = useQuery(() => (!milestoneId && !spine ? api.listMilestones() : Promise.resolve([])), [milestoneId, spine?.repo]);
   const names = new Map((milestones ?? []).map((m) => [m.id, milestoneName(m)]));
   // monitor alerts that are not the owner's now (every ask snoozed, or the Delivery Manager's): one quiet line each, never counted.
-  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && (i.state === "snoozed" || i.state === "alarm")) : [];
+  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && (i.state === "snoozed" || i.state === "alarm") && (!hits || hits.has(i.id))) : [];
   // the number is known as soon as the fast status batch is in (before the cards); unknown while it counts.
   const knownCount = status && !status.loading ? count : data && !status ? count : undefined;
   // Codes are qualified `<repo>/<code>` when the list spans repos (human-asks v2).
@@ -1576,7 +1689,16 @@ export function WaitingOnYou({
   const readOnly = spine ? `Not tracked: Track as ${skinWords.milestone} to answer here.` : undefined;
   // every Mac task is a full card (Done, Stuck, a note, voice); with the Mac list, one card per ticket (laptopRows)
   const askCard = (i: WaitingItem) => <WaitingCard item={i} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />;
-  const macRows = laptopView ? laptopRows(laptopView.tasks, mac, laptopView.done) : undefined;
+  // E996-S29: a Mac ticket card (its steps page) whose ask takes a key shows that ask's private box too.
+  const keyBox = (i: WaitingItem) => (i.secret && !readOnly ? <SecretBox item={i as WaitingItem & { secret: { app: string; name: string } }} /> : null);
+  // E996-S29: a key ask is a card in the list above with its box; its Mac ticket is not a second card here.
+  const keyAsks = new Set(items.filter((i) => i.state === "open" && i.secret && i.code).flatMap((i) => [i.code!, ...(i.sameKey ?? [])]));
+  // E948-S78: one narrowed view for both the laptop panel and the Needs Mac agent fold (before, the panel showed
+  // every Mac task while a search was on).
+  const shownView = laptopView && searching ? searchLaptopView(laptopView, mac, search.q) : laptopView;
+  const macRows = shownView ? laptopRows(shownView.tasks.filter((t) => !(t.ask && keyAsks.has(t.ask))), mac, shownView.done) : undefined;
+  // while searching, a laptop panel with no matching Mac task hides (Blocked says what matches).
+  const laptopShown = laptop && (!searching || (macRows ?? []).some((r) => !r.done));
   const macCount = macRows ? macRows.filter((r) => !r.done).length : mac.length;
   // a persona's open approve asks (two or more) are one set with Accept all, shown where its first ask comes.
   const sets = askSets(open);
@@ -1597,14 +1719,13 @@ export function WaitingOnYou({
     <>
       {part !== "rest" && (
       <>
-      {laptop && <LaptopSwitch view={laptopView} mac={mac} listUrl={macListUrl()} askCard={askCard} />}
       <FoldSection
         title={title}
         count={fold ? knownCount : count}
         hideZero={!fold}
         tone="needs-you"
         testId="waiting-on-you"
-        open={sectionOpen}
+        open={sectionOpen || searching}
         onToggle={fold ? setSectionOpen : undefined}
         meta={
           <>
@@ -1623,10 +1744,18 @@ export function WaitingOnYou({
         }
         actions={fold && <SortControl value={sort} onChange={setSort} testId="waiting-on-you" />}
       >
+        {/* the owner ("inbox is inbox, filters on top of expanders nothing between"): the laptop switch opens the
+            Blocked section, inside it, never a box between the filters and the sections. */}
+        {laptopShown && <LaptopSwitch view={shownView} mac={mac} listUrl={macListUrl()} askCard={askCard} keyBox={keyBox} />}
         <SnoozingLines items={snoozed} qualify={qualify} />
         {error && <ErrorBox error={error} />}
         {loading && !data && <SkeletonCards count={knownCount} testId="waiting-on-you-loading" />}
-        {data && count === 0 && (
+        {data && count === 0 && searching && (
+          <p className="text-sm text-muted-foreground" data-testid="nothing-matches-blocked">
+            Nothing blocked matches “{search.q}”.
+          </p>
+        )}
+        {data && count === 0 && !searching && (
           <EmptyState
             title={`Nothing waiting on you${milestoneId ? " here" : ""}`}
             detail={`You're clear${status?.asOf ? `, checked ${formatRelative(status.asOf)}` : ""}. A new ask from the team lands here first.`}
@@ -1679,7 +1808,7 @@ export function WaitingOnYou({
       {part !== "blocked" && (
       <>
       {macCount > 0 && !laptopOn && (
-        <FoldSection title="Needs Mac agent" count={macCount} testId="mac-agent" bodyTestId="mac-agent-section" open={macOpen} onToggle={setMacOpen}>
+        <FoldSection title="Needs Mac agent" count={macCount} testId="mac-agent" bodyTestId="mac-agent-section" open={macOpen || searching} onToggle={setMacOpen}>
           <p className="mb-2 text-xs text-muted-foreground">
             Claude on your Mac does these in your own Chrome, one text each. Each is a card: Done, Stuck, a note or a voice note.{" "}
             <a className="underline" href={macListUrl()} target="_blank" rel="noreferrer" data-testid="mac-agent-list">
@@ -1689,7 +1818,7 @@ export function WaitingOnYou({
           </p>
           {/* the same cards as the laptop list (a Done here ticks the ticket page and clears it); without the Mac list, each ask's own card */}
           {macRows ? (
-            <MacCards rows={macRows} askCard={askCard} testId="mac-agent-cards" />
+            <MacCards rows={macRows} askCard={askCard} keyBox={keyBox} testId="mac-agent-cards" />
           ) : (
             <div className="grid grid-cols-1 gap-3" data-testid="mac-agent-cards">
               {mac.map((i) => (
@@ -1705,7 +1834,7 @@ export function WaitingOnYou({
           count={snoozed.length}
           testId="snoozed"
           bodyTestId="snoozed-section"
-          open={snoozedOpen}
+          open={snoozedOpen || searching}
           onToggle={setSnoozedOpen}
           actions={<LimitControl limit={snoozedLimit} onChange={setSnoozedLimit} total={snoozed.length} testId="snoozed" />}
         >
@@ -1722,7 +1851,7 @@ export function WaitingOnYou({
           title="Decided for you"
           count={fyi.length}
           testId="decided-for-you"
-          open={fyiOpen}
+          open={fyiOpen || searching}
           onToggle={setFyiOpen}
           actions={<LimitControl limit={fyiLimit} onChange={setFyiLimit} total={fyi.length} testId="decided-for-you" />}
         >
@@ -1740,7 +1869,7 @@ export function WaitingOnYou({
           title="Coming up"
           count={coming.length}
           testId="coming-up"
-          open={comingOpen}
+          open={comingOpen || searching}
           onToggle={setComingOpen}
           actions={<LimitControl limit={comingLimit} onChange={setComingLimit} total={coming.length} testId="coming-up" />}
         >
@@ -1757,7 +1886,7 @@ export function WaitingOnYou({
           title="Answered"
           count={rest.length}
           testId="answered-section"
-          open={answeredOpen}
+          open={answeredOpen || searching}
           onToggle={setAnsweredOpen}
           actions={<LimitControl limit={answeredLimit} onChange={setAnsweredLimit} total={rest.length} testId="answered" />}
         >
@@ -1773,7 +1902,7 @@ export function WaitingOnYou({
           title="Superseded"
           count={superseded.length}
           testId="superseded"
-          open={supersededOpen}
+          open={supersededOpen || searching}
           onToggle={setSupersededOpen}
           actions={<LimitControl limit={supersededLimit} onChange={setSupersededLimit} total={superseded.length} testId="superseded" />}
         >
@@ -1829,7 +1958,8 @@ function AnsweredRow({ item: i, done, showMilestone, readOnly, qualify }: { item
       >
         <RowCode item={i} qualify={!!qualify} />
         <span className="min-w-0 flex-1 truncate" data-testid="answered-question">{question}</span>
-        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">{done ? "answered, done" : "answered"}</Badge>
+        {/* not on a phone: the section already says Answered, and the question keeps the line (it was cut to two words) */}
+        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] font-normal max-sm:hidden">{done ? "answered, done" : "answered"}</Badge>
         {/* the same answer closed other asks: said on the folded row too, the full line in the opened card. */}
         {!!i.response?.settles?.closed.length && (
           <Badge variant="outline" className="shrink-0 border-sky-500/40 px-1.5 py-0 text-[10px] font-normal text-sky-800 dark:text-sky-300" title={i.response.settles.line} data-testid="answered-also-closed">
@@ -1841,41 +1971,53 @@ function AnsweredRow({ item: i, done, showMilestone, readOnly, qualify }: { item
       </button>
       {open && (
         <div className="mt-1 mb-2">
-          <WaitingCard item={i} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+          {i.slim ? <WholeAskLoader item={i} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} /> : <WaitingCard item={i} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />}
         </div>
       )}
     </li>
   );
 }
 
+/**
+ * the list carries a done ask as its one-line row; its whole card is fetched when the row opens (a fixed-size
+ * placeholder meanwhile). Without the route (mock, an older console) the row's own fields make the card.
+ */
+function WholeAskLoader({ item, ...rest }: { item: WaitingItem; showMilestone?: boolean; readOnly?: string; qualify?: boolean }) {
+  const { data, error } = useQuery(() => (api.getWaitingItem ? api.getWaitingItem(item.id, item.milestoneId) : Promise.resolve(item)), [item.id]);
+  if (!data && !error) return <SkeletonCards count={1} testId="answered-card-loading" />;
+  return <WaitingCard item={data ?? item} {...rest} />;
+}
+
 /** an open status item with no Waiting-on-you card (Ready to mark, a failed run): one row, its one action. */
-function StatusItemRow({ item, milestone }: { item: PendingItem; milestone?: string }) {
+export function StatusItemRow({ item, milestone }: { item: PendingItem; milestone?: string }) {
   if (item.kind === "monitor_alert") return <MonitorAlertCard item={item} />;
   const action = pendingAction(item);
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
-    <div className="grid min-w-0 grid-cols-1 rounded-xl border bg-card p-4 [overflow-wrap:anywhere]" data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} id={waitingAnchor(item.id)}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{item.kind === "mark_ready" ? "Do" : "Review"}</span>
+    <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"}>
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <IssuedAge iso={item.since} />
         <OwnerPriorityTag p={item.ownerPriority} />
-      </div>
-      <div className="mt-1.5 text-[15px] font-medium leading-snug text-foreground">{item.title}</div>
-      {item.kind === "mark_ready" && item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85">{item.detail}</p>}
+      </CardMeta>
+      <div className={CARD_TITLE}>{item.title}</div>
+      {/* every Blocked card gives its info (what waits on the owner), not only the ready stamp. */}
+      {item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="status-item-detail">{item.detail}</p>}
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {/* the owner's ready stamp is the item's one action, right here (writes Status: ready, like the Tree's button). */}
         {item.kind === "mark_ready" ? (
           <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
         ) : (
           "to" in action && (
-            <Button asChild size="sm" variant="outline" className={PHONE_TAP}>
+            <CardButton asChild variant="outline" >
               <Link to={action.to}>{action.label}</Link>
-            </Button>
+            </CardButton>
           )
         )}
       </div>
-    </div>
+      {/* E948-S60: a status card takes feedback too, to the Team desk with the card named. */}
+      <CardFeedback origin={`status-feedback:${item.id}`} title={item.title} refName={item.id} />
+    </CardShell>
   );
 }
 
@@ -1925,17 +2067,15 @@ export function MonitorAlertCard({ item }: { item: PendingItem }) {
   const m = item.monitor;
   const asks = m?.asks ?? [];
   return (
-    <div className="grid min-w-0 gap-1.5 rounded-lg border p-3 text-sm" data-testid="monitor-alert" data-kind={item.kind} data-pending-id={item.id} id={waitingAnchor(item.id)}>
-      <div className="flex min-w-0 flex-wrap items-baseline gap-2">
-        <Badge variant="red" className="shrink-0">
-          {m?.why.includes("stop") ? "Stopped" : "Check overdue"}
-        </Badge>
-        <span className="min-w-0 flex-1 break-words font-medium">{item.title.replace(/^Monitor alert:\s*/, "")}</span>
+    <CardShell kind="monitor_alert" className="text-sm" data-testid="monitor-alert" data-kind={item.kind} data-pending-id={item.id} id={waitingAnchor(item.id)}>
+      <CardMeta kind="Alert">
+        <span data-testid="monitor-alert-state">{m?.why.includes("stop") ? "Stopped" : "Check overdue"}</span>
         <IssuedAge iso={item.since} />
-      </div>
-      {item.detail && <span className="text-xs text-muted-foreground" data-testid="monitor-alert-detail">{item.detail}</span>}
+      </CardMeta>
+      <div className={CARD_TITLE}>{item.title.replace(/^Monitor alert:\s*/, "")}</div>
+      {item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="monitor-alert-detail">{item.detail}</p>}
       {asks.length > 0 && (
-        <ul className="grid gap-1" data-testid="monitor-alert-asks">
+        <ul className="mt-3 grid gap-1" data-testid="monitor-alert-asks">
           {asks.map((a) => {
             const label = `${a.repo ? `${a.repo}/` : ""}${a.code}`;
             const state = a.state === "missing" ? "no ask has this code" : a.snoozedUntil ? `snoozed until ${a.snoozedUntil}` : a.state === "open" ? "open" : "already answered";
@@ -1960,8 +2100,10 @@ export function MonitorAlertCard({ item }: { item: PendingItem }) {
           })}
         </ul>
       )}
-      {m && !asks.some((a) => a.state === "open") && <span className="text-xs text-amber-800 dark:text-amber-300" data-testid="monitor-alert-next">{m.next}</span>}
-    </div>
+      {m && !asks.some((a) => a.state === "open") && <span className="mt-1 text-xs text-muted-foreground" data-testid="monitor-alert-next">{m.next}</span>}
+      {/* E948-S60: the alert itself takes feedback (its asks' cards carry their own). */}
+      <CardFeedback origin={`alert-feedback:${item.id}`} title={item.title.replace(/^Monitor alert:\s*/, "")} refName={item.id} />
+    </CardShell>
   );
 }
 
@@ -1993,11 +2135,11 @@ export function MonitorAlertLine({ item }: { item: PendingItem }) {
         <Badge variant="outline" className="shrink-0">
           {item.state === "snoozed" ? "Snoozed alert" : "Delivery Manager"}
         </Badge>
-        {/* What it waits on first (never cut), then the item, cut to the line (full on hover). */}
+        {/* Who and the item on the first line, what unblocks it on its own line under them (polish.css). */}
         <span className="shrink-0 text-foreground" data-testid="monitor-alert-line-why">
           {item.state === "snoozed" && open.length > 0 ? `waits on ${open.map((a) => `${a.code}, snoozed by you until ${a.snoozedUntil}`).join("; ")}` : (m?.next ?? "names no open ask")}
         </span>
-        <span className="min-w-0 flex-1 truncate">· {what}</span>
+        <span className="min-w-0 flex-1 truncate" data-testid="monitor-alert-line-what">· {what}</span>
         {item.state === "snoozed" && open.map((a) => <AlertUnsnooze key={a.code} alert={item} ask={a} />)}
       </div>
     </div>
@@ -2022,10 +2164,10 @@ function AlertUnsnooze({ alert, ask }: { alert: PendingItem; ask: MonitorAlertAs
   };
   return (
     <span className="inline-flex shrink-0 items-center gap-2">
-      <Button size="sm" variant="outline" className={cn("h-7 shrink-0 text-xs", PHONE_TAP, busy && WORKING)} disabled={busy} aria-busy={busy || undefined} onClick={go} data-testid="alert-unsnooze">
+      <CardButton variant="outline" className={cn("h-7 shrink-0 text-xs", busy && WORKING)} disabled={busy} aria-busy={busy || undefined} onClick={go} data-testid="alert-unsnooze">
         {busy && <Spinner />}
         {busy ? "Unsnoozing…" : "Unsnooze"}
-      </Button>
+      </CardButton>
       {note && (
         <span className={cn("text-xs", note.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400")} data-testid="alert-unsnooze-note">
           {note.text}

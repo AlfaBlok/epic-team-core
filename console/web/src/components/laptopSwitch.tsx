@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Copy, ExternalLink, Laptop, Loader2, MessageSquareReply, RotateCcw, Send } from "lucide-react";
+import { Check, Copy, ExternalLink, Laptop, Loader2, MessageSquareReply, RotateCcw } from "lucide-react";
 import { api, type LaptopFor, type LaptopStep, type LaptopView, type MacTask, type StepTickInput, type WaitingItem } from "@/api";
 import { mutate } from "@/lib/data";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { PHONE_TAP } from "@/components/common";
 import { ACTION, PRESS, pressProps, type Pressing } from "@/components/cardActions";
 import { useChatAttach, wordsWithFiles } from "@/components/ChatAttach";
-import { WordsBox } from "@/components/WordsBox";
+import { CardFeedback, FeedbackBlock } from "@/components/cardFeedback";
+import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { cn } from "@/lib/utils";
 import { homeRepo } from "@/lib/identity";
@@ -106,6 +106,24 @@ export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTas
   return out.sort((a, b) => a.rank - b.rank).map(({ rank: _r, ...r }) => r);
 }
 
+/**
+ * E948-S78: the Inbox search filters the laptop panel too (the owner 2026-11-13, "search not working": "t9-a10" still
+ * showed E986-S29 and E959-S22). A Mac task stays when an inbox ask the search kept is its own (code, ticket or row,
+ * as `laptopRows` ties them), or its own words (title, row, ask) hold the searched text. `macKept` is the Mac asks
+ * after the search; `q` the searched text.
+ */
+export function searchMacTasks(tasks: MacTask[], macKept: WaitingItem[], q: string): MacTask[] {
+  const needle = q.trim().toLowerCase();
+  const tied = new Set(laptopRows(tasks, macKept).filter((r) => r.item).map((r) => r.key));
+  const said = (t: MacTask) => !!needle && [t.title, t.row, t.ask].some((w) => !!w && w.toLowerCase().includes(needle));
+  return tasks.filter((t) => tied.has(t.key) || said(t));
+}
+
+/** the laptop panel's view while a search is on: its tasks and done tasks narrowed to the matches. */
+export function searchLaptopView(view: LaptopView, macKept: WaitingItem[], q: string): LaptopView {
+  return { ...view, tasks: searchMacTasks(view.tasks, macKept, q), ...(view.done ? { done: searchMacTasks(view.done, macKept, q) } : {}) };
+}
+
 /** Plain http (the tailnet) has no navigator.clipboard: copy through a hidden textarea. */
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -154,7 +172,7 @@ function left(until: string, now: number): string {
   return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min left` : `${m} min left`;
 }
 
-export function LaptopSwitch({ view, mac, listUrl, askCard }: { view?: LaptopView; mac: WaitingItem[]; listUrl: string; askCard?: (item: WaitingItem) => ReactNode }) {
+export function LaptopSwitch({ view, mac, listUrl, askCard, keyBox }: { view?: LaptopView; mac: WaitingItem[]; listUrl: string; askCard?: (item: WaitingItem) => ReactNode; keyBox?: (item: WaitingItem) => ReactNode }) {
   const [busy, setBusy] = useState<LaptopFor | "off" | undefined>();
   const [err, setErr] = useState<string | undefined>();
   const [now, setNow] = useState(() => Date.now());
@@ -216,7 +234,7 @@ export function LaptopSwitch({ view, mac, listUrl, askCard }: { view?: LaptopVie
         {on ? " Open the Claude app, start a new session, paste the text and send it. No Terminal. The team knows you are here." : rows.length ? " Turn it on and they come first here, and the team is told." : ""}
       </p>
       {err && <p className="mt-1 text-xs text-red-700 dark:text-red-400">{err}</p>}
-      {on && all.length > 0 && <MacCards rows={all} askCard={askCard} />}
+      {on && all.length > 0 && <MacCards rows={all} askCard={askCard} keyBox={keyBox} />}
       {on && (
         <p className="mt-2 text-xs text-muted-foreground">
           <a className="underline" href={view?.listUrl || listUrl} target="_blank" rel="noreferrer">
@@ -236,7 +254,7 @@ export function LaptopSwitch({ view, mac, listUrl, askCard }: { view?: LaptopVie
  * state and its owner is woken. A task with no page is its inbox ask's own card (`askCard`). A Done clears the task;
  * the card he just pressed stays with Not done after all until he leaves the page.
  */
-export function MacCards({ rows, askCard, testId = "laptop-tasks" }: { rows: LaptopRow[]; askCard?: (item: WaitingItem) => ReactNode; testId?: string }) {
+export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { rows: LaptopRow[]; askCard?: (item: WaitingItem) => ReactNode; keyBox?: (item: WaitingItem) => ReactNode; testId?: string }) {
   const [kept, setKept] = useState<Set<string>>(() => new Set());
   const shown = rows.filter((r) => !r.done || kept.has(r.key));
   const open = shown.filter((r) => !r.done);
@@ -246,7 +264,11 @@ export function MacCards({ rows, askCard, testId = "laptop-tasks" }: { rows: Lap
       {shown.map((r) => (
         <li key={r.key} className="min-w-0" data-testid="laptop-task" data-state={r.step?.state ?? "none"}>
           {r.step ? (
-            <LaptopCard row={r} n={open.indexOf(r) + 1} onDone={() => setKept((k) => new Set(k).add(r.key))} />
+            <div className="grid min-w-0 gap-1.5">
+              <LaptopCard row={r} n={open.indexOf(r) + 1} onDone={() => setKept((k) => new Set(k).add(r.key))} />
+              {/* E996-S29: a ticket whose ask takes a key keeps that ask's private box here (T9-A10 told him to paste into a box this card did not have). */}
+              {r.item?.secret && r.item.state === "open" && keyBox?.(r.item)}
+            </div>
           ) : r.item && askCard ? (
             <div className="grid min-w-0 gap-1.5">
               <TaskHead row={r} n={open.indexOf(r) + 1} />
@@ -254,13 +276,13 @@ export function MacCards({ rows, askCard, testId = "laptop-tasks" }: { rows: Lap
               {askCard(r.item)}
             </div>
           ) : (
-            <Card className="py-0">
-              <CardContent className="grid min-w-0 gap-2 px-3 py-3">
-                <TaskHead row={r} n={open.indexOf(r) + 1} />
-                <TaskTitle row={r} />
-                {r.command ? <CopyCommand command={r.command} /> : <span className="text-xs text-muted-foreground">No text yet: its next wake writes the ticket.</span>}
-              </CardContent>
-            </Card>
+            <CardShell kind="mac" data-testid="mac-ticket-card">
+              <TaskHead row={r} n={open.indexOf(r) + 1} />
+              <TaskTitle row={r} />
+              <div className="mt-3.5">{r.command ? <CopyCommand command={r.command} /> : <span className="text-xs text-muted-foreground">No text yet: its next wake writes the ticket.</span>}</div>
+              {/* E948-S60: a ticket with no page yet still takes feedback, to the Team desk with the ticket named. */}
+              <CardFeedback origin={`mac-feedback:${r.key}`} title={r.title} refName={r.code ?? r.key} />
+            </CardShell>
           )}
         </li>
       ))}
@@ -270,7 +292,7 @@ export function MacCards({ rows, askCard, testId = "laptop-tasks" }: { rows: Lap
 
 function TaskHead({ row: r, n }: { row: LaptopRow; n: number }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+    <CardMeta kind="Mac">
       {n > 0 && <span>{n}</span>}
       {r.redLine && <span className="text-xs text-muted-foreground" data-testid="laptop-red-line">Red line</span>}
       {r.minutes != null && <span data-testid="laptop-minutes">{r.minutes} min</span>}
@@ -278,17 +300,17 @@ function TaskHead({ row: r, n }: { row: LaptopRow; n: number }) {
       {r.repo && r.repo !== homeRepo() && <span>{r.repo}</span>}
       {r.step?.state === "stuck" && <span className="font-medium text-foreground" data-testid="laptop-state">Stuck</span>}
       {r.step?.state === "done" && <span className="text-muted-foreground" data-testid="laptop-state">Done</span>}
-    </div>
+    </CardMeta>
   );
 }
 
 function TaskTitle({ row: r }: { row: LaptopRow }) {
   return r.url ? (
-    <a className="text-sm font-medium hover:underline" href={r.url} target="_blank" rel="noreferrer">
+    <a className={cn(CARD_TITLE, "hover:underline")} href={r.url} target="_blank" rel="noreferrer">
       {r.title} <ExternalLink className="inline h-3 w-3" />
     </a>
   ) : (
-    <span className="text-sm font-medium">{r.title}</span>
+    <span className={CARD_TITLE}>{r.title}</span>
   );
 }
 
@@ -337,14 +359,16 @@ export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; o
       if (!(await send("note", reply))) throw new Error("the card did not take it");
     },
     disabled: !!press,
+    big: true,
   });
   const wait = !!press || voice.busy || !files.ready;
   const typed = !!words.trim() || files.ids.length > 0;
   const line = changeLine(st.change);
-  const last = st.notes.slice(-2);
+  // a dated note with no words is never a blank "Note <date>:" line (the console kept no words for it)
+  const last = st.notes.filter((x) => !!x.words?.trim()).slice(-2);
   return (
-    <Card className={cn("py-0", st.state === "done" && "opacity-80")} data-testid="laptop-card">
-      <CardContent className="grid min-w-0 gap-2 px-3 py-3">
+    <CardShell kind="mac" className={cn(st.state === "done" && "opacity-80")} data-testid="laptop-card">
+      <div className="grid min-w-0 gap-2">
         <TaskHead row={r} n={st.state === "done" ? 0 : n} />
         <TaskTitle row={r} />
         <p className="text-xs text-muted-foreground">
@@ -367,15 +391,6 @@ export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; o
           </ul>
         )}
         {r.command && st.state !== "done" && <CopyCommand command={r.command} />}
-        <WordsBox
-          label="A note for the team"
-          placeholder="A note, what you saw, or what should change. Any length. Speak it, or paste a screenshot."
-          value={words}
-          onChange={setWords}
-          files={files}
-          voice={voice}
-          testid="laptop-note"
-        />
         <div className="flex flex-wrap items-center gap-2" data-testid="laptop-buttons">
           {st.state !== "done" ? (
             <>
@@ -391,9 +406,6 @@ export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; o
               <RotateCcw /> Not done after all
             </Button>
           )}
-          <Button size="sm" variant="ghost" className={PHONE_TAP} onClick={() => send("note")} data-testid="laptop-send-note" {...pressProps(press, "note", wait || !typed)}>
-            <Send /> Send the note
-          </Button>
           {err ? (
             <span className="text-xs text-red-700 dark:text-red-400" data-testid="laptop-error">{err}</span>
           ) : (
@@ -404,7 +416,20 @@ export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; o
             )
           )}
         </div>
-      </CardContent>
-    </Card>
+        {/* E948-S60: the card ends with the one feedback block (its Send is Send the note). */}
+        <div className="grid" data-testid="laptop-note">
+          <FeedbackBlock
+            value={words}
+            onChange={setWords}
+            files={files}
+            voice={voice}
+            sending={press?.key === "note" && press.phase === "sending"}
+            disabled={!!press}
+            sendTestId="laptop-send-note"
+            onSend={() => void send("note")}
+          />
+        </div>
+      </div>
+    </CardShell>
   );
 }

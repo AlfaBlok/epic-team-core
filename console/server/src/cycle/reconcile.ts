@@ -38,6 +38,11 @@ export interface ReconcileDeps {
    * another grace period. Never called twice for one run (RESENT in its summary).
    */
   resend?: (run: Run, why: string, fresh: boolean) => Promise<boolean>;
+  /**
+   * close the run when it is an orphan wake (running, no thread, past its start window, no start in flight);
+   * true = it was closed. Checked before the stale limit, so an orphan never waits 3 h.
+   */
+  orphan?: (run: Run) => boolean;
 }
 
 /** the summary mark of a run whose wake was re-sent once. */
@@ -336,6 +341,7 @@ export function createReconciler(d: ReconcileDeps) {
     const graceAge = now() - Math.max(Date.parse(run.startedAt), resent.get(run.id) ?? 0); // grace restarts at a re-send
     const timedOut = () => close(run, "failed", `timed out after ${Math.round(age / 60_000)} min with no outcome`);
     if (!run.threadId) {
+      if (d.orphan?.(run)) return true; // it closed the run (seat hold, run-end pull) itself
       if (age > d.staleRunMs && !(await recentActivity(run))) {
         await timedOut();
         return true;

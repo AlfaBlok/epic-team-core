@@ -251,10 +251,21 @@ function planRowsAt(tree: MilestoneBook["tree"], maxDepth: number): PlanRow[] {
     const deeper = n.depth >= maxDepth;
     rows.push({ key: n.path, depth: n.depth, code: n.code, title: n.title, state: n.state, dod: n.dod, parent, ...(deeper && openBelow(n.path) ? { hidden: openBelow(n.path) } : {}) });
     if (deeper) return;
-    const open = children.filter((k) => isOpen(k.state)).sort((a, b) => Number(b.state === "stuck") - Number(a.state === "stuck"));
+    // view-only folds (docs/epic-folds.json): a folded child is no row of its own, one dashed line under its parent names them.
+    const folded = children.filter((k) => k.foldedInto);
+    const own = children.filter((k) => !k.foldedInto);
+    const open = own.filter((k) => isOpen(k.state)).sort((a, b) => Number(b.state === "stuck") - Number(a.state === "stuck"));
     for (const k of open) walk(k, at);
-    const done = children.filter((k) => k.state === "done").length;
-    const parked = children.filter((k) => k.state === "parked").length;
+    if (folded.length)
+      rows.push({
+        key: `${n.path}#folded`,
+        depth: n.depth + 1,
+        title: `${folded.length} folded in: ${folded.map((k) => k.code).join(", ")}`,
+        state: folded.some((k) => isOpen(k.state)) ? "moving" : "done",
+        parent: at,
+      });
+    const done = own.filter((k) => k.state === "done").length;
+    const parked = own.filter((k) => k.state === "parked").length;
     if (done || parked)
       rows.push({
         key: `${n.path}#closed`,

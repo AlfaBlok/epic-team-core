@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type { DB } from "../db.js";
-import { VOICE_NOTE_HEAD } from "../desk/voiceNotes.js";
+import { VOICE_NOTE_HEAD, pointsBackLine } from "../desk/voiceNotes.js";
 import { notJordi } from "../status/mark.js";
 import { VoiceError, type DeskPort, type Voice } from "./voice.js";
 import { ownerName } from "../identity.js";
@@ -25,17 +25,24 @@ export const NOTE_PRICES = { audioIn: 3, textIn: 1.25, out: 5 };
 export const NOTE_USD_PER_MIN = 0.003;
 /** The page starts a new segment this often: each is a whole file, uploaded and transcribed while he keeps talking. */
 export const NOTE_SEGMENT_S = 120;
-/** The cap of one note: the page sends it by itself at this length. */
-export const NOTE_MAX_MIN = 30;
+/**
+ * The cap of one note: the page sends it by itself at this length, everything up to it kept (the owner, 2026-11-12:
+ * "allow up to 2 hours, and never stop without telling him"). Parts stay two minutes each, so no upload or transcription
+ * grows with the note's length.
+ */
+export const NOTE_MAX_MIN = 120;
+/** The page warns this many minutes before the cap (1 h 50 min into a 2-hour note). */
+export const NOTE_WARN_BEFORE_MIN = 10;
 /** One segment's upload at most (two minutes of 32 kbit/s opus is about 0.5 MB; AAC from an iPhone about 1-2 MB). */
 export const NOTE_SEGMENT_MAX_BYTES = 12 * 1024 * 1024;
 /** Page hint of a Chat voice note when he had none: the desk's seed reads the head, not the hint. */
 export const NOTE_SOURCE = "Chat";
 /**
  * the most parts a note may have. Parts are cut every NOTE_SEGMENT_S and also each time the phone locks or the
- * note picks up again after a lock (so what was said is uploaded at once); the 30-minute cap still bounds the length.
+ * note picks up again after a lock (so what was said is uploaded at once); the 2-hour cap still bounds the length
+ * (60 two-minute parts, the rest room for locks).
  */
-export const NOTE_MAX_PARTS = 100;
+export const NOTE_MAX_PARTS = 300;
 /** Context for the next segment: the last words of the previous one (OpenAI's `prompt`). */
 const PROMPT_TAIL = 300;
 
@@ -161,6 +168,7 @@ export interface NoteStart {
   note: VoiceNote;
   segmentS: number;
   maxMin: number;
+  warnMin: number;
   usdPerMin: number;
   model: string;
   monthUsd: number;
@@ -237,7 +245,7 @@ export function createVoiceNotes(d: NotesDeps) {
     // a resend from the browser's outbox (a retry, a reload, after a restart) gets the note it opened before.
     if (clientId) {
       const had = db.prepare("SELECT id FROM voice_notes WHERE tenant_id = ? AND client_id = ?").get(world, clientId) as { id: string } | undefined;
-      if (had) return { note: must(had.id), segmentS: NOTE_SEGMENT_S, maxMin: NOTE_MAX_MIN, usdPerMin: NOTE_USD_PER_MIN, model: NOTE_MODEL, ...budget() };
+      if (had) return { note: must(had.id), segmentS: NOTE_SEGMENT_S, maxMin: NOTE_MAX_MIN, warnMin: NOTE_MAX_MIN - NOTE_WARN_BEFORE_MIN, usdPerMin: NOTE_USD_PER_MIN, model: NOTE_MODEL, ...budget() };
     }
     if (!d.voice.enabled()) throw new VoiceError(409, "voice_off", `${d.voice.state().reason ?? "Voice is switched off in the console."} Type instead.`);
     const b = budget();
@@ -245,7 +253,7 @@ export function createVoiceNotes(d: NotesDeps) {
     if (!d.desk) throw new VoiceError(503, "desk_unavailable", "this chat has no desk to post the note to");
     const id = `vn_${crypto.randomBytes(4).toString("hex")}`;
     db.prepare("INSERT INTO voice_notes (id, tenant_id, milestone_id, started_at, state, page, client_id) VALUES (?, ?, ?, ?, 'recording', ?, ?)").run(id, world, ms, iso(), page?.slice(0, 200) ?? null, clientId ?? null);
-    return { note: must(id), segmentS: NOTE_SEGMENT_S, maxMin: NOTE_MAX_MIN, usdPerMin: NOTE_USD_PER_MIN, model: NOTE_MODEL, ...b };
+    return { note: must(id), segmentS: NOTE_SEGMENT_S, maxMin: NOTE_MAX_MIN, warnMin: NOTE_MAX_MIN - NOTE_WARN_BEFORE_MIN, usdPerMin: NOTE_USD_PER_MIN, model: NOTE_MODEL, ...b };
   }
 
   const recording = (id: string) => {
@@ -277,7 +285,8 @@ export function createVoiceNotes(d: NotesDeps) {
     if (done?.text != null) return { segment: { n, text: done.text as string, costUsd: done.cost_usd as number }, note: must(id) };
     const sec = Math.max(0, Math.min(NOTE_SEGMENT_S * 2, Number.isFinite(seconds) ? seconds : 0));
     const sofar = (db.prepare("SELECT COALESCE(SUM(seconds), 0) s FROM voice_note_segments WHERE note_id = ? AND n != ?").get(id, n) as { s: number }).s;
-    if (sofar + sec > NOTE_MAX_MIN * 60 + 30) throw new VoiceError(409, "note_cap", `a voice note is at most ${NOTE_MAX_MIN} minutes`);
+    // the part that crosses the line is still kept (the page stops at the cap, a late tick may overshoot by a part).
+    if (sofar + sec > NOTE_MAX_MIN * 60 + NOTE_SEGMENT_S) throw new VoiceError(409, "note_cap", `a voice note is at most ${NOTE_MAX_MIN / 60} hours`);
     const b = budget();
     if (b.monthUsd >= b.monthCapUsd) throw new VoiceError(409, "month_cap", `Voice is paused until the 1st: this month reached its ${usd(b.monthCapUsd)} cap.`);
     const folder = path.join(d.dir, id);
@@ -288,26 +297,38 @@ export function createVoiceNotes(d: NotesDeps) {
       `INSERT INTO voice_note_segments (note_id, n, at, mime, file, bytes, seconds) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (note_id, n) DO UPDATE SET at = excluded.at, mime = excluded.mime, file = excluded.file, bytes = excluded.bytes, seconds = excluded.seconds, error = NULL`,
     ).run(id, n, iso(), mime.slice(0, 80), file, audio.byteLength, sec);
+    try {
+      const text = await transcribePart(id, n, audio, mime, sec);
+      return { segment: { n, text, costUsd: segRow(id, n)?.cost_usd as number }, note: must(id) };
+    } catch (e) {
+      if (e instanceof VoiceError) throw e;
+      throw new VoiceError(502, "transcribe_failed", `the segment was kept but not transcribed: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
+
+  /** Transcribe one kept part (its audio already on disk and in its row); its words and cost go into the row. */
+  async function transcribePart(id: string, n: number, audio: Uint8Array, mime: string, sec: number): Promise<string> {
     const prev = n > 0 ? (segRow(id, n - 1)?.text as string | undefined) : undefined;
     try {
-      const t = await d.transcribe(audio, { mime: mime.split(";")[0], filename: `${id}-${n}.${ext}`, ...(prev ? { prompt: prev.slice(-PROMPT_TAIL) } : {}) });
+      const t = await d.transcribe(audio, { mime: mime.split(";")[0], filename: `${id}-${n}.${audioExt(mime) ?? "webm"}`, ...(prev ? { prompt: prev.slice(-PROMPT_TAIL) } : {}) });
       const cost = noteCost(t.usage, sec);
       db.prepare("UPDATE voice_note_segments SET text = ?, usage = ?, cost_usd = ?, error = NULL WHERE note_id = ? AND n = ?").run(t.text.trim(), t.usage ? JSON.stringify(t.usage).slice(0, 2000) : null, cost, id, n);
       retotal(id);
-      return { segment: { n, text: t.text.trim(), costUsd: cost }, note: must(id) };
+      return t.text.trim();
     } catch (e) {
-      db.prepare("UPDATE voice_note_segments SET error = ? WHERE note_id = ? AND n = ?").run((e as Error).message.slice(0, 300), id, n);
+      db.prepare("UPDATE voice_note_segments SET error = ? WHERE note_id = ? AND n = ?").run((e as Error).message.slice(0, 300) || "failed", id, n);
       retotal(id);
-      if (e instanceof VoiceError) throw e;
-      throw new VoiceError(502, "transcribe_failed", `the segment was kept but not transcribed: ${(e as Error).message.slice(0, 200)}`);
+      throw e;
     }
   }
 
   /** The chat message: the head (source, time, length, cost, id), the audio link, then his words. */
   function message(n: VoiceNote, words: string, audioUrl: string, parts: number): string {
     const when = `${n.startedAt.slice(0, 10)} ${n.startedAt.slice(11, 16)}Z`;
+    const back = pointsBackLine(words);
     return [
       `${VOICE_NOTE_HEAD} (${NOTE_SOURCE}), ${when} · ${clock(n.seconds)} · ${usd(n.costUsd)} (${NOTE_MODEL}) · ${n.id}`,
+      ...(back ? [back] : []),
       `Audio: ${audioUrl}${parts > 1 ? ` (${parts} parts)` : ""}`,
       "",
       words,
@@ -333,13 +354,30 @@ export function createVoiceNotes(d: NotesDeps) {
     if (n0.state === "posted") return { note: n0 };
     if (n0.state === "transcribed") return { note: n0, audio: audioUrl };
     if (n0.state !== "recording" && n0.state !== "failed") throw new VoiceError(409, "note_closed", `voice note ${id} is ${n0.state}`);
-    const rows = db.prepare("SELECT n, text, error FROM voice_note_segments WHERE note_id = ? ORDER BY n").all(id) as { n: number; text: string | null; error: string | null }[];
+    const rows = db.prepare("SELECT n, text, error, file, mime, seconds FROM voice_note_segments WHERE note_id = ? ORDER BY n").all(id) as { n: number; text: string | null; error: string | null; file: string; mime: string; seconds: number }[];
+    // a part whose audio is in but whose words failed gets one more try now; one that still fails is named in the
+    // note with its audio link, so the rest of what he said is never held back by it.
+    const unheard = new Set<number>();
+    for (const r of rows) {
+      if (r.n >= o.segments || r.text != null || r.error == null || !fs.existsSync(r.file)) continue;
+      const t = await transcribePart(id, r.n, new Uint8Array(fs.readFileSync(r.file)), r.mime, r.seconds).catch(() => undefined);
+      if (t != null) r.text = t;
+      else unheard.add(r.n);
+    }
     const missing: number[] = [];
     // `skip` are parts the page has no audio for (an empty part, or one lost when the phone closed the page).
     const skip = new Set(o.skip ?? []);
-    for (let i = 0; i < o.segments; i++) if (!skip.has(i) && rows.find((r) => r.n === i)?.text == null) missing.push(i);
+    for (let i = 0; i < o.segments; i++) if (!skip.has(i) && !unheard.has(i) && rows.find((r) => r.n === i)?.text == null) missing.push(i);
     if (missing.length) throw new VoiceError(409, "segments_missing", `segments not in yet: ${missing.join(", ")}`);
-    const words = rows.filter((r) => r.n < o.segments && r.text != null).map((r) => r.text!.trim()).filter(Boolean).join("\n\n");
+    let at = 0;
+    const said: string[] = [];
+    for (const r of rows) {
+      if (r.n >= o.segments) continue;
+      if (unheard.has(r.n)) said.push(`[Part ${r.n + 1}, from ${clock(at)}, could not be turned into words. Its audio is kept: ${audioUrl}?part=${r.n}]`);
+      else if (r.text?.trim()) said.push(r.text.trim());
+      at += r.seconds;
+    }
+    const words = said.join("\n\n");
     const page = o.page?.trim() || (db.prepare("SELECT page FROM voice_notes WHERE id = ?").get(id) as { page: string | null } | undefined)?.page || undefined;
     if (!words) {
       db.prepare("UPDATE voice_notes SET state = 'empty', finished_at = ? WHERE id = ?").run(iso(), id);
@@ -481,7 +519,7 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
     `${prefix}/notes/:nid/finish`,
     guard(async (c, n) => {
       const p = finishIn.safeParse(await json(c));
-      if (!p.success) return bad(c, "segments (how many were recorded, 1..100) is required; page (string), skip (part numbers with no audio) and fill (true: the words come back for a card's text box, nothing is posted) are optional");
+      if (!p.success) return bad(c, "segments (how many were recorded, 1..300) is required; page (string), skip (part numbers with no audio) and fill (true: the words come back for a card's text box, nothing is posted) are optional");
       return c.json(await n.finish(c.req.param("nid") ?? "", { ...p.data, ...(open ? { fill: true } : {}), audioBase: base(c) }));
     }),
   );

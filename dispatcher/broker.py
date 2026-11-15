@@ -20,7 +20,10 @@ per-seat cap (BROKER_MAX_PER_SEAT running workers, default 10). Score = headroom
 headroom = min(100 - 5h%, 100 - weekly%) and running = max(the seat's open pick reservations, the console's running
 child runs on that seat; the console DB is read read-only, unreadable = reservations only). A seat whose turn could
 not start (`done --fail --signal` text matching START_FAIL_RE) is avoided for START_FAIL_COOLDOWN s while another seat
-is eligible. Highest score wins, tie -> least recently used. `status` counts available/free with the same eligibility.
+is eligible. A seat whose start failed to sign in (signal matching AUTH_FAIL_RE: "could not authenticate", "Not logged
+in", ...) is set aside AUTH_FAIL_COOLDOWN s: not eligible at all, so pick takes the next best seat; a later `done` ok on
+it clears that, and pick/status name the seats set aside (`set_aside`). Highest score wins, tie -> least recently
+used. `status` counts available/free with the same eligibility.
 A seat whose usage is unknown only because its access token expired, with a refresh token stored, stays eligible as
 long as no worker runs on it: it scores as EXPIRED_HEADROOM headroom, so its next session refreshes the token. `pick`
 also starts, detached, `refresh-token <seat>` for one expired seat: a one-word `claude -p` turn (haiku, no MCP
@@ -80,6 +83,9 @@ START_FAIL_RE = re.compile(r"could not start this turn|did not answer the MCP se
 EXPIRED_HEADROOM = 50  # assumed headroom of an idle seat whose token expired (its next session refreshes it)
 TOKEN_REFRESH_GAP = 90  # seconds between two token-refresh sessions started on this host
 TOKEN_REFRESH_COOLDOWN = 30 * 60  # a seat whose refresh did not help is tried again after this long
+AUTH_FAIL_RE = re.compile(r"could not authenticate|not logged in|no \.credentials\.json|authentication_error|invalid api key|"
+                          r"oauth token (has )?(expired|been revoked)|please run /login|invalid bearer token", re.I)
+AUTH_FAIL_COOLDOWN = 30 * 60  # seconds a seat that could not sign in is set aside (not eligible)
 START_FAIL_COOLDOWN = 600  # seconds a seat whose turn could not start is avoided while another seat is eligible
 USAGE_TTL = 120  # reuse a successful usage read this many seconds (no HTTP call)
 USAGE_STALE_MAX = 15 * 60  # on a failed read keep the last good values this long (stale), then unknown
@@ -98,7 +104,7 @@ DEFAULT = {"beat": 0, "seats": {n: {"providerInstanceId": "claudeAgent_" + n} fo
 FIELDS = {"runs": 0, "ok": 0, "failed": 0, "in_flight": 0, "reservations": [], "last_used": None,
           "maxed_until": None, "logged_in": None, "auth_checked": None, "usage": None,
           "last_signal": None, "last_error": None, "usage_backoff_until": None, "running": 0,
-          "console_running": None, "start_failed_until": None}
+          "console_running": None, "start_failed_until": None, "auth_failed_until": None}
 
 
 def now():
@@ -150,11 +156,16 @@ def release_stale(d):
             s["maxed_until"] = None
 
 
-def refresh_auth(d):
+def refresh_auth(d, only=None):
+    claude = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")  # an ssh PATH may lack ~/.local/bin
+    cmd = os.environ.get("BROKER_AUTH_CMD")
+    cmd = cmd.split() if cmd else [claude, "auth", "status"]
     for n, s in d["seats"].items():
+        if only is not None and n not in only:
+            continue
         env = dict(os.environ, CLAUDE_CONFIG_DIR=os.path.expanduser("~/.claude_" + n))
         try:
-            r = subprocess.run(["claude", "auth", "status"], env=env, capture_output=True, text=True, timeout=30)
+            r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
             j = json.loads(r.stdout)
             s["logged_in"], s["subscription"], s["org"] = j.get("loggedIn"), j.get("subscriptionType"), j.get("orgName")
         except Exception as e:  # keep previous value, record why
@@ -240,6 +251,22 @@ def parse_usage(j):
 
 def age(at):
     return (now() - parse(at)).total_seconds() if at else None
+
+
+AUTH_RECHECK = 15 * 60  # a seat whose usage cannot be read gets `claude auth status` again at most this often
+
+
+def recheck_auth(d):
+    """`beat` (the only auth check) no longer runs, so a seat that signed out (OAuth refresh failed) kept
+    logged_in=true and showed only "usage unknown: HTTP 429" (seat1, 2026-11-14). Re-read sign-in for each seat whose
+    usage is unknown, at most every AUTH_RECHECK s: a signed-out seat then says "logged out". Usage fixtures (tests)
+    skip it unless BROKER_AUTH_CMD is set."""
+    if os.environ.get("SEAT_BROKER_USAGE_FIXTURE") and not os.environ.get("BROKER_AUTH_CMD"):
+        return
+    due = [n for n, s in d["seats"].items() if not (s["usage"] or {}).get("known")
+           and not (s.get("auth_checked") and age(s["auth_checked"]) < AUTH_RECHECK)]
+    if due:
+        refresh_auth(d, only=due)
 
 
 def refresh_usage(d):
@@ -381,6 +408,8 @@ def skip_reason(s):
         return "logged out"
     if s["maxed_until"] and s["maxed_until"] > ts():
         return "limited until " + s["maxed_until"]
+    if auth_failed(s):
+        return "set aside until %s: sign-in failed" % s["auth_failed_until"]
     if expired_ok(s):
         if s.get("running", 0) > 0:  # one refresh session at a time; a second waits for the refreshed usage
             return "token expired, refresh session running"
@@ -597,6 +626,15 @@ def recent_launches(d):
     return len(d["local_launches"])
 
 
+def auth_failed(s):
+    return bool(s.get("auth_failed_until")) and s["auth_failed_until"] > ts()
+
+
+def set_aside(d):
+    """{seat: until} for every seat set aside after a failed sign-in."""
+    return {n: s["auth_failed_until"] for n, s in sorted(d["seats"].items()) if auth_failed(s)}
+
+
 def start_failed(s):
     return bool(s.get("start_failed_until")) and s["start_failed_until"] > ts()
 
@@ -634,12 +672,17 @@ def release(d, seat, ok, signal=None, until=None):
         s["reservations"].pop(0)
     s["in_flight"] = len(s["reservations"])
     s["ok" if ok else "failed"] += 1
+    if ok and s.get("auth_failed_until"):  # the seat signed in after all
+        s["auth_failed_until"] = None
     if signal:
         s["last_signal"] = signal
     if not ok:
         s["last_error"] = "%s %s" % (ts(), signal or "failed")
         if signal and START_FAIL_RE.search(signal):  # avoid this seat for a while, not a usage limit
             s["start_failed_until"] = ts(now() + timedelta(seconds=START_FAIL_COOLDOWN))
+        if signal and AUTH_FAIL_RE.search(signal):  # cannot sign in -> set aside, pick the next seat
+            s["auth_failed_until"] = ts(now() + timedelta(seconds=AUTH_FAIL_COOLDOWN))
+            log("%s %s set aside until %s: sign-in failed (%s)" % (ts(), seat, s["auth_failed_until"], signal[:120]))
         if not until and signal and LIMIT_RE.search(signal):
             m = re.search(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", signal)
             until = m.group(0) if m else ts(now() + timedelta(hours=1))
@@ -698,6 +741,7 @@ def main():
                 print(json.dumps(dict({"seat": None, "providerInstanceId": None}, **refusal(refused))))
                 return
             refresh_usage(d)
+            recheck_auth(d)
             count_running(d)
             # renew one expired seat's token (a pick --from another host ran no host gate here, so check the cap now)
             renew = refresh_due(d, host_ok=not (mem_reason(recent_launches(d)) or load_reason() or session_reason(d))
@@ -719,6 +763,8 @@ def main():
                     out["token_refresh"] = True  # this session refreshes the seat's expired token
             else:
                 out.update(refusal(no_seat_reason(d)))
+            if set_aside(d):
+                out["set_aside"] = set_aside(d)  # the caller's summary names the seats set aside
         if renew:
             start_refresh(renew)
             out["token_refresh_started"] = renew
@@ -781,10 +827,10 @@ def main():
         print(json.dumps({"name": "seat pool", "capacity": len(seats), "available": len(free),
                           "ceiling": MAX_TOTAL, "open": n_open, "per_seat_cap": MAX_PER_SEAT,
                           "sessions": dict(zip(("live", "cap"), session_count(d, write=False)[:2]), host=HOST),
-                          "beat": d.get("beat"), "updated": d.get("updated"), "free": sorted(free),
+                          "beat": d.get("beat"), "updated": d.get("updated"), "free": sorted(free), "set_aside": set_aside(d),
                           "seats": {n: {"org": s.get("org"), "logged_in": s["logged_in"], "in_flight": s["in_flight"],
                                         "running": s["running"], "console_running": s["console_running"],
-                                        "start_failed_until": s["start_failed_until"], "runs": s["runs"], "maxed_until": s["maxed_until"],
+                                        "start_failed_until": s["start_failed_until"], "auth_failed_until": s["auth_failed_until"], "runs": s["runs"], "maxed_until": s["maxed_until"],
                                         "five_hour": ((s["usage"] or {}).get("utilization") or {}).get("five_hour"),
                                         "usage": {k: (s["usage"] or {}).get(k) for k in (
                                             "known", "reason", "token_expired", "five_hour_pct", "five_hour_resets_at", "weekly_pct",

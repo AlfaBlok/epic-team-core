@@ -146,3 +146,12 @@ export function useSharedQuery<T>(key: string, fn: () => Promise<T>, opts: { tag
   const e = entry && shared.get(key) === entry ? entry : shared.get(key);
   return { data: e?.data as T | undefined, error: e?.error, loading: e ? e.loading : true };
 }
+
+/**
+ * the owner's inbox list, one fetch and one poll for every reader with the same filter (the Team home's
+ * page, its Blocked section and its later folds read the one answer; before, each fetched and polled its own copy).
+ */
+export function useWaitingList(f: Parameters<typeof api.listWaitingOnOwner>[0] = { includeSuperseded: true }) {
+  const key = `waiting:${JSON.stringify(f ?? {})}`;
+  return useSharedQuery(key, () => api.listWaitingOnOwner(f), { tag: "inbox" });
+}

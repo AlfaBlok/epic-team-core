@@ -7,7 +7,7 @@ import { openDb, type DB } from "../src/db.js";
 import type { EditInput, SpineWriter } from "../src/inbox/spineWrite.js";
 import { advisories, COPY_PASTE_ADVISORY, NO_COPY_PASTE_RULE, STEPS_PAGE_RULE, type HumanAsk } from "../src/inbox/asks.js";
 import { gateProblems } from "../src/review/card.js";
-import { copyPasteInHtml, copyPasteInText, copyPasteProblem } from "../src/steps/copyPaste.js";
+import { copyPasteInHtml, copyPasteInText, copyPasteProblem, OWNER_COMMANDS } from "../src/steps/copyPaste.js";
 import { createSteps, mountSteps, NOTE_MAX, stepsIn, WORDS_MAX } from "../src/steps/steps.js";
 import { stepVoicePage } from "../src/steps/stepVoice.js";
 import { mountVoiceNotesRec, type VoiceNotes } from "../src/voice/notes.js";
@@ -59,6 +59,23 @@ describe("T96-S8 the copy-paste detector", () => {
     expect(copyPasteInText("Run:\n```\n$ op read op://x/y\n```").map((f) => f.line)).toEqual(["op read op://x/y"]);
     expect(copyPasteInText("Paste `brew install uv` — runs on: your Mac, Terminal app, tested in zsh and bash")).toEqual([]);
     expect(copyPasteProblem(copyPasteInText("Paste `brew install uv`"))).toContain("root L-54");
+  });
+});
+
+describe("the one named exception: the Sync browser auth command", () => {
+  const sync = `curl -sSL http://host1:8750/auth-sync/as${"1".repeat(32)}.sh | sh`;
+  it("the marked copy box passes, the bare command is still found, an unknown name is reported", () => {
+    expect(copyPasteInHtml(`<code>${sync}</code>`)).toHaveLength(1);
+    expect(copyPasteInHtml(`<code data-owner-command="sync-browser-auth">${sync}</code>`)).toEqual([]);
+    expect(copyPasteInHtml(`<code data-owner-command="anything-else">brew install x</code>`).map((f) => f.kind)).toEqual(["exception", "code"]);
+  });
+  it("in an ask's text by `owner-command: <name>`; the list holds only that one name", () => {
+    expect(copyPasteInText(`Run \`${sync}\` (owner-command: sync-browser-auth)`)).toEqual([]);
+    expect(copyPasteInText("Run `brew install x` owner-command: my-own").map((f) => f.kind)).toEqual(["exception", "inline"]);
+    expect(Object.keys(OWNER_COMMANDS)).toEqual(["sync-browser-auth", "run-mac-list"]);
+    const run = "curl -fsSL http://host1:9196/mac/go.sh | sh";
+    expect(copyPasteInHtml(`<pre data-owner-command="run-mac-list">${run}</pre>`)).toEqual([]);
+    expect(copyPasteInHtml(`<pre>${run}</pre>`)).toHaveLength(1);
   });
 });
 
@@ -222,8 +239,12 @@ describe("T96-S8 the voice button of a step's note box", () => {
     const kit = fs.readFileSync(path.join(__dirname, "../../web/public/steps-kit.js"), "utf8");
     expect(kit).toContain('class="sk-voice"');
     expect(kit).not.toMatch(/maxlength="600"/);
-    expect(kit).toContain("/voice?step=");
+    // the kit records in place (MediaRecorder) instead of linking to a voice page
+    expect(kit).toContain("MediaRecorder");
+    // the whole hint fits the box on a phone
+    expect(kit).toContain('placeholder="A note for the team (optional): type, paste a screenshot, or use Voice"');
     expect(kit).toContain("data-runs-on");
     expect(fs.readFileSync(path.join(__dirname, "../../web/public/steps-kit.css"), "utf8")).toContain(".sk-where");
+    expect(fs.readFileSync(path.join(__dirname, "../../web/public/steps-kit.css"), "utf8")).toMatch(/\.sk-note textarea \{ min-height: 4\.6rem/);
   });
 });

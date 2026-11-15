@@ -35,6 +35,20 @@ Words on every slide: `copywriting` to draft, `humanizer` before you ship.
 Colours change in one place only: `skills/brands/paper.json` `deck.tokens` (shared with `house-diagram-style`). A product that needs its own accent gets its own brand file with a `deck` block and
 `--brand <name>`; never edit tokens by hand in a deck, `paper_deck.py tokens <dir>` rewrites them.
 
+## Every page leads with the answer
+
+The owner asked for it: "a lot more diagrams and boxes", not "a lot of text and heavy text". This holds for every page you make, not only decks: status and evidence pages, review card
+evidence, reports, proposals, steps pages.
+
+1. **Line one is the answer** (the punchline, 20 words or fewer, in the Newsreader claim size): what happened or what you
+   recommend. Not the context, not the history.
+2. **The first screen shows it**: a diagram (house-diagram-style), a before and after pair, a row of boxes (`.card` or a
+   ✓ / ✗ box per point), or a small table. A reader who stops here knows the outcome.
+3. **Prose last**, short paragraphs (under ~60 words each), only for what the picture cannot say.
+
+Check before you hand it over: `python3 scripts/text_wall_check.py <page>` (flags no picture or box in the
+first screen, a buried lead, a paragraph wall; the pre-commit hook runs it on new docs/status and docs/proposals pages).
+
 ## Palette
 
 | Token | Value | Use |

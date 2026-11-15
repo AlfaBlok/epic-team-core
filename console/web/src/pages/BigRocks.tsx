@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api, type BigRock } from "@/api";
 import { useQuery } from "@/lib/data";
-import { DECK_PATH, PAPER, ROCKS_PATH, SERIF, epicLabel } from "@/lib/deck";
+import { DECK_PATH, PAPER, SERIF, epicLabel } from "@/lib/deck";
 import { Empty, ErrorBox, Loading, PageHeader } from "@/components/common";
 import { RocksAboutBlock } from "@/components/pageAbout";
 import { ownerName } from "@/lib/identity";
+import { ROCKS_PAGE_PATH } from "@/lib/routePaths";
+export { ROCKS_PAGE_PATH };
 
 /**
  * the big rocks board, the heavy themes the owner keeps repeating in his voice notes, from the repo
@@ -13,7 +15,6 @@ import { ownerName } from "@/lib/identity";
  * comes back), then one card per rock: what we want, why it weighs, the epics it maps to (each opens its deck) and the
  * voice notes that carry it, quoted. `/rocks`, `#R<n>` opens one rock.
  */
-export const ROCKS_PAGE_PATH = ROCKS_PATH;
 
 const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 

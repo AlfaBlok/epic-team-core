@@ -53,9 +53,10 @@ export function zoneWord(tz = Intl.DateTimeFormat().resolvedOptions().timeZone):
 export function cadenceText(c: Assignment["cadence"], zone = zoneWord()): string {
   if (c.type === "interval") {
     const m = c.everyMinutes;
-    if (m % 1440 === 0) return m === 1440 ? "every day" : `every ${m / 1440} days`;
-    if (m % 60 === 0) return m === 60 ? "every hour" : `every ${m / 60} hours`;
-    return `every ${m} minutes`;
+    const q = c.quiet ? `, quiet ${c.quiet.from} to ${c.quiet.to} ${zoneWord(c.quiet.timeZone)}` : "";
+    if (m % 1440 === 0) return (m === 1440 ? "every day" : `every ${m / 1440} days`) + q;
+    if (m % 60 === 0) return (m === 60 ? "every hour" : `every ${m / 60} hours`) + q;
+    return `every ${m} minutes` + q;
   }
   const days = [...new Set(c.weekdays)].sort();
   const when = days.length === 7 ? "every day" : days.length === 5 && !days.includes(0) && !days.includes(6) ? "every weekday" : `on ${days.map((d) => DAYS[d]).join(", ")}`;

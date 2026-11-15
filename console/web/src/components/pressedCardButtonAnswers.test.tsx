@@ -81,7 +81,7 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     expect(mark.getAttribute("data-press")).toBe("sending");
     expect(within(mark).getByTestId("button-spinner")).toBeTruthy();
     expect((mark as HTMLButtonElement).disabled).toBe(true);
-    // two buttons on the card (Mark complete, Not yet); Decline sits under More
+    // two buttons on the card (Mark complete, Give feedback); Decline sits under More
     for (const id of ["review-iteration"]) {
       const b = within(c).getByTestId(id) as HTMLButtonElement;
       expect(b.disabled).toBe(true);
@@ -130,13 +130,13 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     expect((within(back).getByRole("button", { name: MARK }) as HTMLButtonElement).disabled).toBe(false);
   }, 10_000);
 
-  it("Not yet (was Changes wanted) and Decline: the pressed send button spins with Sending…", async () => {
+  it("Give feedback (was Not yet) and Decline: the pressed send button spins with Sending…", async () => {
     mount();
     vi.spyOn(api, "relaunchReviewItem").mockReturnValue(new Promise(() => {}));
     const c = await screen.findByTestId("review-card");
-    // Not yet's first press opens the note, its next press sends the words
+    // Give feedback's first press opens the note, its next press sends the words
     fireEvent.click(within(c).getByTestId("review-iteration"));
-    fireEvent.change(within(c).getByLabelText("Your note"), { target: { value: "TEST words" } });
+    fireEvent.change(within(c).getByLabelText("Feedback"), { target: { value: "TEST words" } });
     const send = within(c).getByTestId("review-iteration");
     fireEvent.click(send);
     expect(send.textContent).toBe(PRESS.sending);

@@ -67,14 +67,15 @@ describe("T17-S1 answer box on a phone", () => {
   it("WaitingCard's answer box is Chat's box: 16 px, grows below sm; its buttons are 44 px tap targets", () => {
     // a question that needs words shows its "Your answer" box at once (an options card shows it under More)
     wrap(<WaitingCard item={{ ...item, ask: "provide" }} />);
-    const box = screen.getByRole("textbox", { name: "Your answer" });
+    const box = screen.getByRole("textbox", { name: "Feedback" });
     // the words take the frame's whole width; the buttons sit in a short row under them, inside the same frame
     expect(box.className).toContain("w-full min-w-0 resize-none border-0 bg-transparent px-3 py-2 text-sm");
     for (const c of ["max-sm:text-base", "max-sm:min-h-11", "max-sm:max-h-[40dvh]", "max-sm:[field-sizing:content]"]) expect(box.className).toContain(c);
     const row = box.parentElement as HTMLElement;
     expect(row.dataset.testid).toBe("words-field");
     for (const b of within(row).getAllByRole("button")) expect(b.className).toContain("max-sm:min-h-11");
-    const buttons = within(screen.getByTestId("answer-buttons")).getAllByRole("button");
+    // E948-S60: a words question's Answer is the feedback block's Send, in the box's own row
+    const buttons = [...within(screen.getByTestId("answer-buttons")).queryAllByRole("button"), within(row).getByTestId("answer")];
     expect(buttons.length).toBeGreaterThan(0);
     for (const b of buttons) expect(b.className).toContain("max-sm:min-h-11");
   });

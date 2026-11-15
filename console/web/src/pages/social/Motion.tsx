@@ -344,6 +344,11 @@ export function TargetsView({ targets }: { targets: TargetView[] }) {
                 <div className="mt-2">
                   <Progress now={t.now} target={t.target} />
                 </div>
+                {t.alongside?.map((a) => (
+                  <p key={a.source} className="mt-1 text-xs text-muted-foreground" data-testid="target-alongside">
+                    Beside it: {a.label} {a.now === null ? "not read yet" : fmt(a.now)}
+                  </p>
+                ))}
                 <p className="mt-2 text-[11px] leading-snug text-muted-foreground/80">
                   {t.from ? `Counted since ${short(t.from)}. ` : ""}Source: {t.source ?? "no source yet"}
                   {t.sourceNote ? `. ${t.sourceNote}.` : ""}

@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter } from "react-router-dom";
 import type { DeskChat } from "@/api";
 import { ChatView } from "@/pages/Chat";
-import { bestVoice, createSpeaker, pieces, setReplySpeaker, speakable, SPEAK_REPLIES_KEY, type SpeakMedia } from "./speak";
+import { bestVoice, createSpeaker, FIRST_PIECE, pieces, setReplySpeaker, speakable, SPEAK_REPLIES_KEY, WARM_PIECES, type SpeakMedia } from "./speak";
 
 // "right now I hear like a robotic voice and I cannot stop that robotic voice … I didn't press
 // that button". A reply speaks only on Play (or when he turned Speak replies on), in the team's warm voice, and Pause and
@@ -82,7 +82,7 @@ describe("T42-S40 the words it says", () => {
   it("drops code, links and marks, and cuts the reply into short pieces at sentence ends", () => {
     expect(speakable("**Done.** See [the page](https://x.y/z) or https://a.b/c.\n```\ncode\n```\nBye `now`.")).toBe("Done. See the page or Bye now.");
     const p = pieces("Short one. " + "A longer sentence that goes on for a while to fill the piece. ".repeat(8));
-    expect(p[0]).toBe("Short one. A longer sentence that goes on for a while to fill the piece.");
+    expect(p[0]).toBe("Short one.");
     expect(p.every((x) => x.length <= 300)).toBe(true);
     expect(p.join(" ").replace(/\s+/g, " ")).toContain("fill the piece.");
   });
@@ -210,5 +210,56 @@ describe("T42-S40 in Chat", () => {
     cleanup();
     render(<SpeakRepliesSwitch />);
     expect(screen.getByTestId("speak-replies").textContent).toMatch(/Speak replies: on/);
+  });
+});
+
+// (the slow log, 14 Nov: Play waited 5.2 and 3.3 s before it spoke): the worker server needs about a second per
+// 25 letters on a busy box, so the first piece is short, the next ones grow, and a new reply's first pieces are spoken
+// ahead (warm) so Play finds them ready.
+describe("T42-S89 Play starts at once", () => {
+  const reply_ = "Done, the new release is live and the Chat answers faster on your phone, about a second sooner than this morning. " +
+    "I checked the slow log for the last day and thirty one requests waited over two seconds. Most came from the older page. " +
+    "The photo upload is its own row. The voice wait is this one.";
+  it("the first piece is at most 70 letters, cut at a comma, the second at most 140, the rest 220, nothing lost", () => {
+    const p = pieces(speakable(reply_));
+    expect(p[0]).toBe("Done, the new release is live and the Chat answers faster on your");
+    expect(p[0].length).toBeLessThanOrEqual(FIRST_PIECE);
+    expect(p[1].length).toBeLessThanOrEqual(140);
+    expect(p.slice(2).every((x) => x.length <= 220)).toBe(true);
+    expect(p.join(" ").replace(/\s+/g, " ")).toBe(speakable(reply_));
+    const long = pieces("This first sentence keeps going without any comma at all so it has to be cut between two words somewhere. Then more.");
+    expect(long[0].length).toBeLessThanOrEqual(FIRST_PIECE);
+    expect(long[0]).toMatch(/\w$/);
+    expect(long.join(" ")).toBe("This first sentence keeps going without any comma at all so it has to be cut between two words somewhere. Then more.");
+    const comma = pieces("Everything is green now, the deploy went out at ten and the release log names the change. Bye.");
+    expect(comma[0]).toBe("Everything is green now,");
+  });
+  it("warm speaks a reply's first two pieces ahead once, and Play then asks for exactly those pieces", async () => {
+    const f = fakeMedia();
+    const warmed: string[] = [];
+    f.media.warmPiece = vi.fn(async (t: string) => void warmed.push(t));
+    const s = createSpeaker(f.media);
+    s.warm("a1", reply_);
+    s.warm("a1", reply_);
+    await tick();
+    await tick();
+    const p = pieces(speakable(reply_));
+    expect(warmed).toEqual(p.slice(0, WARM_PIECES));
+    s.play("a1", reply_);
+    await tick();
+    expect(f.fetched.slice(0, 2)).toEqual(warmed);
+    s.stop();
+  });
+  it("in Chat the newest finished desk reply is warmed, an older one or one still writing is not", async () => {
+    const f = fakeMedia();
+    const warmed: string[] = [];
+    f.media.warmPiece = vi.fn(async (t: string) => void warmed.push(t));
+    setReplySpeaker(createSpeaker(f.media));
+    renderChat(async () => chat([reply("a0", "An older answer."), mine("u1", "and now?"), reply("a1", "All good, the deploy is live.")]));
+    await screen.findByText("All good, the deploy is live.");
+    await tick();
+    await tick();
+    expect(warmed).toEqual(["All good, the deploy is live."]);
+    expect(f.media.fetchPiece).not.toHaveBeenCalled();
   });
 });

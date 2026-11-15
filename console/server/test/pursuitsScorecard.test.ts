@@ -175,3 +175,64 @@ describe("pursuits: from a real checkout", () => {
     }
   });
 });
+
+describe("pursuits: a social kit inside the console", () => {
+  it("a pursuit's kit folder gives its kit.json, previews and fonts, and nothing outside them", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pursuits-kit-"));
+    const home = path.join(root, "home_repo");
+    const kitDir = path.join(home, "docs/brand/social-kit/live");
+    fs.mkdirSync(path.join(kitDir, "previews"), { recursive: true });
+    fs.mkdirSync(path.join(home, "docs/brand/social-kit/fonts"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".git"));
+    const file = JSON.parse(FILE);
+    file.pursuits[0].kit = { dir: "docs/brand/social-kit/live", files: "http://files.example/live/assets/" };
+    file.pursuits.push({ id: "bad", name: "Bad", greenWhen: "Never.", kit: { dir: "../outside" } });
+    fs.writeFileSync(path.join(home, "docs/pursuits.json"), JSON.stringify(file));
+    fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "live", name: "Live", tagline: "Agents that post for you." }));
+    fs.writeFileSync(path.join(kitDir, "previews/banner-x.webp"), "WEBP");
+    fs.writeFileSync(path.join(home, "docs/brand/social-kit/fonts/funnel-sans.woff2"), "WOFF");
+    try {
+      const svc = createPursuits({ reposRoot: root, board: () => BOARD, git: gitOut(10_000), home: "home_repo" });
+      const id = file.pursuits[0].id as string;
+      const body = await svc.get();
+      expect(body.pursuits[0].kit).toBe(true);
+      expect(body.pursuits.find((p) => p.id === "bad")?.kit).toBeUndefined();
+      expect(svc.kit(id)).toEqual({ pursuit: { id, name: file.pursuits[0].name }, kit: { id: "live", name: "Live", tagline: "Agents that post for you." }, files: "http://files.example/live/assets/" });
+      expect(svc.kit("bad")).toBeNull();
+      expect(svc.kitFile(id, "previews", "banner-x.webp")?.type).toBe("image/webp");
+      expect(svc.kitFile(id, "fonts", "funnel-sans.woff2")?.body.toString()).toBe("WOFF");
+      expect(svc.kitFile(id, "previews", "../kit.json")).toBeNull();
+      expect(svc.kitFile(id, "previews", "kit.json")).toBeNull();
+      expect(svc.kitFile(id, "fonts", "banner-x.webp")).toBeNull();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pursuits: a kit preview missing on disk is read from git", () => {
+  it("a checkout without media (sparse) still serves the committed preview", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "pursuits-kit-git-"));
+    const home = path.join(root, "home_repo");
+    const kitDir = path.join(home, "docs/kits/live");
+    fs.mkdirSync(path.join(kitDir, "previews"), { recursive: true });
+    const git = (...a: string[]) => execFileSync("git", ["-C", home, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" } });
+    git("init", "-q");
+    const file = JSON.parse(FILE);
+    file.pursuits[0].kit = { dir: "docs/kits/live" };
+    fs.writeFileSync(path.join(home, "docs/pursuits.json"), JSON.stringify(file));
+    fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "live", name: "Live" }));
+    fs.writeFileSync(path.join(kitDir, "previews/banner-x.webp"), "WEBP-IN-GIT");
+    git("add", ".");
+    git("commit", "-qm", "kit");
+    fs.rmSync(path.join(kitDir, "previews/banner-x.webp"));
+    try {
+      const svc = createPursuits({ reposRoot: root, board: () => BOARD, git: gitOut(10_000), home: "home_repo" });
+      const id = file.pursuits[0].id as string;
+      expect(svc.kitFile(id, "previews", "banner-x.webp")?.body.toString()).toBe("WEBP-IN-GIT");
+      expect(svc.kitFile(id, "previews", "nothing-here.webp")).toBeNull();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

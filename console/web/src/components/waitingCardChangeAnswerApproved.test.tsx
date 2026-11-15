@@ -59,11 +59,11 @@ describe("WaitingCard: Change answer on an approved ask", () => {
     wrap(<WaitingCard item={approved()} />);
     fireEvent.click(screen.getByRole("button", { name: "Change answer" }));
     expect(screen.getByTestId("changing-answer").textContent).toMatch(/now: approved\).*rewritten in place/);
-    expect(screen.getByRole("button", { name: /Approve \(current\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Yes: go ahead \(current\)/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Change to this/ })).toBeNull(); // no plain answer box
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
     fireEvent.click(screen.getByTestId("decline"));
-    fireEvent.change(screen.getByLabelText("Your note"), { target: { value: "smaller first step" } });
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "smaller first step" } });
     fireEvent.click(screen.getByTestId("decline"));
     await vi.waitFor(() => expect(change).toHaveBeenCalledWith("jr_1", { kind: "deny", text: "smaller first step", wake: true }));
     // stored and written by its job: no "not delivered" error on the card

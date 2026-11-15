@@ -27,7 +27,7 @@ export interface KpiInput {
 export const KPI_FILE = "data/kpi-daily.md";
 export const PLATFORMS = ["x", "reddit"] as const;
 export type KpiPlatform = (typeof PLATFORMS)[number];
-export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions"] as const;
+export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions", "likes", "postReplies"] as const;
 export type SeriesKey = (typeof SERIES)[number];
 
 export interface KpiPoint {
@@ -44,6 +44,8 @@ export interface KpiSeries {
   kind: "count" | "level";
   /** What the numbers are, in one plain sentence (shown under the chart). */
   note: string;
+  /** where the latest reading came from (likes and replies on posts: the Counts source cell and its time). */
+  source?: string | null;
 }
 export interface BestPost {
   id: string;
@@ -124,6 +126,16 @@ export interface SnapshotRow {
   impressions: number | null;
   readAt: string | null;
   note: string | null;
+  /**
+   * columns after Note (written by scripts/campaign_counts.py and, later, the console's recorder): the
+   * public counts of our live top-level posts on the account, summed, at countsReadAt, and where each was read.
+   */
+  likes?: number | null;
+  postReplies?: number | null;
+  reposts?: number | null;
+  newPosts24h?: number | null;
+  countsReadAt?: string | null;
+  countsSource?: string | null;
 }
 export const SNAPSHOT_HEADER = ["Date", "Platform", "Account", "Followers", "Posts", "Replies sent", "Replies received", "Impressions", "Read at", "Note"];
 
@@ -160,6 +172,12 @@ export function parseSnapshots(text: string): SnapshotRow[] {
       impressions: cellNum(c[7]),
       readAt: c[8] || null,
       note: c[9] || null,
+      likes: cellNum(c[10]),
+      postReplies: cellNum(c[11]),
+      reposts: cellNum(c[12]),
+      newPosts24h: cellNum(c[13]),
+      countsReadAt: c[14] || null,
+      countsSource: c[15] || null,
     });
   }
   return out;
@@ -169,7 +187,10 @@ export function parseSnapshots(text: string): SnapshotRow[] {
 const esc = (s: string | number | null | undefined) => (s === null || s === undefined ? "" : String(s).replace(/\|/g, "/").replace(/\n/g, " "));
 export function snapshotLine(r: SnapshotRow): string {
   const label = r.platform === "x" ? "X" : "Reddit";
-  return `| ${[r.date, label, r.account, r.followers, r.posts, r.repliesSent, r.repliesReceived, r.impressions, r.readAt, r.note].map(esc).join(" | ")} |`;
+  const counts = [r.likes, r.postReplies, r.reposts, r.newPosts24h, r.countsReadAt, r.countsSource];
+  // the recorder's rows stay ten cells; a row that carries the counts keeps them.
+  const tail = counts.some((v) => v !== null && v !== undefined) ? counts : [];
+  return `| ${[r.date, label, r.account, r.followers, r.posts, r.repliesSent, r.repliesReceived, r.impressions, r.readAt, r.note, ...tail].map(esc).join(" | ")} |`;
 }
 
 // -------------------------------------------------------------------------------------------------------- the numbers
@@ -204,17 +225,53 @@ const add = (m: Map<string, number>, day: string | null, n: number) => {
  * account not listed (the world's own account the reads named before) are left out.
  */
 export function followersByDay(snaps: SnapshotRow[], listed: string[] = []): Map<string, number> {
+  return levelByDay(snaps, listed, (r) => r.followers);
+}
+
+/**
+ * one reading per day of a level a snapshot row carries (followers, likes, replies on posts). With listed
+ * accounts, only theirs count and the day sums them; otherwise the day's last reading wins (one account at a time).
+ */
+export function levelByDay(snaps: SnapshotRow[], listed: string[], pick: (r: SnapshotRow) => number | null | undefined): Map<string, number> {
   const acc = (r: { account: string | null } | string | null) => (typeof r === "string" || r === null ? r ?? "" : r.account ?? "").trim().toLowerCase().replace(/^@|^u\//, "");
   const want = new Set(listed.map((l) => acc(l)).filter(Boolean));
-  const read = snaps.filter((r) => r.followers !== null);
+  const read = snaps.filter((r) => pick(r) !== null && pick(r) !== undefined);
   const own = want.size ? read.filter((r) => want.has(acc(r))) : [];
   const perDay = new Map<string, Map<string, number>>();
   for (const r of own.length ? own : read) {
     const day = perDay.get(r.date) ?? new Map<string, number>();
-    day.set(own.length ? acc(r) : "", r.followers!);
+    day.set(own.length ? acc(r) : "", pick(r)!);
     perDay.set(r.date, day);
   }
   return new Map([...perDay].map(([d, m]) => [d, [...m.values()].reduce((a, b) => a + b, 0)]));
+}
+
+/** "2026-11-12T09:30:40Z" → "12 Nov 09:30 UTC" (null when it is not a time). */
+const readTime = (s: string | null | undefined) => {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec((s ?? "").trim());
+  return m ? `${shortDay(m[1])} ${m[2]} UTC` : null;
+};
+
+/** likes or replies on our posts, per day, as the daily count read (scripts/campaign_counts.py) wrote them. */
+function countsSeries(key: "likes" | "postReplies", snaps: SnapshotRow[], listed: string[], what: string): KpiSeries {
+  const pick = (r: SnapshotRow) => (key === "likes" ? r.likes : r.postReplies);
+  const by = levelByDay(snaps, listed, pick);
+  const days = [...by.keys()].sort();
+  if (!days.length) return { key, since: null, points: [], kind: "level", note: `Not counted yet. ${what} are read once a day from now on.`, source: null };
+  const last = [...snaps].filter((r) => pick(r) !== null && pick(r) !== undefined && r.date === days[days.length - 1]).pop();
+  const at = readTime(last?.countsReadAt);
+  // the cell also says where followers were read ("…; followers from …"): under likes only the posts' part matters.
+  const posts = (last?.countsSource ?? "").split(/;\s*followers\b/i)[0].trim();
+  const said = /^0 of 0 posts\b/i.test(posts) ? "no live post to count yet" : posts;
+  const src = said ? `${said}${at ? `, read ${at}` : ""}` : at ? `read ${at}` : null;
+  return {
+    key,
+    since: days[0],
+    points: days.map((date) => ({ date, value: by.get(date)! })),
+    kind: "level",
+    note: `${what} on our live posts, added up, read once a day. Collecting since ${days[0]}.`,
+    source: src,
+  };
 }
 
 /** Ledger totals now, per platform (what a snapshot row records beside followers). */
@@ -327,6 +384,8 @@ export function computeKpis(data: KpiInput, snapshots: SnapshotRow[], today: str
               `Views read about 48 h after each post.${lost ? ` X has given no view counts since ${shortDay(lost)}.` : ""}`,
               "No view count read yet.",
             ),
+      likes: countsSeries("likes", snaps, listed?.[platform] ?? [], "Likes"),
+      postReplies: countsSeries("postReplies", snaps, listed?.[platform] ?? [], "Public replies"),
     };
     return { platform, label, account: (listed?.[platform]?.length ?? 0) > 1 ? listed![platform]!.join(" and ") : snaps.length ? snaps[snaps.length - 1].account : null, series, best: bestPost(data.posts ?? [], platform) };
   });

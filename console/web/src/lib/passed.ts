@@ -29,6 +29,8 @@ export interface Passed {
   where?: string;
   /** The console's instructions to the desk, kept folded. */
   brief: string;
+  /** the desk's own reply line "Passed to the EpicTeam desk: …" (not a console line). */
+  by?: "desk";
 }
 
 // the two desks' product names: EpicTeam and the social product's (identity)
@@ -71,6 +73,29 @@ export function passedHead(text: string): Passed | undefined {
     return { kind: "spill", id: m[1], about: stop(m[2]), quote, where, brief: before.trim() };
   }
   return undefined;
+}
+
+/**
+ * the desk's own one line when it passed his words on (his product feedback as a desk note, or a part by the relay):
+ * `Passed to the EpicTeam desk: <what> (<link>)` as the FIRST line of its reply. Shown as the same grey "passed on" band, with
+ * the link to where it went; the rest of the reply (if any) stays a normal message.
+ */
+const replyHead = () => new RegExp(String.raw`^\s*\**Passed (?:on )?to the ${desks()} desk\**:\**[ \t]*([^\n]*)`, "u");
+export function passedReply(text: string): { p: Passed; rest: string } | undefined {
+  if (!text) return undefined;
+  const m = text.match(replyHead());
+  if (!m) return undefined;
+  // what went ends at its first sentence; a further sentence on the same line is the rest of the reply
+  let line = m[2];
+  let tail = "";
+  const cut = line.search(/\.\s+(?=[A-Z])/);
+  if (cut >= 0) {
+    tail = line.slice(cut + 1).trim();
+    line = line.slice(0, cut + 1);
+  }
+  const url = firstUrl(line.replace(/\]\(/g, " "));
+  const about = stop(line.replace(/\[([^\]]*)\]\([^)]*\)/g, "").replace(/\(?\s*https?:\/\/[^\s)]+\s*\)?/g, "").replace(/\(\s*\)/g, "").replace(/[\s:—-]+$/, ""));
+  return { p: { kind: "to", desk: m[1], id: "", about, quote: "", url, brief: "", by: "desk" }, rest: [tail, text.slice(m[0].length).trim()].filter(Boolean).join("\n") };
 }
 
 /** The label over the card, in his words: who passed it in. */

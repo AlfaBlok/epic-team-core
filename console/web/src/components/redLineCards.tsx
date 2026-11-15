@@ -1,6 +1,6 @@
-import { api, type ReviewItem } from "@/api";
+import { type ReviewItem } from "@/api";
 import { isStructured, needsAnswer, type OwnerPriority, type RedLine, type WaitingItem } from "@/api/inbox-types";
-import { useQuery } from "@/lib/data";
+import { useWaitingList } from "@/lib/data";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
 import { useSnoozes, withSnoozes } from "@/lib/snooze";
 import { PostReviewCard, ReviewCard } from "@/components/review";
@@ -14,7 +14,7 @@ const onLine = (r: RedLine, j?: OwnerPriority) => !!j?.redLine && (r.name ? j.re
  */
 export function RedLineCards({ r }: { r: RedLine }) {
   const { cards: reviews } = useReviewCards();
-  const { data: fetched } = useQuery(() => api.listWaitingOnOwner(), [], { tag: "inbox" });
+  const { data: fetched } = useWaitingList();
   const { entries: snoozes } = useSnoozes();
   const asks = withSnoozes(fetched, snoozes)?.filter((i) => onLine(r, i.ownerPriority) && needsAnswer(i) && isStructured(i) && !i.snoozedUntil && !i.decidedBy && i.signal !== "stamp_ready");
   const mine = reviews?.filter((i) => onLine(r, i.ownerPriority));

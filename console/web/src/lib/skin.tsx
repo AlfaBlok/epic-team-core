@@ -64,6 +64,8 @@ export type ScreenId =
   | "performance"
   /** the Company view, every project as a company with three wheels and one inbox (console only). */
   | "company"
+  /** the goal sets: a table of rows, kanban, inbox, chat desk, context and personas each; both skins. */
+  | "goalSets"
   /** Settings (docs/design/console.md): readiness, red lines and What you build on top, then every operator page (console only). */
   | "settings";
 
@@ -135,7 +137,7 @@ const CONSOLE_WORDS: Words = {
 };
 
 // Social-only screens are left out of the console skin.
-const ALL_SCREENS: ScreenId[] = ["team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits"];
+const ALL_SCREENS: ScreenId[] = ["goalSets", "team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits"];
 
 /**
  * the social skin is the console with a violet theme and favicon, one
@@ -158,7 +160,7 @@ export const SKINS: Record<SkinId, Skin> = {
       },
       milestones: "Campaigns", milestone: "campaign", milestonesWord: "campaigns", addMilestone: "Add campaign", teamSkills: "Skills" },
     // Plan §3: hidden are Hosts, Seats, Threads, Secrets (keys come as approval cards), Testers and the Book.
-    screens: new Set<ScreenId>(["performance", "team", "chat", "messages", "milestones", "spines", "personas", "runs", "tickets", "services", "teamSkills", "credits", "browserAuth", "setup"]),
+    screens: new Set<ScreenId>(["goalSets", "performance", "team", "chat", "messages", "milestones", "spines", "personas", "runs", "tickets", "services", "teamSkills", "credits", "browserAuth", "setup"]),
     reach: new Set(SOCIAL_REACH),
     campaigns: true,
     favicon: { svg: "/favicon-social.svg", touch: "/apple-touch-icon-social.png" },

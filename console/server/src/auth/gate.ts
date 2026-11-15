@@ -12,6 +12,23 @@ import { crossSiteRefusal } from "./csrf.js";
 import { clientAddress } from "../clientAddress.js";
 import { homeWorld, hostOf, sites } from "../identity.js";
 import { companyViewOn } from "../plug/companyView.js";
+import { gunzipSync, inflateSync } from "node:zlib";
+
+/**
+ * The health answer's `ok`, read through its encoding. leanJson gzips a JSON answer of 1 KB or more when the
+ * caller accepts it, and Cloudflare always does, so a plain .json() read failed on the gzip bytes and the customer sites
+ * said {"ok":false} while the console was up.
+ */
+async function healthUp(res: Response): Promise<boolean> {
+  try {
+    const raw = Buffer.from(await res.clone().arrayBuffer());
+    const enc = (res.headers.get("content-encoding") ?? "").toLowerCase();
+    const body = enc === "gzip" ? gunzipSync(raw) : enc === "deflate" ? inflateSync(raw) : raw;
+    return (JSON.parse(body.toString("utf8")) as { ok?: unknown }).ok === true;
+  } catch {
+    return false;
+  }
+}
 
 /** The socket peer of a request (@hono/node-server puts the IncomingMessage on env); undefined in app.request tests. */
 const peerOf = (c: Context): string | undefined => (c.env as any)?.incoming?.socket?.remoteAddress;
@@ -74,8 +91,23 @@ export const productOf = (host: string | undefined, env: NodeJS.ProcessEnv = pro
  * stays the way in. the owner as a customer gets a builder login of his own.
  */
 export const PLATFORM_PRIVATE = { code: "platform_private", message: "the platform is managed from the private console" } as const;
-export const platformBlocked = (host: string | undefined, tenant: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean =>
-  tenant === DEFAULT_TENANT && !!host && customerHosts(env).has(host);
+/**
+ * the door (the owner as customer one on the EpicTeam site). `CONSOLE_PLATFORM_DOOR` names the logins
+ * (emails, space- or comma-separated) that may open the home world on a customer site; unset or empty = off, the default,
+ * and then nothing changes. A door login comes in only by Google or GitHub sign-in (never a password, a switch or its
+ * one-time link, an agent token or the host owner token), and its session there is judged like any customer world's:
+ * only the TENANT_SAFE routes (routeScope.ts judge), no owner powers and never the platform owner (owner.ts). Switching the
+ * door off (unset and restart) refuses its sessions at once: they count as no credential again.
+ */
+export const DOOR_VIA = new Set(["google", "github"]);
+export const doorLogins = (env: NodeJS.ProcessEnv = process.env): Set<string> =>
+  new Set((env.CONSOLE_PLATFORM_DOOR ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+$/.test(e)));
+/** the login (and, when a session starts, the way in) that may pass the door; any other caller passes nothing. */
+export type DoorKey = { email?: string; via?: string };
+export const throughDoor = (door: DoorKey | undefined, env: NodeJS.ProcessEnv = process.env): boolean =>
+  !!door?.email && (door.via === undefined || DOOR_VIA.has(door.via)) && doorLogins(env).has(door.email.trim().toLowerCase());
+export const platformBlocked = (host: string | undefined, tenant: string | undefined, env: NodeJS.ProcessEnv = process.env, door?: DoorKey): boolean =>
+  tenant === DEFAULT_TENANT && !!host && customerHosts(env).has(host) && !throughDoor(door, env);
 const platformRefusal = () => new AuthError(403, PLATFORM_PRIVATE.code, PLATFORM_PRIVATE.message);
 
 /**
@@ -101,7 +133,7 @@ export function requestHost(header: (n: string) => string | undefined): string |
 function publicIdentity(i: Identity) {
   switch (i.kind) {
     case "session":
-      return { kind: i.kind, tenantId: i.tenant, email: i.email, name: i.name, role: i.role };
+      return { kind: i.kind, tenantId: i.tenant, email: i.email, name: i.name, role: i.role, ...(i.door ? { door: true } : {}) }; // door: the customer screens only
     case "token":
       return { kind: i.kind, tenantId: i.tenant, label: i.label };
     case "legacy":
@@ -138,6 +170,12 @@ export function mountAuth(
   const resolve = (c: Context): Identity => {
     const i = auth.resolve({ header: (n) => c.req.header(n), cookie: getCookie(c, SESSION_COOKIE), peer: peerOf(c) });
     // the home world credential on a customer site is no credential (its open pages still answer, the rest is 401).
+    // a door login keeps its session, marked as the door (a customer world's rules, no owner powers).
+    if (i.kind === "session") {
+      const host = hostOfReq(c);
+      if (platformBlocked(host, i.tenant, process.env, { email: i.email })) return { kind: "none", peer: peerOf(c) };
+      return platformBlocked(host, i.tenant) ? { ...i, role: "member", door: true } : i;
+    }
     return "tenant" in i && platformBlocked(hostOfReq(c), i.tenant) ? { kind: "none", peer: peerOf(c) } : i;
   };
 
@@ -169,9 +207,12 @@ export function mountAuth(
     if (!customers.has(requestHost((n) => c.req.header(n)) ?? "")) return next();
     if (mode !== "on") return c.json({ error: { code: "auth_off", message: "this site is closed: the console does not enforce its login (CONSOLE_AUTH)" } }, 503);
     await next();
-    if (c.req.path === "/api/health") {
-      const ok = ((await c.res.clone().json().catch(() => ({}))) as { ok?: unknown }).ok === true;
-      c.res = new Response(JSON.stringify({ ok }), { status: c.res.status, headers: { "content-type": "application/json" } });
+    if (c.req.path === "/api/health" && c.res.status !== 304) {
+      const ok = await healthUp(c.res);
+      const status = c.res.status;
+      // Hono's res setter copies the old answer's headers (its Content-Encoding: gzip among them) onto the new one
+      c.res = undefined as unknown as Response;
+      c.res = new Response(JSON.stringify({ ok }), { status, headers: { "content-type": "application/json" } });
     }
     // a new Response, not headers set on the old one: @hono/node-server writes a plain text/html answer (the /login page)
     // from its own cached headers, so a header added afterwards never left the server (seen on the local copy).
@@ -233,7 +274,8 @@ export function mountAuth(
   };
   const secure = (c: Context) => c.req.header("x-forwarded-proto") === "https" || new URL(c.req.url).protocol === "https:";
   const startSession = (c: Context, userId: string, tenant: string, via?: string) => {
-    if (platformBlocked(hostOfReq(c), tenant)) throw platformRefusal();
+    const email = (o.db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as { email?: string } | undefined)?.email;
+    if (platformBlocked(hostOfReq(c), tenant, process.env, { email, via: via ?? "" })) throw platformRefusal();
     const s = auth.createSession(userId, tenant, { via, host: hostOfReq(c) ?? undefined }); // how and where
     setCookie(c, SESSION_COOKIE, s.id, { httpOnly: true, sameSite: "Lax", path: "/", secure: secure(c), maxAge: SESSION_DAYS * 86400 });
     return auth.session(s.id)!;
@@ -261,7 +303,7 @@ export function mountAuth(
     const tenant = tenantId ? o.store.getTenant(tenantId) ?? null : null;
     const wakeHold = tenant ? o.worldHold?.(tenant.id) : undefined; // the Personas page says why nobody wakes
     const billing = tenant ? o.billingOf?.(tenant.id) : undefined; // an EpicTeam sign-up waits for its payment
-    const worlds = i.kind === "session" ? auth.memberships(i.userId).filter((m) => !platformBlocked(hostOfReq(c), m.tenantId)) : [];
+    const worlds = i.kind === "session" ? auth.memberships(i.userId).filter((m) => !platformBlocked(hostOfReq(c), m.tenantId, process.env, { email: i.email })) : [];
     return c.json({ mode, identity: publicIdentity(i), tenant, worlds, ...(wakeHold ? { wakeHold } : {}), ...(billing ? { billing } : {}), ...(companyViewOn() ? { companyView: true } : {}) }); // the parked Company view
   };
   /**

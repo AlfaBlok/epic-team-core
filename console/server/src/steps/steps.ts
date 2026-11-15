@@ -1,12 +1,15 @@
 import { randomBytes } from "node:crypto";
+import { phantomBoxSteps, phantomStepsProblem } from "../inbox/phantomRefs.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Context, Hono } from "hono";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import { currentAuth } from "../auth/identity.js";
+import { ATTACH_MAX_BYTES, AttachError, splitCardFiles } from "../desk/attachLimits.js";
 import { oneLine, type SpineWrite, type SpineWriter } from "../inbox/spineWrite.js";
 import { copyPasteInHtml, copyPasteProblem, type CopyPasteBlock } from "./copyPaste.js";
 import { addDecisionRow } from "../review/followups.js";
+import { secureCopyOf } from "./secureLinks.js";
 import { fileValueProblem, MAX_FILE, scrub } from "../plug/keys.js";
 import type { PasteKey } from "../inbox/routes.js";
 import { isAskCode } from "../inbox/asks.js";
@@ -149,8 +152,11 @@ export const WORDS_MAX = 600;
 export const NOTE_MAX = 200_000;
 /** The note's words for a spine line, a desk line or the page: one line, at most WORDS_MAX, no double quote. */
 export const shortWords = (w: string): string => {
-  const one = oneLine(w).replace(/"/g, "'");
-  return one.length > WORDS_MAX ? `${one.slice(0, WORDS_MAX).trimEnd()}…` : one;
+  // a note's screenshots (the files line) stay whole after the shortened words, so their links still open
+  const { words, files } = splitCardFiles(w);
+  const one = oneLine(words).replace(/"/g, "'");
+  const cut = one.length > WORDS_MAX ? `${one.slice(0, WORDS_MAX).trimEnd()}…` : one;
+  return files ? `${cut}${cut ? " " : ""}${oneLine(files)}` : cut;
 };
 /** A note too long for a spine line is filed whole as text in the owning repo. */
 export const isLongNote = (w: string | undefined): w is string => !!w && oneLine(w).length > WORDS_MAX;
@@ -171,7 +177,14 @@ export interface StepNote {
 }
 
 const dateOf = (line: string) => /^\|\s*(\d{4}-\d{2}-\d{2})/.exec(line.trim())?.[1] ?? "";
-const wordsOf = (line: string) => /his words: "(.*)"/.exec(line.split(" | ")[2] ?? "")?.[1];
+/**
+ * his words from the cell that holds them, whichever column that is: a spine whose Decisions table has another shape
+ * (an extra date column) kept them one cell further on, and every note there read as empty.
+ */
+const wordsOf = (line: string) => {
+  const cell = line.split(" | ").find((c) => c.includes('his words: "'));
+  return cell ? /his words: "(.*)"/.exec(cell)?.[1] : undefined;
+};
 
 /** Every step of `page` in this spine text: its state row (done or stuck; none = not started) and its notes, oldest first. */
 export function stepsIn(text: string, page: string): { steps: Record<string, StepStatus>; notes: Record<string, StepNote[]> } {
@@ -183,7 +196,10 @@ export function stepsIn(text: string, page: string): { steps: Record<string, Ste
     const m = re.exec(line);
     if (!m) continue;
     const words = wordsOf(line);
-    if (m[1] === NOTE_MARK) (notes[m[2]] ??= []).push({ at: dateOf(line), words: words ?? "" });
+    // a note row with no words kept is no note to show: never a dated line with nothing after it.
+    if (m[1] === NOTE_MARK) {
+      if (words?.trim()) (notes[m[2]] ??= []).push({ at: dateOf(line), words });
+    }
     else steps[m[2]] = { state: m[1] === STATE_MARK.done ? "done" : "stuck", at: dateOf(line), ...(words ? { words } : {}) };
   }
   return { steps, notes };
@@ -211,8 +227,11 @@ const LABEL: Record<StepState, string> = { done: "Done", stuck: "Stuck", todo: "
  * row (done and stuck have one, not started has none); words that come with Done or Not started, or with no change, are a
  * note row of their own. What changed: `state`, `note` or both. Skips when nothing changes or there is no Decisions table.
  */
-export function applyStep(text: string, t: StepTick, to: StepState, words: string | undefined, date: string): { text: string; changed: { state: boolean; note: boolean } } | { skip: string } {
+export function applyStep(text: string, t: StepTick, to: StepState, words: string | undefined, date: string, at?: string): { text: string; changed: { state: boolean; note: boolean } } | { skip: string } {
   const from = stateOf(text, t.page.id, t.step);
+  // the time he left it and the row it is about, so the row's inbox card can show his note (review/pageNotes.ts)
+  const hm = at ? /T(\d{2}:\d{2})/.exec(at)?.[1] : undefined;
+  const tag = `${hm ? ` at ${hm}Z` : ""}${waitsOf(t) ? `${hm ? "," : ""} for ${waitsOf(t)}` : ""}`;
   const stateChange = from !== to;
   const noteRow = !!words && !(stateChange && to === "stuck");
   if (!stateChange && !words) return { skip: `already ${LABEL[to].toLowerCase()} in the spine` };
@@ -231,10 +250,10 @@ export function applyStep(text: string, t: StepTick, to: StepState, words: strin
     out = out.split("\n").filter((l) => !(l.trim().startsWith("|") && marks.some((m) => l.includes(m)))).join("\n");
     if (to === "done" && !add(`Step done: ${t.title} on ${t.page.title} ${markOf(STATE_MARK.done, t.page.id, t.step)}${waits ? `, ${waits} can go on` : ""}`, `${by} switched Done on the steps page (E87): the desk was told and the owner woken`))
       return { skip: "the spine has no ## Decisions table" };
-    if (to === "stuck" && !add(`Step stuck: ${t.title} on ${t.page.title} ${markOf(STATE_MARK.stuck, t.page.id, t.step)}${said}`, `${by} switched Stuck on the steps page (E87): ${waits ? `${waits} must clear what blocked him` : "the owner must clear what blocked him"}`))
+    if (to === "stuck" && !add(`Step stuck: ${t.title} on ${t.page.title} ${markOf(STATE_MARK.stuck, t.page.id, t.step)}${tag}${said}`, `${by} switched Stuck on the steps page (E87): ${waits ? `${waits} must clear what blocked him` : "the owner must clear what blocked him"}`))
       return { skip: "the spine has no ## Decisions table" };
   }
-  if (noteRow && !add(`Step note: ${t.title} on ${t.page.title} ${markOf(NOTE_MARK, t.page.id, t.step)}${said}`, `${by} wrote a note on the steps page (E87): the desk was told and the owner woken`))
+  if (noteRow && !add(`Step note: ${t.title} on ${t.page.title} ${markOf(NOTE_MARK, t.page.id, t.step)}${tag}${said}`, `${by} wrote a note on the steps page (E87): the desk was told and the owner woken`))
     return { skip: "the spine has no ## Decisions table" };
   return { text: out, changed: { state: stateChange, note: noteRow || (stateChange && to === "stuck" && !!words) } };
 }
@@ -247,7 +266,7 @@ export function deskLine(t: StepTick, to: StepState, o: { repo: string; spine: s
   const waits = waitsOf(t);
   const test = isTestPage(t.page) ? `TEST tick (not ${ownerName()}), ` : "";
   return (
-    `${STEP_DESK_MARKER} ${test}${headOf(to, o.stateChange ?? true)}: ${t.title} on ${t.page.title} (${t.page.url})` +
+    `${STEP_DESK_MARKER} ${test}${headOf(to, o.stateChange ?? true)}: ${t.title} on ${t.page.title} (${secureCopyOf(t.page.url)})` +
     `${waits ? `, for ${waits}` : ""}${o.words ? `. His words: "${o.words}"` : ""}. Saved in ${o.repo} ${o.spine}${o.sha ? ` (${o.sha})` : ""}; ${o.woke}. ` +
     `This note comes from the console: tell ${ownerName()} in one line that the team has it, and nothing else.`
   );
@@ -548,10 +567,21 @@ export function createSteps(d: StepsDeps) {
    * (422 copy_paste_steps) and named by GET /api/steps/pages/check; a page not reachable yet (registered before it is
    * written) passes, and its next registration or check reads it.
    */
-  async function copyPasteCheck(url: string): Promise<{ checked: boolean; found: CopyPasteBlock[] }> {
-    if (!d.fetchPage || !/^https?:\/\/\S+$/.test(url)) return { checked: false, found: [] };
+  async function copyPasteCheck(url: string, boxes?: Set<string>): Promise<{ checked: boolean; found: CopyPasteBlock[]; phantom: string[] }> {
+    if (!d.fetchPage || !/^https?:\/\/\S+$/.test(url)) return { checked: false, found: [], phantom: [] };
     const html = await d.fetchPage(url).catch(() => undefined);
-    return html === undefined ? { checked: false, found: [] } : { checked: true, found: copyPasteInHtml(html) };
+    // E996-S29: and the steps that send him to paste into a private box the page does not draw.
+    return html === undefined ? { checked: false, found: [], phantom: [] } : { checked: true, found: copyPasteInHtml(html), phantom: phantomBoxSteps(html, boxes ?? boxesAt(url), boxedUrls()) };
+  }
+  /** every registered page that draws a private box (a step elsewhere may send him there). */
+  const boxedUrls = (): Set<string> =>
+    new Set((d.db.prepare("SELECT DISTINCT p.url FROM step_pages p JOIN step_secrets s ON s.page_id = p.id").all() as { url: string }[]).map((r) => r.url));
+  /** the steps with a private box on the page registered at `url` (any repo), plus `extra` (a registration's own `secrets`). */
+  function boxesAt(url: string, extra?: unknown): Set<string> {
+    const out = new Set<string>();
+    for (const r of d.db.prepare("SELECT s.step FROM step_secrets s JOIN step_pages p ON p.id = s.page_id WHERE p.url = ?").all(url) as { step: string }[]) out.add(r.step);
+    if (Array.isArray(extra)) for (const x of extra) if (typeof (x as { step?: unknown })?.step === "string") out.add((x as { step: string }).step.trim());
+    return out;
   }
 
   function register(o: { title?: unknown; url?: unknown; repo?: unknown; spine?: unknown; secrets?: unknown; world?: string; by: string }): StepPage {
@@ -844,7 +874,7 @@ export function createSteps(d: StepsDeps) {
         path: p.spine,
         label: `step ${c.state}`,
         edit: (text, date) => {
-          const next = applyStep(text, tk, c.state, words, date);
+          const next = applyStep(text, tk, c.state, words, date, c.createdAt);
           if ("skip" in next) return next;
           changed = next.changed;
           const head = headOf(c.state, next.changed.state);
@@ -1037,6 +1067,7 @@ export function createSteps(d: StepsDeps) {
   return {
     register,
     copyPasteCheck,
+    boxesAt,
     byToken,
     byId,
     byUrl,
@@ -1049,6 +1080,8 @@ export function createSteps(d: StepsDeps) {
     pump,
     drain,
     open,
+    /** every page's id, address, title and world, newest first (secureLinks.ts). */
+    lite: () => d.db.prepare("SELECT id, url, title, world FROM step_pages ORDER BY created_at DESC").all() as { id: string; url: string; title: string; world: string | null }[],
     list: () =>
       (d.db.prepare("SELECT * FROM step_pages ORDER BY created_at DESC").all() as Record<string, string>[]).map((r) => {
         const p = row(r)!;
@@ -1085,10 +1118,35 @@ async function bodyOf(c: Context): Promise<unknown> {
   }
 }
 
-export function mountSteps(api: Hono, steps: Steps) {
+/**
+ * a note's screenshots: stored like Chat's attachments (desk/attachments.ts) in the page's world, named in the
+ * note as one files line of links, opened by the agent who reads it with its console headers.
+ */
+export interface StepFiles {
+  add: (bytes: Uint8Array, declaredType: string, rawName: string, world: string) => { id: string; name: string; mime: string; bytes: number };
+  line: (ids: string[], world: string) => string;
+}
+/** What a note box takes: pictures only (a screenshot, a photo of a screen). */
+export const STEP_FILE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif"];
+const STEP_FILES_MAX = 8;
+
+export function mountSteps(api: Hono, steps: Steps, files?: StepFiles) {
   const fail = (c: Context, e: unknown) => {
     if (e instanceof StepError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
+    if (e instanceof AttachError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
     throw e;
+  };
+  // the note's words with its screenshots' line after them (ids from the files route below, this page's world only)
+  const withFiles = (p: StepPage, body: unknown): unknown => {
+    const b = body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+    if (!b || b.files === undefined) return body;
+    const ids = Array.isArray(b.files) ? [...new Set(b.files.filter((x): x is string => typeof x === "string" && /^att_[a-f0-9]{12}$/.test(x)))] : [];
+    if (!ids.length) throw new StepError(400, "validation_error", "files must name the screenshots this page uploaded");
+    if (ids.length > STEP_FILES_MAX) throw new StepError(400, "validation_error", `at most ${STEP_FILES_MAX} screenshots in one note`);
+    if (!files) throw new StepError(400, "validation_error", "this console takes no screenshots on steps pages");
+    const words = typeof b.comment === "string" ? b.comment.trim() : "";
+    const { files: _f, ...rest } = b;
+    return { ...rest, comment: `${words}${words ? " " : ""}${files.line(ids, p.world || DEFAULT_TENANT)}` };
   };
   const page = (c: Context) => {
     const p = steps.byToken(c.req.param("token") ?? "");
@@ -1108,7 +1166,39 @@ export function mountSteps(api: Hono, steps: Steps) {
   api.post("/public/steps/:token/ticks", async (c) => {
     cors(c);
     try {
-      return c.json(await steps.tick(page(c), await bodyOf(c)));
+      const p = page(c);
+      return c.json(await steps.tick(p, withFiles(p, await bodyOf(c))));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+  // a screenshot for a note (attached or pasted in the note box): the raw bytes, `content-type` its type, `x-filename` its
+  // name; it answers the id the note's `files` names. A plain POST of an image type is not a simple request, so the kit's
+  // preflight is answered too. The page token is the credential, as for the ticks.
+  api.options("/public/steps/:token/files", (c) => {
+    cors(c);
+    c.header("Access-Control-Allow-Methods", "POST");
+    c.header("Access-Control-Allow-Headers", "content-type, x-filename");
+    c.header("Access-Control-Max-Age", "600");
+    return c.body(null, 204);
+  });
+  api.post("/public/steps/:token/files", async (c) => {
+    cors(c);
+    try {
+      const p = page(c);
+      if (!files) throw new StepError(400, "validation_error", "this console takes no screenshots on steps pages");
+      const type = (c.req.header("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      if (!STEP_FILE_TYPES.includes(type === "image/jpg" ? "image/jpeg" : type)) throw new AttachError(415, "type_refused", "a note box takes pictures (PNG, JPEG, WebP, GIF, HEIC), not " + (type || "this file"));
+      const len = Number(c.req.header("content-length"));
+      if (Number.isFinite(len) && len > ATTACH_MAX_BYTES) throw new AttachError(413, "too_big", `a picture is at most ${ATTACH_MAX_BYTES / 1024 / 1024} MB`);
+      let name = "screenshot";
+      try {
+        name = decodeURIComponent(c.req.header("x-filename") ?? "screenshot") || "screenshot";
+      } catch {
+        /* keep the default */
+      }
+      const a = files.add(new Uint8Array(await c.req.arrayBuffer()), type, name, p.world || DEFAULT_TENANT);
+      return c.json({ file: { id: a.id, name: a.name, mime: a.mime, bytes: a.bytes } }, 201);
     } catch (e) {
       return fail(c, e);
     }
@@ -1130,9 +1220,12 @@ export function mountSteps(api: Hono, steps: Steps) {
       const i = currentAuth()?.identity;
       const b = ((await bodyOf(c)) ?? {}) as Record<string, unknown>;
       // a page that hands the owner terminal lines to copy is refused
-      const chk = await steps.copyPasteCheck(typeof b.url === "string" ? b.url.trim() : "");
+      const url = typeof b.url === "string" ? b.url.trim() : "";
+      const chk = await steps.copyPasteCheck(url, steps.boxesAt(url, b.secrets));
       const why = copyPasteProblem(chk.found);
       if (why) throw new StepError(422, "copy_paste_steps", `The steps page was not registered: ${why}`);
+      const phantom = phantomStepsProblem(chk.phantom);
+      if (phantom) throw new StepError(422, "phantom_box", `The steps page was not registered: ${phantom}`);
       const p = steps.register({ ...b, world: i && "tenant" in i ? i.tenant : undefined, by: i?.kind === "session" ? ownerName() : i?.kind === "token" ? "an agent" : "the console" });
       return c.json(p, 201);
     } catch (e) {
@@ -1146,10 +1239,10 @@ export function mountSteps(api: Hono, steps: Steps) {
     const out = await Promise.all(
       pages.map(async ({ token: _t, ...p }) => {
         const r = await steps.copyPasteCheck(p.url);
-        return { id: p.id, title: p.title, url: p.url, repo: p.repo, spine: p.spine, checked: r.checked, found: r.found };
+        return { id: p.id, title: p.title, url: p.url, repo: p.repo, spine: p.spine, checked: r.checked, found: r.found, phantom: r.phantom };
       }),
     );
-    return c.json({ pages: out, failing: out.filter((x) => x.found.length).length, unreachable: out.filter((x) => !x.checked).length });
+    return c.json({ pages: out, failing: out.filter((x) => x.found.length || x.phantom.length).length, unreachable: out.filter((x) => !x.checked).length });
   });
   // every key pasted on a steps page, names and outcome only (the Services page lists them).
   api.get("/steps/secret-log", (c) => {

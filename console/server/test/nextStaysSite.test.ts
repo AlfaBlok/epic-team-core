@@ -10,6 +10,7 @@ import { ensureAuth } from "../src/auth/schema.js";
 import { mountAuth } from "../src/auth/gate.js";
 import { safeNext } from "../src/auth/oauth.js";
 import { LOGIN_PAGE } from "../src/auth/loginPage.js";
+import { leanJson } from "../src/leanJson.js";
 
 /**
  * the security pass of the public route (app.epicteam.app, app.social.app) before it opens
@@ -20,12 +21,13 @@ import { LOGIN_PAGE } from "../src/auth/loginPage.js";
 const TEAM = "app.epicteam.app";
 const proxied = (host: string, ip = "203.0.113.9") => ({ host, "x-forwarded-for": `${ip}, 172.19.0.1`, "x-forwarded-host": host, "x-forwarded-proto": "https", "cf-connecting-ip": ip });
 
-function setup(mode: AuthMode = "on") {
+function setup(mode: AuthMode = "on", lean = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "console-e88s7-"));
   const db: DB = openDb(path.join(dir, "console.db"));
   ensureAuth(db);
   const app = new Hono();
   const api = new Hono();
+  if (lean) api.use("*", leanJson({ gzipMin: 1 })); // as app.ts: registered before the gate's routes, so inside it
   mountAuth(app, api, { db, store: forTenant(db, "home"), mode });
   api.get("/health", (c) => c.json({ ok: true, presses: { today: 3 }, vps3Disk: { state: "ok", free: "41%" }, checkoutSync: { out: ["home_repo"] } }));
   api.get("/milestones", (c) => c.json([]));
@@ -67,6 +69,16 @@ describe("the customer sites", () => {
     expect(await r.json()).toEqual({ ok: true });
     const inside = await app.request("/api/health", { headers: { host: "team.example.com" } });
     expect(Object.keys(await inside.json())).toContain("vps3Disk");
+  });
+
+  it("answer health up when the inner answer went out gzipped, as it does for every Cloudflare request", async () => {
+    const { app } = setup("on", true);
+    for (const enc of ["gzip, deflate, br", "identity"]) {
+      const r = await app.request("/api/health", { headers: { ...proxied(TEAM), "accept-encoding": enc } });
+      expect(r.status, enc).toBe(200);
+      expect(r.headers.get("content-encoding"), enc).toBeNull();
+      expect(await r.json(), enc).toEqual({ ok: true });
+    }
   });
 
   it("send no-framing, nosniff, referrer and HSTS headers on pages and API answers, refusals too", async () => {

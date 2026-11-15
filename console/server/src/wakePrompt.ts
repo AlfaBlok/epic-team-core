@@ -1,6 +1,6 @@
 import { REVIEW_RULE } from "./review/review.js";
 import { effectiveWrite, type Assignment, type Milestone, type Persona } from "./store.js";
-import { FINISH_THE_JOB_RULE, NO_COPY_PASTE_RULE, isDeliveryManager } from "./inbox/asks.js";
+import { FINISH_THE_JOB_RULE, NO_COPY_PASTE_RULE, VISUAL_FIRST_RULE, isDeliveryManager } from "./inbox/asks.js";
 import { LEFT_READY_RULE } from "./cycle/followUp.js";
 import { childVerdict, type ChildEpic } from "./cycle/children.js";
 import { BLOCKER_RULE } from "./cycle/movement.js";
@@ -105,6 +105,18 @@ export const LOGIN_RULE =
   `before its sign-up is submitted or the login is shown to anyone, run \`python3 ~/github/${homeRepo()}/scripts/bw_login.py new \"<Product> · <site> <who>\" --username <login> --uri <its login page> --row <row>\` ` +
   "(it makes the password, or takes the one the site set with `--password-stdin`; `--out <file>` hands it to your sign-up; it prints only the item name). " +
   `Never give ${ownerName()} a login (card, ask, chat, page) whose password is not in his Bitwarden: \`state: queued\` means not yet, so the row says so and does not go to review until it is saved or its one-step ask is posted.`;
+
+/**
+ * how a console change reaches the live console: straight, one release step, no staging copy to park on and no promote
+ * to wait for (the owner removed staging until there is a second server). The release keeps its safety: a DB backup before
+ * the swap, a health check that rolls back by itself, a one-step rollback and the release log. In every worker brief.
+ */
+export const RELEASE_RULE =
+  "Console releases go straight to production: build the release from main and run `hosted/console/scripts/deploy.sh --release <tarball> --to <console host>`; " +
+  "it backs up the database, swaps, checks health and rolls back by itself when the health check fails. At most one release an hour: inside the hour it parks " +
+  "and the flush timer ships the newest within 15 min after the hour opens, so never retry it. `deploy.sh --rollback --by <run id> --reason <why>` puts the previous release back at once. " +
+  "There is no staging step: never park a change for staging, never wait for a promote; say `live <sha>` on the row only after the live revision shows it. " +
+  "`--incident <what is broken>` skips the hour for a real incident only (customers cannot sign in, pay, load their site or lose data, or a security hole is open), and is logged.";
 
 /** the write rule of an assignment with write on: only within its scope. */
 export const scopedWriteRule = (scope: string) =>
@@ -295,7 +307,7 @@ export function buildWakePrompt(
           "1. Read the spine and its tickets; list EVERY unblocked item that falls in your remit (an open ask blocks only the rows it names; a blocked row never stops the others).",
           `2. ${dispatchRule(maxWorkers)} Or decide there is nothing to do. Your goal is green: do the reversible step instead of asking (see C of the console protocol).`,
         ]),
-    `3. Before you PATCH, finish what this wake started: ${FINISH_THE_JOB_RULE}`,
+    `3. Before you PATCH, finish what this wake started: ${FINISH_THE_JOB_RULE} ${VISUAL_FIRST_RULE}`,
     "4. Finish with one line: `outcome: progressed: <step done>, next <step> | blocked: waits on <open ask code> | monitoring: <what> until <when>, next check <ISO> | idle: no step ready` " +
       "followed by a one-line summary of what you did, the agents you launched, and the ready rows still queued with their reason. " +
       LEFT_READY_RULE +

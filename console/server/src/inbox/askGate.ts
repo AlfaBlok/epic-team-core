@@ -1,4 +1,6 @@
 import { ownerName, ownerPattern, socialProduct } from "../identity.js";
+import { phantomRefProblem } from "./phantomRefs.js";
+import { decideButtonsProblem } from "./decideChoices.js";
 /**
  * the gate every ask to the owner passes, where it is
  * raised (POST /needs-owner) and where the console reads it from a spine (inbox/waiting.ts). An ask that fails is never
@@ -16,6 +18,21 @@ import { ownerName, ownerPattern, socialProduct } from "../identity.js";
  * 5. (from 2026-11-12) A `do` or `provide` ask (his hands) says why the team cannot do it itself: a `why the owner:`
  *    of a few words, and when that reason is his Mac, his Chrome, his laptop or his sign-in, it also says why the Team
  *    Browser or the server browser cannot, anywhere in the ask (the owner, 12 Nov: "why do you still have to bring it to my guy?").
+ * 6. (E996-S29, every open ask whatever its date) It names only what its card has: a private box to paste a value into only
+ *    with a `secret: <app> <NAME>` target, an Approve button only on an approve ask (inbox/phantomRefs.ts).
+ * 8. (E996-S43) A fresh agent completed it from the card alone: scripts/ask_dryrun.py dry-runs every open ask with only its
+ *    card's words and links; a failed one is held as "ask needs rewriting: step N <why>", a new one waits for its dry run
+ *    (inbox/askDryRun.ts, applied in inbox/waiting.ts where the spine line is at hand).
+ * 9. (E996-S48) It does not repeat a question he already answered (same code, same row and most of the same words, or nearly
+ *    the same words): held as "already answered on <date>: <his answer>" (inbox/askRepeat.ts, applied in inbox/waiting.ts).
+ * 10. (E996-S48) It fits one sitting: its `effort:`, else the time its words give, else 3 minutes a numbered step, is 20
+ *    minutes or less; else held as "too long for one sitting: split it".
+ * 11. (E948-S85, every open ask whatever its date) It links to where the owner acts (his voice note of 12 Nov, e-4f9161:
+ *    "if I need to do an action, I expect a link. I need to see a link."): a `do` or `provide` ask carries a web address
+ *    (a full link or a bare site like x.com/settings), or is done on its own card (a `secret:` box, the Mac list's ticket,
+ *    or it says "on this card" / "by voice note" for the card's Record button); an `approve` or `decide` ask that sends
+ *    him to read, open, look at, review or try something links that thing (a web address or a document path). A link to
+ *    a spine on GitHub does not count: that is where the team writes, not where he acts (inbox/askGate.ts linkProblem).
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -33,12 +50,20 @@ export interface GateAsk {
   steps?: string | null;
   /** set on an improvement request ask (`label: improvement request`, inbox/improvement.ts). */
   improvement?: unknown;
+  /** `secret: <app> <NAME>`: the card shows a private key box (rule 6). */
+  secret?: unknown;
+  /** `label: needs Mac agent`: done from its Mac list ticket, the place he acts (rule 11). */
+  macAgent?: unknown;
+  /** a runbook link inside `steps:` (rule 11). */
+  stepsLink?: string;
   /** The ask's `since` date: undefined = a new ask (the API path), null/older than ASK_GATE_FROM = an old line, left alone. */
   since?: string | null;
 }
 
 /** the day the gate started (the owner's messages of 2026-11-11). */
 export const ASK_GATE_FROM = "2026-11-11";
+/** the day rule 7 started (the owner on E946-A31, 2026-11-13): older open decide asks stay, the sweep names them. */
+export const DECIDE_BUTTONS_FROM = "2026-11-13";
 /** the day rule 5 started (the owner's voice note of 2026-11-12 02:01Z). */
 export const HANDS_WHY_FROM = "2026-11-12";
 /** A why that rests on his own machine or sign-in; it must then name the team's own browsers (rule 5). */
@@ -88,6 +113,69 @@ const text = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join("
  */
 export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
+  // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
+  return wordsOrButtonsProblem(a) ?? linkProblem(a);
+}
+
+/** A web address: a full link, or a bare site with a known ending (x.com, team.example.com/pages). */
+const WEB_LINK = /\bhttps?:\/\/[^\s)\]>"']+|(?<![@\w.\/-])(?:[a-z0-9-]+\.)+(?:com|io|dev|app|net|org|ai|eu|co|me|es|mx|so|sh|to|tv|ly|link|site|page)\b(?:\/[^\s)\]>"']*)?/gi;
+/** A spine (or other markdown) on GitHub: where the team writes, not where he acts. */
+const SPINE_ON_GITHUB = /^https?:\/\/github\.com\/[^\s]+\.md\b/i;
+/** A document path the card shows as a link (`context: docs/status/x.html`), never a spine. */
+const DOC_PATH = /^(?!https?:)[^\s]+\.(?:md|html?|pdf|png|webp|jpe?g|csv|txt)(?:#\S*)?$/i;
+/** A spine file: where the team writes, not where he acts. */
+const SPINE_PATH = /(?:^|\/)spines\/|(?:^|\/)(?:EPIC|EPIC_SPINE|EPIC_SPINE_[^/]*|root)\.md(?:#|$)/i;
+/** The ask says it is answered on its own card (its Record, Write or option buttons). */
+const ON_THE_CARD = /\b(?:on|in|from|with) (?:this|the|its) card\b|\bcard'?s (?:voice|record|write|box|buttons?)\b|\bby voice note\b|\b(?:record|send) (?:a |one )?voice note\b/i;
+/** An approve or decide ask that sends him somewhere to judge: read, open, look at, review, try, watch, listen. */
+const SENDS_HIM = /\b(?:read|open|look(?:s|ing)? at|review|watch|listen to|try|test|check|see|visit|go to|sign in to|log ?in to)\b(?:\s+(?:the|this|that|its|our|your|a|an|new|both|two|three|four|five|round \d+|\w+'s)){0,3}\s+(?:[\w-]+\s+)?(?:page|pages|deck|draft|drafts|mock-?ups?|dossier|document|doc|docs|file|site|form|forms|video|videos|clip|clips|report|list|post|posts|demo|screen|screens|pdf|link|proposal|brief|layouts?|app|steps)\b/i;
+
+const isWebPlace = (u: string) => !SPINE_ON_GITHUB.test(u);
+/** Whether a text links a place the owner can open (a web address, never a spine on GitHub); markdown links count by their target. */
+export const hasPlaceLink = (t: string) => [...t.replace(/\[[^\]]*\]\(([^)\s]+)\)/g, " $1 ").matchAll(WEB_LINK)].some((m) => isWebPlace(m[0]));
+function webLinks(a: GateAsk): string[] {
+  const all = text(a.question, a.contextText, a.context, a.why, a.impact, a.risk, a.recommend, ...(a.options ?? []), a.steps, a.stepsLink);
+  return [...all.matchAll(WEB_LINK)].map((m) => m[0]).filter(isWebPlace);
+}
+
+/**
+ * 11. Why this ask has no link to where the owner acts (his voice note of 12 Nov, e-4f9161); undefined when it has one,
+ * or when its own card is the place (a key box, a Mac list ticket, the card's voice button).
+ */
+export function linkProblem(a: GateAsk): string | undefined {
+  if (a.state && a.state !== "open") return undefined;
+  const kind = a.ask.toLowerCase();
+  const links = webLinks(a);
+  // a document the card shows as a link (a runbook in `steps:`, a page in `context:`), never a spine
+  const mdTargets = [...text(a.question, a.contextText, a.steps, a.recommend).matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]);
+  const docLink = [a.context, a.stepsLink, ...mdTargets].some((p) => !!p && DOC_PATH.test(p) && !SPINE_PATH.test(p));
+  if (kind === "do" || kind === "provide") {
+    if (links.length || docLink || a.secret || a.macAgent) return undefined;
+    if (ON_THE_CARD.test(text(a.question, a.contextText, a.steps, a.recommend))) return undefined;
+    return (
+      `it asks ${ownerName()} to act but has no link to where he acts: put the page, site or form he opens first in the ask ` +
+      `(a full https link, or a runbook or page path in \`steps:\` or \`context:\`; a spine does not count), or say it is done on this card (its voice or option buttons), or give it a \`secret: <app> <NAME>\` box ` +
+      `(his voice note of 12 Nov: "if I need to do an action, I expect a link")`
+    );
+  }
+  if (kind !== "approve" && kind !== "decide") return undefined;
+  if (!SENDS_HIM.test(text(a.question, a.recommend, ...(a.options ?? []), a.steps))) return undefined;
+  if (links.length || docLink) return undefined;
+  return (
+    `it sends ${ownerName()} to read, open or try something but does not link it: put the page he judges in the ask ` +
+    `(a full https link or the document's path in \`context:\`; a spine on GitHub does not count) (his voice note of 12 Nov: "I need to see a link")`
+  );
+}
+
+function wordsOrButtonsProblem(a: GateAsk): string | undefined {
+  // 7. a Decide card always shows choices as buttons: held whatever its date, after the other rules' reasons (E948-S69, E946-A31).
+  return wordsProblem(a) ?? (a.since === undefined || (!!a.since && a.since >= DECIDE_BUTTONS_FROM) ? decideButtonsProblem(a) : undefined);
+}
+
+function wordsProblem(a: GateAsk): string | undefined {
+  // 6. it names a box or button its card does not have: held whatever its date (E996-S29, T9-A10).
+  const phantom = phantomRefProblem(a);
+  if (phantom) return phantom;
   // The gate holds asks raised from the day the rule started; older open lines stay as they are (root L-56).
   if (a.since !== undefined && (!a.since || a.since < ASK_GATE_FROM)) return undefined;
   const kind = a.ask.toLowerCase();
@@ -133,7 +221,7 @@ export const ASK_GATE_RULE =
   "The console refuses (422 ask_not_his, or holds back from his inbox and lists to the Delivery Manager) any approve or decide ask that does not name " +
   `what of ${ownerName()}'s it answers (his ask: his words in quotes, a voice note or log id; or a \`why ${ownerName()}:\` that is money, publishing or contacting others, access, ` +
   "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, and any ask carrying a go-live date he did not set (a dated opening, " +
-  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56).";
+  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56).";
 
 export interface HeldAsk {
   code?: string;
@@ -156,3 +244,46 @@ export function heldAsksSection(held: HeldAsk[]): string | undefined {
     ...(held.length > 20 ? [`- … ${held.length - 20} more`] : []),
   ].join("\n");
 }
+
+/** E996-S47: an ask open longer than this reaches the Delivery Manager's wake (scripts/asks_insights.py STALE_DAYS, the same rule). */
+export const STALE_ASK_DAYS = 3;
+
+export interface StaleAskLike {
+  code?: string;
+  repo?: string;
+  path?: string;
+  line?: number;
+  row?: string;
+  question: string;
+  since?: string;
+  state?: string;
+  source?: string;
+  gate?: string;
+  /** the owner snoozed it until this day: his choice, not left hanging (asks.ts snoozedUntil). */
+  snoozedUntil?: string;
+}
+
+/**
+ * E996-S47: the Delivery Manager's wake section: asks open more than STALE_ASK_DAYS days (48 of the 118 failed asks of
+ * 9-14 Nov were left open for days, never answered or withdrawn). Each gets one of three ends this wake: closed, withdrawn
+ * or asked again rewritten. Oldest first.
+ */
+export function staleAsksSection(items: StaleAskLike[], now = new Date()): string | undefined {
+  const cut = now.getTime() - STALE_ASK_DAYS * 86_400_000;
+  const stale = items
+    .filter((i) => (i.state ?? "open") === "open" && i.source !== "heuristic" && i.gate !== "future" && !(i.snoozedUntil && i.snoozedUntil.slice(0, 10) >= now.toISOString().slice(0, 10)) && i.since && Date.parse(i.since) < cut)
+    .map((i) => ({ ...i, days: Math.floor((now.getTime() - Date.parse(i.since!)) / 86_400_000) }))
+    .sort((a, b) => b.days - a.days);
+  if (!stale.length) return undefined;
+  return [
+    `## Asks open more than ${STALE_ASK_DAYS} days (E996-S47)`,
+    `${stale.length} ask${stale.length > 1 ? "s" : ""} to ${ownerName()} in your tree ${stale.length > 1 ? "have" : "has"} waited more than ${STALE_ASK_DAYS} days. An ask left hanging is a failure (asks page, kind \"left hanging\"). This wake, give each one of three ends: ` +
+      "(1) close it: it was done or answered elsewhere, or is no longer needed: `[answered <CODE> <date> @<persona>] … — answer: done, <where>` or `… — answer: no longer needed, <why>`; " +
+      "(2) withdraw it: it is not truly his (root L-56) or the team can do it: `[answered <CODE> <date> @Delivery-Manager] … — answer: withdrawn, <why>`, then do the work or file it as a row; " +
+      `(3) ask again, rewritten, only if it still blocks now and is still ${ownerName()}'s: one decision, the blocking step only, and it must pass \`python3 scripts/ask_dryrun.py --only <CODE> --rejudge\`. ` +
+      "Never answer an ask-tier question for him.",
+    ...stale.slice(0, 30).map((s) => `- ${s.code ?? "(no code)"} · ${s.days} days · ${s.row ? `row ${s.row} · ` : ""}${s.repo ?? ""}${s.path ? `/${s.path}` : ""}${s.line !== undefined ? `:${s.line + 1}` : ""}: ${s.question.slice(0, 160)}`),
+    ...(stale.length > 30 ? [`- … ${stale.length - 30} more`] : []),
+  ].join("\n");
+}
+

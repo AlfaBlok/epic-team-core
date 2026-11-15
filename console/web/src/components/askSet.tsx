@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { SnoozeDropdown } from "@/components/waiting";
+import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
+import type { SnoozeChoice } from "@/api";
+import { CardFeedback } from "@/components/cardFeedback";
+import { CARD_FRAME, CARD_META, CARD_TITLE } from "@/components/cardShell";
 import { Loader2 } from "lucide-react";
 import { api, type WaitingItem } from "@/api";
 import { invalidate, mutate } from "@/lib/data";
 import { relayOf, snoozeItem, unsnoozeItem } from "@/lib/snooze";
 import { showClosed } from "@/lib/afterClose";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { PHONE_TAP } from "@/components/common";
+import { CardButton } from "@/components/ui/cardButton";
 import { askLead, projectLabel } from "@/lib/askLead";
 
 /**
@@ -99,27 +102,27 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
     invalidate("inbox");
   };
 
-  // "Not now": every ask of the set snoozed for 3 days (only asks written in a spine can be).
+  // E948-S60: Snooze with its durations (never "Not now"): every ask of the set (only asks written in a spine can be).
   const snoozable = left.filter((i) => i.source === "ask" && i.state === "open" && !!i.path);
-  const notNow = () => {
-    for (const i of snoozable) void snoozeItem(i, { days: 3 });
+  const snoozeAll = (c: SnoozeChoice) => {
+    for (const i of snoozable) void snoozeItem(i, c);
     showClosed({ said: "Snoozed", title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
   };
   const project = projectLabel(group.items[0]?.milestoneTitle);
-  // one quiet card, Accept all or Not now.
+  // one quiet card, Accept all, Snooze in its meta line, the feedback block last.
   return (
-    <section className="grid min-w-0 grid-cols-1 rounded-xl border bg-card p-4 [overflow-wrap:anywhere]" data-testid="ask-set" data-persona={group.persona}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">Approve</span>
+    <section className={CARD_FRAME} data-card-shell="ask-set" data-testid="ask-set" data-persona={group.persona}>
+      <div className={CARD_META} data-card-meta="">
+        <span className="font-medium text-foreground" data-card-kind-word="">Approve</span>
         {project && <span>{project}</span>}
         <span>
           {group.items.length} from the {group.persona}
         </span>
+        {!readOnly && snoozable.length > 0 && <SnoozeDropdown id={`set:${group.persona}`} className="ml-auto" onPick={snoozeAll} />}
       </div>
-      <h3 className="mt-1.5 text-[15px] font-medium leading-snug text-foreground">
+      <h3 className={CARD_TITLE}>
         The {group.persona}&apos;s {group.items.length} recommendations
       </h3>
-      <p className="mt-1 text-sm leading-relaxed text-foreground/85">Accept all, or say no to one below.</p>
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Why: each one you accept becomes a ready task the team delivers.</p>
       {progress && (
         <p className="mt-2 text-sm text-muted-foreground" data-testid="accept-all-progress">
@@ -133,17 +136,24 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
       </ol>
       {!readOnly && left.length > 0 && (
         <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <Button size="sm" className={cn("flex-1 sm:flex-none", PHONE_TAP)} disabled={!!busy} onClick={() => void acceptAll()} data-testid="accept-all">
-            {busy === "all" && <Loader2 className="animate-spin" />} Accept all {left.length}
-          </Button>
+          <CardButton disabled={!!busy} onClick={() => void acceptAll()} data-testid="accept-all">
+            {busy === "all" && <Loader2 className="animate-spin" />} Yes to all {left.length}: make them tasks
+          </CardButton>
+          {/* E948-S83 iteration 2: Park the whole set (a month on each ask's line, nothing decided). */}
           {snoozable.length > 0 && (
-            <Button size="sm" variant="outline" className={cn("flex-1 sm:flex-none", PHONE_TAP)} disabled={!!busy} onClick={notNow} data-testid="ask-set-not-now">
-              Not now
-            </Button>
+            <ParkButton
+              disabled={!!busy}
+              onPark={() => {
+                for (const i of snoozable) void snoozeItem(i, { days: PARK_DAYS }, undefined, true);
+                showClosed({ said: PARK.said, title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
+              }}
+            />
           )}
         </div>
       )}
-      <div className="mt-3 text-xs text-muted-foreground">{[project, `from the ${group.persona}`].filter(Boolean).join(" · ")}</div>
+      {/* E948-S60: the set takes feedback as a whole, to the Team desk with the set named; right under its buttons, nothing
+          between (the owner 2026-11-15: the feedback is one of the buttons' options); who sent it is in the meta line. */}
+      <CardFeedback className="mt-2" origin={`set-feedback:${group.persona}:${group.items[0]?.id ?? ""}`} title={`The ${group.persona}'s ${group.items.length} recommendations`} refName={group.items.map((i) => i.code ?? i.id).join(", ")} />
     </section>
   );
 }
@@ -188,25 +198,25 @@ function SetRow({
             data-testid="ask-set-words"
           />
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" className={PHONE_TAP} disabled={!!busy || (box === "feedback" && !words.trim())} onClick={() => void onPress(i, box, words.trim()).then(() => setBox(undefined))} data-testid="ask-set-send">
+            <CardButton disabled={!!busy || (box === "feedback" && !words.trim())} onClick={() => void onPress(i, box, words.trim()).then(() => setBox(undefined))} data-testid="ask-set-send">
               {working && <Loader2 className="animate-spin" />} {box === "deny" ? "Say no" : "Send question"}
-            </Button>
-            <Button size="sm" variant="ghost" className={PHONE_TAP} onClick={() => setBox(undefined)}>
+            </CardButton>
+            <CardButton variant="ghost" onClick={() => setBox(undefined)}>
               Cancel
-            </Button>
+            </CardButton>
           </div>
         </div>
       ) : (
         <div className="mt-0.5 flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="ghost" className={quiet} disabled={!!busy} onClick={() => void onPress(i, "approve")} data-testid="ask-set-accept">
-            {working && <Loader2 className="animate-spin" />} Accept
-          </Button>
-          <Button size="sm" variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("feedback")} data-testid="ask-set-ask">
+          <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => void onPress(i, "approve")} data-testid="ask-set-accept">
+            {working && <Loader2 className="animate-spin" />} Yes: make it a task
+          </CardButton>
+          <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("feedback")} data-testid="ask-set-ask">
             Ask a question
-          </Button>
-          <Button size="sm" variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("deny")} data-testid="ask-set-no">
-            No
-          </Button>
+          </CardButton>
+          <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("deny")} data-testid="ask-set-no">
+            No: drop it
+          </CardButton>
         </div>
       )}
       {done?.error && (

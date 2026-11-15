@@ -5,7 +5,7 @@ import { milestoneName } from "@/lib/format";
 import { nextFocusPosition } from "@/lib/bigRoots";
 import { useFocusSave } from "@/lib/useFocusSave";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { CardButton } from "@/components/ui/cardButton";
 import { useWords } from "@/lib/skin";
 
 /**
@@ -23,13 +23,13 @@ export function FocusPinButton({ m }: { m: Milestone }) {
   return (
     <>
       {pinned ? (
-        <Button size="sm" variant="outline" disabled={busy || !list} pending={pressed === `${m.id}:unpin`} pendingLabel="Unpinning…" data-testid="header-focus-pin" title={`Take this ${w.milestone} out of the focus list on Team home`} onClick={() => setFocus(`${m.id}:unpin`, `${name} unpinned from focus`, [{ id: m.id, bigRoot: null }])}>
+        <CardButton variant="outline" disabled={busy || !list} pending={pressed === `${m.id}:unpin`} pendingLabel="Unpinning…" data-testid="header-focus-pin" title={`Take this ${w.milestone} out of the focus list on Team home`} onClick={() => setFocus(`${m.id}:unpin`, `${name} unpinned from focus`, [{ id: m.id, bigRoot: null }])}>
           <PinOff /> Unpin
-        </Button>
+        </CardButton>
       ) : (
-        <Button size="sm" variant="outline" disabled={busy || !list} pending={pressed === `${m.id}:pin`} pendingLabel="Pinning…" data-testid="header-focus-pin" title={`Add this ${w.milestone} at the end of the focus list on Team home`} onClick={() => setFocus(`${m.id}:pin`, `${name} pinned to focus at ${nextFocusPosition(list)}`, [{ id: m.id, bigRoot: nextFocusPosition(list) }])}>
+        <CardButton variant="outline" disabled={busy || !list} pending={pressed === `${m.id}:pin`} pendingLabel="Pinning…" data-testid="header-focus-pin" title={`Add this ${w.milestone} at the end of the focus list on Team home`} onClick={() => setFocus(`${m.id}:pin`, `${name} pinned to focus at ${nextFocusPosition(list)}`, [{ id: m.id, bigRoot: nextFocusPosition(list) }])}>
           <Pin /> Pin to focus
-        </Button>
+        </CardButton>
       )}
       {note && (
         <span role="status" data-testid="header-focus-note" className={cn("basis-full text-xs sm:max-w-xs sm:text-right", note.ok ? "text-muted-foreground" : "text-destructive")}>

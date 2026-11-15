@@ -195,6 +195,9 @@ export interface AddOptions {
   chatSaid?: (header: string | undefined, chat: string) => Promise<boolean>;
   /** wake the milestone's Delivery manager after a ready Add (approvals.ts wakeDeliveryManager). */
   wake?: (m: Milestone, instructions: string) => Promise<{ runId: string } | { error: string } | undefined>;
+  /** how long the Add's answer waits for that wake (default 3 s): past it the wake goes on in the background and the
+   *  answer leaves `wake` out. A wake waits on the agent host (a slow or failing thread call): an Add once took 136 s. */
+  wakeWaitMs?: number;
   /** EpicSpine skill dir (scripts/spine_new.py, validate_spine.py); without it a child epic cannot be added. */
   skillDir?: string;
   python?: string;
@@ -255,7 +258,16 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
     const draftWhy = !asker.owner ? asker.why : input.draft ? `${ownerName()} chose “just register it”` : undefined;
     const after = async (ids: string, where: string) => {
       if (!ready) return {};
-      const wake = await o.wake?.(m, `${ownerName()} added ${ids} under ${where} from the console, ready on his ask (L-37): plan and dispatch it in this wake.`);
+      const started = o.wake?.(m, `${ownerName()} added ${ids} under ${where} from the console, ready on his ask (L-37): plan and dispatch it in this wake.`);
+      if (!started) return {};
+      // the spine is written: answer now and let a slow wake finish in the background (its outcome is logged)
+      let timer: NodeJS.Timeout | undefined;
+      const late = new Promise<undefined>((done) => (timer = setTimeout(() => done(undefined), o.wakeWaitMs ?? 3000)));
+      const wake = await Promise.race([
+        started.catch((e: unknown) => ({ error: String((e as Error)?.message ?? e) })),
+        late,
+      ]).finally(() => clearTimeout(timer));
+      if (!wake) void started.then((w) => w && "error" in w && console.warn(`tree add: the wake after ${ids} failed: ${w.error}`), (e: unknown) => console.warn(`tree add: the wake after ${ids} failed: ${String(e)}`));
       return wake ? { wake } : {};
     };
     const { repoDir, rel } = await o.locate(m);

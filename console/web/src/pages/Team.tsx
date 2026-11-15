@@ -1,10 +1,14 @@
 import { MilestonePath } from "@/components/bootstrap";
+import { AsksThisWeek } from "@/components/askLog";
+import { Slot, SlotStack } from "@/components/slot";
 import { RedLineBand } from "@/components/ownerPriority";
-import { Link, useNavigate } from "react-router-dom";
-import { ArrowDown, ArrowUp, Clock, MessageSquare, MessagesSquare, Phone, Pin, PinOff, Plus, Workflow } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { InboxLine } from "@/components/inboxLine";
+import { ConnectCards } from "@/components/connectCards";
+import { ArrowDown, ArrowUp, ChevronDown, Clock, ExternalLink, MessageSquare, MessagesSquare, Phone, Pin, PinOff, Plus, Workflow } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
-import { useQuery } from "@/lib/data";
+import { useQuery, useWaitingList } from "@/lib/data";
 import { dodCount, milestoneName } from "@/lib/format";
 import { milestoneTiming } from "@/lib/derive";
 import { milestoneState, openAskCodes, statusOf } from "@/lib/status";
@@ -13,12 +17,17 @@ import { useSnoozes } from "@/lib/snooze";
 import { liveWorkers, OpenAsksContext, StateWord, stripLines, WORD_TONE } from "@/components/status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { CardButton } from "@/components/ui/cardButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, RelTime } from "@/components/common";
+import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
 import { WaitingForReview } from "@/components/review";
+import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
+import { CampaignGoals, GoalTalk, SinceYesterday } from "@/components/campaignGoals";
+import { GoalLights } from "@/components/goalLights";
+import { SCORECARDS_PATH } from "@/lib/scorecards";
 import { DeckCards } from "@/components/deckCards";
 import { GoalGraphLinks } from "@/pages/GoalGraph";
 import { LaunchLights } from "@/components/launchBoard";
@@ -34,8 +43,9 @@ import { NextWakeList } from "@/components/planning";
 import { MovingNow } from "@/components/movingNow";
 import { focusHeading, useShows, useSkin, useWords } from "@/lib/skin";
 import { OnboardingScorecard } from "@/components/OnboardingScorecard";
-import { campaignsByMilestone, repoLevelIds, useCampaigns } from "@/lib/campaign";
+import { campaignMilestones, campaignsByMilestone, useCampaigns } from "@/lib/campaign";
 import { CampaignGoalBlock } from "@/components/CampaignGoal";
+import { CampaignChannels } from "@/components/CampaignChannels";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import type { CampaignCard } from "@/api/campaign-types";
 import { dayLabel, slotLabel } from "@/pages/social/parts";
@@ -47,6 +57,9 @@ import { RecentlyClosed } from "@/components/afterClose";
 import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
 import { SETTINGS_PATH } from "@/lib/settingsPath";
+import { InboxSearchProvider } from "@/lib/inboxSearch";
+import { InboxSearchBox } from "@/components/inboxSearch";
+import { InboxShowFilter, showKeeps, TeamCardsSections, useInboxShow } from "@/components/teamCards";
 
 /**
  * the console skin's
@@ -54,7 +67,18 @@ import { SETTINGS_PATH } from "@/lib/settingsPath";
  * Settings page: readiness, red lines and What you build on top, then `between` (the operator pages), then projects and
  * team activity (the owner 2026-11-11 23:48Z: "That section should be Inbox … Don't stuff everything into Team!").
  */
-export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "settings"; between?: ReactNode } = {}) {
+export function TeamPage({
+  section = "inbox",
+  between,
+  dashboard = true,
+  only,
+}: {
+  section?: "inbox" | "settings";
+  between?: ReactNode;
+  dashboard?: boolean;
+  /** the social skin: "goals" is Home (the campaigns and widgets, the inbox one tap away), "inbox" the Inbox alone. */
+  only?: "goals" | "inbox";
+} = {}) {
   const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
   const ms = useQuery(() => api.listMilestones(), []);
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
@@ -68,12 +92,17 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
   const { data: threads = [] } = useQuery(() => api.listThreads(), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
   // per-card counts of what waits on the owner (same source as "Waiting on you").
-  const { data: waiting = [] } = useQuery(() => api.listWaitingOnOwner(), [], { tag: "inbox" });
+  // the same shared list the inbox sections read (one fetch, not three).
+  const { data: waiting = [] } = useWaitingList();
   // each card's word, sentence and count come from the server's status batch.
   // the shared fetch the pills and Blocked read; each card's count is its blocked list's length (lib/inbox).
   const { data: statuses } = useStatusBatch();
   const { entries: snoozing } = useSnoozes();
   const [newOpen, setNewOpen] = useState(false);
+  // E948-S66: the inbox shows all, or one kind (Blocked, Digests, Ideas, Goals, Review), kept in the address as ?show=.
+  const [show, setShow] = useInboxShow();
+  const keeps = showKeeps(show);
+  const scorecardId = useSearchParams()[0].get("scorecard") || undefined;
   const [focusOpen, setFocusOpen] = useState(false);
   const shows = useShows();
   // inside Epic Social the Personas list names those working on the selected project's milestones.
@@ -94,18 +123,16 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
   const scorecard = !!me?.tenant;
   const w = useWords();
   // milestones whose repo has the social pack (either skin) get the campaign card's post line and a Pipeline button.
-  const { data: camps } = useCampaigns();
+  const { data: camps, loading: campsLoading, error: campsError } = useCampaigns();
   // the Team home lists the selected project's campaigns only (project, above).
   const campaignOf = useMemo(() => campaignsByMilestone(camps?.campaigns), [camps]);
-  // in the social skin a repo's own level is not a campaign card (repoLevelIds).
-  const repoLevel = useMemo(() => (campaigns ? repoLevelIds(camps?.campaigns) : new Set<string>()), [campaigns, camps]);
+  // in the social skin Home lists only real campaigns and their jobs (campaignMilestones), never every milestone of the
+  // world: a house decision or a server is EpicTeam's. Until the campaign list is read nothing is listed (no flash).
+  const shownHere = useMemo(() => (campaigns ? new Set(campaignMilestones(camps?.campaigns, ms.data).map((m) => m.id)) : undefined), [campaigns, camps, ms.data]);
+  const homeMs = (m: { id: string }) => (!shownHere || shownHere.has(m.id)) && project.keep(m.id);
   // about 20 cards show in priority order (focus first, in his order); Load more shows the next 20.
   const [limit, setLimit] = useState(MILESTONE_PAGE);
-  const page = pageMilestones(
-    roots.filter((m) => !repoLevel.has(m.id) && project.keep(m.id)),
-    rest.filter((m) => !repoLevel.has(m.id) && project.keep(m.id)),
-    limit,
-  );
+  const page = pageMilestones(roots.filter(homeMs), rest.filter(homeMs), limit);
   const focusActions = (m: NonNullable<typeof ms.data>[number]) => {
     const i = roots.findIndex((r) => r.id === m.id);
     const name = milestoneName(m);
@@ -113,20 +140,20 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
     return (
       <div className="flex flex-wrap items-center gap-1.5" data-testid="focus-actions">
         {i < 0 ? (
-          <Button variant="outline" size="sm" className={btn} disabled={focusBusy} pending={pressed === `${m.id}:pin`} pendingLabel="Pinning…" onClick={() => setFocus(`${m.id}:pin`, `${name} pinned to focus at ${nextFocusPosition(list)}`, [{ id: m.id, bigRoot: nextFocusPosition(list) }])}>
+          <CardButton variant="outline" className={btn} disabled={focusBusy} pending={pressed === `${m.id}:pin`} pendingLabel="Pinning…" onClick={() => setFocus(`${m.id}:pin`, `${name} pinned to focus at ${nextFocusPosition(list)}`, [{ id: m.id, bigRoot: nextFocusPosition(list) }])}>
             <Pin className="h-3.5 w-3.5" /> Pin to focus
-          </Button>
+          </CardButton>
         ) : (
           <>
-            <Button variant="outline" size="sm" className={btn} disabled={focusBusy || i === 0} pending={pressed === `${m.id}:up`} aria-label={`Move ${name} up`} title="Move up" onClick={() => setFocus(`${m.id}:up`, `${name} moved up`, moveFocus(roots, i, -1))}>
+            <CardButton variant="outline" className={btn} disabled={focusBusy || i === 0} pending={pressed === `${m.id}:up`} aria-label={`Move ${name} up`} title="Move up" onClick={() => setFocus(`${m.id}:up`, `${name} moved up`, moveFocus(roots, i, -1))}>
               <ArrowUp className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" className={btn} disabled={focusBusy || i === roots.length - 1} pending={pressed === `${m.id}:down`} aria-label={`Move ${name} down`} title="Move down" onClick={() => setFocus(`${m.id}:down`, `${name} moved down`, moveFocus(roots, i, 1))}>
+            </CardButton>
+            <CardButton variant="outline" className={btn} disabled={focusBusy || i === roots.length - 1} pending={pressed === `${m.id}:down`} aria-label={`Move ${name} down`} title="Move down" onClick={() => setFocus(`${m.id}:down`, `${name} moved down`, moveFocus(roots, i, 1))}>
               <ArrowDown className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" className={btn} disabled={focusBusy} pending={pressed === `${m.id}:unpin`} pendingLabel="Unpinning…" onClick={() => setFocus(`${m.id}:unpin`, `${name} unpinned from focus`, [{ id: m.id, bigRoot: null }])}>
+            </CardButton>
+            <CardButton variant="outline" className={btn} disabled={focusBusy} pending={pressed === `${m.id}:unpin`} pendingLabel="Unpinning…" onClick={() => setFocus(`${m.id}:unpin`, `${name} unpinned from focus`, [{ id: m.id, bigRoot: null }])}>
               <PinOff className="h-3.5 w-3.5" /> Unpin
-            </Button>
+            </CardButton>
           </>
         )}
       </div>
@@ -140,22 +167,22 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
     return (
       <div className="ml-auto flex items-center gap-1.5" data-testid="card-talk">
         {campaignOf.has(m.id) && (
-          <Button asChild variant="outline" size="sm" className="h-7 px-2 text-xs">
+          <CardButton asChild variant="outline" className="h-7 px-2 text-xs">
             <Link to={`/milestones/${encodeURIComponent(m.id)}`} data-testid="card-pipeline" aria-label={`${name} Pipeline`} title="This campaign's Pipeline: ideas, drafts waiting for you, scheduled, posted">
               <Workflow className="h-3.5 w-3.5" /> Pipeline
             </Link>
-          </Button>
+          </CardButton>
         )}
-        <Button asChild variant="outline" size="sm" className="h-7 px-2 text-xs">
+        <CardButton asChild variant="outline" className="h-7 px-2 text-xs">
           <Link to={chat} data-testid="card-chat" aria-label={`Chat with ${name}`} title={`This ${w.milestone}'s chat with its repo desk`}>
             <MessageSquare className="h-3.5 w-3.5" /> Chat
           </Link>
-        </Button>
-        <Button asChild variant="outline" size="sm" className="h-7 border-emerald-600/40 px-2 text-xs text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300">
+        </CardButton>
+        <CardButton asChild variant="outline" className="h-7 border-emerald-600/40 px-2 text-xs text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300">
           <Link to={`${chat}&call=1`} data-testid="card-call" aria-label={`Call ${name}`} title={`Call this ${w.milestone}'s voice: it knows the tree and this ${w.milestone}'s book`}>
             <Phone className="h-3.5 w-3.5" /> Call
           </Link>
-        </Button>
+        </CardButton>
       </div>
     );
   };
@@ -303,16 +330,18 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
   };
 
   const settings = !campaigns && section === "settings";
+  // on Settings the dashboard panels show only while their switch is on (SettingsPage passes it, off by default).
+  const board = !settings || dashboard;
   const home = !me?.tenant || me.tenant.id === homeWorld();
   // in the social skin a new campaign is the wizard, never a bare milestone or bootstrap.
   const actions = (
     <>
       {/* the owner's "how do I add a new root?": a new milestone (existing spine or new epic) made focus in one step. */}
       {/* the social twins: New campaign (the wizard; the campaign is pinned) and Add job (a one-off milestone). */}
-      <Button variant="outline" onClick={() => (campaigns ? navigate(`/${NEW_CAMPAIGN_PATH}`) : setFocusOpen(true))} data-testid="new-focus">
+      <Button variant="outline" className={PHONE_TAP} onClick={() => (campaigns ? navigate(`/${NEW_CAMPAIGN_PATH}`) : setFocusOpen(true))} data-testid="new-focus">
         <Pin /> {campaigns ? "New campaign" : `New focus ${w.milestone}`}
       </Button>
-      <Button variant="outline" onClick={() => setNewOpen(true)} data-testid="add-job">
+      <Button variant="outline" className={PHONE_TAP} onClick={() => setNewOpen(true)} data-testid="add-job">
         <Plus /> {campaigns ? "Add job" : w.addMilestone}
       </Button>
     </>
@@ -321,110 +350,247 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
       {!settings && (
         <PageHeader
-          title={campaigns ? "Home" : w.team}
-          description={campaigns ? "Every project's campaigns first, then what needs you." : "What waits on you: blocked first, then finished work to review."}
-          actions={campaigns ? actions : undefined}
+          title={campaigns && only !== "inbox" ? "Home" : campaigns ? "Inbox" : w.team}
+          description={
+            campaigns && only === "goals"
+              ? undefined
+              : campaigns && only !== "inbox"
+                ? "Your campaigns, then what waits on you."
+                : campaigns
+                  ? "What waits on you: blocked first, then the team's cards, then finished work to review."
+                  : "What waits on you: blocked first, then the team's digests, ideas and goals to set, then finished work to review."}
+          actions={only === "inbox" ? <AsksThisWeek /> : campaigns && only !== "goals" ? actions : undefined}
         />
       )}
       {campaigns ? (
         <>
           {/* the social home opens on every project's campaigns,
               each under its project (pinned first, in his order), then his inbox, then the widgets. */}
-          <ProjectCampaigns roots={page.roots} rest={page.rest} card={socialCard} note={focusNote} error={ms.error} loading={ms.loading} />
-          <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} className="mb-6 mt-3" testId="team-load-more" />
-          {/* the owner's red line on top of the inbox; its items lead both lists below, marked in red. */}
-          <RedLineBand />
-          <WaitingOnYou title="Blocked, waiting on you" fold="blocked" laptop={home} />
-          <WaitingForReview fold="review" />
-          <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />
-          {/* The widgets, after the campaigns and the inbox. */}
-          <NewApplications />
-          {scorecard && <OnboardingScorecard />}
-          <RecentlyClosed />
-          {home && <LaunchLights product={socialProduct().toLowerCase()} />}
-          {shows("book") && <DeckCards />}
-          {shows("spines") && <AskedNoRow />}
-          {shows("spines") && <OrphanCommits />}
-          <MovingNow />
-          <NextWakeList />
+          {/* the owner ("I want to see a list of key results and traffic light for each"): Home is the goal and its key
+              results with a light each; everything else folds under one line below. */}
+          {only === "goals" && <GoalLights />}
+          {only === "goals" ? (
+            <MoreOnHome label="More: all objectives, campaigns, your Inbox, what the team is doing">
+              <InboxLine />
+              {shows("goalSets") && (
+                <Link to={`/${SCORECARDS_PATH}`} className="mb-3 flex min-h-11 items-center rounded-lg border bg-card px-3 text-sm hover:bg-accent" data-testid="home-all-objectives">
+                  All objectives and their key results
+                </Link>
+              )}
+              <div className="mb-4 flex flex-wrap gap-2">{actions}</div>
+              <ProjectCampaigns roots={page.roots} rest={page.rest} card={socialCard} note={focusNote} error={ms.error ?? campsError} loading={ms.loading || (campsLoading && !camps)} empty={camps && !camps.campaigns.some((c) => !c.retired) ? <CampaignsElsewhere /> : undefined} />
+              <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} className="mb-6 mt-3" testId="team-load-more" />
+              <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />
+              <NewApplications />
+              <RedLineBand />
+              {scorecard && <OnboardingScorecard />}
+              <RecentlyClosed />
+              {home && <LaunchLights product={socialProduct().toLowerCase()} />}
+              {shows("book") && <DeckCards />}
+              {shows("spines") && <AskedNoRow />}
+              {shows("spines") && <OrphanCommits />}
+              <MovingNow />
+              <NextWakeList />
+              {board && shownPersonas.length > 0 && personasList(shownPersonas)}
+              {board && <WakesDidSomething counts={runStats?.wakes24h} />}
+            </MoreOnHome>
+          ) : only !== "inbox" && (
+            <>
+              <ProjectCampaigns roots={page.roots} rest={page.rest} card={socialCard} note={focusNote} error={ms.error ?? campsError} loading={ms.loading || (campsLoading && !camps)} empty={camps && !camps.campaigns.some((c) => !c.retired) ? <CampaignsElsewhere /> : undefined} />
+              <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} className="mb-6 mt-3" testId="team-load-more" />
+            </>
+          )}
+          {/* the social product world's own asks and cards, then blocked, then finished work to review, and only then the
+              inbox's history (Mac agent, snoozed, decided for you, coming up, answered), as on the console's Inbox. */}
+          {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
+          {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
+          {only !== "goals" && <SlotStack name="social-inbox">
+            <Slot name="social-other-worlds">
+              <OtherWorldsWaiting />
+            </Slot>
+            {keeps.blocked && (
+              <Slot name="social-blocked" fallback={420}>
+                {/* the phone Home: no laptop switch here, it is EpicTeam's (the Mac list), as on EpicTeam's quiet Inbox. */}
+                <WaitingOnYou title="Blocked, waiting on you" fold="blocked" part="blocked" />
+              </Slot>
+            )}
+            {/* the owner (22:19Z): after what is blocked on him, each campaign and pursuit with its one number. */}
+            {show === "all" && (
+              <Slot name="social-campaign-goals">
+                <CampaignGoals />
+              </Slot>
+            )}
+            {/* E948-S66: then the team's own cards in his order: ideas, goals to set (with each campaign's goal talk), digests
+                (with the since-yesterday lines). */}
+            {keeps.kinds.length > 0 && (
+              <Slot name="social-team-cards">
+                <TeamCardsSections kinds={keeps.kinds} scorecard={scorecardId} extra={{ goal: <GoalTalk />, digest: <SinceYesterday /> }} />
+              </Slot>
+            )}
+            {keeps.review && (
+              <Slot name="social-review" fallback={420}>
+                <WaitingForReview fold="review" />
+              </Slot>
+            )}
+            {keeps.rest && (
+              <Slot name="social-rest">
+                <WaitingOnYou title="Blocked, waiting on you" fold="blocked" part="rest" />
+              </Slot>
+            )}
+          </SlotStack>}
+          {only !== "goals" && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
+          {only !== "inbox" && only !== "goals" && <NewApplications />}
+          {/* the phone Home (the owner, "on the mobile, it's just a total mess"): Home is the
+              campaigns and what waits on him, like EpicTeam's quiet Inbox; the widgets (red lines, scorecard, recently
+              closed, launch lights, what moves, personas) fold under one quiet line at the end, nothing removed. */}
+          {only !== "inbox" && only !== "goals" && <MoreOnHome>
+            <RedLineBand />
+            {scorecard && <OnboardingScorecard />}
+            <RecentlyClosed />
+            {home && <LaunchLights product={socialProduct().toLowerCase()} />}
+            {shows("book") && <DeckCards />}
+            {shows("spines") && <AskedNoRow />}
+            {shows("spines") && <OrphanCommits />}
+            <MovingNow />
+            <NextWakeList />
+            {board && shownPersonas.length > 0 && personasList(shownPersonas)}
+            {board && <WakesDidSomething counts={runStats?.wakes24h} />}
+          </MoreOnHome>}
         </>
       ) : !settings ? (
         <>
           {/* the Inbox: what blocks on the owner (the laptop switch on top re-orders it), then finished work. Nothing else. */}
-          <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" />
-          <WaitingForReview fold="review" />
-          {/* the rest of his inbox's history (Mac agent, snoozed, decided for you, coming up, answered), folded, after both lists. */}
-          <WaitingOnYou title="Blocked on you" fold="blocked" part="rest" />
-          {shows("settings") && (
-            <p className="mt-6 text-xs text-muted-foreground" data-testid="inbox-rest-moved">
-              Red lines, What you build and the readiness checklist moved to{" "}
-              <Link to={`/${SETTINGS_PATH}`} className="text-foreground underline decoration-foreground/25 underline-offset-[3px] hover:decoration-current">
-                Settings
-              </Link>
-              . Projects open from the menu.
-            </p>
-          )}
+          {/* the owner ("remove the purple section ... inbox is inbox, filters on"): no other-worlds band here, the filters
+              then the expanders with nothing between; the social skin keeps its own. */}
+          {/* every section fetches at once and shows top to bottom (each once it and all above it are in, the
+              next one holding its place with a shimmer), so one that lands late never pushes what is on screen. */}
+          <InboxSearchProvider>
+          {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
+          <InboxSearchBox />
+          {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}
+          <InboxShowFilter show={show} onChange={setShow} />
+          {/* an account the team needs, connected with one tap (Google's own page, the account named). */}
+          {keeps.blocked && <ConnectCards where="inbox" />}
+          <SlotStack name="inbox">
+            {keeps.blocked && (
+              <Slot name="blocked" fallback={420}>
+                <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" />
+              </Slot>
+            )}
+            {/* the owner (22:19Z): after what is blocked on him, each campaign and pursuit with its one number. */}
+            {show === "all" && (
+              <Slot name="campaign-goals">
+                <CampaignGoals />
+              </Slot>
+            )}
+            {/* E948-S66: then the team's own cards in his order: ideas, goals to set (with each campaign's goal talk), digests
+                (with the since-yesterday lines). */}
+            {keeps.kinds.length > 0 && (
+              <Slot name="team-cards">
+                <TeamCardsSections kinds={keeps.kinds} scorecard={scorecardId} extra={{ goal: <GoalTalk />, digest: <SinceYesterday /> }} />
+              </Slot>
+            )}
+            {keeps.review && (
+              <Slot name="review" fallback={420}>
+                <WaitingForReview fold="review" />
+              </Slot>
+            )}
+            {/* the rest of his inbox's history (Mac agent, snoozed, decided for you, coming up, answered), folded, after both lists. */}
+            {keeps.rest && (
+              <Slot name="rest">
+                <WaitingOnYou title="Blocked on you" fold="blocked" part="rest" />
+              </Slot>
+            )}
+            {/* the line after the lists keeps its place in the order too (nothing to load). */}
+            <Slot name="after" ready>
+              {shows("settings") && (
+                <p className="mt-6 text-xs text-muted-foreground" data-testid="inbox-rest-moved">
+                  Red lines moved to{" "}
+                  <Link to={`/${SETTINGS_PATH}`} className="text-foreground underline decoration-foreground/25 underline-offset-[3px] hover:decoration-current">
+                    Settings
+                  </Link>
+                  . Projects open from the menu.
+                </p>
+              )}
+            </Slot>
+          </SlotStack>
+          </InboxSearchProvider>
         </>
       ) : (
         <>
           {/* Settings, on top: the readiness checklist, the owner's red lines (edit, delete; their cards lead the Inbox),
               what he builds, tester applications he has not opened yet. */}
-          {scorecard && <OnboardingScorecard list />}
+          {board && scorecard && <OnboardingScorecard list />}
           <RedLineBand list />
-          {home && <BuildingLists milestones={ms.data} list />}
-          <NewApplications />
+          {board && home && <BuildingLists milestones={ms.data} list />}
+          {board && <NewApplications />}
           {between}
           <div className="mb-4 mt-8 flex flex-wrap items-center gap-2" data-testid="team-overview-head">
-            <h2 className="mr-auto text-[15px] font-semibold">Projects and team</h2>
+            <h2 className="mr-auto text-[15px] font-semibold">{board ? "Projects and team" : "Projects"}</h2>
             {actions}
           </div>
           {/* every card he closed this week, with Add comment. */}
-          <RecentlyClosed />
-          {home && <LaunchLights product="epicteam" />}
-          {shows("book") && <DeckCards />}
-          {shows("book") && home && <GoalGraphLinks />}
-          <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />
-          {shows("spines") && <AskedNoRow />}
-          {shows("spines") && <OrphanCommits />}
-          <MovingNow />
-          <NextWakeList />
+          {board && <RecentlyClosed />}
+          {board && home && <LaunchLights product="epicteam" />}
+          {board && shows("book") && <DeckCards />}
+          {board && shows("book") && home && <GoalGraphLinks />}
+          {board && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
+          {board && shows("spines") && <AskedNoRow />}
+          {board && shows("spines") && <OrphanCommits />}
+          {board && <MovingNow />}
+          {board && <NextWakeList />}
 
-          {/* "Focus milestones" (the owner's big roots, his order) then "Other milestones"; with no focus set the
-              console skin still names both, so the way to make one focus is on the page. */}
-          <h2 className="mb-3 text-[15px] font-semibold" data-testid="focus-milestones">
-            {focusHeading(w)}
-          </h2>
-          {focusNote && (
-            <p className={cn("mb-3 text-xs", focusNote.ok ? "text-muted-foreground" : "text-destructive")} role="status" data-testid="focus-note">
-              {focusNote.text}
-            </p>
-          )}
-          {ms.error && <ErrorBox error={ms.error} />}
-          {ms.loading && <Loading />}
-          {ms.data && ms.data.length === 0 && <Empty>No {w.milestonesWord} yet. Add one to point the team at a spine.</Empty>}
-          {ms.data && ms.data.length > 0 && !roots.length && (
-            <Empty>{`No focus ${w.milestonesWord} yet. Pin one below with Pin to focus, or create one pinned with New focus ${w.milestone} above.`}</Empty>
-          )}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {page.roots.map(card)}
-          </div>
-          {page.rest.length > 0 && (
+          {/* the project cards (status, last run, pin and order) sit behind the dashboard switch; the menu opens
+              each project, and its page keeps Pin to focus and Unpin. */}
+          {board && (
             <>
-              <h2 className="mb-3 mt-8 text-[15px] font-semibold" data-testid="other-milestones">
-                Other {w.milestonesWord}
+              {/* "Focus milestones" (the owner's big roots, his order) then "Other milestones"; with no focus set the
+                  console skin still names both, so the way to make one focus is on the page. */}
+              <h2 className="mb-3 text-[15px] font-semibold" data-testid="focus-milestones">
+                {focusHeading(w)}
               </h2>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{page.rest.map(card)}</div>
+              {focusNote && (
+                <p className={cn("mb-3 text-xs", focusNote.ok ? "text-muted-foreground" : "text-destructive")} role="status" data-testid="focus-note">
+                  {focusNote.text}
+                </p>
+              )}
+              {ms.error && <ErrorBox error={ms.error} />}
+              {ms.loading && <Loading />}
+              {ms.data && ms.data.length === 0 && <Empty>No {w.milestonesWord} yet. Add one to point the team at a spine.</Empty>}
+              {ms.data && ms.data.length > 0 && !roots.length && (
+                <Empty>{`No focus ${w.milestonesWord} yet. Pin one below with Pin to focus, or create one pinned with New focus ${w.milestone} above.`}</Empty>
+              )}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {page.roots.map(card)}
+              </div>
+              {page.rest.length > 0 && (
+                <>
+                  <h2 className="mb-3 mt-8 text-[15px] font-semibold" data-testid="other-milestones">
+                    Other {w.milestonesWord}
+                  </h2>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{page.rest.map(card)}</div>
+                </>
+              )}
+              <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} className="mt-3" testId="team-load-more" />
             </>
           )}
-          <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} className="mt-3" testId="team-load-more" />
         </>
       )}
-      {(campaigns || settings) && shownPersonas.length > 0 && (
-        <section className="mt-8">
+      {settings && board && shownPersonas.length > 0 && personasList(shownPersonas)}
+      {settings && board && <WakesDidSomething counts={runStats?.wakes24h} />}
+      <SyncFooter />
+      <MilestoneDialog open={newOpen} onOpenChange={setNewOpen} job={campaigns} />
+      <MilestoneDialog open={focusOpen} onOpenChange={setFocusOpen} focusAt={nextFocusPosition(list)} />
+    </OpenAsksContext.Provider>
+  );
+
+  function personasList(shown: typeof shownPersonas) {
+    return (
+        <section className="mt-8" data-testid="personas-list">
           <h2 className="mb-3 text-[15px] font-semibold">Personas</h2>
           <Card>
             <ul className="divide-y">
-              {shownPersonas.map((p) => {
+              {shown.map((p) => {
                 const { count, last } = runStats?.personas[p.id] ?? { count: 0 };
                 const on = assignments.filter((a) => a.personaId === p.id && project.keep(a.milestoneId)).length;
                 return (
@@ -446,12 +612,45 @@ export function TeamPage({ section = "inbox", between }: { section?: "inbox" | "
             </ul>
           </Card>
         </section>
-      )}
-      {(campaigns || settings) && <WakesDidSomething counts={runStats?.wakes24h} />}
-      <SyncFooter />
-      <MilestoneDialog open={newOpen} onOpenChange={setNewOpen} job={campaigns} />
-      <MilestoneDialog open={focusOpen} onOpenChange={setFocusOpen} focusAt={nextFocusPosition(list)} />
-    </OpenAsksContext.Provider>
+    );
+  }
+}
+
+/**
+ * the phone Home: the social Home's widgets folded under one quiet line at its end (open state kept), so a phone
+ * shows the campaigns and what waits on him, nothing else.
+ */
+export function MoreOnHome({ children, label }: { children: ReactNode; label?: string }) {
+  const key = "social-home-more";
+  const [open, setOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  return (
+    <section className="mt-6 border-t pt-2" data-testid="home-more">
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground"
+        aria-expanded={open}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          try {
+            window.localStorage.setItem(key, next ? "1" : "0");
+          } catch {
+            /* private mode */
+          }
+        }}
+        data-testid="home-more-toggle"
+      >
+        <ChevronDown className={cn("h-4 w-4 shrink-0", open && "rotate-180")} aria-hidden />
+        {open ? "Less" : (label ?? "More: red lines, recently closed, what the team is doing")}
+      </button>
+      {open && <div className="mt-3" data-testid="home-more-body">{children}</div>}
+    </section>
   );
 }
 
@@ -469,6 +668,7 @@ export function ProjectCampaigns<M extends MilestoneRow>({
   note,
   error,
   loading,
+  empty,
 }: {
   roots: M[];
   rest: M[];
@@ -476,6 +676,8 @@ export function ProjectCampaigns<M extends MilestoneRow>({
   note?: { ok: boolean; text: string } | null;
   error?: unknown;
   loading?: boolean;
+  /** what an empty list says instead of the default (a world that runs no campaign points to the one that does). */
+  empty?: ReactNode;
 }) {
   const { projects, current, select, projectOf } = useProject();
   const all = [...roots, ...rest];
@@ -511,12 +713,92 @@ export function ProjectCampaigns<M extends MilestoneRow>({
           {g.ms.length ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{g.ms.map(card)}</div>
           ) : (
-            !loading && <Empty>No campaigns here yet. Start one with New campaign above.</Empty>
+            !loading && (empty ?? <Empty>No campaigns here yet. Start one with New campaign above.</Empty>)
           )}
         </div>
       ))}
     </section>
   );
+}
+
+/**
+ * a world that runs no campaign of its own (the home world in the violet skin): its projects are team work, so Home
+ * lists none of them and names the owner's real campaigns instead, each opening in the world that runs it (the same
+ * read as the Inbox's band, GET /api/worlds).
+ */
+export function CampaignsElsewhere() {
+  const { data, loading } = useOtherWorlds();
+  const worlds = (data?.worlds ?? []).filter((w) => w.appUrl);
+  const withCampaigns = worlds.filter((w) => w.campaigns?.length);
+  if (loading && !data) return <Loading />;
+  if (!withCampaigns.length)
+    return (
+      <Empty>
+        <span data-testid="campaigns-elsewhere">
+          No campaigns run in this world: its projects are team work and stay on the team side.
+          {worlds[0] && (
+            <>
+              {" "}
+              Your campaigns run in {worlds[0].app}:{" "}
+              <a href={worlds[0].appUrl} target="_blank" rel="noreferrer" className="underline" data-testid="campaigns-elsewhere-link">
+                open {worlds[0].app}
+              </a>
+              .
+            </>
+          )}
+        </span>
+      </Empty>
+    );
+  return (
+    <div className="grid gap-3" data-testid="campaigns-elsewhere">
+      {withCampaigns.map((w) => (
+        <div key={w.tenantId} className="grid gap-2" data-world={w.tenantId}>
+          <p className="text-xs text-muted-foreground" data-testid="campaigns-elsewhere-note">
+            Each opens in {w.app}.
+          </p>
+          {/* the phone Home: on a phone the whole name shows (it wraps, never cut), the goal and whether it posts
+              each get their own short line, the open-elsewhere mark is an icon in the corner. */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {w.campaigns!.map((c) => {
+              const posting = postingWord(c.posting);
+              return (
+                <a key={c.milestoneId} href={c.openUrl} target="_blank" rel="noreferrer" className="block min-w-0 rounded-xl border bg-card px-4 py-3 [overflow-wrap:anywhere] hover:bg-accent/40" title={`Open in ${w.app}`} data-testid="elsewhere-campaign">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span className="min-w-0 flex-1 text-[15px] font-semibold leading-snug" data-testid="campaign-name">
+                      {c.name}
+                    </span>
+                    <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={`opens in ${w.app}`} />
+                  </div>
+                  {c.goal && <div className="mt-1 text-sm text-muted-foreground" data-testid="campaign-goal">{c.goal}</div>}
+                  {posting && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs" data-testid="campaign-posting">
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", posting.live ? "bg-emerald-500" : "bg-muted-foreground/40")} aria-hidden />
+                      <span className={posting.live ? "text-foreground" : "text-muted-foreground"}>{posting.text}</span>
+                    </div>
+                  )}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * the phone Home: a campaign's posting line in a few plain words for a phone. "Live: posting on Reddit and X (its
+ * Publisher sends …)" reads "Posting on Reddit and X"; "Not live yet: it starts 2026-12-10" stays whole; the bracketed
+ * how goes (it is on the campaign's own page).
+ */
+export function postingWord(line?: string): { live: boolean; text: string } | undefined {
+  if (!line) return undefined;
+  const i = line.indexOf(":");
+  const head = i > 0 ? line.slice(0, i).trim() : "";
+  const rest = (i > 0 ? line.slice(i + 1) : line).replace(/\s*\([^)]*\)?.*$/, "").trim();
+  const live = /^live\b/i.test(head);
+  const text = live ? rest || "Posting" : [head, rest].filter(Boolean).join(": ");
+  return { live, text: text.charAt(0).toUpperCase() + text.slice(1) };
 }
 
 /**
@@ -531,6 +813,8 @@ export function PostLine({ c }: { c: CampaignCard }) {
     <div className="grid gap-0.5 text-xs" data-testid="card-post-line">
       {/* the campaign's one goal and the number toward it. */}
       {c.goal && <CampaignGoalBlock card={c} compact />}
+      {/* one line per channel: its sign-in, account and the summed counts. */}
+      {c.channels?.length ? <CampaignChannels card={c} compact /> : null}
       {c.posting && (
         <div className="flex min-w-0 items-center gap-1.5" data-testid="card-posting" data-live={c.posting.live ? "yes" : "no"} title={c.posting.line}>
           <span className={c.posting.live ? "shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 font-medium text-muted-foreground"}>
