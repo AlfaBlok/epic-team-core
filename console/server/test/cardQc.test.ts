@@ -139,7 +139,13 @@ describe("E948-S62 judge fix: the model answers breaches as a list", () => {
     const v = QC_JUDGE_SCHEMA.properties.visual;
     expect(v.required).toEqual(["breaches", "summary"]);
     expect(Object.keys(v.properties)).not.toContain("pass");
-    expect(v.properties.breaches.items.required).toEqual(["rule", "width", "what"]);
+    expect(v.properties.breaches.items.required).toEqual(["rule", "width", "fault", "what"]);
+  });
+  it("each point says whether the evidence page shows it and what changed since the last check", () => {
+    const w = QC_JUDGE_SCHEMA.properties.words.items;
+    expect(w.required).toEqual(["n", "status", "how", "onPage", "changed"]);
+    expect(w.properties.onPage.type).toBe("boolean");
+    expect(w.properties.changed.type).toBe("string");
   });
 });
 

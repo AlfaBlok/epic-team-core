@@ -62,3 +62,11 @@
   html { @apply bg-background; }
   body { @apply bg-background text-foreground antialiased; }
 }
+
+/* the card the owner is recording or typing on stays marked while the inbox holds still (lib/inboxHold), in the
+   one ink (no new colour), so it is found at a glance among cards that look the same. */
+[data-card-shell]:has([data-inbox-hold]),
+[data-card]:has([data-inbox-hold]) {
+  border-color: hsl(var(--foreground) / 0.6);
+  box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.6);
+}

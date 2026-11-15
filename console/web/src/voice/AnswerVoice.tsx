@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { NoteClock, NoteMedia, NotesApi } from "./noteEngine";
 import { clearNoteState, useNote, type NoteState } from "./useNote";
+import { useInboxHold } from "@/lib/inboxHold";
 
 /**
  * (the owner 2026-11-08: "In a card pane (answer, new iteration with feedback) the owner can record a voice note as his answer,
@@ -67,5 +68,12 @@ export function useAnswerVoice(props: {
   big?: boolean;
 }): AnswerVoice {
   const n = useNote({ ...props, tid: "answer-voice", idleLabel: "Speak" });
-  return { button: n.button, strip: n.strip, busy: n.busy };
+  // while the owner records or types here the inbox holds still, and this card is marked (index.css)
+  const holding = useInboxHold(props.origin, { recording: n.busy, typed: props.typed });
+  const mark = holding ? <span hidden data-inbox-hold="" data-testid="inbox-hold" /> : null;
+  return {
+    button: n.button,
+    strip: mark || n.strip ? <>{mark}{n.strip}</> : undefined,
+    busy: n.busy,
+  };
 }

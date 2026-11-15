@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiMode } from "@/api";
+import { inboxHeld, onInboxRelease } from "@/lib/inboxHold";
 
 // Tiny fetch-and-refresh layer: every mutation bumps a global version, all queries refetch.
 /** a query may carry a tag; `invalidate(tag)` refreshes only those (a snooze refetches the inbox, not ~15 lists). */
@@ -8,6 +9,9 @@ export type QueryTag = "inbox" | "counts";
 const listeners = new Set<{ refresh: () => void; tag?: QueryTag }>();
 export const invalidate = (tag?: QueryTag) => listeners.forEach((l) => (!tag || l.tag === tag || (tag === "inbox" && l.tag === "counts")) && l.refresh());
 api.subscribe?.(() => invalidate());
+
+/** inbox lists and counts hold still while a card box is in use (lib/inboxHold); others always update. */
+const holds = (tag?: QueryTag) => (tag === "inbox" || tag === "counts") && inboxHeld();
 
 /** Poll interval: real server data changes behind our back (runs, spines). */
 const POLL_MS = apiMode === "real" ? 30_000 : 0;
@@ -43,12 +47,22 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
   const [loading, setLoading] = useState(true);
   const fnRef = useRef(fn);
   fnRef.current = fn;
+  const has = useRef(false);
+  const parked = useRef<{ d: T } | undefined>(undefined);
 
   const load = useCallback(() => {
     let alive = true;
     fnRef
       .current()
-      .then((d) => alive && (setData(d), setError(undefined)))
+      .then((d) => {
+        if (!alive) return;
+        // held: park the answer until the card box lets go (the first answer always shows)
+        if (has.current && holds(opts.tag)) return void (parked.current = { d });
+        has.current = true;
+        parked.current = undefined;
+        setData(d);
+        setError(undefined);
+      })
       .catch((e: Error) => alive && setError(e))
       .finally(() => alive && setLoading(false));
     return () => {
@@ -57,6 +71,9 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
   }, []);
 
   useEffect(() => {
+    // new deps: their first answer shows even while held
+    has.current = false;
+    parked.current = undefined;
     let cancel = load();
     const refresh = () => {
       cancel();
@@ -65,10 +82,18 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     const l = { refresh, tag: opts.tag };
     listeners.add(l);
     const stopPoll = pollWhileVisible(refresh, POLL_MS);
+    const stopRelease = onInboxRelease(() => {
+      const p = parked.current;
+      if (!p) return;
+      parked.current = undefined;
+      setData(p.d);
+      setError(undefined);
+    });
     return () => {
       cancel();
       listeners.delete(l);
       stopPoll();
+      stopRelease();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
@@ -91,7 +116,7 @@ export async function mutate<T>(fn: () => Promise<T>, tag?: QueryTag): Promise<T
  * the Team home section each fetched and polled on their own clock, up to 30 s apart: a pill said 1 while the list was
  * already empty. Same refresh rules as useQuery (tag, poll); the entry is dropped when its last reader unmounts.
  */
-type Shared = { data?: unknown; error?: Error; loading: boolean; version: number; seq: number; readers: number; subs: Set<() => void>; stop: () => void; refresh: () => void };
+type Shared = { data?: unknown; parked?: { d: unknown }; error?: Error; loading: boolean; version: number; seq: number; readers: number; subs: Set<() => void>; stop: () => void; refresh: () => void };
 const shared = new Map<string, Shared>();
 
 function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Shared {
@@ -104,17 +129,33 @@ function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Sh
   };
   e.refresh = () => {
     const n = ++e.seq;
+    let park = false;
     fn()
-      .then((d) => n === e.seq && ((e.data = d), (e.error = undefined)))
+      .then((d) => {
+        if (n !== e.seq) return;
+        // held: park the answer until the card box lets go (the first answer always shows)
+        if (!e.loading && holds(tag)) return void ((park = true), (e.parked = { d }));
+        e.parked = undefined;
+        e.data = d;
+        e.error = undefined;
+      })
       .catch((err: Error) => n === e.seq && (e.error = err))
-      .finally(() => n === e.seq && ((e.loading = false), bump()));
+      .finally(() => n === e.seq && !park && ((e.loading = false), bump()));
   };
   const l = { refresh: () => e.refresh(), tag };
   listeners.add(l);
   const stopPoll = pollWhileVisible(() => e.refresh(), POLL_MS);
+  const stopRelease = onInboxRelease(() => {
+    if (!e.parked) return;
+    e.data = e.parked.d;
+    e.parked = undefined;
+    e.error = undefined;
+    bump();
+  });
   e.stop = () => {
     listeners.delete(l);
     stopPoll();
+    stopRelease();
     e.seq++;
   };
   shared.set(key, e);

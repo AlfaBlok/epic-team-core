@@ -155,8 +155,16 @@ export const QC_JUDGE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["n", "status", "how"],
-        properties: { n: { type: "integer" }, status: { type: "string", enum: ["met", "declared", "missed", "elsewhere"] }, how: { type: "string" } },
+        // onPage: a missed point the evidence page shows after all (the card holds three short lines); changed,
+        // what changed on the card or page when a point the last check accepted turns missed (card_qc.py keeps it otherwise)
+        required: ["n", "status", "how", "onPage", "changed"],
+        properties: {
+          n: { type: "integer" },
+          status: { type: "string", enum: ["met", "declared", "missed", "elsewhere"] },
+          how: { type: "string" },
+          onPage: { type: "boolean" },
+          changed: { type: "string" },
+        },
       },
     },
     visual: {
@@ -170,8 +178,9 @@ export const QC_JUDGE_SCHEMA = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["rule", "width", "what"],
-            properties: { rule: { type: "integer" }, width: { type: "integer" }, what: { type: "string" } },
+            // fault: true only when the page goes back to be fixed for it (card_qc.py drops fault false)
+            required: ["rule", "width", "fault", "what"],
+            properties: { rule: { type: "integer" }, width: { type: "integer" }, fault: { type: "boolean" }, what: { type: "string" } },
           },
         },
         summary: { type: "string" },
