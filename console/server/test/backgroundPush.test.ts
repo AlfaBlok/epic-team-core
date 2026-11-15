@@ -240,6 +240,41 @@ describe("T6-S82 his words are never dropped", () => {
     expect(String(got[0].text)).toMatch(/Changes wanted pressed .* the row had moved on .*\] Show the problem first, then the solution\.$/);
   });
 
+  it("a Changes wanted the card refuses as too long (after the press said saved) lands his words whole as a Decisions row", async () => {
+    const got: Record<string, unknown>[] = [];
+    const tooLong = () => new Response(JSON.stringify({ error: { code: "validation_error", message: "feedback is required, or a file in attachments (at most 4000 characters)" } }), { status: 400, headers: { "content-type": "application/json" } });
+    const { presses, press } = app(tooLong, (b) => {
+      got.push(b);
+      return new Response(JSON.stringify({ sha: "def5678" }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const words = `${"I don't know if we're ready to promote it. ".repeat(260)}THE-END`;
+    const r = await press(words);
+    expect(r.status).toBe(202);
+    const id = ((await r.json()) as { press: { id: string } }).press.id;
+    expect(await until(() => presses.get(id)?.state !== "landing")).toBe(true);
+    expect(presses.get(id)).toMatchObject({ state: "landed", sha: "def5678" });
+    expect(presses.get(id)!.reason).toMatch(/the card refused them .*his words were written as a Decisions row of T48-S37/);
+    expect(got).toHaveLength(1);
+    expect(String(got[0].text)).toMatch(/^\[Changes wanted pressed .* the card refused it: feedback is required/);
+    expect(String(got[0].text).endsWith(words)).toBe(true);
+  });
+
+  it("a refused press with no words stays failed (nothing to keep)", async () => {
+    const got: unknown[] = [];
+    const bad = () => new Response(JSON.stringify({ error: { code: "validation_error", message: "feedback is required" } }), { status: 400, headers: { "content-type": "application/json" } });
+    const { presses, press } = app(bad, (b) => {
+      got.push(b);
+      return new Response("{}", { status: 200 });
+    });
+    const r = await press("   ");
+    const id = ((await r.json()) as { press?: { id: string } }).press?.id;
+    if (id) {
+      expect(await until(() => presses.get(id)?.state !== "landing")).toBe(true);
+      expect(presses.get(id)?.state).toBe("failed");
+    }
+    expect(got).toHaveLength(0);
+  });
+
   it("an earlier try of the same press already wrote the words (cut off by a restart): that is its landing, no second row", async () => {
     const got: unknown[] = [];
     const words = "Okay, man, so this video is a great opportunity to learn, and I think I want mock-ups.";

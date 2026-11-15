@@ -465,12 +465,21 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
         verdict = { kind: "retry", reason: `${verdict.reason} (just after another press on this card landed: trying again)` };
       } else if (WORDS_ROUTE.test(req.path)) {
         // the row moved on before his words were written (2026-11-11 05:03Z): they land all the same
-        const kept = await landWords(id, req, verdict.reason, ctx);
+        const kept = await landWords(id, req, verdict.reason, ctx, "moved");
         if (kept) {
           verdict = kept.verdict;
           if (kept.out !== undefined) out = kept.out;
           if (verdict.kind === "landed") status = 200;
         }
+      }
+    } else if (verdict.kind === "refused" && (status === 400 || status === 413 || status === 422) && WORDS_ROUTE.test(req.path)) {
+      // the card refused his words as bad input after the press had already answered "saved" (2026-11-15 03:32-03:42Z:
+      // two long voice notes, 11 presses, refused at a 4,000 character cap): the press must not end his words there
+      const kept = await landWords(id, req, verdict.reason, ctx, "refused");
+      if (kept) {
+        verdict = kept.verdict;
+        if (kept.out !== undefined) out = kept.out;
+        if (verdict.kind === "landed") status = 200;
       }
     }
     const p = presses.settle(id, {
@@ -485,13 +494,13 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
   }
 
   /**
-   * a Changes wanted (or Deny with a reason) refused because the row left review before it was written. His words
+   * a Changes wanted (or Deny with a reason) refused because the row left review before it was written, or refused as bad input (too long) after the press answered "saved". His words
    * are never dropped: when the row already carries them (an earlier try of this press wrote them and was cut off) the
    * press is that landing; else they go into the row's spine as a Decisions row through Add comment (which also tells the
    * row's Delivery manager), and the press lands as that. Only a card whose row is unknown keeps the refusal (the words
    * stay in the press log, the failure shows on /api/write-health).
    */
-  async function landWords(id: string, req: PressRequest, reason: string, ctx: Parameters<typeof runWithAuth>[0]): Promise<{ verdict: Verdict; out?: unknown } | undefined> {
+  async function landWords(id: string, req: PressRequest, reason: string, ctx: Parameters<typeof runWithAuth>[0], cause: "moved" | "refused" = "moved"): Promise<{ verdict: Verdict; out?: unknown } | undefined> {
     const m = WORDS_ROUTE.exec(req.path);
     if (!m) return undefined;
     const body = json(req.body ?? "");
@@ -504,7 +513,8 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
     if (!req.card) return { verdict: { kind: "refused", reason: `${reason} (his words are kept in the press log: the card's row was not known when it was pressed)` } };
     const pressedAt = presses.get(id)?.at ?? new Date().toISOString();
     const kind = m[2] === "relaunch" ? "Changes wanted" : "Deny";
-    const text = `[${kind} pressed ${pressedAt.slice(0, 16).replace("T", " ")}Z on the review card; the row had moved on before it was written: ${reason.replace(/^not written: /, "").slice(0, 200)}] ${words}`;
+    const what = cause === "moved" ? "the row had moved on before it was written" : "the card refused it";
+    const text = `[${kind} pressed ${pressedAt.slice(0, 16).replace("T", " ")}Z on the review card; ${what}: ${reason.replace(/^not written: /, "").slice(0, 200)}] ${words}`;
     try {
       const res = await withPress(id, () =>
         runWithAuth(ctx, async () =>
@@ -519,7 +529,7 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
       );
       const out = (await readJson(res)) as { sha?: string; error?: { message?: string } } | undefined;
       if (res.status >= 200 && res.status < 300)
-        return { verdict: { kind: "landed", ...(out?.sha ? { sha: out.sha } : {}), note: `the row had moved on (${reason.slice(0, 160)}): his words were written as a Decisions row of ${req.card.ref}${out?.sha ? ` (${out.sha})` : ""} and its Delivery manager told` }, out };
+        return { verdict: { kind: "landed", ...(out?.sha ? { sha: out.sha } : {}), note: `${cause === "moved" ? "the row had moved on" : "the card refused them"} (${reason.slice(0, 160)}): his words were written as a Decisions row of ${req.card.ref}${out?.sha ? ` (${out.sha})` : ""} and its Delivery manager told` }, out };
       const why = out?.error?.message ?? `HTTP ${res.status}`;
       return res.status >= 500 ? { verdict: { kind: "retry", reason: `${reason}; writing his words as a Decisions row failed: ${why}` } } : { verdict: { kind: "refused", reason: `${reason}; his words could not be written as a Decisions row either (${why}); they are kept in the press log` } };
     } catch (e) {
