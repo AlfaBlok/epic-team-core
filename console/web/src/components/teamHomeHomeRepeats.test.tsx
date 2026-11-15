@@ -36,15 +36,16 @@ describe("T48-S2 Team home: one home, no repeats", () => {
     expect(screen.queryByText(/^Pending$/i)).toBeNull();
     await waitFor(() => expect(screen.getByTestId("waiting-on-you-count")).toBeTruthy());
 
-    // Independent folds, remembered.
+    // the owner: the Inbox lands with every section folded; each opens on its own, for this visit.
     const review = screen.getByTestId("waiting-for-review-toggle");
-    expect(review.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(review);
     expect(review.getAttribute("aria-expanded")).toBe("false");
+    expect(blocked.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("review-card")).toBeNull();
+    fireEvent.click(review);
+    expect(review.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId("waiting-for-review-count").textContent).toBe("1");
-    expect(blocked.getAttribute("aria-expanded")).toBe("true");
-    expect(localStorage.getItem("teamHome.section.review")).toBe("closed");
+    expect(blocked.getAttribute("aria-expanded")).toBe("false");
+    expect(localStorage.getItem("teamHome.section.review")).toBeNull();
   });
 
   it("a folded section stays folded on the next visit", async () => {

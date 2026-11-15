@@ -252,6 +252,8 @@ export const VISUAL_FIRST_RULE =
   "Your own chat reports and run summaries lead the same way: the answer in one line, then boxes, never a wall of bullets. " +
   "Before you hand over a page run `python3 scripts/text_wall_check.py <page>` " +
   `in ${homeRepo()} (it flags a text wall and a diagram whose shape misleads); fix what it names. The review gate holds a card whose evidence page opens with text ("needs evidence"). ` +
+  // (the owner's voice note vn_c23abab6 on a plan card: "when you tell me a plan, I expect to see a diagram")
+  `A plan (a card, page or reply telling ${ownerName()} what we will do) opens with one drawn diagram of the idea, before anything else, and little text after it: boxes of text or a table are not a diagram, and the review gate sends a plan card whose page has no drawn diagram before its first 80 words back ("needs evidence"). ` +
   // (the owner 2026-11-12: "I have like a strong predilection for simple UX ... make it clean and, like, sophisticated")
   "Clean, simple, sophisticated: every page, screen and site you make looks calm and few: one thing per screen, flat surfaces (no gradients, no shadows at rest), " +
   "colour only on data and the one action, two or three typefaces, no emoji or ornaments, nothing squeezed on a phone; take the look from the skills, never invent one " +

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -12,11 +12,18 @@ function storedOpen(key: string): boolean | undefined {
     return undefined;
   }
 }
+/**
+ * the owner (2026-11-15: "I want to maybe land with everything collapsed, and then I expand where I want
+ * to look at"): inside the Inbox every section opens folded on each visit, whatever was open last time; a tap opens it
+ * for this visit only, so the next visit lands folded again.
+ */
+export const LandFolded = createContext(false);
 export function useSectionOpen(key: string | undefined, byDefault = true): [boolean, (open: boolean) => void] {
-  const [open, setOpen] = useState(() => (key ? (storedOpen(key) ?? byDefault) : byDefault));
+  const landFolded = useContext(LandFolded);
+  const [open, setOpen] = useState(() => (landFolded ? false : key ? (storedOpen(key) ?? byDefault) : byDefault));
   const set = (o: boolean) => {
     setOpen(o);
-    if (!key) return;
+    if (!key || landFolded) return;
     try {
       window.localStorage.setItem(SECTION_STORE + key, o ? "open" : "closed");
     } catch {

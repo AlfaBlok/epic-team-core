@@ -1,7 +1,7 @@
 import { HIS_WORDS_MAX } from "../hisWords.js";
 import { execFile } from "node:child_process";
 import { secureDeep } from "../steps/secureLinks.js";
-import { TEXT_WALL_PREFIX, textWallProblem } from "./pageShape.js";
+import { TEXT_WALL_PREFIX, isPlan, planShapeProblem, textWallProblem } from "./pageShape.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -171,6 +171,8 @@ export interface LiveCheck {
   ok: boolean;
   status: number;
   error?: string;
+  /** a page on the page host: why it fails as a plan page ("" = it opens with a drawn diagram and keeps to few words). */
+  plan?: string;
 }
 
 export interface LiveCheckDeps {
@@ -226,11 +228,16 @@ export async function checkLive(url: string, commit: string | undefined, d: Live
   const target = own && d.localOrigin ? `${d.localOrigin}${u.pathname}${u.search}` : url;
   let status = 0;
   let wall: string | undefined;
+  let plan: string | undefined;
   try {
     const res = await (d.fetch ?? fetch)(target, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(d.timeoutMs ?? 10_000) });
     status = res.status;
     const page = status >= 200 && status < 400 && (d.pageHosts?.() ?? []).includes(u.hostname) && /html/i.test(res.headers?.get?.("content-type") ?? "html");
-    if (page) wall = textWallProblem(await res.text());
+    if (page) {
+      const html = await res.text();
+      wall = textWallProblem(html);
+      plan = planShapeProblem(html);
+    }
     else await res.body?.cancel().catch(() => undefined);
   } catch (e) {
     return { ok: false, status: 0, error: `no answer: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300) };
@@ -240,14 +247,15 @@ export async function checkLive(url: string, commit: string | undefined, d: Live
     if (api && (await d.githubApi(api).catch(() => false))) return { ok: true, status: 200 };
   }
   if (status < 200 || status >= 400) return { ok: false, status, error: `answered ${status}` };
-  if (wall) return { ok: false, status, error: wall };
+  const d1 = plan === undefined ? {} : { plan };
+  if (wall) return { ok: false, status, error: wall, ...d1 };
   if (commit && own) {
     const rev = d.revision?.();
     if (!rev) return { ok: false, status, error: `deployed revision unknown; cannot tell whether ${commit.slice(0, 7)} is live` };
     const inIt = rev.startsWith(commit) || (await (d.contains?.(commit, rev) ?? Promise.resolve(false)).catch(() => false));
     if (!inIt) return { ok: false, status, error: `merged but not deployed: live release ${rev.slice(0, 7)} does not contain ${commit.slice(0, 7)}` };
   }
-  return { ok: true, status };
+  return { ok: true, status, ...d1 };
 }
 
 /** Default deps on the console host: its own listen address for its own names, app/REVISION, git in the code repo checkout. */
@@ -317,9 +325,12 @@ export function ensureReviewLive(db: DB): void {
       PRIMARY KEY (url, commit_sha)
     );
   `);
+  // a page's plan shape: why it fails as a plan page, "" = it passes, NULL = not a page on the page host or not checked since
+  const cols = db.prepare("PRAGMA table_info(review_live)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "plan")) db.exec("ALTER TABLE review_live ADD COLUMN plan TEXT");
 }
 
-type LiveRow = { ok: number; status: number | null; error: string | null; checked_at: string };
+type LiveRow = { ok: number; status: number | null; error: string | null; checked_at: string; plan: string | null };
 
 export interface ReviewOptions {
   /** The request-scoped store: its world's milestones are the repos read. */
@@ -422,7 +433,10 @@ export function createReview(db: DB, o: ReviewOptions) {
   const notACard = (r: ReviewRow): ActionResult | undefined =>
     r.verdict.kind === "card" ? undefined : { error: 409, code: "not_a_card", message: `${r.ref} is not a card for ${ownerName()} (${r.verdict.reason ?? r.verdict.kind}${r.verdict.problems?.length ? `: ${r.verdict.problems.join("; ")}` : ""}); nothing changed` };
 
-  const liveRow = (url: string, commit?: string) => db.prepare("SELECT ok, status, error, checked_at FROM review_live WHERE url = ? AND commit_sha = ?").get(url, commit ?? "") as LiveRow | undefined;
+  const liveRow = (url: string, commit?: string) => db.prepare("SELECT ok, status, error, checked_at, plan FROM review_live WHERE url = ? AND commit_sha = ?").get(url, commit ?? "") as LiveRow | undefined;
+
+  /** a card about a plan (its title, task goal or short name says so): its evidence page must open with a diagram. */
+  const isPlanRow = (r: ReviewRow) => isPlan(r.face?.title, r.face?.taskGoal, r.face?.tree?.find((t) => t.mark === "this")?.text);
 
   function toItem(r: ReviewRow): ReviewItem {
     // only a card's link is checked (list, L-47), so only a card reads the check cache: a row the gate stops
@@ -474,25 +488,31 @@ export function createReview(db: DB, o: ReviewOptions) {
 
   /** a card whose evidence link was checked and does not open goes back to the agents (needs evidence). */
   function liveVerdict(r: ReviewRow, ok: boolean, links: ReviewLink[], err: string | undefined): ReviewVerdict {
-    if (r.verdict.kind !== "card" || ok) return r.verdict;
+    if (r.verdict.kind !== "card") return r.verdict;
+    // a plan card whose evidence page opens without a drawn diagram goes back too (vn_c23abab6)
+    const plan = ok && isPlanRow(r) ? r.links.map((l) => liveRow(l.url, r.commit)?.plan).find((p) => !!p) : undefined;
+    if (plan) return { kind: "needs-evidence", reason: plan };
+    if (ok) return r.verdict;
     const wall = links.find((l) => l.checkedAt && l.liveError?.startsWith(TEXT_WALL_PREFIX));
     if (wall) return { kind: "needs-evidence", reason: wall.liveError! };
     if (links.some((l) => l.checkedAt && l.liveError)) return { kind: "needs-evidence", reason: `the evidence link does not open: ${err ?? "no answer"}` };
     return r.verdict;
   }
 
-  async function checkLink(url: string, commit: string | undefined, force = false): Promise<void> {
+  async function checkLink(url: string, commit: string | undefined, force = false, plan = false): Promise<void> {
     const key = `${url}\0${commit ?? ""}`;
     const c = liveRow(url, commit);
-    if (!force && c && (c.ok === 1 || Date.parse(c.checked_at) > now().getTime() - recheckMs)) return;
+    // a plan's page checked before the diagram test is checked once more for it
+    const known = c?.ok === 1 && !(plan && c.plan === null && (o.live?.pageHosts?.() ?? []).includes(hostOf(url)));
+    if (!force && c && (known || Date.parse(c.checked_at) > now().getTime() - recheckMs)) return;
     let p = checking.get(key);
     if (!p) {
       p = checkLive(url, commit, o.live)
         .then((r) => {
           db.prepare(
-            `INSERT INTO review_live (url, commit_sha, ok, status, error, checked_at) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(url, commit_sha) DO UPDATE SET ok = excluded.ok, status = excluded.status, error = excluded.error, checked_at = excluded.checked_at`,
-          ).run(url, commit ?? "", r.ok ? 1 : 0, r.status, r.error ?? null, iso());
+            `INSERT INTO review_live (url, commit_sha, ok, status, error, checked_at, plan) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(url, commit_sha) DO UPDATE SET ok = excluded.ok, status = excluded.status, error = excluded.error, checked_at = excluded.checked_at, plan = excluded.plan`,
+          ).run(url, commit ?? "", r.ok ? 1 : 0, r.status, r.error ?? null, iso(), r.plan ?? null);
         })
         .finally(() => checking.delete(key));
       checking.set(key, p);
@@ -502,7 +522,7 @@ export function createReview(db: DB, o: ReviewOptions) {
   /** Check every link of these rows not known to answer (and not checked in the last minute). */
   // At most 4 checks at once: a private GitHub page answers 404 and costs a `gh api` spawn on the console host.
   const checkRows = async (rs: ReviewRow[], force = false) => {
-    const todo = rs.flatMap((r) => r.links.map((l) => () => checkLink(l.url, r.commit, force).catch(() => undefined)));
+    const todo = rs.flatMap((r) => r.links.map((l) => () => checkLink(l.url, r.commit, force, isPlanRow(r)).catch(() => undefined)));
     const next = async (): Promise<void> => {
       const t = todo.shift();
       if (!t) return;

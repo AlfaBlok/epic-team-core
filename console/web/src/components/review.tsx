@@ -49,7 +49,18 @@ type Listed = ReviewItem & { milestoneTitle?: string };
  * the badge's and the sidebar's. A pressed card slides away and the count drops at once; every press writes the spine
  * first and a refused write changes nothing and shows why, with Retry.
  */
-export function WaitingForReview({ fold, only, title = "Done, waiting for your review" }: { fold?: string; only?: (i: ReviewItem) => boolean; title?: string } = {}) {
+export function WaitingForReview({
+  fold,
+  only,
+  title = "Done, waiting for your review",
+  closedGoals = true,
+}: {
+  fold?: string;
+  only?: (i: ReviewItem) => boolean;
+  title?: string;
+  /** the Inbox shows its closed goals under Everything else, so it turns them off here. */
+  closedGoals?: boolean;
+} = {}) {
   // tagged "inbox", so a snooze refreshes this list and the green pill (counts) together.
   // the cards are `useReviewCards`, the list the green pills count (one fetch, this browser's snoozes and presses
   // applied the same way), so the header, the sidebar and the phone top bar never show a card the list does not.
@@ -166,7 +177,7 @@ export function WaitingForReview({ fold, only, title = "Done, waiting for your r
         )}
       </FoldSection>
       <PressProgress lines={progress} />
-      <ClosedGoalsFold />
+      {closedGoals && <ClosedGoalsFold />}
       {/* snoozed reviews, folded under the section with their own count and Unsnooze (as Snoozed asks). */}
       {snoozed.length > 0 && (
         <FoldSection
@@ -194,7 +205,7 @@ export function WaitingForReview({ fold, only, title = "Done, waiting for your r
  * Q3: goals you closed with items still open. Those items show nowhere else until you reopen the goal here;
  * nothing was deleted.
  */
-function ClosedGoalsFold() {
+export function ClosedGoalsFold() {
   const { data } = useQuery(() => api.listClosedGoals().catch(() => [] as ClosedGoal[]), [], { tag: "inbox" });
   const [open, setOpen] = useState(false);
   // E948-S78: the Inbox search keeps the closed goals whose title, code or hidden items hold it; none left, it hides.

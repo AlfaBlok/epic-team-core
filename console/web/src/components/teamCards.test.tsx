@@ -94,15 +94,17 @@ describe("E948-S66 the team's cards in the inbox", () => {
   });
 
   it("the Show filter keeps one part of the inbox", () => {
-    expect(showKeeps("all")).toEqual({ blocked: true, review: true, rest: true, kinds: ["advisor", "idea", "goal", "digest"] });
+    // the filter names the Inbox's few sections; an old one-kind address (?show=idea) still keeps that kind.
+    expect(showKeeps("all")).toEqual({ blocked: true, review: true, rest: true, goals: true, kinds: ["advisor", "idea", "digest"] });
     expect(showKeeps("advisor").kinds).toEqual(["advisor"]);
-    expect(showKeeps("blocked")).toEqual({ blocked: true, review: false, rest: false, kinds: [] });
-    expect(showKeeps("goal").kinds).toEqual(["goal"]);
+    expect(showKeeps("blocked")).toEqual({ blocked: true, review: false, rest: false, goals: false, kinds: [] });
+    expect(showKeeps("goal")).toMatchObject({ goals: true, kinds: [] });
+    expect(showKeeps("team").kinds).toEqual(["advisor", "idea", "digest"]);
     const on = vi.fn();
     render(<InboxShowFilter show="all" onChange={on} />);
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Blocked", "Senior advisor", "Digests", "Ideas", "Goals", "Review"]);
-    fireEvent.click(screen.getByTestId("inbox-show-digest"));
-    expect(on).toHaveBeenCalledWith("digest");
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Blocked", "Goals to set", "Review", "Ideas and digests"]);
+    fireEvent.click(screen.getByTestId("inbox-show-team"));
+    expect(on).toHaveBeenCalledWith("team");
   });
 
   it("every card points at its goal set and key result: the meta line, each digest reason, Open the set", async () => {

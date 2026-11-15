@@ -12,6 +12,7 @@ import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { RelTime } from "@/components/common";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { useSlotReady } from "@/components/slot";
+import { GoalTalkLines, useGoalTalk } from "@/components/campaignGoals";
 import { cn } from "@/lib/utils";
 
 /**
@@ -496,15 +497,79 @@ function KindSection({ kind, cards, onAnswered }: { kind: TeamCardKind; cards: T
   );
 }
 
-/** what the inbox shows: all, or one kind (his "each kind filterable"); kept in the address as ?show=. */
-export const INBOX_SHOW = ["all", "blocked", "advisor", "digest", "idea", "goal", "review"] as const;
-export type InboxShow = (typeof INBOX_SHOW)[number];
-export const SHOW_WORD: Record<InboxShow, string> = { all: "All", blocked: "Blocked", advisor: "Senior advisor", digest: "Digests", idea: "Ideas", goal: "Goals", review: "Review" };
+/**
+ * the owner (2026-11-15: "either I'm reviewing something or I am unblocking something ... why do we have
+ * two sets of goals to be set?"): the Inbox's few sections. Goals to set is one list, the campaigns' goal questions and
+ * the team's goal cards together, and counts in red as waiting on him; the team's ideas, the Senior advisor's suggestions
+ * and the scorecard digests are one list for his review, in green. Never a grey count: a list with nothing in it hides.
+ */
+export const INBOX_SECTION_TITLE = { goal: "Goals to set", team: "Ideas and digests from the team" } as const;
+export const TEAM_GROUP_KINDS: TeamCardKind[] = ["advisor", "idea", "digest"];
+
+export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
+  const { data, error } = useTeamCards(scorecard);
+  const { talk, ready, needle } = useGoalTalk();
+  useSlotReady((!!data || !!error) && ready);
+  const search = useInboxSearch();
+  const [gone, setGone] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useSectionOpen("inbox-goals-to-set");
+  const q = search.active ? search.q.trim().toLowerCase() : "";
+  const cards = (data?.open ?? []).filter((c) => c.kind === "goal" && !gone.has(c.id) && (!q || teamCardText(c).includes(q)));
+  // a goal set's own inbox (scorecard) is that set's cards only: the campaigns' questions belong to the whole Inbox.
+  const lines = scorecard ? [] : talk;
+  const count = cards.length + lines.length;
+  if (!count) return null;
+  return (
+    <FoldSection title={INBOX_SECTION_TITLE.goal} count={count} tone="needs-you" testId="inbox-goals-to-set" open={open || !!needle} onToggle={setOpen}>
+      <GoalTalkLines talk={lines} />
+      {cards.length > 0 && (
+        <ul className={cn("grid min-w-0 grid-cols-1 gap-[18px]", lines.length && "mt-[18px]")} data-testid="team-cards-goal-list">
+          {cards.map((c) => (
+            <li key={c.id} className="min-w-0">
+              <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </FoldSection>
+  );
+}
+
+export function InboxIdeasAndDigests({ kinds = TEAM_GROUP_KINDS, scorecard }: { kinds?: TeamCardKind[]; scorecard?: string }) {
+  const { data, error } = useTeamCards(scorecard);
+  useSlotReady(!!data || !!error);
+  const search = useInboxSearch();
+  const [gone, setGone] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useSectionOpen("inbox-team-cards");
+  const q = search.active ? search.q.trim().toLowerCase() : "";
+  const all = (data?.open ?? []).filter((c) => kinds.includes(c.kind) && !gone.has(c.id) && (!q || teamCardText(c).includes(q)));
+  // his old order inside the one list: the Senior advisor's suggestions, then ideas, then digests.
+  const cards = kinds.flatMap((k) => all.filter((c) => c.kind === k));
+  if (!cards.length) return null;
+  return (
+    <FoldSection title={INBOX_SECTION_TITLE.team} count={cards.length} tone="review" testId="inbox-team-cards" open={open || !!q} onToggle={setOpen}>
+      <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="inbox-team-cards-list">
+        {cards.map((c) => (
+          <li key={c.id} className="min-w-0" data-team-kind={c.kind}>
+            <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
+          </li>
+        ))}
+      </ul>
+    </FoldSection>
+  );
+}
+
+/** what the inbox shows: all, or one of its sections (his "each kind filterable"); kept in the address as ?show=. */
+export const INBOX_SHOW = ["all", "blocked", "goal", "review", "team"] as const;
+/** the old one-kind choices (?show=idea …) still open, as that kind inside its list; no button of their own. */
+const OLD_SHOW = ["advisor", "digest", "idea"] as const;
+export type InboxShow = (typeof INBOX_SHOW)[number] | (typeof OLD_SHOW)[number];
+export const SHOW_WORD: Record<(typeof INBOX_SHOW)[number], string> = { all: "All", blocked: "Blocked", goal: "Goals to set", review: "Review", team: "Ideas and digests" };
 
 export function useInboxShow(): [InboxShow, (s: InboxShow) => void] {
   const [params, setParams] = useSearchParams();
   const raw = params.get("show");
-  const show = (INBOX_SHOW as readonly string[]).includes(raw ?? "") ? (raw as InboxShow) : "all";
+  const show = ([...INBOX_SHOW, ...OLD_SHOW] as readonly string[]).includes(raw ?? "") ? (raw as InboxShow) : "all";
   const set = (s: InboxShow) => {
     const next = new URLSearchParams(params);
     if (s === "all") next.delete("show");
@@ -539,8 +604,14 @@ export function InboxShowFilter({ show, onChange, counts }: { show: InboxShow; o
   );
 }
 
-/** which inbox parts a Show choice keeps. */
-export function showKeeps(show: InboxShow): { blocked: boolean; review: boolean; rest: boolean; kinds: TeamCardKind[] } {
-  if (show === "all") return { blocked: true, review: true, rest: true, kinds: ["advisor", "idea", "goal", "digest"] };
-  return { blocked: show === "blocked", review: show === "review", rest: false, kinds: show === "advisor" || show === "digest" || show === "idea" || show === "goal" ? [show] : [] };
+/** which inbox parts a Show choice keeps: `goals` the Goals to set list, `kinds` the kinds in the ideas and digests list. */
+export function showKeeps(show: InboxShow): { blocked: boolean; review: boolean; rest: boolean; goals: boolean; kinds: TeamCardKind[] } {
+  if (show === "all") return { blocked: true, review: true, rest: true, goals: true, kinds: TEAM_GROUP_KINDS };
+  return {
+    blocked: show === "blocked",
+    review: show === "review",
+    rest: false,
+    goals: show === "goal",
+    kinds: show === "team" ? TEAM_GROUP_KINDS : show === "advisor" || show === "digest" || show === "idea" ? [show] : [],
+  };
 }

@@ -2,6 +2,7 @@
 import { forgetWorld } from "@/lib/useSocial";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
 import { TeamPage } from "@/pages/Team";
@@ -49,6 +50,8 @@ describe("the console skin's Inbox has no other-world panel", () => {
     expect(screen.queryByText(/SocialApp waits on you/)).toBeNull();
     expect(screen.queryByText(/Old account ask/)).toBeNull();
     // the laptop switch opens the Blocked section, inside it, not as a box between the filters and the sections
+    // (the Inbox lands folded, so Blocked is opened first)
+    fireEvent.click(await screen.findByTestId("waiting-on-you-toggle"));
     const laptop = await screen.findByTestId("laptop-switch");
     expect(screen.getByTestId("waiting-on-you").contains(laptop)).toBe(true);
   });

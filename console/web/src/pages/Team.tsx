@@ -23,9 +23,9 @@ import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
-import { WaitingForReview } from "@/components/review";
+import { ClosedGoalsFold, WaitingForReview } from "@/components/review";
+import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
-import { CampaignGoals, GoalTalk, SinceYesterday } from "@/components/campaignGoals";
 import { GoalLights } from "@/components/goalLights";
 import { SCORECARDS_PATH } from "@/lib/scorecards";
 import { DeckCards } from "@/components/deckCards";
@@ -57,9 +57,9 @@ import { RecentlyClosed } from "@/components/afterClose";
 import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
 import { SETTINGS_PATH } from "@/lib/settingsPath";
-import { InboxSearchProvider } from "@/lib/inboxSearch";
+import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
-import { InboxShowFilter, showKeeps, TeamCardsSections, useInboxShow } from "@/components/teamCards";
+import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
 
 /**
  * the console skin's
@@ -361,9 +361,7 @@ export function TeamPage({
               ? undefined
               : campaigns && only !== "inbox"
                 ? "Your campaigns, then what waits on you."
-                : campaigns
-                  ? "What waits on you: blocked first, then the team's cards, then finished work to review."
-                  : "What waits on you: blocked first, then the team's digests, ideas and goals to set, then finished work to review."}
+                : "What waits on you: blocked first, then goals to set, then finished work and the team's ideas to review."}
           actions={only === "inbox" ? <AsksThisWeek /> : campaigns && only !== "goals" ? actions : undefined}
         />
       )}
@@ -409,7 +407,8 @@ export function TeamPage({
               inbox's history (Mac agent, snoozed, decided for you, coming up, answered), as on the console's Inbox. */}
           {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
-          {only !== "goals" && <SlotStack name="social-inbox">
+          {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
+          {only !== "goals" && <LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
             <Slot name="social-other-worlds">
               <OtherWorldsWaiting />
             </Slot>
@@ -419,30 +418,27 @@ export function TeamPage({
                 <WaitingOnYou title="Blocked, waiting on you" fold="blocked" part="blocked" />
               </Slot>
             )}
-            {/* the owner (22:19Z): after what is blocked on him, each campaign and pursuit with its one number. */}
-            {show === "all" && (
-              <Slot name="social-campaign-goals">
-                <CampaignGoals />
-              </Slot>
-            )}
-            {/* E948-S66: then the team's own cards in his order: ideas, goals to set (with each campaign's goal talk), digests
-                (with the since-yesterday lines). */}
-            {keeps.kinds.length > 0 && (
-              <Slot name="social-team-cards">
-                <TeamCardsSections kinds={keeps.kinds} scorecard={scorecardId} extra={{ goal: <GoalTalk />, digest: <SinceYesterday /> }} />
+            {keeps.goals && (
+              <Slot name="social-goals-to-set">
+                <InboxGoalsToSet scorecard={scorecardId} />
               </Slot>
             )}
             {keeps.review && (
               <Slot name="social-review" fallback={420}>
-                <WaitingForReview fold="review" />
+                <WaitingForReview fold="review" closedGoals={false} />
+              </Slot>
+            )}
+            {keeps.kinds.length > 0 && (
+              <Slot name="social-team-cards">
+                <InboxIdeasAndDigests kinds={keeps.kinds} scorecard={scorecardId} />
               </Slot>
             )}
             {keeps.rest && (
               <Slot name="social-rest">
-                <WaitingOnYou title="Blocked, waiting on you" fold="blocked" part="rest" />
+                <EverythingElse />
               </Slot>
             )}
-          </SlotStack>}
+          </SlotStack></LandFolded.Provider>}
           {only !== "goals" && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
           {only !== "inbox" && only !== "goals" && <NewApplications />}
           {/* the phone Home (the owner, "on the mobile, it's just a total mess"): Home is the
@@ -470,6 +466,8 @@ export function TeamPage({
           {/* every section fetches at once and shows top to bottom (each once it and all above it are in, the
               next one holding its place with a shimmer), so one that lands late never pushes what is on screen. */}
           <InboxSearchProvider>
+          {/* the owner ("land with everything collapsed, and then I expand where I want to look at"). */}
+          <LandFolded.Provider value>
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
           <InboxSearchBox />
           {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}
@@ -479,7 +477,7 @@ export function TeamPage({
           <SlotStack name="inbox">
             {reviewFirst && keeps.review && (
               <Slot name="review" fallback={420}>
-                <WaitingForReview fold="review" />
+                <WaitingForReview fold="review" closedGoals={false} />
               </Slot>
             )}
             {keeps.blocked && (
@@ -487,28 +485,28 @@ export function TeamPage({
                 <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" />
               </Slot>
             )}
-            {/* the owner (22:19Z): after what is blocked on him, each campaign and pursuit with its one number. */}
-            {show === "all" && (
-              <Slot name="campaign-goals">
-                <CampaignGoals />
-              </Slot>
-            )}
-            {/* E948-S66: then the team's own cards in his order: ideas, goals to set (with each campaign's goal talk), digests
-                (with the since-yesterday lines). */}
-            {keeps.kinds.length > 0 && (
-              <Slot name="team-cards">
-                <TeamCardsSections kinds={keeps.kinds} scorecard={scorecardId} extra={{ goal: <GoalTalk />, digest: <SinceYesterday /> }} />
+            {/* the owner: "either I'm reviewing something or I am unblocking something". Goals to set is
+                one list and waits on him (red); then finished work and the team's ideas and digests for his review (green);
+                the rest of his inbox's history (closed goals, Mac agent, snoozed, decided for you, coming up, answered) is
+                one folded line. His goals and their numbers live on the objectives screen, not here. */}
+            {keeps.goals && (
+              <Slot name="goals-to-set">
+                <InboxGoalsToSet scorecard={scorecardId} />
               </Slot>
             )}
             {!reviewFirst && keeps.review && (
               <Slot name="review" fallback={420}>
-                <WaitingForReview fold="review" />
+                <WaitingForReview fold="review" closedGoals={false} />
               </Slot>
             )}
-            {/* the rest of his inbox's history (Mac agent, snoozed, decided for you, coming up, answered), folded, after both lists. */}
+            {keeps.kinds.length > 0 && (
+              <Slot name="team-cards">
+                <InboxIdeasAndDigests kinds={keeps.kinds} scorecard={scorecardId} />
+              </Slot>
+            )}
             {keeps.rest && (
               <Slot name="rest">
-                <WaitingOnYou title="Blocked on you" fold="blocked" part="rest" />
+                <EverythingElse />
               </Slot>
             )}
             {/* the line after the lists keeps its place in the order too (nothing to load). */}
@@ -524,6 +522,7 @@ export function TeamPage({
               )}
             </Slot>
           </SlotStack>
+          </LandFolded.Provider>
           </InboxSearchProvider>
         </>
       ) : (
@@ -874,4 +873,21 @@ export function pressingInReviewOnly(
   if (!review?.some((i) => i.ownerPriority?.pressing)) return false;
   const open = new Set(blocked.map((b) => b.id));
   return !blocked.some((b) => b.ownerPriority?.pressing) && !asks.some((a) => open.has(a.id) && a.ownerPriority?.pressing);
+}
+
+/**
+ * the owner ("the other sections merge or go"): everything in his inbox that is neither blocked on him,
+ * a goal to set nor waiting for his review (closed goals with open items, Mac agent tasks, snoozed, decided for you,
+ * coming up, answered) sits under this one folded line at the end, each list still folding on its own inside it.
+ * No count: nothing in it waits on him.
+ */
+function EverythingElse() {
+  const [open, setOpen] = useSectionOpen("inbox-everything-else", false);
+  const search = useInboxSearch();
+  return (
+    <FoldSection title="Everything else" count={0} hideZero testId="inbox-everything-else" open={open || search.active} onToggle={setOpen}>
+      <ClosedGoalsFold />
+      <WaitingOnYou title="Blocked on you" fold="blocked" part="rest" />
+    </FoldSection>
+  );
 }
