@@ -102,12 +102,12 @@ describe("campaign page", () => {
     expect(world).not.toHaveBeenCalled();
   });
 
-  it("a milestone without the social pack keeps the console's tabs and opens on Summary", async () => {
+  it("a milestone without the social pack opens as a goal: the objective's tabs, on Key results", async () => {
     page("/milestones/ms-e5");
-    const tabs = await screen.findByRole("tablist");
-    expect(within(tabs).queryByRole("tab", { name: "Pipeline" })).toBeNull();
-    expect(within(tabs).getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true");
-    expect(within(tabs).getByRole("tab", { name: "Approvals" })).toBeTruthy();
+    const tabs = await screen.findByTestId("set-tabs");
+    expect(within(tabs).queryByRole("link", { name: "Pipeline" })).toBeNull();
+    expect(within(tabs).getByRole("link", { name: "Key results" }).getAttribute("aria-current")).toBe("page");
+    expect(within(tabs).getByRole("link", { name: "Context" })).toBeTruthy();
   });
 });
 

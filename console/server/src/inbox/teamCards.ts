@@ -59,6 +59,8 @@ export interface DigestLine {
   value: string;
   /** the state at the last digest, when it changed */
   was?: "green" | "amber" | "red" | "unknown";
+  /** what a line not green waits on (kept so the next digest can tell a new wait from the same one, E948-S113) */
+  waits?: { who: "you" | "team"; text: string; url?: string };
 }
 export interface TeamCard {
   id: string;
@@ -79,7 +81,7 @@ export interface TeamCard {
   title: string;
   /** where it came from, one line (his note, a check, a page) */
   source?: string;
-  digest?: { greens: number; total: number; prevGreens?: number; prevTotal?: number; prevDay?: string; trend: "greener" | "redder" | "same" | "first"; reasons: { text: string; url?: string; keyResult?: string }[]; lines?: DigestLine[] };
+  digest?: { greens: number; total: number; prevGreens?: number; prevTotal?: number; prevDay?: string; trend: "greener" | "redder" | "same" | "first"; reasons: { text: string; url?: string; keyResult?: string }[]; lines?: DigestLine[]; news?: string[] };
   idea?: { gain: string; recommend: string; links?: CardLink[] };
   goal?: { unset: string; options: { goal: string; number: string }[]; recommend?: number; links?: CardLink[] };
   advisor?: AdvisorSet;
@@ -124,6 +126,14 @@ const links = (v: unknown): CardLink[] | undefined => {
 };
 const STATES = new Set(["green", "amber", "red", "unknown"]);
 
+function waitsOf(l: DigestLine): { waits?: DigestLine["waits"] } {
+  const w = l.waits as Record<string, unknown> | undefined;
+  const text = str(w?.text, 200);
+  if (!w || !text || (w.who !== "you" && w.who !== "team") || l.state === "green") return {};
+  const u = url(w.url);
+  return { waits: { who: w.who, text, ...(u ? { url: u } : {}) } };
+}
+
 export type Checked = { ok: true; card: Omit<TeamCard, "id" | "at" | "day"> } | { ok: false; code: string; message: string };
 
 /** the body a persona posts, checked and trimmed (no free fields kept). */
@@ -154,10 +164,15 @@ export function checkPost(b: Record<string, unknown>, day = dayOf(new Date().toI
     const lines = (Array.isArray(d.lines) ? d.lines : [])
       .map((l) => l as DigestLine)
       .filter((l) => typeof l?.label === "string" && STATES.has(l.state))
-      .map((l) => ({ label: l.label.slice(0, 160), state: l.state, value: String(l.value ?? "").slice(0, 80), ...(l.was && STATES.has(l.was) && l.was !== l.state ? { was: l.was } : {}) }))
+      .map((l) => ({ label: l.label.slice(0, 160), state: l.state, value: String(l.value ?? "").slice(0, 80), ...(l.was && STATES.has(l.was) && l.was !== l.state ? { was: l.was } : {}), ...waitsOf(l) }))
       .slice(0, 30);
     const prev = Number.isInteger(d.prevGreens) && Number.isInteger(d.prevTotal) ? { prevGreens: d.prevGreens as number, prevTotal: d.prevTotal as number, ...(str(d.prevDay, 10) ? { prevDay: str(d.prevDay, 10) } : {}) } : {};
-    return { ok: true, card: { ...base, digest: { greens, total, ...prev, trend, reasons, ...(lines.length ? { lines } : {}) } } };
+    const news = (Array.isArray(d.news) ? d.news : []).map((n) => str(n, 200)).filter((n): n is string => !!n).slice(0, 5);
+    // E948-S113 (the owner, vn_88b47f31 2026-11-15: "If there is no change here, then I don't want this digest article"):
+    // a digest with the same count as the last one, no line that changed light and no news named is no card at all.
+    if (d.prevGreens === greens && d.prevTotal === total && !lines.some((l) => "was" in l) && !news.length)
+      return { ok: false, code: "no_news", message: "nothing moved since the last digest (same count, same lights, no news named): no card" };
+    return { ok: true, card: { ...base, digest: { greens, total, ...prev, trend, reasons, ...(lines.length ? { lines } : {}), ...(news.length ? { news } : {}) } } };
   }
   if (kind === "advisor") {
     if (by !== ADVISOR_BY) return { ok: false, code: "not_advisor", message: `an advisor set is made by the ${ADVISOR_BY}` };

@@ -101,20 +101,45 @@ export const WORKER_TIER_RULE =
  * helper kept a copy a day old and missed the visual-first rule in every brief after). The first is the owner's
  * objectives with their live list ("which objective does this move?" opens every plan and report).
  */
-export function workerBriefRules(objectivesLine?: string): string[] {
-  return [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
+export function workerBriefRules(objectivesLine?: string, matchingViews: HisView[] = []): string[] {
+  const rules = [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
+  // the owner's view rides only in the brief of a row on its topic (hisViewsFor), never in every brief
+  return matchingViews.length ? [...rules.slice(0, -1), hisViewRecipe(matchingViews), X_LINKS_RULE] : rules;
+}
+
+/** one `<owner>'s view: <topic>` entry in the memory service, as listed in the home repo's docs/his-views.json. */
+export type HisView = { id: string; title: string; topic: string; mined?: string; worlds?: string[]; tags?: string[] };
+
+/**
+ * the views a row touches (the owner: "does every agent need to read this, or is it like agents
+ * working in a specific field?"): only a row of one of the view's worlds (its repo) or whose title shares one of its
+ * tags, the same tag idea as the X links. Mirrors views_for in scripts/his_view.py.
+ */
+export function hisViewsFor(row: { repo?: string; title?: string }, views: HisView[]): HisView[] {
+  const words = new Set((row.title ?? "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const repo = row.repo;
+  return views.filter((v) => (!!repo && (v.worlds ?? []).includes(repo)) || (v.tags ?? []).some((t) => words.has(t)));
 }
 
 /**
  * how a worker gets the owner's whole view on a topic from the memory service in one step: a fresh agent took 24
  * calls and ~113 s re-mining every note; with a `<owner>'s view: <topic>` entry (his words and an evidence reference
- * per line) it took 1 call and ~37 s and found the same wants.
+ * per line) it took 1 call and ~37 s and found the same wants. Only for a row its topic touches (hisViewsFor); every
+ * other brief gets "" and skips it.
  */
-export const hisViewRecipe = (): string =>
-  `Before you plan anything that rests on what ${ownerName()} wants (a place, a product, a person, a taste), get his whole view from ${memoryName()} first: ` +
-  `\`python3 ~/github/${homeRepo()}/scripts/his_view.py <topic words>\` (or ${memoryName()} \`search_memory\` with \`view <topic>\`) gives the ` +
-  `\`${ownerName()}'s view: <topic>\` entry (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. ` +
-  "No view yet: mine his notes once (`--facets`), then store one with `store_memory` (his words and reference per line, the team's numbers marked as the team's, `mined <ISO UTC>`) so the next agent starts there.";
+export const hisViewRecipe = (views: HisView[] = []): string =>
+  views.length === 0
+    ? ""
+    : `${ownerName()}'s view on your row's topic is in ${memoryName()}: ${views.map((v) => `\`${v.title}\``).join(", ")}. ` +
+      `Before you plan anything that rests on what he wants, read it: ` +
+      views.map((v) => `\`python3 ~/github/${homeRepo()}/scripts/his_view.py ${v.topic}\``).join(", ") +
+      ` (or ${memoryName()} \`search_memory\` with \`view <topic>\`) gives the view (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. ` +
+      "A new wish of his on the topic: add it to the view with `store_memory` (his words and reference per line, `mined <ISO UTC>`).";
+
+/** the scoped pointer every brief carries: whether one of the owner's views touches this row (most rows: none). */
+export const HIS_VIEW_POINTER =
+  `Then \`python3 ~/github/${homeRepo()}/scripts/his_view.py for <your row> [--repo <your checkout>]\` says whether one of ${ownerName()}'s views in ${memoryName()} is on your row's topic ` +
+  "(its world or its tags); only then read it, otherwise skip it.";
 
 /**
  * the X links the owner sends: each is one entry in the home repo's docs/tool-scout/tools.json with topic tags and the
@@ -126,7 +151,7 @@ export const X_LINKS_RULE =
   "prints each one on your row's place in the data graph (its product, objective, campaign) or sharing its topic tags, with its lesson; " +
   "use what applies and name it in your plan. Search more with `x_links.py search <words>`. " +
   `When ${ownerName()} sends a new X link, its entry gets tags and nodes the same day (AGENTS.md). ` +
-  hisViewRecipe();
+  HIS_VIEW_POINTER;
 
 /** a child-run create that times out may still have created the run; the retry must not make a second one. */
 export const CHILD_RUN_RETRY_RULE =

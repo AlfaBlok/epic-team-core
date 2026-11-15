@@ -78,7 +78,7 @@ describe("the repo's own level is not a campaign", () => {
         <SidebarNav />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^Other projects \\(${total + 1}\\)`)));
+    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^More goals \\(${total + 1}\\)`)));
   });
 });
 

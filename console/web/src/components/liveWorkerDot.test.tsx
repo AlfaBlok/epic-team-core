@@ -71,7 +71,9 @@ describe("T6-S51 live-worker dot", () => {
     }
   });
 
-  it("sidebar FOCUS entry: green pulsing for the milestone with a live worker, grey for the one without", async () => {
+  // (the owner: every sidebar entry opens and reads the same way): a goal row is its circle, name and pills, as an
+  // objective's; whether a worker runs shows on its screen (Personas, Board), not as a word under its name.
+  it("sidebar goal entry: no running or idle word, the same row as an objective's", async () => {
     const a = await api.createMilestone({ title: "Live epic", repo: "Acme/home_repo", path: "docs/spines/m6-team-unattended.md", owner: "Sam" });
     const b = await api.createMilestone({ title: "Guess epic", repo: "Acme/home_repo", path: "docs/spines/root.md", owner: "Sam" });
     vi.spyOn(api, "listStatus").mockResolvedValue({ milestones: [working(1, a.id), working(undefined, b.id)], items: [], needsYou: 0, at: new Date(NOW).toISOString() });
@@ -80,11 +82,9 @@ describe("T6-S51 live-worker dot", () => {
         <SidebarNav />
       </MemoryRouter>,
     );
-    // the sidebar says one word per project, "running" in green while a worker is live.
-    const word = async (t: string) => (await screen.findByText(t)).closest("a")!.querySelector('[data-testid="sidebar-state"]')!;
-    await vi.waitFor(async () => expect((await word("Live epic")).getAttribute("data-state")).toBe("running"));
-    expect((await word("Live epic")).className).toContain("emerald");
-    expect((await word("Guess epic")).getAttribute("data-state")).toBe("idle");
-    expect((await word("Guess epic")).className).not.toContain("emerald");
+    const row = async (t: string) => (await screen.findByText(t)).closest("a")!;
+    await vi.waitFor(async () => expect((await row("Live epic")).querySelector('[data-testid="sidebar-goal-wheel"]')).toBeTruthy());
+    expect((await row("Live epic")).querySelector('[data-testid="sidebar-state"]')).toBeNull();
+    expect((await row("Guess epic")).querySelector('[data-testid="sidebar-state"]')).toBeNull();
   });
 });

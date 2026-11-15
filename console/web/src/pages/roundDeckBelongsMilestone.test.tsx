@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { api, type MilestoneTree, type NodeTree, type TreeNode } from "@/api";
 import { AppRoutes } from "@/App";
@@ -85,16 +85,19 @@ describe("the deck belongs to its milestone and to each epic", () => {
     expect(spineOf(t.root, "nope")).toBeUndefined();
   });
 
-  it("round 3: the deck is a Deck tab beside Chat, shown inside the page; no Epic deck button at the top", async () => {
+  // a goal opens like an objective; its deck is on the Context tab (Open its deck), shown inside the page.
+  const openDeck = async () => {
+    fireEvent.click(within(await screen.findByTestId("set-tabs")).getByRole("link", { name: "Context" }));
+    fireEvent.click(await screen.findByTestId("goal-open-deck"));
+  };
+  it("round 3: the deck opens from the goal's Context tab, shown inside the page; no Epic deck button at the top", async () => {
     const m = await api.createMilestone({ title: "Team", repo: "Acme/home_repo", path: "docs/spines/root.md", owner: "Sam" });
     vi.spyOn(api, "getTree").mockResolvedValue(treeOf(m.id, "docs/spines/root.md"));
     const deck = vi.spyOn(api, "getEpicDeck");
     at(`/milestones/${m.id}`);
-    const tabs = await screen.findByTestId("milestone-tabs");
+    await screen.findByTestId("set-tabs");
     expect(screen.queryByTestId("epic-book-link")).toBeNull();
-    const names = [...tabs.querySelectorAll("[role=tab]")].map((t) => t.textContent);
-    expect(names.indexOf("Deck")).toBe(names.indexOf("Chat") + 1);
-    fireEvent.mouseDown(screen.getByTestId("tab-deck"), { button: 0 });
+    await openDeck();
     await screen.findByText(/tab=deck/);
     // the deck sits inside the tab (no jump to /deck): the milestone's own deck, its slides, the last one Everything made
     const inTab = await screen.findByTestId("epic-deck");
@@ -128,7 +131,7 @@ describe("the deck belongs to its milestone and to each epic", () => {
     at(`/milestones/${m.id}?tab=tree`);
     fireEvent.click(await screen.findByRole("button", { name: "EPIC-947" }));
     await screen.findByText(/node=r%2Fe47/);
-    fireEvent.mouseDown(screen.getByTestId("tab-deck"), { button: 0 });
+    await openDeck();
     await screen.findByTestId("epic-deck");
     expect(deck).toHaveBeenLastCalledWith("home_repo", "EPIC-947");
   });

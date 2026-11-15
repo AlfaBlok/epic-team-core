@@ -52,14 +52,19 @@ import { MilestoneStrip, OpenAsksContext } from "@/components/status";
 import { HeaderMarks, MarkAndSettle, MarkDialog, markHistory } from "@/components/mark";
 import { NextWakeList, StampButton } from "@/components/planning";
 import { openAskCodes } from "@/lib/status";
-import { useBlocked, useMilestoneStatus } from "@/lib/inbox";
+import { milestoneInbox, useBlocked, useMilestoneStatus, useReviewCards, useStatusBatch } from "@/lib/inbox";
+import { useSnoozes } from "@/lib/snooze";
+import { GOAL_INBOX_TAB, GoalHeader, TabStrip, objectiveTab } from "@/components/goalSets";
+import { WaitingForReview } from "@/components/review";
+import { ObjectiveApprovals, ObjectivePersonas } from "@/components/objectivePersonas";
+import { milestoneAnswer, milestoneWheelRows } from "@/lib/bigRoots";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
 import { InlineMd } from "@/components/inlineMd";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { pagesOfMilestone } from "@/lib/wheelPages";
-import type { ScorecardNode } from "@/api/pursuit-types";
-import { productHref, scorecardHref } from "@/lib/scorecards";
+import { objectiveOf, productHref, scorecardHref } from "@/lib/scorecards";
+export { objectiveOf };
 export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
@@ -117,15 +122,6 @@ const tabHref = (tab: Tab, node?: string, show?: TreeFilterKey[]) => `?${new URL
  * does the old tab's job now (OLD_TAB_TO_OBJECTIVE); a campaign keeps its page, and a milestone no objective holds
  * (another repo's own milestone) keeps this page until it has one.
  */
-export function objectiveOf(nodes: readonly ScorecardNode[] | undefined, milestoneId: string): ScorecardNode | undefined {
-  const all: ScorecardNode[] = [];
-  const walk = (ns: readonly ScorecardNode[]) => {
-    for (const n of ns) all.push(n);
-    for (const n of ns) walk(n.children ?? []);
-  };
-  walk(nodes ?? []);
-  return all.find((n) => n.milestoneId === milestoneId);
-}
 
 export function MilestonePage() {
   const { id = "" } = useParams();
@@ -143,7 +139,160 @@ export function MilestonePage() {
     next.delete("node");
     return <Navigate to={`${scorecardHref(objective.id)}?${next}`} replace />;
   }
-  return <MilestoneScreen />;
+  // a goal no objective holds opens the same screen as an objective; a campaign keeps its own page.
+  return campaign ? <MilestoneScreen /> : <GoalMilestoneScreen />;
+}
+
+/** a goal's tabs, the objective's own names and order (goalSets TABS): one way to open every goal. */
+const GOAL_TABS = [
+  { id: "table", label: "Key results" },
+  { id: "kanban", label: "Board" },
+  { id: "inbox", label: "Inbox" },
+  { id: "chat", label: "Chat desk" },
+  { id: "context", label: "Context" },
+  { id: "personas", label: "Personas" },
+  { id: "pages", label: "Pages" },
+] as const;
+
+/** ?item=<id> (a blocked run's link) scrolls its card into view and rings it for 4 s. */
+function useItemHighlight(item: string | null, ready: unknown) {
+  useEffect(() => {
+    if (!item) return;
+    let tries = 0;
+    let unmark: ReturnType<typeof setTimeout> | undefined;
+    const timer = setInterval(() => {
+      const el = document.getElementById(waitingAnchor(item));
+      if (!el && ++tries < 40) return;
+      clearInterval(timer);
+      if (!el) return;
+      el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-sky-500", "ring-offset-2");
+      el.setAttribute("data-highlighted", "true");
+      unmark = setTimeout(() => {
+        el.classList.remove("ring-2", "ring-sky-500", "ring-offset-2");
+        el.removeAttribute("data-highlighted");
+      }, 4000);
+    }, 150);
+    return () => {
+      clearInterval(timer);
+      if (unmark) clearTimeout(unmark);
+    };
+  }, [item, ready]);
+}
+
+/**
+ * A goal no objective holds (the house, a server, another repo's milestone), opened the way an objective opens (the
+ * owner: "Why sidebar element selection work so different when selecting a goal or a 'project'? What's
+ * the difference? Everything"): its circle, name and answer in one box, then the objective's tabs. The old tabs live
+ * inside them (OLD_TAB_TO_OBJECTIVE): Summary is Key results, Tree and Backlog the Board, Waiting on you the Inbox (its
+ * asks and its review cards, the sidebar's two pills), Chat the Chat desk, Definitions, Deck and Approvals the Context,
+ * Activity and Settings the Personas.
+ */
+function GoalMilestoneScreen() {
+  const { id = "" } = useParams();
+  const w = useWords();
+  const [params, setParams] = useSearchParams();
+  const routes = useRoutes();
+  const { data: m, error, loading } = useQuery(() => api.getMilestone(id), [id]);
+  const decks = !!m && routes("book") && (!m.world || m.world === homeWorld());
+  // an old Tree row link (?node= with no tab) opens the Board on that node.
+  const asked = params.get("tab") ?? (params.get("node") ? "tree" : null);
+  const tab = objectiveTab(asked);
+  const node = params.get("node") ?? undefined;
+  const show = parseTreeFilter(params.get("show"));
+  const { data: waiting } = useQuery(() => api.listWaitingOnOwner({ milestoneId: id, nodeKey: node }), [id, node], { tag: "inbox" });
+  const treeQuery = useQuery(() => api.getTree(id), [id]);
+  const pagesList = useWheelPages();
+  const { data: status } = useMilestoneStatus(id);
+  const blocked = useBlocked(status, { nodeKey: node });
+  const openIds = status && new Set(blocked.map((i) => i.id));
+  const open = (waiting ?? []).filter((i) => (openIds ? openIds.has(i.id) : needsAnswer(i)));
+  // the Inbox tab's pills are the sidebar entry's, from the same function on the same batch and review list.
+  const { data: batch } = useStatusBatch();
+  const { entries: snoozing } = useSnoozes();
+  const { cards } = useReviewCards();
+  const counts = milestoneInbox(batch, cards, id, snoozing);
+  useItemHighlight(tab === "inbox" ? params.get("item") : null, waiting);
+  if (error) return <ErrorBox error={error} />;
+  if (loading || !m) return <Loading />;
+  const scopeLabel = node ? node.split("/").pop() : undefined;
+  const nodeSpine = node && treeQuery.data ? spineOf(treeQuery.data.root, node) : undefined;
+  const deckEpic = params.get("epic") || (nodeSpine?.path && nodeSpine.path !== m.path ? deckCodeOf(nodeSpine.code ?? nodeSpine.id, nodeSpine.path) : undefined);
+  const board = (key?: string, keys?: TreeFilterKey[]) => setParams({ tab: "kanban", ...(key ? { node: key } : {}), ...(keys?.length ? { show: keys.join(",") } : {}) }, { replace: true });
+  const myPages = pagesOfMilestone(pagesList.data, m.repo);
+  return (
+    <OpenAsksContext.Provider value={openAskCodes(waiting)}>
+      <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-3" data-testid="goal-milestone-page" data-milestone-id={m.id}>
+        <Ancestry m={m} />
+        <GoalHeader rows={milestoneWheelRows(status)} title={milestoneName(m)} answer={milestoneAnswer(status)} />
+        <TabStrip tabs={GOAL_TABS} tab={tab} keep={{ node }} pills={{ inbox: counts }} counts={pagesList.data ? { pages: myPages.length } : undefined} label={`This ${w.milestone}'s pages`} />
+        {tab === "table" && (
+          <div className="grid gap-3">
+            {/* how it stands (Outcome, Flow, Settled) and whether it leads the sidebar's other goals, one quiet line. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="goal-status-line">
+              <HeaderMarks m={m} status={status} treeHref="?tab=tree" />
+              {m.settledAt && (
+                <Badge variant="gray" title={`Settled ${formatRelative(m.settledAt)}: hidden from the sidebar and Team home; the status is unchanged.`} data-testid="settled-badge">
+                  Settled
+                </Badge>
+              )}
+              <FocusPinButton m={m} />
+            </div>
+            <MilestoneStrip status={status} waitingHref={`?tab=${GOAL_INBOX_TAB}`} />
+            <SummaryTab m={m} node={node} open={open} scopeLabel={scopeLabel} tree={treeQuery} status={status} />
+          </div>
+        )}
+        {tab === "kanban" && (
+          <div className="grid gap-6">
+            <TreeTab m={m} tree={treeQuery} selectedKey={node} onSelect={(key) => board(key, show)} filter={show} onFilterChange={(keys) => board(node, keys)} />
+            <BacklogTab m={m} />
+          </div>
+        )}
+        {tab === "inbox" && (
+          <div className="grid gap-4" data-testid="goal-inbox">
+            <WaitingOnYou milestoneId={m.id} nodeKey={node} scopeLabel={scopeLabel} />
+            <WaitingForReview only={(c) => c.milestoneId === m.id} title="Ready for your review" />
+          </div>
+        )}
+        {tab === "chat" && <MilestoneChat key={m.id} m={m} />}
+        {tab === "context" &&
+          (asked === "deck" && decks ? (
+            <MilestoneDeckTab m={m} epic={deckEpic} />
+          ) : (
+            <div className="grid gap-4">
+              <div className="flex flex-wrap items-center gap-2" data-testid="goal-context-actions">
+                {decks && (
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={`?${new URLSearchParams({ tab: "deck", ...(node ? { node } : {}) })}`} data-testid="goal-open-deck">
+                      Open its deck
+                    </Link>
+                  </Button>
+                )}
+                <span className="font-mono text-xs text-muted-foreground">
+                  {m.repo} · <MilestonePath path={m.path} /> · Owner: {m.owner}
+                </span>
+              </div>
+              <FreshnessLine milestoneId={m.id} />
+              <Overview m={m} needsYou={(status?.needsYou ?? 0) > 0} />
+              <ObjectiveApprovals milestoneId={m.id} />
+            </div>
+          ))}
+        {/* the objective's own Personas tab (switches, pause, their runs), then this goal's settings. */}
+        {tab === "personas" && (
+          <div className="grid gap-6">
+            <ObjectivePersonas milestoneId={m.id} />
+            <details className="group rounded-xl border bg-card/50" data-testid="goal-settings">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center px-3 text-sm text-muted-foreground hover:text-foreground">Settings</summary>
+              <div className="p-3 pt-0">
+                <SettingsTab m={m} />
+              </div>
+            </details>
+          </div>
+        )}
+        {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={w.milestone} />}
+      </div>
+    </OpenAsksContext.Provider>
+  );
 }
 
 function MilestoneScreen() {

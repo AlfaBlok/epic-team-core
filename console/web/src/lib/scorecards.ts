@@ -179,3 +179,14 @@ export const PRODUCTS_PATH = "products";
 export const PRODUCT_DEF_PATH = `${PRODUCTS_PATH}/:id`;
 export const productHref = (id: string, tab?: "kit") => `/${PRODUCTS_PATH}/${encodeURIComponent(id)}${tab ? `?tab=${tab}` : ""}`;
 export const scorecardHref = (id?: string, tab?: string) => `/${SCORECARDS_PATH}${id ? `/${encodeURIComponent(id)}` : ""}${tab && tab !== "numbers" ? `?tab=${tab}` : ""}`;
+
+/** the objective that holds a milestone (its scorecard node, first in his order, carries its id); none = a goal of its own. */
+export function objectiveOf(nodes: readonly ScorecardNode[] | undefined, milestoneId: string): ScorecardNode | undefined {
+  const all: ScorecardNode[] = [];
+  const walk = (ns: readonly ScorecardNode[]) => {
+    for (const n of ns) all.push(n);
+    for (const n of ns) walk(n.children ?? []);
+  };
+  walk(nodes ?? []);
+  return all.find((n) => n.milestoneId === milestoneId);
+}

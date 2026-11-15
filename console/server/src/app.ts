@@ -32,7 +32,7 @@ import { deriveVerdict, runCommitsLookup, type RunCommit } from "./adapters/outc
 import { buildTree, subtree, treeTodoSection, type Tree } from "./adapters/tree.js";
 import { DEFAULT_OWNER, ownerOf } from "./tenancy/owner.js";
 import { activeGrantsFor } from "./cycle/grants.js";
-import { workerBriefRules } from "./cycle/prompts.js";
+import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js";
 import { runStateFor } from "./cycle/runState.js";
 import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
 import { repeatStreak } from "./cycle/repeat.js";
@@ -1840,10 +1840,19 @@ export function createApp(
   // X stats of the team's six accounts, one file a day (data/x-stats/<date>.json, scripts/x_stats.py).
   const xStats = createXStatsReader({ reposRoot: read.reposRoot });
   api.get("/x-stats", (c) => c.json(xStats.get(c.req.query("date") || undefined)));
-  // the rules every worker brief carries verbatim, fresh from this release (a manager's brief helper reads them)
+  // the rules every worker brief carries verbatim, fresh from this release (a manager's brief helper reads them);
+  // ?repo=<row's repo>&title=<row title> adds the owner's view only for a row on its topic (docs/his-views.json)
   api.get("/worker-rules", async (c) => {
     const line = (await ownerObjectivesNow?.().catch(() => undefined))?.line;
-    return c.text(workerBriefRules(line || undefined).map((r) => `"${r}"`).join("\n") + "\n");
+    const repo = c.req.query("repo"), title = c.req.query("title");
+    let views: HisView[] = [];
+    if (repo || title) {
+      const home = resolveRepo(read.reposRoot, homeRepo())?.path;
+      try {
+        views = hisViewsFor({ repo, title }, JSON.parse(fs.readFileSync(`${home}/docs/his-views.json`, "utf8")).views ?? []);
+      } catch { views = []; }
+    }
+    return c.text(workerBriefRules(line || undefined, views).map((r) => `"${r}"`).join("\n") + "\n");
   });
   // a pursuit's social kit, shown inside the console on the pursuit's own page (its kit.json, previews and fonts).
   api.get("/pursuits/:id/kit", (c) => {

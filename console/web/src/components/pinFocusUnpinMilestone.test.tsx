@@ -23,7 +23,8 @@ afterEach(() => {
 beforeEach(() => localStorage.clear());
 
 const mk = (title: string, bigRoot?: number) => api.createMilestone({ title, repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam", ...(bigRoot ? { bigRoot } : {}) });
-const header = () => screen.getByRole("heading", { level: 1 }).parentElement!.parentElement!;
+// a goal's pin sits on its Key results tab's status line (the header box holds only its circle, name and answer).
+const header = () => screen.getByTestId("goal-status-line");
 const renderMilestone = (id: string, social = false) => {
   const page = (
     <MemoryRouter initialEntries={[`/milestones/${id}`]}>

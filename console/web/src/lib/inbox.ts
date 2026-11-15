@@ -129,3 +129,17 @@ export const useStatusFor = (milestoneId?: string, off?: boolean) =>
     () => (off ? Promise.resolve(undefined) : milestoneId ? api.getMilestoneStatus(milestoneId) : api.listStatus()),
     { tag: "inbox" },
   );
+
+/**
+ * One milestone goal's inbox: its open asks (red) and its review cards (green), the numbers its sidebar entry
+ * shows and its Inbox tab shows and lists, from the same status batch and review list with the same snoozes.
+ */
+export function milestoneInbox(
+  batch: { milestones: { milestoneId: string; items?: PendingItem[] }[] } | undefined,
+  cards: Pick<ReviewItem, "id" | "milestoneId">[] | undefined,
+  milestoneId: string,
+  snoozing?: { has: (id: string) => boolean },
+): { ask: number; review: number } {
+  const status = batch?.milestones.find((s) => s.milestoneId === milestoneId);
+  return { ask: blockedItems(status, { snoozing }).length, review: (cards ?? []).filter((c) => c.milestoneId === milestoneId).length };
+}

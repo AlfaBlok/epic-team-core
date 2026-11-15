@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api } from "@/api";
 import { AppRoutes } from "@/App";
@@ -115,20 +115,25 @@ describe("E947-S1 Epic Book per milestone", () => {
           </MemoryRouter>
         </SkinProvider>,
       );
+    // the deck opens from the goal's Context tab, as an objective's context.
     page(SKINS.console);
-    expect(await screen.findByTestId("tab-deck")).toBeTruthy();
+    expect(await screen.findByTestId("set-tabs")).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId("set-tabs")).getByRole("link", { name: "Context" }));
+    expect(await screen.findByTestId("goal-open-deck")).toBeTruthy();
     cleanup();
     // another world's milestone (the home world sees it as the platform) has no book
     const get = api.getMilestone.bind(api);
     vi.spyOn(api, "getMilestone").mockImplementation(async (id) => ({ ...(await get(id)), world: "social" }));
     page(SKINS.console);
-    await screen.findByTestId("chat-about-this");
-    expect(screen.queryByTestId("tab-deck")).toBeNull();
+    fireEvent.click(within(await screen.findByTestId("set-tabs")).getByRole("link", { name: "Context" }));
+    await screen.findByTestId("goal-context-actions");
+    expect(screen.queryByTestId("goal-open-deck")).toBeNull();
     vi.restoreAllMocks();
     cleanup();
     page(SKINS.social);
-    await screen.findByTestId("chat-about-this");
-    expect(screen.queryByTestId("tab-deck")).toBeNull();
+    fireEvent.click(within(await screen.findByTestId("set-tabs")).getByRole("link", { name: "Context" }));
+    await screen.findByTestId("goal-context-actions");
+    expect(screen.queryByTestId("goal-open-deck")).toBeNull();
   });
 });
 

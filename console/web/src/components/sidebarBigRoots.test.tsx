@@ -62,9 +62,10 @@ describe("T40-S3 sidebar: big roots", () => {
       const roots = screen.getAllByTestId("big-root");
       // the state word now shares the line under the bar with the percent, so read the name's own line
       expect(roots.map((r) => r.querySelector(".line-clamp-2")?.textContent?.trim())).toEqual(["SocialApp launch", "Memo launch", "Hair transplant", "House decision"]);
-      // no bar, percent or coloured dot; one word (running, needs you, idle) and the counts.
+      // drawn like an objective: its circle, its name and its pills, no state word under it.
       await waitFor(() => expect(within(roots[0]).getByTestId("sidebar-needs-you").textContent).toBe("2"));
-      expect(within(roots[0]).getByTestId("sidebar-state").textContent).toBe("needs you");
+      expect(within(roots[0]).queryByTestId("sidebar-state")).toBeNull();
+      expect(within(roots[0]).getByTestId("sidebar-goal-wheel")).toBeTruthy();
       expect(within(roots[0]).queryByTestId("big-root-pct")).toBeNull();
       expect(within(roots[0]).queryByTestId("tree-dot")).toBeNull();
       expect(within(roots[1]).queryByTestId("sidebar-needs-you")).toBeNull();
@@ -72,7 +73,7 @@ describe("T40-S3 sidebar: big roots", () => {
       // The per-repo milestone is folded; its waiting count shows on the fold.
       expect(screen.queryByText("ops · PLAN-2")).toBeNull();
       const toggle = screen.getByTestId("other-milestones-toggle");
-      expect(toggle.textContent).toMatch(/^Other projects \(3\)/); // the infra repo + the mock seed's two
+      expect(toggle.textContent).toMatch(/^More goals \(3\)/); // the infra repo + the mock seed's two
       expect(within(toggle).getByTestId("other-needs-you").textContent).toBe("1");
       fireEvent.click(toggle);
       expect(screen.getByText("ops · PLAN-2")).toBeTruthy();

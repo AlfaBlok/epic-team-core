@@ -192,7 +192,7 @@ describe("failed wake that recovered", () => {
 });
 
 describe("sidebar word and Team badge", () => {
-  it("each milestone row carries the server's word; the Team badge is the batch's needsYou", async () => {
+  it("each goal row is its circle, name and pills (no state word); the Team badge is the batch's needsYou", async () => {
     const m = await api.createMilestone({ title: "Held epic", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam" });
     vi.spyOn(api, "listStatus").mockResolvedValue({
       milestones: [{ ...status({ word: "monitoring", monitoring: [HOLD] }), milestoneId: m.id }],
@@ -206,9 +206,8 @@ describe("sidebar word and Team badge", () => {
       </MemoryRouter>,
     );
     const link = (await screen.findByText("Held epic")).closest("a")!;
-    // one word in the sidebar (running, needs you or idle); the server's word stays in its title.
-    await vi.waitFor(() => expect(link.querySelector('[data-testid="sidebar-state"]')!.getAttribute("title")).toContain("monitoring"));
-    expect(["running", "needs you", "idle"]).toContain(link.querySelector('[data-testid="sidebar-state"]')!.textContent);
+    await vi.waitFor(() => expect(link.querySelector('[data-testid="sidebar-goal-wheel"]')).toBeTruthy());
+    expect(link.querySelector('[data-testid="sidebar-state"]')).toBeNull();
     expect((await screen.findByTestId("waiting-count")).textContent).toBe("2");
   });
 });

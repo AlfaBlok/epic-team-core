@@ -245,7 +245,7 @@ describe("T18-S2 entry points", () => {
     expect(link.getAttribute("href")).toBe("/chat");
   });
 
-  it("'Chat about this' on a Milestone page opens that milestone's Chat tab (T19-S6)", async () => {
+  it("a goal's Chat desk tab is that milestone's Chat (the tab replaced the Chat about this button)", async () => {
     const { MilestonePage } = await import("@/pages/Milestone");
     const m = await api.createMilestone({ title: "Treeish", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam" });
     render(
@@ -255,10 +255,8 @@ describe("T18-S2 entry points", () => {
         </Routes>
       </MemoryRouter>,
     );
-    const link = (await screen.findByTestId("chat-about-this")) as HTMLAnchorElement;
-    const url = new URL(link.getAttribute("href")!, "http://x");
-    expect(url.pathname).toBe(`/milestones/${m.id}`);
-    expect(url.searchParams.get("tab")).toBe("chat");
+    const link = (await within(await screen.findByTestId("set-tabs")).findByRole("link", { name: "Chat desk" })) as HTMLAnchorElement;
+    expect(new URL(link.getAttribute("href")!, `http://x/milestones/${m.id}`).searchParams.get("tab")).toBe("chat");
   });
 });
 

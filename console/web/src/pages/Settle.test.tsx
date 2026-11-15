@@ -85,7 +85,7 @@ describe("Settle button on the milestone page (M2-21)", () => {
 
   it("not settled → no badge", async () => {
     await renderPage(DONE);
-    await screen.findAllByRole("tab");
+    await screen.findByTestId("set-tabs");
     expect(screen.queryByTestId("settled-badge")).toBeNull();
   });
 });

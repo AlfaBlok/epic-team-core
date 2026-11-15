@@ -128,6 +128,10 @@ async function renderPage(search = "", patch: Partial<Milestone> = {}) {
   return { m, loc };
 }
 
+/** a goal's tabs are the objective's (links in set-tabs); the open one is aria-current. */
+const goalTab = async (name: string | RegExp) => within(await screen.findByTestId("set-tabs")).findByRole("link", { name });
+const isOpen = async (name: string | RegExp) => expect((await goalTab(name)).getAttribute("aria-current")).toBe("page");
+
 const waitingItem = (id: string, question: string): WaitingItem => ({
   id,
   source: "needs_jordi",
@@ -142,24 +146,28 @@ const waitingItem = (id: string, question: string): WaitingItem => ({
 } as unknown as WaitingItem);
 
 describe("Milestone page layout (M2-16)", () => {
-  it("tabs in order, Summary is the default with no ?tab", async () => {
+  // (the owner: "Why sidebar element selection work so different when selecting a goal or a 'project'?"):
+  // a goal no objective holds opens like an objective: the answer box, then the objective's tabs in its order.
+  it("the objective's tabs in its order, Key results is the default with no ?tab", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
     await renderPage();
-    const tabs = await screen.findAllByRole("tab");
-    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Summary", "Waiting on you", "Tree", "Chat", "Deck", "Activity", "Personas", "Pages", "Approvals", "Backlog", "Definitions", "Settings"]);
-    expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true");
+    const tabs = within(await screen.findByTestId("set-tabs")).getAllByRole("link");
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Board", "Inbox", "Chat desk", "Context", "Personas", "Pages"]);
+    await isOpen("Key results");
+    expect(screen.getByTestId("set-answer-box")).toBeTruthy();
+    expect(screen.getByTestId("set-objective").textContent).toBe("Treeish");
+    // no second header: no Outcome and Flow chips, no Unpin or Chat about this beside the name.
+    expect(screen.queryByTestId("chat-about-this")).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 
-  it("E965-S4 (was E917-S2's wrap): the tab strip is one 36 px row at every width; what does not fit folds under More", async () => {
+  it("every old tab opens the goal tab that does its job now", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
-    await renderPage();
-    const list = await screen.findByRole("tablist");
-    const cls = list.className.split(" ");
-    expect(cls).toEqual(expect.arrayContaining(["h-9", "flex-nowrap", "[&>button]:shrink-0"]));
-    expect(cls).not.toContain("flex-wrap");
-    // every tab carries its id for the fold; jsdom has no layout, so none is folded and no More shows on a milestone
-    expect(Array.from(list.querySelectorAll("[role=tab]")).every((t) => t.getAttribute("data-tab-id"))).toBe(true);
-    expect(screen.queryByTestId("more-tabs")).toBeNull();
+    for (const [old, now] of [["summary", "Key results"], ["tree", "Board"], ["backlog", "Board"], ["waiting", "Inbox"], ["chat", "Chat desk"], ["definitions", "Context"], ["approvals", "Context"], ["activity", "Personas"], ["settings", "Personas"], ["pages", "Pages"]] as const) {
+      await renderPage(`?tab=${old}`);
+      await isOpen(now);
+      cleanup();
+    }
   });
 
   it("E917-S2: Backlog hides Source and lets Title narrow below sm, so the table fits a phone", async () => {
@@ -181,9 +189,10 @@ describe("Milestone page layout (M2-16)", () => {
     expect(screen.getByRole("link", { name: "Personas tab" }).getAttribute("href")).toMatch(/\?tab=personas$/);
     expect(screen.getByRole("link", { name: "Activity tab" }).getAttribute("href")).toMatch(/\?tab=activity$/);
     expect(screen.queryByTestId("waiting-strip")).toBeNull();
-    expect(screen.getByTestId("waiting-count").textContent).toBe("0");
+    // nothing waits: the Inbox tab carries no pill, as the sidebar entry carries none.
+    expect(screen.queryByTestId("tab-inbox-asks")).toBeNull();
     fireEvent.click(tree);
-    expect((await screen.findByRole("tab", { name: /^Tree/ })).getAttribute("aria-selected")).toBe("true");
+    await isOpen("Board");
   });
 
   it("E913-S7: Tree tab label carries red / amber / blue count pills (zero hidden) and the tile labels its numbers", async () => {
@@ -192,14 +201,9 @@ describe("Milestone page layout (M2-16)", () => {
     const root: TreeNode = { key: "k/R", id: "R", kind: "spine", title: "root", status: "active", color: "blue", children: [ready], flags: [] };
     const getTree = vi.spyOn(api, "getTree").mockResolvedValue({ milestoneId: "x", root, counts: { grey: 3, blue: 1, yellow: 5, red: 0, green: 1 }, nonGreen: 9, closed: 0, flagged: 0, source: "spines", warnings: [] });
     await renderPage();
-    const tab = await screen.findByRole("tab", { name: /^Tree/ });
-    await waitFor(() => expect(screen.getByTestId("tree-tab-yellow").textContent).toBe("5"));
-    expect(screen.queryByTestId("tree-tab-red")).toBeNull();
-    expect(screen.getByTestId("tree-tab-yellow").getAttribute("title")).toBe("5 blocked");
-    // the ready row counts as open, like the tree draws it
-    expect(screen.getByTestId("tree-tab-blue").getAttribute("aria-label")).toBe("2 open");
-    expect(tab.textContent?.replace(/\d+$/, "")).toBe("Tree");
-    expect(screen.getByTestId("tile-count-yellow").textContent).toBe("5blocked on a dependency");
+    // the Board tab carries no pills of its own (an objective's does not); the Summary tile keeps the numbers.
+    await waitFor(() => expect(screen.getByTestId("tile-count-yellow").textContent).toBe("5blocked on a dependency"));
+    expect(screen.queryByTestId("tree-tab-yellow")).toBeNull();
     expect(screen.getByTestId("tile-count-grey").textContent).toBe("2draft");
     expect(getTree).toHaveBeenCalledTimes(1); // the tab pills and the Summary tile share one fetch
   });
@@ -236,15 +240,14 @@ describe("Milestone page layout (M2-16)", () => {
     // the pill stays first, before the code
     const li = within(strip).getAllByRole("listitem")[0];
     expect(li.firstElementChild).toBe(within(li).getByTestId("ask-kind"));
-    expect(screen.getByTestId("waiting-count").className).toContain("bg-amber-500"); // amber = Needs you
     fireEvent.click(screen.getByRole("link", { name: "see all →" }));
-    expect((await screen.findByRole("tab", { name: /Waiting on you/ })).getAttribute("aria-selected")).toBe("true");
+    await isOpen(/^Inbox/);
   });
 
   it("old ?tab=overview opens Definitions; old ?node= link opens Tree", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
     await renderPage("?tab=overview");
-    expect((await screen.findByRole("tab", { name: "Definitions" })).getAttribute("aria-selected")).toBe("true");
+    await isOpen("Context");
     cleanup();
     const { tabFromParams } = await import("@/pages/Milestone");
     expect(tabFromParams(new URLSearchParams("node=EPIC-902/E904"))).toBe("tree");
@@ -252,12 +255,10 @@ describe("Milestone page layout (M2-16)", () => {
     expect(tabFromParams(new URLSearchParams("tab=summary&node=x"))).toBe("summary");
   });
 
-  it("switching to Summary while a node is selected keeps the node and an explicit tab", async () => {
+  it("an old ?node= link (a Tree row) opens the Board on that node", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
-    const { loc } = await renderPage("?node=a/b");
-    const summary = await screen.findByRole("tab", { name: "Summary" });
-    fireEvent.mouseDown(summary);
-    await vi.waitFor(() => expect(loc.search).toBe("?tab=summary&node=a%2Fb"));
+    await renderPage("?node=a/b");
+    await isOpen("Board");
   });
 
   const chain = { servesChain: [{ path: "docs/EPIC-900-VPS-FLEET.md", title: "EPIC-900 VPS fleet" }, { path: "docs/spines/root.md", title: "ops root" }] };
@@ -285,7 +286,7 @@ describe("Milestone page layout (M2-16)", () => {
   it("no breadcrumb on a root spine", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
     await renderPage();
-    await screen.findAllByRole("tab");
+    await screen.findByTestId("set-tabs");
     expect(screen.queryByRole("navigation", { name: "Ancestry" })).toBeNull();
   });
 });
@@ -302,7 +303,7 @@ describe("Milestone page Tree tab (M2-10)", () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect((await screen.findByRole("tab", { name: /^Tree/ })).getAttribute("aria-selected")).toBe("true");
+    await isOpen("Board");
     expect(await screen.findByTestId("tree-counts")).toBeTruthy();
     expect(screen.getByRole("tree")).toBeTruthy();
   });
@@ -388,7 +389,7 @@ describe("Waiting-on-you deep link (M2-19)", () => {
   it("?tab=waiting&item=<id> opens the tab and highlights that card", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([waitingItem("nj_a", "First"), waitingItem("nj_b", "Root steps on HOST1?")]);
     await renderPage("?tab=waiting&item=nj_b");
-    expect((await screen.findByRole("tab", { name: /Waiting on you/ })).getAttribute("aria-selected")).toBe("true");
+    await isOpen(/^Inbox/);
     await vi.waitFor(() => expect(document.getElementById("waiting-nj_b")?.getAttribute("data-highlighted")).toBe("true"), { timeout: 5000 });
     expect(document.getElementById("waiting-nj_b")?.className).toContain("ring-sky-500");
     expect(document.getElementById("waiting-nj_a")?.getAttribute("data-highlighted")).toBeNull();
@@ -473,9 +474,11 @@ describe("E906-S10 Activity 'Running' filter", () => {
       },
     ]);
     await renderPage("?tab=activity&kind=running");
-    expect(await screen.findByText("worker running · 14 min")).toBeTruthy();
-    expect(screen.getByText("new wake")).toBeTruthy();
-    expect(screen.queryByText("old wake")).toBeNull();
+    // Activity is the Personas tab's "Their runs", as on an objective.
+    const runs = await screen.findByTestId("objective-runs");
+    expect(await within(runs).findByText("worker running · 14 min")).toBeTruthy();
+    expect(within(runs).getByText("new wake")).toBeTruthy();
+    expect(within(runs).queryByText("old wake")).toBeNull();
     expect(screen.getByText("1 worker running")).toBeTruthy();
     const select = screen.getByLabelText("Kind") as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["All runs", "Wake runs", "Answer runs", "Running"]);
@@ -563,7 +566,7 @@ describe("E919-S1 milestone Chat tab", () => {
     const get = vi.spyOn(api, "getMilestoneChat");
     const send = vi.spyOn(api, "sendMilestoneChatMessage");
     const { m } = await renderPage("?tab=chat");
-    expect((await screen.findByRole("tab", { name: "Chat" })).getAttribute("aria-selected")).toBe("true");
+    await isOpen("Chat desk");
     expect(await screen.findByText("Repo desk ready.")).toBeTruthy();
     expect(get).toHaveBeenCalledWith(m.id, { limit: 20 });
     expect(desk).not.toHaveBeenCalled();
@@ -578,7 +581,7 @@ describe("E919-S1 milestone Chat tab", () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([]);
     const get = vi.spyOn(api, "getMilestoneChat");
     await renderPage();
-    await screen.findAllByRole("tab");
+    await screen.findByTestId("set-tabs");
     expect(get).not.toHaveBeenCalled();
   });
 });

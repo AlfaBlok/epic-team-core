@@ -50,3 +50,19 @@ export function pageMilestones<M>(roots: M[], rest: M[], limit: number): { roots
   const o = rest.slice(0, Math.max(0, limit - r.length));
   return { roots: r, rest: o, hidden: roots.length + rest.length - r.length - o.length };
 }
+
+/** a milestone's circle: one segment per branch of its tree, the done ones green (its status's progress); none yet = an empty ring. */
+export function milestoneWheelRows(status: { progress?: { done: number; total: number } } | undefined): { state: "green" | "unknown" }[] {
+  const p = status?.progress;
+  if (!p?.total) return [];
+  const done = Math.min(p.total, Math.round(p.done));
+  return Array.from({ length: p.total }, (_, k) => ({ state: k < done ? "green" : "unknown" }));
+}
+
+/** a milestone goal's one-line answer under its name (as an objective's key results answer): how much of its tree is done. */
+export function milestoneAnswer(status: { progress?: { pct: number; done: number; total: number } } | undefined): string {
+  const p = status?.progress;
+  if (!p?.total) return "Nothing measured yet: its tree has no parts to count.";
+  const done = Math.min(p.total, Math.round(p.done));
+  return `${p.pct}% done: ${done} of ${p.total} part${p.total === 1 ? "" : "s"} finished.`;
+}

@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
-import { Link, NavLink, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, type ChatRead, type DeskChat, type PendingItem, type ReviewItem } from "@/api";
 import type { PersonaGapsBody, ScorecardNode, ScorecardRow, ScorecardRowState, ScorecardsBody, ScorecardWork } from "@/api/pursuit-types";
 import { CountPill, PILL_SHAPE, PILL_TITLES, SortControl, useSectionSort, type SectionSort } from "@/components/homeSection";
@@ -666,6 +666,63 @@ export function PersonaGapsLine() {
   );
 }
 
+/** the tab every sidebar pill opens and counts: a goal's Inbox (its asks red, its review cards green). */
+export const GOAL_INBOX_TAB = "inbox";
+
+/**
+ * a goal's inbox pills, the same on every sidebar entry and on its Inbox tab (the owner: a green 1
+ * on House decision opened a page where no tab showed it). Red = asks waiting on him, green = cards for his review;
+ * with `to`, a tap on a pill opens that goal's Inbox tab, the tab that lists exactly those items.
+ */
+export function GoalPills({ c, to, onNavigate, milestoneId, ids = { ask: "sidebar-set-asks", review: "sidebar-set-review" } }: { c: { ask: number; review: number }; to?: string; onNavigate?: () => void; milestoneId?: string; ids?: { ask: string; review: string } }) {
+  const navigate = useNavigate();
+  if (!c.ask && !c.review) return null;
+  const open = to
+    ? {
+        role: "link",
+        tabIndex: 0,
+        "data-to": to,
+        onClick: (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigate?.();
+          navigate(to);
+        },
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigate?.();
+          navigate(to);
+        },
+      }
+    : {};
+  return (
+    <span className="flex shrink-0 items-center gap-1" data-testid="goal-pills" {...open} title={to ? `Open its Inbox: ${c.ask} waiting on you, ${c.review} for your review` : undefined}>
+      {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} testId={ids.ask} milestoneId={milestoneId} />}
+      {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} testId={ids.review} milestoneId={milestoneId} />}
+    </span>
+  );
+}
+
+/** a goal's first screen: its wheel, its name and its one-line answer in one box edged by its light (objectives and milestones alike). */
+export function GoalHeader({ rows, title, answer, children, testId = "set-answer-box" }: { rows: Pick<ScorecardRow, "state">[]; title: ReactNode; answer: ReactNode; children?: ReactNode; testId?: string }) {
+  return (
+    <header className="flex min-w-0 items-start gap-3 rounded-xl border border-l-[6px] bg-card p-3 shadow-sm sm:p-4" style={{ borderLeftColor: STATE_FILL[lightOf(rows)] }} data-testid={testId}>
+      <SetWheel rows={rows} size={44} testId="set-wheel" />
+      <div className="grid min-w-0 gap-1.5">
+        <h1 className="text-xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-3xl" data-testid="set-objective">
+          {title}
+        </h1>
+        <p className="text-[15px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere] sm:text-base" data-testid="set-answer">
+          {answer}
+        </p>
+        {children}
+      </div>
+    </header>
+  );
+}
+
 /** the top objectives in his order, less the ones shown inside another (their file's `foldedInto`). */
 export const topObjectives = (nodes: ScorecardNode[] | undefined) => (nodes ?? []).filter((n) => !n.foldedInto);
 
@@ -693,8 +750,7 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
           <span className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]">{titleOf(n)}</span>
           <span className="flex shrink-0 items-center gap-1">
             <IdlePill n={n} testId="sidebar-set-idle" />
-            {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} testId="sidebar-set-asks" />}
-            {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} testId="sidebar-set-review" />}
+            <GoalPills c={c} to={scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
           </span>
         </span>
       </Link>
@@ -705,6 +761,10 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
 /** the sidebar, both skins: All objectives on top (every key result, the combined inbox), then each objective in his order, nested. */
 export function SidebarGoalSets({ onNavigate }: { onNavigate?: () => void }) {
   const { data } = useGoalSets();
+  return <SidebarGoalSetsOf data={data} onNavigate={onNavigate} />;
+}
+/** the same, on objectives the caller already read (the sidebar reads them once for this list and its other goals). */
+export function SidebarGoalSetsOf({ data, onNavigate }: { data: ScorecardsBody | undefined; onNavigate?: () => void }) {
   const { countFor, rows } = useSetInbox(data);
   const { pathname } = useLocation();
   const activeId = pathname.startsWith(`/${SCORECARDS_PATH}/`) ? decodeURIComponent(pathname.slice(SCORECARDS_PATH.length + 2).split("/")[0]) : undefined;
@@ -834,8 +894,16 @@ const ALL_TABS = [
   { id: "chat", label: "Team desk" },
 ] as const;
 
+/** a tab's link: ?tab=<id> (none for the first), plus the params kept across tabs (a milestone goal's picked ?node=). */
+const tabTo = (id: string, keep?: Record<string, string | undefined>) => {
+  const q = new URLSearchParams();
+  if (id !== "table") q.set("tab", id);
+  for (const [k, v] of Object.entries(keep ?? {})) if (v) q.set(k, v);
+  return `?${q}`;
+};
+
 /** `links`: tabs that open another page (the social skin's Home: Inbox), drawn after the page's own tabs. */
-export function TabStrip({ tabs, tab, counts, links, label = `${SET_NAME.one} pages` }: { tabs: readonly { id: string; label: string }[]; tab: string; counts?: Partial<Record<string, number>>; links?: Record<string, { label: string; to: string; count?: number }>; label?: string }) {
+export function TabStrip({ tabs, tab, counts, pills, links, keep, label = `${SET_NAME.one} pages` }: { tabs: readonly { id: string; label: string }[]; tab: string; counts?: Partial<Record<string, number>>; pills?: Partial<Record<string, { ask: number; review: number }>>; keep?: Record<string, string | undefined>; links?: Record<string, { label: string; to: string; count?: number }>; label?: string }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const nav = ref.current;
@@ -856,7 +924,7 @@ export function TabStrip({ tabs, tab, counts, links, label = `${SET_NAME.one} pa
       {tabs.map((t) => (
         <Link
           key={t.id}
-          to={t.id === "table" ? "?" : `?tab=${t.id}`}
+          to={tabTo(t.id, keep)}
           replace
           className={cn("-mb-px flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 text-sm sm:min-h-10 sm:px-1", tab === t.id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
           aria-current={tab === t.id ? "page" : undefined}
@@ -864,6 +932,8 @@ export function TabStrip({ tabs, tab, counts, links, label = `${SET_NAME.one} pa
         >
           {t.label}
           {counts?.[t.id] ? <span className="text-xs text-muted-foreground">{counts[t.id]}</span> : null}
+          {/* the same red and green pills as the goal's sidebar entry (GoalPills), here on the tab they open. */}
+          {pills?.[t.id] ? <GoalPills c={pills[t.id]!} ids={{ ask: `tab-${t.id}-asks`, review: `tab-${t.id}-review` }} /> : null}
         </Link>
       ))}
       {Object.entries(links ?? {}).map(([id, l]) => (
@@ -1123,7 +1193,8 @@ export function GoalSetPage() {
   }, [kr, node]);
   const pursuit = node ? inbox.ix.pursuitOf.get(node.id)! : undefined;
   const mine = node ? inbox.rows.filter((r) => inScorecard(inbox.ix, node.id, r.item)) : [];
-  const counts = { ask: mine.filter((r) => r.kind === "ask").length, review: mine.filter((r) => r.kind === "review").length };
+  // the sidebar's own count (useSetInbox countFor), so its pills and this Inbox tab's never differ.
+  const counts = node ? inbox.countFor(node.id) : { ask: 0, review: 0 };
   const rows = node ? rowsWithInbox(node, inbox.loading ? undefined : counts) : [];
   const krs = node ? keyResultsOf(node) : [];
   const only = useCallback((i: Placeable) => !!node && inScorecard(inbox.ix, node.id, i), [node, inbox.ix]);
@@ -1147,24 +1218,23 @@ export function GoalSetPage() {
           {/* each objective is a wheel (the owner: "These are the wheels"): its key results round a circle, then the answer. */}
           {/* the first screen opens on one boxed answer at every width (the card check, 390 px: "a heading and a
               paragraph, not a punchline answer box"): the objective, then its answer, in one box edged by its light. */}
-          <header className="flex min-w-0 items-start gap-3 rounded-xl border border-l-[6px] bg-card p-3 shadow-sm sm:p-4" style={{ borderLeftColor: STATE_FILL[lightOf(krs)] }} data-testid="set-answer-box">
-            <SetWheel rows={krs} size={44} testId="set-wheel" />
-            <div className="grid min-w-0 gap-1.5">
-              <h1 className="text-xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-3xl" data-testid="set-objective">
+          <GoalHeader
+            rows={krs}
+            title={
+              <>
                 {titleOf(node)}
                 {node.objectiveStatus === "proposed" && <ProposedMark />}
-              </h1>
-              <p className="text-[15px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere] sm:text-base" data-testid="set-answer">
-                {krAnswer(krs)}
-              </p>
-              {pursuitP?.product && (
-                <Link to={productHref(pursuitP.product.id)} className="w-fit text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground" data-testid="set-product">
-                  Product: {pursuitP.product.name}
-                </Link>
-              )}
-            </div>
-          </header>
-          <TabStrip tabs={tabs} tab={tab} counts={{ inbox: mine.length, kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
+              </>
+            }
+            answer={krAnswer(krs)}
+          >
+            {pursuitP?.product && (
+              <Link to={productHref(pursuitP.product.id)} className="w-fit text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground" data-testid="set-product">
+                Product: {pursuitP.product.name}
+              </Link>
+            )}
+          </GoalHeader>
+          <TabStrip tabs={tabs} tab={tab} pills={{ inbox: counts }} counts={{ kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
           {tab === "table" && (
             <div className="grid gap-4">
               <KeyResultSheet krs={krs} setId={pursuit.id} open={kr} onOpen={openKr} />

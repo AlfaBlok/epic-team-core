@@ -6,19 +6,19 @@ import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components
 import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
 import { useQuery } from "@/lib/data";
-import { blockedItems, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
+import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
-import { SidebarGoalSets } from "@/components/goalSets";
+import { GOAL_INBOX_TAB, GoalPills, SetWheel, SidebarGoalSetsOf, useGoalSets } from "@/components/goalSets";
+import { objectiveOf } from "@/lib/scorecards";
 import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { liveWorkers } from "@/components/status";
-import { MILESTONE_PAGE, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
+import { MILESTONE_PAGE, milestoneWheelRows, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
-import { milestoneState, statusOf } from "@/lib/status";
+import { statusOf } from "@/lib/status";
 import { lazyPage } from "@/lib/lazyPage";
 import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
@@ -184,33 +184,38 @@ export function SidebarState({ live, needs, loading, title }: { live: number; ne
   );
 }
 
-function BigRootLink({ m, status, counts, onNavigate }: { m: Milestone; status: MilestoneStatusView | undefined; counts?: { review?: number }; onNavigate?: () => void }) {
+export const MILESTONE_INBOX_TAB = GOAL_INBOX_TAB;
+
+/**
+ * one goal that no objective holds (the house, a server, another repo's milestone): drawn like an objective's entry
+ * (its circle, its name, its inbox pills, the owner: "Why sidebar element selection work so different
+ * when selecting a goal or a 'project'?"), opening the same goal screen; a tap on a pill opens its Inbox tab.
+ */
+function MilestoneGoalLink({ m, status, counts, onNavigate }: { m: Milestone; status: MilestoneStatusView | undefined; counts: { ask: number; review: number }; onNavigate?: () => void }) {
   const pr = progressLabel(status);
-  const blockedHere = useBlocked(status);
-  const needs = status?.loading ? 0 : blockedHere.length;
   return (
     <NavLink
       to={`/milestones/${m.id}`}
-      className={(s) => cn(itemClass(s), "items-start")}
+      className={({ isActive }) => cn("grid min-w-0 gap-1.5 rounded-md border-l-[3px] px-2.5 py-2", isActive ? "border-l-foreground bg-card shadow-sm ring-1 ring-border" : "border-l-transparent hover:bg-accent/60")}
       onClick={onNavigate}
-      title={`${milestoneName(m)} · ${m.repo} ${m.path}`}
+      title={!m.docTitle ? milestoneName(m) : m.titleOverride ? `${m.title} (spine title: ${m.docTitle})` : `${m.docTitle} (console title: ${m.title})`}
       data-testid="big-root"
       data-milestone-id={m.id}
     >
-      {/* the name, then one word, running, needs you or idle. */}
-      <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="line-clamp-2 min-w-0 break-words font-medium text-foreground">{milestoneName(m)}</span>
-        <SidebarState live={liveWorkers(status)} needs={needs} loading={!!status?.loading} title={[`spine status: ${m.status ?? "unknown"}`, pr?.title].filter(Boolean).join(" · ")} />
+      <span className="flex min-w-0 items-start gap-2">
+        <SetWheel rows={milestoneWheelRows(status)} size={20} testId="sidebar-goal-wheel" />
+        <span className="line-clamp-2 min-w-0 flex-1 break-words text-[14px] font-medium leading-snug text-foreground" title={pr?.title}>{milestoneName(m)}</span>
+        {status?.loading ? <CountLoading className="mt-0.5" /> : <GoalPills c={counts} to={`/milestones/${encodeURIComponent(m.id)}?tab=${MILESTONE_INBOX_TAB}`} onNavigate={onNavigate} milestoneId={m.id} ids={SIDEBAR_PILL_IDS} />}
       </span>
-      {status?.loading && <CountLoading className="mt-0.5" />}
-      <Pills needsYou={needs} review={counts?.review} milestoneId={m.id} ids={SIDEBAR_IDS} className="mt-0.5" />
     </NavLink>
   );
 }
 
-/** a milestone line shows red and green only, no unread. */
-const SIDEBAR_IDS = { needsYou: "sidebar-needs-you", review: "sidebar-review" };
+const SIDEBAR_PILL_IDS = { ask: "sidebar-needs-you", review: "sidebar-review" };
 /** green per milestone: the review cards (lib/inbox reviewCards, the list the section shows) on that milestone. */
+/** the console's words for the goals no objective holds: goals like the objectives, never "projects". */
+export const OTHER_GOALS = "Other goals";
+export const MORE_GOALS = "More goals";
 const reviewOf = (cards: { milestoneId?: string }[] | undefined, id: string) => (cards ?? []).filter((c) => c.milestoneId === id).length;
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
@@ -219,7 +224,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const project = useProject();
   // the social skin lists every project's campaigns, each under its project (byProject below); the console skin narrows.
   const byProject = !!useSkin().campaigns && project.projects.length > 1;
-  const milestones = allMilestones && (project.current && !byProject ? allMilestones.filter((m) => project.keep(m.id)) : allMilestones);
+  const campaignSkin = !!useSkin().campaigns;
+  // the objectives, read once for their own list and to leave out every milestone an objective holds: that
+  // milestone IS the objective, listed above with its wheel, so it never shows twice nor opens a second way.
+  const sets = useGoalSets();
+  const held = (id: string) => !campaignSkin && !!objectiveOf(sets.data?.nodes, id);
+  const listed = allMilestones && (project.current && !byProject ? allMilestones.filter((m) => project.keep(m.id)) : allMilestones);
+  const milestones = !listed || campaignSkin || sets.error ? listed : sets.data ? listed.filter((m) => !held(m.id)) : undefined;
   // the dots and the Team badge read the server's status batch (same object as the milestone header).
   // one shared fetch of the status batch and the review cards (lib/inbox): every pill here is the length of the
   // list its section shows, read at the same moment, with this browser's snoozes and presses applied.
@@ -303,7 +314,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         {moreOpen && body}
       </div>
     );
-  const rootLink = (m: Milestone) => <BigRootLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={{ review: reviewOf(allCards, m.id) }} onNavigate={onNavigate} />;
+  // one row for every goal no objective holds, pinned or not: its circle, name and the pills its Inbox tab shows.
+  const rootLink = (m: Milestone) => <MilestoneGoalLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={milestoneInbox(statuses, allCards, m.id, snoozing)} onNavigate={onNavigate} />;
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden p-3">
@@ -383,7 +395,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
       {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
       {/* every sidebar entry is a goal set, nested, All goal sets on top; both skins. */}
-      {shows("goalSets") && <SidebarGoalSets onNavigate={onNavigate} />}
+      {shows("goalSets") && <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />}
 
       {/* the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
           microphone. The other things are in the sidebar." So every other page sits here, below the goal sets, in his
@@ -392,7 +404,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-milestones">
         <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground" data-testid="sidebar-focus-heading">
-          {roots.length ? focusHeading(w) : w.milestones}
+          {campaigns ? (roots.length ? focusHeading(w) : w.milestones) : OTHER_GOALS}
         </div>
         {/* the owner's big roots lead, each with its color, % done and waiting count; the per-repo milestones fold below. */}
         {byProject ? <ProjectGroups roots={page.roots} statuses={statuses} cards={allCards} onNavigate={onNavigate} link={rootLink} /> : page.roots.map(rootLink)}
@@ -405,7 +417,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             onClick={() => setOthersOpen(!othersOpen)}
           >
             {othersOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Other {w.milestonesWord} ({rest.length})
+            {campaigns ? `Other ${w.milestonesWord}` : MORE_GOALS} ({rest.length})
             {!othersOpen && restLoading && <CountLoading className="ml-auto" />}
             {!othersOpen && (
               <Pills
@@ -416,38 +428,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             )}
           </button>
         )}
-        {restShows &&
-          page.rest.map((m) => {
-          const st = milestoneState(statusOf(statuses, m.id));
-          return (
-          <NavLink
-            key={m.id}
-            to={`/milestones/${m.id}`}
-            className={(s) => cn(itemClass(s), "items-start")}
-            onClick={onNavigate}
-            title={!m.docTitle ? m.title : m.titleOverride ? `${m.title} (spine title: ${m.docTitle})` : `${m.docTitle} (console title: ${m.title})`}
-          >
-            <span className="grid min-w-0 flex-1">
-              <span className="line-clamp-2 min-w-0 break-words">{milestoneName(m)}</span>
-              <SidebarState
-                live={liveWorkers(statusOf(statuses, m.id))}
-                needs={statusOf(statuses, m.id)?.loading ? 0 : blockedItems(statusOf(statuses, m.id), { snoozing }).length}
-                loading={!!statusOf(statuses, m.id)?.loading}
-                title={`spine status: ${m.status ?? "unknown"} · ${st.word}`}
-              />
-            </span>
-            {/* the inbox count (items the owner can act on now, the server status's needsYou), nothing at 0; open work stays on the Tree counts row. */}
-            {statusOf(statuses, m.id)?.loading && <CountLoading className="mt-0.5" />}
-            <Pills
-              needsYou={statusOf(statuses, m.id)?.loading ? null : blockedItems(statusOf(statuses, m.id), { snoozing }).length}
-              review={reviewOf(allCards, m.id)}
-              milestoneId={m.id}
-              ids={SIDEBAR_IDS}
-              className="mt-0.5"
-            />
-          </NavLink>
-          );
-        })}
+        {restShows && page.rest.map(rootLink)}
         {(restShows || page.roots.length < roots.length) && <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} testId="sidebar-load-more" />}
         <button
           type="button"

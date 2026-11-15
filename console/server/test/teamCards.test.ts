@@ -67,6 +67,15 @@ describe("E948-S66 team cards", () => {
     expect(checkPost({ kind: "news", by: "x", title: "y" })).toMatchObject({ ok: false, code: "bad_kind" });
   });
 
+  it("E948-S113: a digest where nothing moved is no card; a held line keeps what it waits on for the next comparison", () => {
+    const same = { greens: 3, total: 9, prevGreens: 3, prevTotal: 9, trend: "same", reasons: [{ text: "Still red: browser" }], lines: [{ label: "Browser", state: "red", value: "0 of 1" }] };
+    expect(checkPost(digest("x", { digest: same }))).toMatchObject({ ok: false, code: "no_news" });
+    expect(checkPost(digest("x", { digest: { ...same, news: ["Browser now waits on your answer"] } }))).toMatchObject({ ok: true, card: { digest: { news: ["Browser now waits on your answer"] } } });
+    expect(checkPost(digest("x", { digest: { ...same, lines: [{ label: "Browser", state: "red", value: "0 of 1", was: "amber" }] } })).ok).toBe(true);
+    const w = checkPost(digest("x", { digest: { ...same, news: ["first"], lines: [{ label: "Browser", state: "red", value: "0", waits: { who: "team", text: "the team: a box, being built now", url: "https://team.example.com/x", extra: 1 } }, { label: "Sign-up", state: "green", value: "yes", waits: { who: "team", text: "x" } }] } }));
+    expect(w.ok && w.card.digest?.lines).toEqual([{ label: "Browser", state: "red", value: "0", waits: { who: "team", text: "the team: a box, being built now", url: "https://team.example.com/x" } }, { label: "Sign-up", state: "green", value: "yes" }]);
+  });
+
   it("a card names the key result it is about, and so does each digest reason", () => {
     const c = checkPost({ ...idea(1), scorecard: "launch", keyResult: "Tester applications" });
     expect(c).toMatchObject({ ok: true, card: { scorecard: "launch", keyResult: "Tester applications" } });

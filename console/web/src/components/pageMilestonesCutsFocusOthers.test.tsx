@@ -44,7 +44,7 @@ describe("T40-S5 sidebar: about 20, then Load more", () => {
     expect(screen.getAllByTestId("big-root").map((r) => r.querySelector(".line-clamp-2")?.textContent?.trim())).toEqual(["Focus one", "Focus two", "Focus three"]);
     // Folded: the fold still counts every other milestone, and no Load more shows while the fold is closed.
     const toggle = screen.getByTestId("other-milestones-toggle");
-    expect(toggle.textContent).toMatch(new RegExp(`^Other projects \\(${total - 3}\\)`));
+    expect(toggle.textContent).toMatch(new RegExp(`^More goals \\(${total - 3}\\)`));
     expect(screen.queryByTestId("sidebar-load-more")).toBeNull();
     fireEvent.click(toggle);
     const box = screen.getByTestId("sidebar-milestones");
