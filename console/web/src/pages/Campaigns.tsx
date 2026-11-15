@@ -242,6 +242,9 @@ export function NewCampaignPage() {
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
   const [messages, setMessages] = useState("");
+  // a repo's first campaign shows the campaign template too: its frame and messages as the hints.
+  const tpl = useQuery(async () => (repos.data ? api.campaignTemplate(repos.data.id) : undefined), [repos.data?.id]);
+  const tplHint = (k: string) => tpl.data?.parts.find((p) => p.key === k);
   const [plan, setPlan] = useState<CampaignPlan>();
   const [result, setResult] = useState<CampaignResult>();
   const [busy, setBusy] = useState(false);
@@ -325,17 +328,26 @@ export function NewCampaignPage() {
         <Card>
           <CardContent className="grid gap-3 p-4">
             <div className="text-sm font-medium">2. The brief ({picked?.remote ?? repo})</div>
+            {tpl.data && (
+              <div className="rounded-md border p-3 text-sm" data-testid="campaign-template">
+                Starts from the campaign template:{" "}
+                <a className="underline" href={tpl.data.source.url} target="_blank" rel="noreferrer">
+                  {tpl.data.source.name.toLowerCase()}
+                </a>
+                . After this first step, each named campaign in the repo opens with all its parts filled in.
+              </div>
+            )}
             <div className="grid gap-1">
               <Label htmlFor="campaign-title">Name</Label>
               <Input id="campaign-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="the root spine's title, else the repo's name" />
             </div>
             <div className="grid gap-1">
               <Label htmlFor="campaign-objective">Objective</Label>
-              <Textarea id="campaign-objective" rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="What the campaign is for, in a sentence or two" />
+              <Textarea id="campaign-objective" rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder={tplHint("frame") ? `${tplHint("frame")!.help}. Example: ${tplHint("frame")!.example}` : "What the campaign is for, in a sentence or two"} />
             </div>
             <div className="grid gap-1">
               <Label htmlFor="campaign-messages">Key messages (one per line)</Label>
-              <Textarea id="campaign-messages" rows={4} value={messages} onChange={(e) => setMessages(e.target.value)} />
+              <Textarea id="campaign-messages" rows={4} value={messages} onChange={(e) => setMessages(e.target.value)} placeholder={tplHint("keyMessages") ? `${tplHint("keyMessages")!.help}. Example: ${tplHint("keyMessages")!.example}` : undefined} />
             </div>
             <div className="text-xs text-muted-foreground">Both are optional; the rest of the brief (voice, formats, hold rules) is on the Campaign brief screen.</div>
             <div className="flex justify-between">

@@ -156,12 +156,13 @@ export const QC_JUDGE_SCHEMA = {
   additionalProperties: false,
   required: ["words", "visual", "reader"],
   properties: {
-    // the fresh reader says what the card asks in one sentence and its most ambiguous part
+    // the fresh reader says what the card asks in one sentence and its most ambiguous part; changesAnswer: whether that
+    // part would change what he answers (card_qc.py holds only then; without the field the judge wrote it into the text)
     reader: {
       type: "object",
       additionalProperties: false,
-      required: ["asked", "ambiguous"],
-      properties: { asked: { type: "string" }, ambiguous: { type: "string" } },
+      required: ["asked", "ambiguous", "changesAnswer"],
+      properties: { asked: { type: "string" }, ambiguous: { type: "string" }, changesAnswer: { type: "boolean" } },
     },
     words: {
       type: "array",
