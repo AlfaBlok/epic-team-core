@@ -27,7 +27,7 @@ export interface KpiInput {
 export const KPI_FILE = "data/kpi-daily.md";
 export const PLATFORMS = ["x", "reddit"] as const;
 export type KpiPlatform = (typeof PLATFORMS)[number];
-export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions", "likes", "postReplies"] as const;
+export const SERIES = ["posts", "repliesSent", "repliesReceived", "followers", "impressions", "likes", "postReplies", "views"] as const;
 export type SeriesKey = (typeof SERIES)[number];
 
 export interface KpiPoint {
@@ -136,6 +136,8 @@ export interface SnapshotRow {
   newPosts24h?: number | null;
   countsReadAt?: string | null;
   countsSource?: string | null;
+  /** X's view count of the same posts, summed (the 17th cell; empty on Reddit and on older rows). */
+  views?: number | null;
 }
 export const SNAPSHOT_HEADER = ["Date", "Platform", "Account", "Followers", "Posts", "Replies sent", "Replies received", "Impressions", "Read at", "Note"];
 
@@ -178,6 +180,7 @@ export function parseSnapshots(text: string): SnapshotRow[] {
       newPosts24h: cellNum(c[13]),
       countsReadAt: c[14] || null,
       countsSource: c[15] || null,
+      views: cellNum(c[16]),
     });
   }
   return out;
@@ -187,7 +190,7 @@ export function parseSnapshots(text: string): SnapshotRow[] {
 const esc = (s: string | number | null | undefined) => (s === null || s === undefined ? "" : String(s).replace(/\|/g, "/").replace(/\n/g, " "));
 export function snapshotLine(r: SnapshotRow): string {
   const label = r.platform === "x" ? "X" : "Reddit";
-  const counts = [r.likes, r.postReplies, r.reposts, r.newPosts24h, r.countsReadAt, r.countsSource];
+  const counts = [r.likes, r.postReplies, r.reposts, r.newPosts24h, r.countsReadAt, r.countsSource, ...(r.views !== null && r.views !== undefined ? [r.views] : [])];
   // the recorder's rows stay ten cells; a row that carries the counts keeps them.
   const tail = counts.some((v) => v !== null && v !== undefined) ? counts : [];
   return `| ${[r.date, label, r.account, r.followers, r.posts, r.repliesSent, r.repliesReceived, r.impressions, r.readAt, r.note, ...tail].map(esc).join(" | ")} |`;
@@ -253,8 +256,8 @@ const readTime = (s: string | null | undefined) => {
 };
 
 /** likes or replies on our posts, per day, as the daily count read (scripts/campaign_counts.py) wrote them. */
-function countsSeries(key: "likes" | "postReplies", snaps: SnapshotRow[], listed: string[], what: string): KpiSeries {
-  const pick = (r: SnapshotRow) => (key === "likes" ? r.likes : r.postReplies);
+function countsSeries(key: "likes" | "postReplies" | "views", snaps: SnapshotRow[], listed: string[], what: string): KpiSeries {
+  const pick = (r: SnapshotRow) => (key === "likes" ? r.likes : key === "views" ? r.views : r.postReplies);
   const by = levelByDay(snaps, listed, pick);
   const days = [...by.keys()].sort();
   if (!days.length) return { key, since: null, points: [], kind: "level", note: `Not counted yet. ${what} are read once a day from now on.`, source: null };
@@ -386,6 +389,8 @@ export function computeKpis(data: KpiInput, snapshots: SnapshotRow[], today: str
             ),
       likes: countsSeries("likes", snaps, listed?.[platform] ?? [], "Likes"),
       postReplies: countsSeries("postReplies", snaps, listed?.[platform] ?? [], "Public replies"),
+      // X views of our live posts from the same daily free read (the page shows it once it has a reading).
+      views: countsSeries("views", snaps, listed?.[platform] ?? [], "Views"),
     };
     return { platform, label, account: (listed?.[platform]?.length ?? 0) > 1 ? listed![platform]!.join(" and ") : snaps.length ? snaps[snaps.length - 1].account : null, series, best: bestPost(data.posts ?? [], platform) };
   });

@@ -449,9 +449,9 @@ export function TrafficLight({ light, size = "md", testId = "traffic-light" }: {
 }
 
 /** a key result's target in plain words, or "no target yet" in grey (the owner, 17:57Z: "what is the target?"). */
-function KrTarget({ r, label }: { r: ScorecardRow; label?: boolean }) {
+function KrTarget({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
   return r.target ? (
-    <span className="text-foreground [overflow-wrap:anywhere]" data-testid="kr-target-text">
+    <span className={cn("text-foreground [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : r.target} data-testid="kr-target-text">
       {label && <span className="text-muted-foreground">Target </span>}
       {r.target}
     </span>
@@ -462,14 +462,15 @@ function KrTarget({ r, label }: { r: ScorecardRow; label?: boolean }) {
   );
 }
 
-/** where it stands now: the value, its note (when it was read, the due date), a dot in its colour. */
-function KrNow({ r, label }: { r: ScorecardRow; label?: boolean }) {
+/** where it stands now: the value, its note (when it was read, the due date), a dot in its colour. In the row it is cut to
+ * two lines (the owner: "please make rows reasonable height"); the whole text opens with the row (`full`). */
+function KrNow({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
   return (
-    <span className="inline-flex min-w-0 items-baseline gap-1.5" data-testid="kr-now-text">
-      <span className="translate-y-[1px] self-center">
+    <span className="inline-flex min-w-0 items-start gap-1.5" data-testid="kr-now-text">
+      <span className="mt-[5px] shrink-0">
         <TrafficLight light={r.state} size="sm" testId="kr-light" />
       </span>
-      <span className="min-w-0 [overflow-wrap:anywhere]">
+      <span className={cn("min-w-0 [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : [r.value, r.note].filter(Boolean).join(" · ")} data-testid={full ? "kr-now-full" : "kr-now-short"}>
         {label && <span className="text-muted-foreground">Now </span>}
         <span className="font-semibold tabular-nums text-foreground">{r.value}</span>
         {r.note && <span className="text-muted-foreground"> · {r.note}</span>}
@@ -494,7 +495,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
         <span>tap a key result for the work under it</span>
       </p>
       <ul className="overflow-hidden rounded-xl border bg-card" data-testid="kr-sheet">
-        <li aria-hidden="true" className="hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,11rem)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid" data-testid="kr-sheet-head">
+        <li aria-hidden="true" className="hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid" data-testid="kr-sheet-head">
           <i />
           <span className="py-2">Key result</span>
           <span className="py-2">Target</span>
@@ -507,7 +508,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
           const toggle = () => onOpen?.(isOpen ? null : r.label);
           return (
             <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className="border-b last:border-b-0" data-testid="kr-item" data-state={r.state}>
-              <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,11rem)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
+              <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
                 <i className="block self-stretch" style={{ background: STATE_FILL[r.state] }} aria-hidden="true" />
                 <span className="grid min-w-0 gap-0.5 py-3">
                   <span className="text-[15px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="kr-name">
@@ -541,6 +542,16 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
               </button>
               {isOpen && (
                 <div className="grid gap-1.5 border-t bg-muted/20 px-3 py-3 sm:px-5" data-testid="kr-detail">
+                  {/* the whole status and target, cut to two lines in the row above: the full text on tap. */}
+                  <div className="grid gap-1 rounded-md border bg-card px-2.5 py-2 text-sm" data-testid="kr-detail-status">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status now</span>
+                    <KrNow r={r} full />
+                    {r.target && (
+                      <span className="text-xs text-muted-foreground">
+                        Target <KrTarget r={r} full />
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-foreground">Work under this key result</p>
                   {!all.length && <p className="text-xs text-muted-foreground">Nothing is working on this yet. The Delivery Manager opens a row for it on the next wake.</p>}
                   {all.map((w) => {

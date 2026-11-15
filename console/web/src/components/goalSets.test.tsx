@@ -187,7 +187,17 @@ describe("goal sets: the screens", () => {
     // green with no work: no mark in red; red with none: "nothing working on this"
     expect(within(krs[2]).getByTestId("kr-no-work").textContent).toBe("nothing working on this");
     expect(within(krs[0]).queryByTestId("kr-detail")).toBeNull();
+    // the owner: "please make rows reasonable height": in the row the status and target are cut to two lines, full on hover
+    const short = within(within(krs[0]).getByTestId("kr-now")).getByTestId("kr-now-short");
+    expect(short.className).toContain("line-clamp-2");
+    expect(short.getAttribute("title")).toBe("0 of 5 · read 13 Nov");
+    expect(within(within(krs[0]).getByTestId("kr-target")).getByTestId("kr-target-text").className).toContain("line-clamp-2");
+    expect(within(krs[0]).getByTestId("kr-row").className).toContain("sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto]");
     fireEvent.click(within(krs[0]).getByTestId("kr-row"));
+    // ...and a tap opens the whole status and target, uncut, above its work
+    const whole = within(screen.getAllByTestId("kr-item")[0]).getByTestId("kr-detail-status");
+    expect(within(whole).getByTestId("kr-now-full").className).not.toContain("line-clamp");
+    expect(whole.textContent).toBe("Status now0 of 5 · read 13 NovTarget 5 by 17 Nov");
     const items = within(screen.getAllByTestId("kr-item")[0]).getAllByTestId("kr-work-item");
     expect(items.map((x) => [x.textContent, x.dataset.state])).toEqual([
       ["E901-S1Build the pageready", "amber"],
