@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { splitDecisions } from "@/lib/cardKind";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin } from "lucide-react";
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
@@ -241,8 +242,10 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const campaigns = !!useSkin().campaigns;
   const blockedHere = useBlocked(statuses, { keep: project.keep });
   // spines not read yet: no number (never a low count), as before
-  const openNeeds = statuses?.loading ? null : blockedHere.length;
-  const teamReview = reviewCards(allCards, { keep: project.keep }).length;
+  // E948-S103: a review card that waits on his choice is counted red with Blocked, as the Inbox's Decisions bucket is
+  const split = splitDecisions(reviewCards(allCards, { keep: project.keep }));
+  const openNeeds = statuses?.loading ? null : blockedHere.length + split.decisions.length;
+  const teamReview = split.review.length;
   // the social skin lists real campaigns and their jobs only (campaignMilestones): every other milestone of the world
   // (a house decision, a server, taxes) is team work and stays on the team side.
   const { data: camps } = useCampaigns();
@@ -1030,8 +1033,10 @@ function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   const { keep } = useProject();
   const { data: statuses } = useStatusBatch();
   const blockedHere = useBlocked(statuses, { keep });
-  const needsYou = statuses?.loading ? null : blockedHere.length;
-  const review = useReviewCards({ keep }).cards?.length;
+  const reviewCardsNow = useReviewCards({ keep }).cards;
+  const split = splitDecisions(reviewCardsNow);
+  const needsYou = statuses?.loading ? null : blockedHere.length + split.decisions.length;
+  const review = reviewCardsNow && split.review.length;
   const unread = counts?.chat ?? 0;
   // the same desk Chat opens (pages/Chat ChatPage): the home world's Team desk, or the world's own desk in its skin.
   const world = useQuery(() => worldId(), []);

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { splitDecisions } from "@/lib/cardKind";
 import { Inbox } from "lucide-react";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useProject } from "@/lib/project";
@@ -13,8 +14,10 @@ export const INBOX_PATH = "inbox";
 export function InboxLine() {
   const { keep } = useProject();
   const { data: statuses } = useStatusBatch();
-  const blocked = useBlocked(statuses, { keep }).length;
-  const review = useReviewCards({ keep }).cards?.length ?? 0;
+  // E948-S103: decisions wait on him with Blocked; finished work is to review
+  const split = splitDecisions(useReviewCards({ keep }).cards);
+  const blocked = useBlocked(statuses, { keep }).length + split.decisions.length;
+  const review = split.review.length;
   if (statuses?.loading || blocked + review === 0) return null;
   const parts = [blocked ? `${blocked} waiting on you` : "", review ? `${review} to review` : ""].filter(Boolean).join(", ");
   return (

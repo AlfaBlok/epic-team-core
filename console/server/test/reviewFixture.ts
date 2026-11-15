@@ -36,7 +36,7 @@ export const cardText = (ref: string, o: { evidence?: string; title?: string; ne
     "  - ✓ The page opens on a phone.",
     `evidence: ${o.evidence ?? "https://team.example/audit"}`,
     "screenshot: shot.png",
-    "source: You asked for it in your voice note of 12 Nov.",
+    "source: Your voice note of 12 Nov: \"keep the test page\".",
     "decision: Is the test page good enough to keep? The team recommends keeping it.",
     ...(o.next?.length ? ["next:", ...o.next.map((n) => `  - ${n}`)] : []),
     ...(o.completes ? [`completes: ${o.completes}`] : []),

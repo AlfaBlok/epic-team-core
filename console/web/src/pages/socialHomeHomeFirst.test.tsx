@@ -70,7 +70,7 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
     expect(names(screen.getByTestId("campaigns-of-brand-campaign"))).toEqual(["Epic launch"]);
     // the campaigns come before the inbox (Blocked, review) and the widgets
     const campaigns = screen.getByTestId("project-campaigns");
-    const blocked = await screen.findByText(/Blocked, waiting on you/);
+    const blocked = await screen.findByText(/^Blocked on you/);
     expect(campaigns.compareDocumentPosition(blocked) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -142,7 +142,7 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
     at(<TeamPage />);
     const band = await screen.findByTestId("other-world");
     const campaigns = screen.getByTestId("project-campaigns");
-    const blocked = await screen.findByText(/Blocked, waiting on you/);
+    const blocked = await screen.findByText(/^Blocked on you/);
     const review = await screen.findByTestId("waiting-for-review");
     expect(campaigns.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(band.compareDocumentPosition(blocked) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

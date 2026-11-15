@@ -42,7 +42,7 @@ describe("WaitingCard", () => {
     // one short heading without the "You decide:" verb; the question is not repeated when the heading says all of it
     expect(screen.getByTestId("ask-lead").textContent).toBe("Ship with one logger or two?");
     expect(screen.queryByTestId("ask-question")).toBeNull();
-    expect(screen.getByTestId("card-kind").textContent).toBe("Decide"); // the kind is a word in the meta line, not "Decide: …"
+    expect(screen.getByTestId("card-kind").textContent).toBe("Decision"); // the kind is a word in the meta line, not "Decide: …"
     expect(screen.getByTestId("card-meta").className).toMatch(/text-muted-foreground/);
     expect(screen.queryByTestId("ask-kind")).toBeNull(); // no kind pill
     expect(screen.getByTestId("ask-lead").className).not.toMatch(/font-semibold|font-bold/);
@@ -463,7 +463,7 @@ describe("WaitingOnYou", () => {
     expect(section.textContent).toMatch(/^Blocking E904 steward now/);
     expect((within(section.firstElementChild as HTMLElement).getByText("run thread").closest("a") as HTMLAnchorElement).getAttribute("href")).toBe(threadHref("th_run"));
     const cards = screen.getAllByTestId("waiting-card");
-    expect(within(cards[0]).getByTestId("card-kind").textContent).toBe("Approve");
+    expect(within(cards[0]).getByTestId("card-kind").textContent).toBe("Decision");
     expect(within(cards[0]).getByTestId("ask-lead").textContent).toBe("Approve the T4 deploy window?");
     expect(section.contains(cards[0])).toBe(true);
     expect(section.contains(cards[1])).toBe(false);

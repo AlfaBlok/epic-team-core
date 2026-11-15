@@ -36,7 +36,7 @@ export interface CardType {
 }
 export type CardKind = "decision" | "review" | "do" | "answer" | "key" | "news";
 export const KIND_NAME: Record<CardKind, string> = {
-  decision: "Decide",
+  decision: "Decision",
   review: "Review",
   do: "Do",
   answer: "Answer",

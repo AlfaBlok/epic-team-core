@@ -44,7 +44,7 @@ describe("card age (T48-S11)", () => {
     expect(age.getAttribute("title")).toMatch(/^issued Nov 1, 2026, \d\d:55/);
     const header = age.parentElement!;
     expect(header.getAttribute("data-testid")).toBe("card-meta");
-    expect(within(header).getByTestId("card-kind").textContent).toBe("Decide");
+    expect(within(header).getByTestId("card-kind").textContent).toBe("Decision");
     expect(within(screen.getByTestId("card-foot")).getByTestId("ask-code").textContent).toBe("T9-A1");
     fireEvent.click(screen.getByTestId("ask-lead"));
     expect(screen.getByTestId("waiting-details").textContent).not.toMatch(/waiting/);

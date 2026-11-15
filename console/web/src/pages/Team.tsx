@@ -23,7 +23,7 @@ import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
-import { ClosedGoalsFold, WaitingForReview } from "@/components/review";
+import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
@@ -415,7 +415,12 @@ export function TeamPage({
             {keeps.blocked && (
               <Slot name="social-blocked" fallback={420}>
                 {/* the phone Home: no laptop switch here, it is EpicTeam's (the Mac list), as on EpicTeam's quiet Inbox. */}
-                <WaitingOnYou title="Blocked, waiting on you" fold="blocked" part="blocked" />
+                <WaitingOnYou title="Blocked on you" fold="blocked" part="blocked" />
+              </Slot>
+            )}
+            {keeps.review && (
+              <Slot name="social-decisions" fallback={420}>
+                <InboxDecisions />
               </Slot>
             )}
             {keeps.goals && (
@@ -425,7 +430,7 @@ export function TeamPage({
             )}
             {keeps.review && (
               <Slot name="social-review" fallback={420}>
-                <WaitingForReview fold="review" closedGoals={false} />
+                <InboxDoneForReview />
               </Slot>
             )}
             {keeps.kinds.length > 0 && (
@@ -475,9 +480,15 @@ export function TeamPage({
           {/* an account the team needs, connected with one tap (Google's own page, the account named). */}
           {keeps.blocked && <ConnectCards where="inbox" />}
           <SlotStack name="inbox">
+            {/* E948-S103 (vn_a8293638): cards that wait on his choice sit in their own bucket, above finished work */}
+            {reviewFirst && keeps.review && (
+              <Slot name="decisions" fallback={420}>
+                <InboxDecisions />
+              </Slot>
+            )}
             {reviewFirst && keeps.review && (
               <Slot name="review" fallback={420}>
-                <WaitingForReview fold="review" closedGoals={false} />
+                <InboxDoneForReview />
               </Slot>
             )}
             {keeps.blocked && (
@@ -489,6 +500,11 @@ export function TeamPage({
                 one list and waits on him (red); then finished work and the team's ideas and digests for his review (green);
                 the rest of his inbox's history (closed goals, Mac agent, snoozed, decided for you, coming up, answered) is
                 one folded line. His goals and their numbers live on the objectives screen, not here. */}
+            {!reviewFirst && keeps.review && (
+              <Slot name="decisions" fallback={420}>
+                <InboxDecisions />
+              </Slot>
+            )}
             {keeps.goals && (
               <Slot name="goals-to-set">
                 <InboxGoalsToSet scorecard={scorecardId} />
@@ -496,7 +512,7 @@ export function TeamPage({
             )}
             {!reviewFirst && keeps.review && (
               <Slot name="review" fallback={420}>
-                <WaitingForReview fold="review" closedGoals={false} />
+                <InboxDoneForReview />
               </Slot>
             )}
             {keeps.kinds.length > 0 && (

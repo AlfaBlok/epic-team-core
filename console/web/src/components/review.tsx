@@ -15,6 +15,7 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
+import { CARD_WORD, DECIDE_QUESTION, isDecisionCard } from "@/lib/cardKind";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
@@ -54,14 +55,21 @@ type Listed = ReviewItem & { milestoneTitle?: string };
 export function WaitingForReview({
   fold,
   only,
-  title = "Done, waiting for your review",
+  title = REVIEW_SECTION,
   closedGoals = true,
+  testId = "waiting-for-review",
+  tone = "review",
+  empty = "Nothing finished waiting for your review.",
 }: {
   fold?: string;
   only?: (i: ReviewItem) => boolean;
   title?: string;
   /** the Inbox shows its closed goals under Everything else, so it turns them off here. */
   closedGoals?: boolean;
+  /** E948-S103: the Decisions bucket is this list again, its own test id, red (it waits on his choice) */
+  testId?: string;
+  tone?: "review" | "needs-you";
+  empty?: string;
 } = {}) {
   // tagged "inbox", so a snooze refreshes this list and the green pill (counts) together.
   // the cards are `useReviewCards`, the list the green pills count (one fetch, this browser's snoozes and presses
@@ -145,16 +153,16 @@ export function WaitingForReview({
         title={title}
         count={data ? items.length : fold && !error ? undefined : 0}
         hideZero={!fold}
-        tone="review"
-        testId="waiting-for-review"
+        tone={tone}
+        testId={testId}
         open={open || !!hits}
         onToggle={fold ? setOpen : undefined}
-        actions={fold && <SortControl value={sort} onChange={setSort} testId="waiting-for-review" />}
+        actions={fold && <SortControl value={sort} onChange={setSort} testId={testId} />}
       >
         <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
         {error && <ErrorBox error={error} muted />}
-        {!data && !error && <SkeletonCards count={undefined} testId="waiting-for-review-loading" />}
-        {data && items.length === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing to review matches “{search.q}”.</p> : <Empty>Nothing finished waiting for your review.</Empty>)}
+        {!data && !error && <SkeletonCards count={undefined} testId={`${testId}-loading`} />}
+        {data && items.length === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing here matches “{search.q}”.</p> : <Empty>{empty}</Empty>)}
         {rows.length > 0 && (
           <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="review-feed">
             {rows.map(({ slot, item: i, sent }, n) =>
@@ -209,6 +217,15 @@ export function WaitingForReview({
       )}
     </>
   );
+}
+
+/** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
+export function InboxDecisions() {
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." />;
+}
+/** E948-S103: Done, waiting for your review keeps only finished work he marks done. */
+export function InboxDoneForReview() {
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} />;
 }
 
 /**
@@ -461,7 +478,7 @@ export function mainButtonLabel(face: { closesGoal?: boolean; next?: CardFace["n
  */
 /** step titles in one sentence: each without its own closing full stop, so "…for the app., Three…" never shows (vn_e751eeeb). */
 export const joinSteps = (titles: string[]) => titles.map((t) => t.trim().replace(/[.。]+$/, "")).join(", ");
-export const DECIDE_QUESTION = /^(?:do|should|shall|will|can|would) (?:we|the team|i)\b[^?]*\?/i;
+export { DECIDE_QUESTION } from "@/lib/cardKind";
 export type DecisionChoice = { label: string; sub: string; start: boolean; recommended: boolean };
 export function decisionChoices(face: Pick<CardFace, "decision" | "options" | "next">): DecisionChoice[] | undefined {
   const next = face.next ?? [];
@@ -501,6 +518,10 @@ export function decisionChoices(face: Pick<CardFace, "decision" | "options" | "n
   if (!out.some((c) => c.recommended)) out[0].recommended = true;
   return [...out.filter((c) => c.recommended), ...out.filter((c) => !c.recommended)];
 }
+
+export { CARD_WORD, FEEDBACK_OPTION, isDecisionCard } from "@/lib/cardKind";
+export const DECISIONS_SECTION = "Decisions waiting on you";
+export const REVIEW_SECTION = "Done, waiting for your review";
 
 const MARK: Record<TreeLine["mark"], string> = { done: "✓", progress: "◐", this: "●", next: "○" };
 
@@ -834,7 +855,9 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   return (
     <article className={CARD_FRAME} data-card-shell="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
       <div className={CARD_META} data-card-meta="" data-testid="review-crumb">
-        <span className="font-medium text-foreground" data-card-kind-word="">Review</span>
+        <span className="font-medium text-foreground" data-card-kind-word="" data-testid="review-kind-word">
+          {isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review}
+        </span>
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {item.createdAt && <RelTime iso={item.createdAt} />}
         {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}

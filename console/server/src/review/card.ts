@@ -387,6 +387,32 @@ export function sourceProblem(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * E948-S102 (the owner 2026-11-15, vn_b19ddf2d: cards ask him things he cannot place, a talk he never asked for, a
+ * strategy question that could mean many things): the decision opens with the one question he answers, one sentence
+ * ending in a question mark, then the team's pick. A statement, two questions or two joined by "and" is held.
+ */
+export function decisionAskProblem(decision: string): string | undefined {
+  const bare = outsideLinks(decision).trim();
+  const first = bare.split(/(?<=[.?!])\s+/)[0] ?? "";
+  const fix = "open it with the one question he answers, like Is this the forecast you wanted? Then the team's pick";
+  if (!first.endsWith("?")) return `the decision does not ask a question: ${fix}`;
+  if ((bare.match(/\?/g) ?? []).length > 1 || /,?\s+(?:and|or)\s+(?:is|are|do|does|did|should|shall|can|could|will|would|was|were)\s+\w+/i.test(first))
+    return `the decision asks more than one thing: ${fix}`;
+  return undefined;
+}
+
+/**
+ * E948-S102: the source lets him place the card. It quotes his own words (in quotes) or names who raised it and why
+ * ("The Gap finder raised it: …"); a card that only says "your voice note of 14 Nov" is held.
+ */
+export const RAISED_BY = /\b(?:raised|found|spotted|proposed|flagged|noticed|suggested)\b/i;
+export function sourceWordsProblem(source: string): string | undefined {
+  const bare = outsideLinks(source);
+  if (/["“”«»]/.test(bare) || RAISED_BY.test(bare)) return undefined;
+  return 'the source does not say where it came from in his words: quote his key words in quotes, or say who raised it and why';
+}
+
 export interface GateInput {
   card?: CardFields;
   /** The project's plain name and the goal sentence (the card's top line). */
@@ -427,11 +453,15 @@ export function gateProblems(g: GateInput): string[] {
   // the card opens with where it came from and ends with the one decision asked: a card with neither is held back
   if (!c.source?.trim() && !c.from?.name) out.push("the source is missing: say where it came from, his words with their date and a link, or who raised it and why");
   if (c.source?.trim()) add(sourceProblem(c.source));
+  // E948-S102: the source lets him place it, in his own words, or names who raised it
+  if (c.source?.trim() && !c.from?.name) add(sourceWordsProblem(c.source));
   if (!c.decision?.trim()) out.push("the decision is missing: name the one decision asked of him, in plain words, with the team's recommendation");
   else {
     add(plainProblem("the decision", c.decision, CARD_LIMITS.decision));
     // E948-S85: a decision that sends him to act somewhere off the card links that place (his voice note of 12 Nov: "I need to see a link")
     add(decisionLinkProblem(c.decision));
+    // E948-S102: the card says plainly what it asks, one question he can answer
+    add(decisionAskProblem(c.decision));
   }
   // E948-S69: a decision card's buttons each name what happens next, `<label>: <next step>`
   if (c.options) {

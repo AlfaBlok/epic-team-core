@@ -125,7 +125,7 @@ export function reviewLead(face: { title: string; taskGoal?: string }): Lead {
  * the card's
  * parts in the round 2 mockup's order. The kind is one plain word in the meta line.
  */
-export const KIND_WORD: Record<LeadKind, string> = { approve: "Approve", decide: "Decide", do: "Do", give: "Answer", check: "Review", answer: "Answer" };
+export const KIND_WORD: Record<LeadKind, string> = { approve: "Decision", decide: "Decision", do: "Do", give: "Answer", check: "Review", answer: "Answer" };
 
 /** a page link the ask opens with ("http://…: record four videos", "Mac page: http://… (Copy button) — …"). */
 const LEAD_URL = /^\s*(?:mac page\s*:\s*)?https?:\/\/\S+(?:\s*\([^)]*\))?(?:\s+and\s+https?:\/\/\S+(?:\s*\([^)]*\))?)*?(?:\s+[:—–-]\s+|:\s+|\s*[—–]\s*)/i;

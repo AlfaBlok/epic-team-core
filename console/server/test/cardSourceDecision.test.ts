@@ -15,10 +15,10 @@ const without = (key: string) => cardText("E941-S2").split("\n").filter((l) => !
 describe("E948-S58 source and decision on every card", () => {
   it("parses source and decision, with their synonyms", () => {
     const c = parseCard(cardText("E941-S2"))!;
-    expect(c.source).toBe("You asked for it in your voice note of 12 Nov.");
+    expect(c.source).toBe('Your voice note of 12 Nov: "keep the test page".');
     expect(c.decision).toBe("Is the test page good enough to keep? The team recommends keeping it.");
-    const s = parseCard(without("source").replace("decision:", "You decide:").replace("---\nrow:", "---\nWhere it came from: Sam said it on 12 Nov.\nrow:"))!;
-    expect(s.source).toBe("Sam said it on 12 Nov.");
+    const s = parseCard(without("source").replace("decision:", "You decide:").replace("---\nrow:", "---\nWhere it came from: Sam said \"do it\" on 12 Nov.\nrow:"))!;
+    expect(s.source).toBe('Sam said "do it" on 12 Nov.');
     expect(s.decision).toMatch(/^Is the test page/);
     expect(gateProblems({ card: parseCard(cardText("E941-S2"))!, ...G })).toEqual([]);
   });
@@ -61,5 +61,29 @@ describe("E948-S85 a card's decision links the place it sends him to", () => {
     expect(decisionLinkProblem("Does the mic now record in place for you? The team recommends yes once you try it on your phone.")).toBeUndefined();
     const card = cardText("E941-S2").replace(/^decision:.*$/m, "decision: Log in to the console and press Save. The team recommends yes.");
     expect(gateProblems({ card: parseCard(card)!, ...G }).join(" ")).toMatch(/does not link the place/);
+  });
+});
+
+// E948-S102: the owner, vn_b19ddf2d: cards ask him things he cannot place. The source says where it came from in his words,
+// and the decision says plainly what it asks, one question.
+describe("E948-S102 every card says where it came from and what it asks, plainly", async () => {
+  const { decisionAskProblem, sourceWordsProblem } = await import("../src/review/card.js");
+  it("holds a decision that is not one question", () => {
+    expect(decisionAskProblem("Try one car on your phone. We recommend sending it an ad.")).toMatch(/does not ask a question/);
+    expect(decisionAskProblem("Does this explain the second pass, and are these checks enough? We recommend yes.")).toMatch(/more than one thing/);
+    expect(decisionAskProblem("Is this right? Should we also post it? We recommend yes.")).toMatch(/more than one thing/);
+    expect(decisionAskProblem("Which cluster first? We recommend Tenerife south-west.")).toBeUndefined();
+    expect(decisionAskProblem("Is this the forecast you wanted? We recommend keeping it.")).toBeUndefined();
+  });
+  it("holds a source with neither his words nor who raised it", () => {
+    expect(sourceWordsProblem("Your voice note, 14 Nov: what we spend a day.")).toMatch(/in his words/);
+    expect(sourceWordsProblem('Your voice note, 14 Nov: "will we run out before the reset".')).toBeUndefined();
+    expect(sourceWordsProblem("The Gap finder raised it: two goals had no owner.")).toBeUndefined();
+  });
+  it("the gate holds such a card as card needs rewriting", () => {
+    const c = parseCard(cardText("E941-S2").replace(/^decision: .*$/m, "decision: Try it on your phone. We recommend yes.").replace(/^source: .*$/m, "source: Your voice note of 12 Nov."))!;
+    const p = gateProblems({ card: c, ...G }).join(" ");
+    expect(p).toMatch(/does not ask a question/);
+    expect(p).toMatch(/in his words/);
   });
 });

@@ -69,7 +69,7 @@ describe("the Inbox has a few clear sections, all folded when it opens", () => {
     await screen.findByTestId("inbox-goals-to-set");
     await screen.findByTestId("inbox-team-cards");
     await screen.findByTestId("inbox-everything-else");
-    await waitFor(() => expect(sections()).toEqual(["waiting-on-you", "inbox-goals-to-set", "waiting-for-review", "inbox-team-cards", "inbox-everything-else"]));
+    await waitFor(() => expect(sections().filter((t) => t !== "inbox-decisions")).toEqual(["waiting-on-you", "inbox-goals-to-set", "waiting-for-review", "inbox-team-cards", "inbox-everything-else"]));
     // the sections that merged or went
     for (const gone of ["campaign-goals", "team-cards-goal", "team-cards-idea", "team-cards-digest", "goal-talk-section", "since-yesterday"]) expect(screen.queryByTestId(gone)).toBeNull();
   });

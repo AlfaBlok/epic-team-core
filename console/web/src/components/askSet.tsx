@@ -132,7 +132,7 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
   return (
     <section className={CARD_FRAME} data-card-shell="ask-set" data-testid="ask-set" data-persona={group.persona}>
       <div className={CARD_META} data-card-meta="">
-        <span className="font-medium text-foreground" data-card-kind-word="">Approve</span>
+        <span className="font-medium text-foreground" data-card-kind-word="">Decision</span>
         {project && <span>{project}</span>}
         <span>
           {group.items.length} from the {group.persona}

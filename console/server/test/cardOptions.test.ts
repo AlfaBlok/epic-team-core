@@ -13,7 +13,7 @@ const card = (options: string) =>
     "  - ✓ The car idea fills most of the page.",
     "evidence: [Open the page](https://example.com/boring/)",
     "screenshot: shot.png",
-    "source: Your voice note of 12 November, [log](https://example.com/log)",
+    "source: Your voice note of 12 November, \"which business\" [log](https://example.com/log)",
     "decision: Which way do we go? The team recommends Spain.",
     options,
     "---",
