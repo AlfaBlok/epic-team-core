@@ -102,7 +102,7 @@ export const WORKER_TIER_RULE =
  * objectives with their live list ("which objective does this move?" opens every plan and report).
  */
 export function workerBriefRules(objectivesLine?: string, matchingViews: HisView[] = []): string[] {
-  const rules = [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
+  const rules = [objectivesRule(objectivesLine), `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, HIS_NOTES_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
   // the owner's view rides only in the brief of a row on its topic (hisViewsFor), never in every brief
   return matchingViews.length ? [...rules.slice(0, -1), hisViewRecipe(matchingViews), X_LINKS_RULE] : rules;
 }
@@ -140,6 +140,19 @@ export const hisViewRecipe = (views: HisView[] = []): string =>
 export const HIS_VIEW_POINTER =
   `Then \`python3 ~/github/${homeRepo()}/scripts/his_view.py for <your row> [--repo <your checkout>]\` says whether one of ${ownerName()}'s views in ${memoryName()} is on your row's topic ` +
   "(its world or its tags); only then read it, otherwise skip it.";
+
+/**
+ * the owner asked for one thing about ten times before it was built whole: each brief quoted only his newest note, the
+ * same ask sat on several rows, an iteration narrowed it and the card check judged only the newest quote. Every worker
+ * reads all his notes on its row and on the rows the same ask sits on, whatever its brief quoted, and answers each.
+ */
+export const HIS_NOTES_RULE =
+  `Before you plan, read every note ${ownerName()} left on your row and on the rows the same ask sits on: ` +
+  `\`python3 ~/github/${homeRepo()}/scripts/card_notes.py words <your row> [--repo <repo>=<your checkout>]\` prints them whole, ` +
+  "oldest first, with the ones where he says it again on top. Your brief may quote only the newest: the older ones still count. " +
+  "Your result answers each of his points (a point you do not deliver is a ✗ line on the card), never a narrower or wider version of it; " +
+  "when he says it again (\"how many times\", \"still not\"), say back in one line what he keeps asking and cover it whole (root L-73). " +
+  "The card check judges your card against every one of these notes.";
 
 /**
  * the X links the owner sends: each is one entry in the home repo's docs/tool-scout/tools.json with topic tags and the

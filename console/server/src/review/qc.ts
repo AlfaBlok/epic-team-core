@@ -44,6 +44,8 @@ export interface QcResult {
   held?: string[];
   /** the fresh reader's one sentence on what the card asks, and its most ambiguous part ("" = nothing). */
   reader?: { asked: string; ambiguous: string };
+  /** the press-every-button walk of the evidence page; dead = the step where it dead-ends (null = none). */
+  clicks?: { dead: string | null; shot?: string };
   shots: QcShot[];
 }
 
@@ -82,6 +84,9 @@ export function readQc(repoDir: string, row: string): QcResult | undefined {
       pass: v.pass === true,
       ...(Array.isArray(v.held) ? { held: v.held.map(String) } : {}),
       ...(v.reader && typeof v.reader === "object" ? { reader: { asked: String(v.reader.asked ?? ""), ambiguous: String(v.reader.ambiguous ?? "") } } : {}),
+      ...(v.clicks && typeof v.clicks === "object"
+        ? { clicks: { dead: v.clicks.dead ? String(v.clicks.dead) : null, ...(typeof v.clicks.shot === "string" && !v.clicks.shot.includes("/") ? { shot: v.clicks.shot } : {}) } }
+        : {}),
       shots: Array.isArray(v.shots) ? v.shots.filter((s) => s && typeof s.file === "string" && !s.file.includes("/") && !s.file.includes("..")).map((s) => ({ width: Number(s.width) || 0, file: s.file, ...(s.url ? { url: String(s.url) } : {}) })) : [],
     };
   } catch {
@@ -122,6 +127,9 @@ export function qcVerdict(o: { row: string; required: boolean; qc: QcResult | un
       reason: "not what he asked",
       problems: missed.map((w) => `${ownerName()} said "${w.said}"${w.where ? ` (${w.where})` : ""}: ${w.how || "the result does not show it"}`),
     };
+  // a link or button on the evidence page that leads nowhere
+  if (qc.clicks?.dead)
+    return { kind: "fails-qc", reason: "dead end", problems: [qc.clicks.dead, ...(qc.clicks.shot ? [`its screen: ${QC_DIR}/${qc.clicks.shot}`] : [])] };
   if (!qc.visual.pass) return { kind: "fails-qc", reason: "failed the visual check", problems: qc.visual.problems.length ? qc.visual.problems : ["the look failed and named no reason"] };
   // "Ambiguity is our enemy": held until the fresh reader finds nothing ambiguous
   if (qc.reader?.ambiguous)

@@ -144,6 +144,23 @@ describe("E948-S62 the card quality check in the review gate", () => {
     expect(byRef("E941-S2").verdict.kind).toBe("card");
   });
 
+  it("a dead end on the evidence page holds the card, naming the step and its screen; a clean walk passes", () => {
+    const dead = qcFile("E941-S1", cardText("E941-S1"), {
+      pass: false,
+      held: ["dead end: step 2, the 'Open' button on http://h/p/ does nothing"],
+      clicks: { dead: "step 2, the 'Open' button on http://h/p/ does nothing", shot: "E941-S1-dead.webp" },
+    });
+    const clean = qcFile("E941-S2", cardText("E941-S2"), { clicks: { dead: null } });
+    const made = repo({ "E941-S1": dead, "E941-S2": clean });
+    expect(byRef("E941-S1").verdict).toMatchObject({
+      kind: "fails-qc",
+      reason: "dead end",
+      problems: ["step 2, the 'Open' button on http://h/p/ does nothing", "its screen: docs/cards/qc/E941-S1-dead.webp"],
+    });
+    expect(readQc(made.dir, "E941-S2")?.clicks).toEqual({ dead: null });
+    expect(byRef("E941-S2").verdict.kind).toBe("card");
+  });
+
   it("a broken result file never passes: it reads as no check", () => {
     const made = repo({ "E941-S1": "{not json", "E941-S2": qcFile("E941-S2", cardText("E941-S2")) });
     expect(readQc(made.dir, "E941-S1")).toBeUndefined();
@@ -166,7 +183,7 @@ describe("E948-S62 judge fix: the model answers breaches as a list", () => {
   });
   it("the card judge and the ask dry run both answer what is asked and the most ambiguous part", () => {
     expect(QC_JUDGE_SCHEMA.required).toContain("reader");
-    expect(QC_JUDGE_SCHEMA.properties.reader.required).toEqual(["asked", "ambiguous"]);
+    expect(QC_JUDGE_SCHEMA.properties.reader.required).toEqual(["asked", "ambiguous", "changesAnswer"]);
     expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem"]);
     expect(JUDGE_SCHEMAS.dryrun.properties.ambiguous.type).toBe("string");
   });
