@@ -18,7 +18,7 @@ const TEAM = "cloud.example.com";
 const SOCIAL = "cloud.example.org";
 const HOSTS = `${TEAM}=team,${SOCIAL}=social`;
 
-function setup(o: { env?: NodeJS.ProcessEnv; ready?: boolean } = {}) {
+function setup(o: { env?: NodeJS.ProcessEnv; ready?: boolean; slow?: number } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "console-e88s4-"));
   const db: DB = openDb(path.join(dir, "console.db"));
   ensureAuth(db);
@@ -29,6 +29,7 @@ function setup(o: { env?: NodeJS.ProcessEnv; ready?: boolean } = {}) {
   const signups: SignupInput[] = [];
   const at = new Date().toISOString();
   const signup = async (i: SignupInput) => {
+    if (o.slow) await new Promise((r) => setTimeout(r, o.slow));
     signups.push(i);
     const world = `${i.product === "team" ? "et" : "es"}-mail-${signups.length}`;
     db.prepare("INSERT INTO tenants (id, name, skin, plan, created_at) VALUES (?, ?, ?, ?, ?)").run(world, "New", i.product === "social" ? "social" : "console", "team", at);
@@ -212,5 +213,28 @@ describe("email sign-up and password reset", () => {
     expect(b.html).toContain('href="https://x/login#reset=abc"');
     const page = LOGIN_PAGE();
     for (const s of ["/api/access/email/status", "/api/access/email/signup", "/api/access/email/confirm", "/api/access/email/reset/finish", "Forgot your password?", "Sign up with email"]) expect(page).toContain(s);
+  });
+});
+
+describe("a slow world", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("confirm answers 202 while the world is made; asking again with the same link signs in once it is ready", async () => {
+    vi.stubEnv("CONSOLE_CUSTOMER_HOSTS", HOSTS);
+    const t = setup({ env: { CONSOLE_CONFIRM_WAIT_MS: "50" }, slow: 300 });
+    try {
+      await t.req("POST", "/api/access/email/signup", { body: { email: "slow@example.com", password: "correct horse battery" } });
+      const token = t.linkOf(t.mails[0], "confirm");
+      const first = await t.req("POST", "/api/access/email/confirm", { body: { token } });
+      expect(first.status).toBe(202);
+      expect(first.json.pending).toBe(true);
+      await new Promise((r) => setTimeout(r, 400));
+      const again = await t.req("POST", "/api/access/email/confirm", { body: { token } });
+      expect(again.json).toEqual({ ok: true, next: "/" });
+      expect(again.cookies.some((c) => c.startsWith("console_session=") && c !== "console_session=")).toBe(true);
+      expect(t.signups).toHaveLength(1);
+      expect((await t.req("POST", "/api/access/email/confirm", { body: { token } })).json.error.code).toBe("invalid_confirm");
+    } finally {
+      t.cleanup();
+    }
   });
 });

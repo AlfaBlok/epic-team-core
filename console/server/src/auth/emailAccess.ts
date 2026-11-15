@@ -295,24 +295,49 @@ export function mountEmailAccess(api: Hono, o: EmailAccessOptions) {
     return c.json(SENT);
   });
 
+  /**
+   * A world can take longer to make than a proxy waits (the social world: about 100 s, past Cloudflare's 100 s limit), so a
+   * confirm answers within CONSOLE_CONFIRM_WAIT_MS (default 20 s): 202 `pending` while the world is still being made, and
+   * the page asks again with the same link. The link is spent on the first ask; only its holder (the same token) finishes.
+   */
+  const making = new Map<string, { p: Promise<{ userId: string; world: string; next: string }>; exp: number }>();
+  const waitMs = () => Math.max(0, Number(env.CONSOLE_CONFIRM_WAIT_MS ?? 20_000) || 0);
   api.post("/access/email/confirm", async (c) => {
     const no = await gate(c, false);
     if (no) return no;
     const host = hostOf(c);
+    const token = str((await body(c)).token);
+    const key = `${host}|${sha256(token)}`;
     try {
-      if (env.CONSOLE_SIGNUP === "off") throw new AuthError(403, "signup_closed", "new accounts are closed right now");
-      if (o.signupsToday() >= Math.max(0, Number(env.CONSOLE_SIGNUP_PER_DAY ?? 20) || 0)) throw new AuthError(429, "signup_full", "today's new accounts are full: try again tomorrow");
-      const t = spend("signup", str((await body(c)).token), host);
-      if (userByEmail(t.email)) throw new AuthError(400, "account_exists", "this email already has an account: log in, or reset the password");
-      const product = o.customers.get(host)!;
-      const made = await outsideRequest(() => o.signup({ email: t.email, name: t.name ?? "", product, provider: "email", host, ...(t.visit_source ? { visitSource: t.visit_source } : {}) }));
-      const u = userByEmail(t.email);
-      if (!u) throw new AuthError(400, "signup_failed", "your account could not be made: try again in a few minutes");
-      db.prepare("UPDATE users SET pw_hash = ? WHERE id = ?").run(t.pw_hash, u.id);
-      o.linkSignup(t.email, u.id, made.world);
-      o.startSession(c, host, u.id, made.world, "email");
-      return c.json({ ok: true, next: t.next || "/" });
+      for (const [k, v] of making) if (v.exp < now()) making.delete(k);
+      let job = making.get(key);
+      if (!job) {
+        if (env.CONSOLE_SIGNUP === "off") throw new AuthError(403, "signup_closed", "new accounts are closed right now");
+        if (o.signupsToday() >= Math.max(0, Number(env.CONSOLE_SIGNUP_PER_DAY ?? 20) || 0)) throw new AuthError(429, "signup_full", "today's new accounts are full: try again tomorrow");
+        const t = spend("signup", token, host);
+        if (userByEmail(t.email)) throw new AuthError(400, "account_exists", "this email already has an account: log in, or reset the password");
+        const product = o.customers.get(host)!;
+        const p = (async () => {
+          const made = await outsideRequest(() => o.signup({ email: t.email, name: t.name ?? "", product, provider: "email", host, ...(t.visit_source ? { visitSource: t.visit_source } : {}) }));
+          const u = userByEmail(t.email);
+          if (!u) throw new AuthError(400, "signup_failed", "your account could not be made: try again in a few minutes");
+          db.prepare("UPDATE users SET pw_hash = ? WHERE id = ?").run(t.pw_hash, u.id);
+          o.linkSignup(t.email, u.id, made.world);
+          return { userId: u.id as string, world: made.world, next: (t.next as string) || "/" };
+        })();
+        p.catch((e) => console.error(`email sign-up of ${t.email} on ${host}: ${(e as Error).message}`));
+        job = { p, exp: now() + 30 * 60_000 };
+        making.set(key, job);
+      }
+      let timer: NodeJS.Timeout | undefined;
+      const done = await Promise.race([job.p, new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), waitMs())))]).finally(() => clearTimeout(timer));
+      if (!done) return c.json({ pending: true, message: "Your account is being made: one more moment." }, 202);
+      making.delete(key);
+      o.startSession(c, host, done.userId, done.world, "email");
+      return c.json({ ok: true, next: done.next });
     } catch (e) {
+      making.delete(key);
+      if (!(e instanceof AuthError)) return c.json({ error: { code: "signup_failed", message: "your account could not be made: try again in a few minutes" } }, 400);
       return fail(c, e);
     }
   });

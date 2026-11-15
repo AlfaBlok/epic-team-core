@@ -36,6 +36,8 @@ import { lazyPage } from "@/lib/lazyPage";
 const ChatView = lazyPage(() => import("@/pages/Chat"), "ChatView");
 const WaitingForReview = lazyPage(() => import("@/components/review"), "WaitingForReview");
 const WaitingOnYou = lazyPage(() => import("@/components/waiting"), "WaitingOnYou");
+const ObjectivePersonas = lazyPage(() => import("@/components/objectivePersonas"), "ObjectivePersonas");
+const ObjectiveApprovals = lazyPage(() => import("@/components/objectivePersonas"), "ObjectiveApprovals");
 
 /**
  * Goal sets (the name is one setting, SET_NAME, until the owner picks one).
@@ -798,6 +800,28 @@ const TABS = [
   { id: SET_KIT_TAB, label: "Social kit" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+/**
+ * the old milestone page's tabs, folded into the objective's own (vn_748ec5a1): Summary is Key results, Waiting on you is
+ * Inbox, Tree and Backlog are the Board, Chat is the Chat desk, Definition, Deck and Approvals are Context, Activity
+ * and Settings (pause) are Personas. A link carrying an old tab opens the tab that does its job now.
+ */
+export const OLD_TAB_TO_OBJECTIVE: Record<string, Tab> = {
+  summary: "table",
+  waiting: "inbox",
+  tree: "kanban",
+  backlog: "kanban",
+  chat: "chat",
+  definitions: "context",
+  overview: "context",
+  deck: "context",
+  approvals: "context",
+  activity: "personas",
+  settings: "personas",
+  personas: "personas",
+};
+export function objectiveTab(asked: string | null): Tab {
+  return (TABS.find((t) => t.id === asked)?.id ?? (asked ? OLD_TAB_TO_OBJECTIVE[asked] : undefined) ?? "table") as Tab;
+}
 const ALL_TABS = [
   { id: "table", label: "Key results" },
   { id: "inbox", label: "Combined inbox" },
@@ -1026,6 +1050,7 @@ function Context({ node, pursuit }: { node: ScorecardNode; pursuit: ScorecardNod
           </ul>
         </section>
       )}
+      {node.milestoneId && <ObjectiveApprovals milestoneId={node.milestoneId} />}
       {node.kind === "pursuit" && (
         <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="set-effort">
           {/* the order lives in docs/pursuits.json (the drag left /pursuits with the plain list, iteration 4). */}
@@ -1047,6 +1072,8 @@ function Context({ node, pursuit }: { node: ScorecardNode; pursuit: ScorecardNod
 }
 
 function Personas({ node }: { node: ScorecardNode }) {
+  // one objective, one screen (vn_748ec5a1): its personas switch on or off right here, never on a second page.
+  if (node.milestoneId) return <ObjectivePersonas milestoneId={node.milestoneId} />;
   const teams = node.teams ?? [];
   return (
     <div className="grid gap-2" data-testid="set-personas">
@@ -1061,11 +1088,6 @@ function Personas({ node }: { node: ScorecardNode }) {
           ))}
         </ul>
       )}
-      {node.milestoneId && (
-        <Link to={`/milestones/${encodeURIComponent(node.milestoneId)}?tab=personas`} className="text-sm underline underline-offset-4">
-          Switch personas on or off
-        </Link>
-      )}
     </div>
   );
 }
@@ -1073,7 +1095,7 @@ function Personas({ node }: { node: ScorecardNode }) {
 export function GoalSetPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = (TABS.find((t) => t.id === params.get("tab"))?.id ?? "table") as Tab;
+  const tab = objectiveTab(params.get("tab"));
   const { data: pursuitsBody } = usePursuits();
   const kr = params.get("kr");
   const openKr = (label: string | null) =>

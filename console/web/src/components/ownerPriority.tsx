@@ -87,8 +87,8 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
               {red.sentence}
             </div>
           )}
-          <div>{hot ? hot.why : p.why}</div>
-          {words && (
+          {!first && <div>{hot ? hot.why : p.why}</div>}
+          {words && !first && (
             <div className="mt-1 italic text-muted-foreground">
               “{words}”{said ? ` · you said this on ${said}` : ""}
             </div>

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type DeskChat } from "@/api";
 import type { ScorecardsBody } from "@/api/pursuit-types";
-import { GoalSetPage, GoalSetsPage, SidebarGoalSets, filterChat } from "@/components/goalSets";
+import { GoalSetPage, GoalSetsPage, SidebarGoalSets, filterChat, objectiveTab } from "@/components/goalSets";
 import { SCORECARD_PATH, SCORECARDS_PATH, SET_NAME, indexScorecards, homeOf, sortInbox, type InboxRow } from "@/lib/scorecards";
 
 /**
@@ -241,6 +241,7 @@ describe("goal sets: the screens", () => {
     expect((await screen.findByTestId("set-file")).textContent).toContain("docs/scorecards/launch.json");
     expect(screen.getByTestId("objective-was").textContent).toBe("It replaces: A customer pays.");
     unmount();
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => ({ ...n, milestoneId: undefined })) });
     render(
       <MemoryRouter initialEntries={["/sets/launch?tab=personas"]}>
         <Routes>
@@ -248,7 +249,54 @@ describe("goal sets: the screens", () => {
         </Routes>
       </MemoryRouter>,
     );
+    // a node with a milestone shows its live persona controls; one with only a teams list shows that list.
     expect((await screen.findByTestId("set-persona")).textContent).toContain("every 30 min");
+  });
+
+  // one objective, one screen (the owner, vn_748ec5a1: "two dashboards for one objective"): the switch is on the objective's own tab.
+  it("one objective, one screen: its personas switch on or off in place, never on a second page", { timeout: 30000 }, async () => {
+    const m = { id: "ms_1", title: "Launch week", repo: "app", path: "docs/e.md", owner: "Sam", paused: false, createdAt: "2026-11-01T00:00:00Z" };
+    vi.spyOn(api, "getMilestone").mockResolvedValue(m as never);
+    const a = { id: "as_1", milestoneId: "ms_1", personaId: "p_1", enabled: true, writeEnabled: true, cadence: { kind: "interval", minutes: 60 }, createdAt: "2026-11-01T00:00:00Z" };
+    vi.spyOn(api, "listAssignments").mockResolvedValue([a] as never);
+    vi.spyOn(api, "listPersonas").mockResolvedValue([{ id: "p_1", name: "Builder", model: "opus" }] as never);
+    vi.spyOn(api, "listRuns").mockResolvedValue([] as never);
+    const update = vi.spyOn(api, "updateAssignment").mockResolvedValue({ ...a, enabled: false } as never);
+    const nodes = BODY.nodes.map((n) => (n.id === "launch" ? n : { ...n, milestoneId: undefined, children: [] }));
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes });
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=personas"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId("objective-personas", {}, { timeout: 15000 });
+    await within(box).findByText("Builder", {}, { timeout: 5000 });
+    expect(within(box).getByText("Builder")).toBeTruthy();
+    expect(screen.queryByText("Switch personas on or off")).toBeNull();
+    fireEvent.click(within(box).getByText("on", { selector: "label" }).querySelector("[role=switch]")!);
+    await waitFor(() => expect(update).toHaveBeenCalledWith("as_1", { enabled: false }));
+    // still the objective's screen, under its one name
+    expect(screen.getByTestId("goal-set-page").getAttribute("data-set")).toBe("launch");
+    expect(screen.queryByText("Launch week")).toBeNull();
+    expect(screen.getByTestId("objective-pause")).toBeTruthy();
+  });
+
+  it("an old milestone tab opens the objective tab that does its job now", async () => {
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=approvals"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("set-context")).toBeTruthy();
+    expect(objectiveTab("summary")).toBe("table");
+    expect(objectiveTab("waiting")).toBe("inbox");
+    expect(objectiveTab("activity")).toBe("personas");
+    expect(objectiveTab("settings")).toBe("personas");
+    expect(objectiveTab("nonsense")).toBe("table");
   });
 
   it("All goal sets: one line per set, and the combined inbox sorts across them", async () => {

@@ -199,6 +199,10 @@ main .border-amber-500\/40, main .border-amber-500\/60 { border-color: hsl(38 85
   /* plain text in the line gives way too (a week, "from the Senior advisor"); the kind word, buttons and age stay */
   main [data-card-meta]:has(a, button) > span:not([data-card-kind-word]) { flex-shrink: 1; min-width: 1.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   main [data-card-meta]:has(a, button) > a { flex-shrink: 1; min-width: 2.5rem; display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the why-it-ranks-here tag gives way too (ends in …, the whole line in its tooltip and its box) */
+  main [data-card-meta] > button[data-testid="owner-priority"] { flex-shrink: 1; min-width: 3rem; display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* its box, once tapped, takes a line of its own under the row instead of running off the card */
+  main [data-card-meta]:has([data-testid="owner-priority-why"]) { flex-wrap: wrap; }
 }
 /* the finger-sized rows above set display on top bar links; from tablet width up, what the top bar hides (the menu
    button and the brand, the sidebar shows them) stays hidden */

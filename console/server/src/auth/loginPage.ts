@@ -252,9 +252,19 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   if (confirmToken) {
     history.replaceState(null, "", "/login");
     show("confirm");
-    post("/api/access/email/confirm", { token: confirmToken })
-      .then((j) => { $("cfNote").textContent = "Confirmed. Opening your account…"; location.replace(okNext(j.next) ? j.next : "/"); })
-      .catch((err) => { $("cfNote").hidden = true; $("errCf").textContent = err.message; $("cfBack").hidden = false; });
+    // a new world can take a minute or two: the server answers 202 while it is being made, and we ask again
+    const ask = (n) => fetch("/api/access/email/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: confirmToken }) })
+      .then(async (r) => {
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 202 || (r.status >= 502 && r.status <= 524)) {
+          if (n > 30) throw new Error("this is taking too long: try the link again in a few minutes");
+          $("cfNote").textContent = j.message || "Your account is being made: one more moment.";
+          return ask(n + 1);
+        }
+        if (!r.ok) throw new Error((j.error && j.error.message) || ("error " + r.status));
+        $("cfNote").textContent = "Confirmed. Opening your account…"; location.replace(okNext(j.next) ? j.next : "/");
+      });
+    ask(0).catch((err) => { $("cfNote").hidden = true; $("errCf").textContent = err.message; $("cfBack").hidden = false; });
   }
   const resetToken = frag.get("reset");
   if (resetToken) { history.replaceState(null, "", "/login"); show("reset"); }

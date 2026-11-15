@@ -1,7 +1,7 @@
 import { MilestonePath } from "@/components/bootstrap";
 import { NeverOnBadge } from "@/components/neverOn";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Archive, ArrowLeft, ArrowUp, CheckSquare, ChevronRight, ExternalLink, Info, MessageCircle, Settings2, OctagonX, Pencil, Play, Plus, Send, Square, Trash2, Unlink, X } from "lucide-react";
 import { AskKindTag } from "@/components/askKind";
 import { MilestoneArc } from "@/components/arc";
@@ -56,6 +56,8 @@ import { useBlocked, useMilestoneStatus } from "@/lib/inbox";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
 import { InlineMd } from "@/components/inlineMd";
+import type { ScorecardNode } from "@/api/pursuit-types";
+import { scorecardHref } from "@/lib/scorecards";
 export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
@@ -105,7 +107,43 @@ function tabSearch(tab: Tab, node?: string, show?: TreeFilterKey[], home: Tab = 
 }
 const tabHref = (tab: Tab, node?: string, show?: TreeFilterKey[]) => `?${new URLSearchParams(tabSearch(tab, node, show))}`;
 
+/**
+ * One objective, one screen (the owner, vn_748ec5a1): "It's like we have two
+ * contexts, like two dashboards for one objective. That is a total, absolute, utter mess." A milestone that is an
+ * objective's (its scorecard node, first in his order, carries its id) opens that objective's screen, on the tab that
+ * does the old tab's job now (OLD_TAB_TO_OBJECTIVE); a campaign keeps its page, and a milestone no objective holds
+ * (another repo's own milestone) keeps this page until it has one.
+ */
+export function objectiveOf(nodes: readonly ScorecardNode[] | undefined, milestoneId: string): ScorecardNode | undefined {
+  const all: ScorecardNode[] = [];
+  const walk = (ns: readonly ScorecardNode[]) => {
+    for (const n of ns) all.push(n);
+    for (const n of ns) walk(n.children ?? []);
+  };
+  walk(nodes ?? []);
+  return all.find((n) => n.milestoneId === milestoneId);
+}
+
 export function MilestonePage() {
+  const { id = "" } = useParams();
+  const [params] = useSearchParams();
+  const camps = useCampaigns();
+  const { data: sets, error } = useQuery(() => api.listScorecards(), []);
+  const campaign = campaignsByMilestone(camps.data?.campaigns).has(id);
+  if (!sets && !error) return <Loading />;
+  if (camps.loading && !camps.data) return <Loading />;
+  const objective = campaign ? undefined : objectiveOf(sets?.nodes, id);
+  if (objective) {
+    const asked = params.get("tab") ?? (params.get("node") ? "tree" : "summary");
+    const next = new URLSearchParams(params);
+    next.set("tab", asked);
+    next.delete("node");
+    return <Navigate to={`${scorecardHref(objective.id)}?${next}`} replace />;
+  }
+  return <MilestoneScreen />;
+}
+
+function MilestoneScreen() {
   const { id = "" } = useParams();
   const w = useWords();
   const [params, setParams] = useSearchParams();
@@ -1482,7 +1520,7 @@ function PersonaFilter({ persona, id, onClear }: { persona?: Persona; id: string
   );
 }
 
-function ActivityTab({ m }: { m: Milestone }) {
+export function ActivityTab({ m }: { m: Milestone }) {
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
   const { data: runs, loading } = useQuery(() => api.listRuns({ milestoneId: m.id }), [m.id]);
