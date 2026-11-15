@@ -31,7 +31,11 @@ const redLabel = (r: NonNullable<OwnerPriority["redLine"]>) => (r.name ? `Red li
 const PRESSING_LABEL: Record<NonNullable<OwnerPriority["pressing"]>["kind"], string> = {
   frustrated: "You were frustrated",
   repeated: "You asked again",
+  first: "First until it is done",
 };
+/** a standing rule's marker names it with its live count ("Acme testers first · 2 of 5"). */
+const pressingLabel = (h: NonNullable<OwnerPriority["pressing"]>) =>
+  h.kind === "first" && h.rule ? `${h.rule} first${h.count && h.count.value != null ? ` · ${h.count.value} of ${h.count.reaches}` : ""}` : PRESSING_LABEL[h.kind];
 
 /**
  * the owner's level for an inbox item (the Prioritizer read his voice notes and wrote it into the repo); a tap shows
@@ -43,7 +47,7 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
   if (!p) return null;
   const red = p.redLine;
   const hot = p.pressing;
-  const label = hot ? PRESSING_LABEL[hot.kind] : red ? redLabel(red) : LABEL[p.level];
+  const label = hot ? pressingLabel(hot) : red ? redLabel(red) : LABEL[p.level];
   const why = hot ? hot.why : red ? red.sentence : p.why;
   const words = hot ? hot.words : p.words;
   const said = hot ? hot.said : p.said;
@@ -81,7 +85,9 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
           )}
           <div className="mt-1 text-xs text-muted-foreground">
             {hot
-              ? "First in your inbox until you answer it."
+              ? hot.kind === "first"
+                ? `First in your inbox until ${hot.count ? `${hot.count.reaches} ${hot.count.label ?? "people"}` : "it is done"}${hot.count?.value != null ? `, ${hot.count.value} now` : ""}.`
+                : "First in your inbox until you answer it."
               : <>Set by the Prioritizer from your voice notes{(red?.at ?? p.at) ? ` on ${red?.at ?? p.at}` : ""}.</>}
           </div>
         </div>

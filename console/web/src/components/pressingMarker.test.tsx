@@ -49,3 +49,15 @@ describe("the review list moves above Blocked only for a pressing review card", 
     expect(pressingInReviewOnly(undefined, [], [])).toBe(false);
   });
 });
+
+describe("a standing first rule", () => {
+  it("names the rule with its live count and says when it stops", () => {
+    const p = { level: "high" as const, why: "High.", ref: "E907-S9", pressing: { kind: "first" as const, rule: "Acme testers", why: "You asked that Acme tester work comes first.", count: { value: 2, reaches: 5, label: "active Acme testers" } } };
+    render(<OwnerPriorityTag p={p} />);
+    const tag = screen.getByTestId("owner-priority");
+    expect(tag.textContent).toBe("Acme testers first · 2 of 5");
+    expect(tag.getAttribute("data-pressing")).toBe("first");
+    fireEvent.click(tag);
+    expect(screen.getByTestId("owner-priority-why").textContent).toContain("First in your inbox until 5 active Acme testers, 2 now.");
+  });
+});

@@ -63,7 +63,7 @@ import { claimsFor, claimsSection, mountChatDispatch, rowClaimRefusal, rowOf } f
 import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, hasStandingDuty, noteAck } from "./wakePrompt.js";
 import { mountInbox } from "./inbox/routes.js";
 import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } from "./inbox/redLineEdit.js";
-import { withCounts, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
+import { withCounts, worldFirst, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, priorityLines } from "./pursuits.js";
@@ -1645,6 +1645,8 @@ export function createApp(
     const redLines = await withCounts(worldRedLines(store, read.reposRoot)); // counts: hooks.counts (hosted: remoteCounts)
     return c.json({ redLine: redLines[0] ?? null, redLines });
   });
+  // the owner's standing rules (docs/priorities.json `first`): what leads every list, its live count and whether it is still on.
+  api.get("/inbox-first", (c) => c.json({ rules: worldFirst(store, read.reposRoot) }));
   //..S9: the Company view (its companies, the Promo, Operations and Build wheels, the social product worlds' items) and
   //'s uptime checks every 5 minutes (opts.uptimeProbe, off in tests): the tenancy plug's (hosted/tenancy.ts).
   const buildSpinesOf = read.spines ? softSpines(read.spines) : undefined;

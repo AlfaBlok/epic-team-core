@@ -163,7 +163,7 @@ export function createStatus(d: StatusDeps) {
     for (const w of worlds.values()) for (const it of (await w).items) if (!where.has(it.id)) where.set(it.id, it);
     const locate = (it: PendingItem) => {
       const w = where.get(it.id);
-      return { repo: it.repo ?? w?.repo, path: it.path ?? w?.path, row: w?.row, code: it.code ?? w?.code };
+      return { repo: it.repo ?? w?.repo, path: it.path ?? w?.path, row: w?.row, code: it.code ?? w?.code, title: it.title, question: w?.question };
     };
     const items = byMilestonePriority(
       [...unique.values()].map((it) => ({ it, alsoIn: alsoIn.get(it.id), milestoneId: it.milestoneId, ...locate(it) })),

@@ -58,9 +58,12 @@ export interface JordiPriority {
  * every list (above the red line) until it is answered or closed. `scripts/pressing.py` writes the entries into the
  * levels file from his voice notes (and the desk adds one by hand); the console only reads them.
  */
-export type PressingKind = "frustrated" | "repeated";
+export type PressingKind = "frustrated" | "repeated" | "first";
 export interface PressingMark {
   kind: PressingKind;
+  /** kind `first`: the rule's name ("Acme testers") and its live count, until it switches off by itself. */
+  rule?: string;
+  count?: FirstCount;
   why: string;
   words?: string;
   said?: string;
@@ -73,6 +76,29 @@ export interface PressingEntry extends PressingMark {
   ref: string;
   path?: string;
 }
+/**
+ * a standing rule the owner gave ("every card and ask about the product's testers ranks first, until five testers use it"): every item whose words or red line match leads every list, above what is pressing, until a live count
+ * reaches its number, then the rule switches off by itself. Written into the levels file as `first`; no section of its own.
+ */
+export interface FirstRule {
+  name: string;
+  why: string;
+  words?: string;
+  said?: string;
+  source?: string;
+  /** an item matches when its title or question says one of `words` and names one of `products` (or lives in one of `repos`), or sits on one of `redLines`. */
+  match: { words: string[]; products: string[]; repos: string[]; redLines: string[] };
+  /** the rule is on until this count (`<source>#<field>`, remoteCounts.ts) reaches `reaches`; an unread count keeps it on. */
+  until?: { source: string; reaches: number; label?: string };
+}
+export interface FirstCount {
+  value: number | null;
+  reaches: number;
+  label?: string;
+}
+/** At most this many rules: a standing rule or two, never a second backlog. */
+export const FIRST_MAX = 3;
+
 /** At most this many items lead the inbox as pressing (the newest first in the file): a few, never a second backlog. */
 export const PRESSING_MAX = 7;
 
@@ -162,6 +188,7 @@ export interface PriorityFile {
   redLine?: RedLine;
   redLines?: RedLine[];
   pressing?: PressingEntry[];
+  first?: FirstRule[];
 }
 
 const LEVELS = new Set<JordiLevel>(["high", "normal", "low"]);
@@ -308,6 +335,52 @@ export function parsePressing(text: string, repoName: string): PressingEntry[] {
   return out;
 }
 
+/** the file's standing `first` rules (a broken one, with no name, why or match, is skipped), at most FIRST_MAX. */
+export function parseFirst(text: string): FirstRule[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const list = raw && typeof raw === "object" && Array.isArray((raw as PriorityFile).first) ? ((raw as PriorityFile).first as unknown[]) : [];
+  const out: FirstRule[] = [];
+  for (const it of list) {
+    if (!it || typeof it !== "object" || Array.isArray(it)) continue;
+    const e = it as Record<string, unknown>;
+    const s = (o: Record<string, unknown>, k: string) => (typeof o[k] === "string" && (o[k] as string).trim() ? (o[k] as string).trim() : undefined);
+    const strs = (o: Record<string, unknown>, k: string) => (Array.isArray(o[k]) ? (o[k] as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()) : []);
+    const m = e.match && typeof e.match === "object" && !Array.isArray(e.match) ? (e.match as Record<string, unknown>) : {};
+    const match = { words: strs(m, "words"), products: strs(m, "products"), repos: strs(m, "repos"), redLines: strs(m, "redLines") };
+    const name = s(e, "name");
+    const why = s(e, "why");
+    if (!name || !why || (!match.words.length && !match.redLines.length)) continue;
+    const u = e.until && typeof e.until === "object" && !Array.isArray(e.until) ? (e.until as Record<string, unknown>) : undefined;
+    const until = u && s(u, "source") && typeof u.reaches === "number" && u.reaches > 0 ? { source: s(u, "source")!, reaches: u.reaches, ...(s(u, "label") ? { label: s(u, "label") } : {}) } : undefined;
+    out.push({ name, why, match, ...(until ? { until } : {}), ...(s(e, "words") ? { words: s(e, "words") } : {}), ...(s(e, "said") ? { said: s(e, "said") } : {}), ...(s(e, "source") ? { source: s(e, "source") } : {}) });
+    if (out.length >= FIRST_MAX) break;
+  }
+  return out;
+}
+
+/** a rule with its count read now: on while the count is unread or below its number. */
+export interface ActiveFirst extends FirstRule {
+  count?: FirstCount;
+}
+export const firstIsOn = (r: ActiveFirst) => !r.until || r.count?.value == null || r.count.value < r.until.reaches;
+
+const wordRe = (w: string) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+/** does the item match the rule: its own words name the product and say one of the words, or it lives in the product's repo, or sits on the rule's red line. */
+export function firstMatches(r: FirstRule, i: Locatable, p?: JordiPriority): boolean {
+  if (p?.redLine?.name && r.match.redLines.some((n) => norm(n) === norm(p.redLine!.name!))) return true;
+  if (!r.match.words.length) return false;
+  // a source citation ("<Name> Log/2026-11-14.md#^e-…", where his words are kept) names the memory service, not what the item is about
+  const text = [i.title, i.question].filter(Boolean).join(" ").replace(/\b[\w-]+ Log\/\S*/g, " ");
+  if (!text || !r.match.words.some((w) => wordRe(w).test(text))) return false;
+  const inRepo = !!i.repo && r.match.repos.some((x) => norm(x) === norm(i.repo!));
+  return inRepo || r.match.products.some((w) => wordRe(w).test(text));
+}
+
 /** What an inbox item tells about where it lives: its repo (checkout name), spine file, row code and own code. */
 export interface Locatable {
   repo?: string;
@@ -318,6 +391,9 @@ export interface Locatable {
   row?: string;
   /** Ask: its code (``). */
   code?: string;
+  /** its words (a card's title, an ask's question): a standing `first` rule reads them. */
+  title?: string;
+  question?: string;
 }
 
 export type PriorityLookup = (i: Locatable) => JordiPriority | undefined;
@@ -330,7 +406,22 @@ const strip = ({ repo: _r, path: _p, ...p }: Entry): JordiPriority => p;
  * row code `` belongs to of the same repo; a number two epics share is no match), then its epic by spine
  * file; never another repo's.
  */
-export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], pressing: PressingEntry[] = []): PriorityLookup {
+export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], pressing: PressingEntry[] = [], first: ActiveFirst[] = []): PriorityLookup {
+  const pressed = pressedLookup(entries, redLines, pressing);
+  const rules = first.filter(firstIsOn);
+  if (!rules.length) return pressed;
+  // a standing rule leads above every pressing item: its order is below theirs (-rules.length .. -1) inside the same tier.
+  return (i) => {
+    const p = pressed(i);
+    const n = rules.findIndex((r) => firstMatches(r, i, p));
+    if (n < 0) return p;
+    const r = rules[n];
+    const mark: PressingMark = { kind: "first", rule: r.name, why: r.why, order: n - rules.length, ...(r.count ? { count: r.count } : {}), ...(r.words ? { words: r.words } : {}), ...(r.said ? { said: r.said } : {}), ...(r.source ? { source: r.source } : {}) };
+    return { ...(p ?? { level: "high" as const, ref: i.ref ?? i.code ?? i.row ?? r.name, why: r.why }), pressing: mark };
+  };
+}
+
+function pressedLookup(entries: Entry[], redLines: RedLine | RedLine[] | undefined, pressing: PressingEntry[]): PriorityLookup {
   const lined = linedLookup(levelLookup(entries), (Array.isArray(redLines) ? redLines : redLines ? [redLines] : []).map((l, n) => lineMatcher(l, n)));
   if (!pressing.length) return lined;
   const hit = pressingMatcher(pressing);
@@ -471,10 +562,40 @@ function textOf(f: string): string | undefined {
 }
 
 /** a checkout's levels (docs/priorities.json) and red lines (the objectives file when they live there). */
-function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[] } {
+function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; first: FirstRule[] } {
   const levels = textOf(path.join(dir, PRIORITIES_FILE));
   const lines = textOf(path.join(dir, redLinesFile(dir)));
-  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [] };
+  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [], first: levels ? parseFirst(levels) : [] };
+}
+
+/**
+ * the rules' counts, as last read: the lists are sorted on every request and must not wait on a remote read, so each
+ * count is read in the background (the counts hook keeps its own hourly cache) and the last value is used meanwhile.
+ */
+const firstCounts = new Map<string, { value: number | null; readAt: number; reading?: boolean }>();
+export const FIRST_COUNT_TTL_MS = 10 * 60 * 1000;
+export function firstCountValue(source: string, now = Date.now(), read = (s: string) => hooks.counts.read([{ label: s, source: s }])): number | null {
+  const held = firstCounts.get(source);
+  if (!held || (!held.reading && now - held.readAt > FIRST_COUNT_TTL_MS)) {
+    const id = hooks.counts.sourceId(source) ?? source;
+    firstCounts.set(source, { value: held?.value ?? null, readAt: now, reading: true });
+    read(id)
+      .then((c) => firstCounts.set(source, { value: typeof c[0]?.value === "number" ? c[0].value : (held?.value ?? null), readAt: Date.now() }))
+      .catch(() => firstCounts.set(source, { value: held?.value ?? null, readAt: Date.now() }));
+  }
+  return firstCounts.get(source)?.value ?? null;
+}
+/** tests: forget every count read. */
+export const resetFirstCounts = () => firstCounts.clear();
+
+/** the world's standing rules with their counts now (GET /api/inbox-first shows them). */
+export function activeFirst(rules: FirstRule[]): ActiveFirst[] {
+  return rules.map((r) => (r.until ? { ...r, count: { value: firstCountValue(r.until.source), reaches: r.until.reaches, ...(r.until.label ? { label: r.until.label } : {}) } } : r));
+}
+
+/** the world's standing `first` rules, each with its count and whether it is on. */
+export function worldFirst(store: Pick<Store, "listMilestones">, reposRoot: string): (ActiveFirst & { on: boolean })[] {
+  return activeFirst(worldFiles(store, reposRoot).first).map((r) => ({ ...r, on: firstIsOn(r) }));
 }
 
 /**
@@ -482,8 +603,8 @@ function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedL
  * own). None written yet: undefined, so the lists keep the milestone order exactly as before.
  */
 export function worldPriorities(store: Pick<Store, "listMilestones">, reposRoot: string): PriorityLookup | undefined {
-  const { entries, redLines, pressing } = worldFiles(store, reposRoot);
-  return entries.length || redLines.length || pressing.length ? lookupOf(entries, redLines, pressing) : undefined;
+  const { entries, redLines, pressing, first } = worldFiles(store, reposRoot);
+  return entries.length || redLines.length || pressing.length || first.length ? lookupOf(entries, redLines, pressing, activeFirst(first)) : undefined;
 }
 
 /**
@@ -499,10 +620,11 @@ export function worldRedLines(store: Pick<Store, "listMilestones">, reposRoot: s
   return worldFiles(store, reposRoot).redLines;
 }
 
-function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[] } {
+function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; first: FirstRule[] } {
   const seen = new Set<string>();
   const entries: Entry[] = [];
   const pressing: PressingEntry[] = [];
+  let first: FirstRule[] = [];
   let redLines: RedLine[] = [];
   for (const m of store.listMilestones({ includeSettled: true })) {
     const r = m.repo ? resolveRepo(reposRoot, m.repo) : undefined;
@@ -512,8 +634,10 @@ function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { 
     entries.push(...f.entries);
     pressing.push(...f.pressing);
     if (!redLines.length) redLines = f.redLines;
+    // one world, one file: the first checkout (in milestone order) that writes rules holds them
+    if (!first.length) first = f.first;
   }
-  return { entries, redLines, pressing };
+  return { entries, redLines, pressing, first };
 }
 
 /** the lines with their counts read now (each remote source at most once an hour; a failed read says so). */
