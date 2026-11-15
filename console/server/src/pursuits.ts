@@ -6,6 +6,7 @@ import { homeRepo } from "./identity.js";
 import type { GitOut } from "./freshness.js";
 import type { Cadence } from "./schemas.js";
 import { repoKey } from "./adapters/repoNames.js";
+import { productsIn, type ProductRef } from "./products.js";
 
 /**
  * The owner's pursuits: the big goals he wants to see through. `docs/pursuits.json` of the home repo names each one,
@@ -56,6 +57,8 @@ export interface Pursuit {
   lastMove: PursuitMove | null;
   /** the pursuit has a social kit the console shows on its own page (/pursuits/<id>/social-kit). */
   kit?: boolean;
+  /** the product it moves (docs/scorecard/products.json): its kit and words are written there once. */
+  product?: { id: string; name: string };
   /** its place in the owner's order, 1 first; parked pursuits have none. */
   rank: number | null;
   parked: boolean;
@@ -138,6 +141,8 @@ interface Declared {
   totems: PursuitTotem[];
   /** its social kit, a folder of the home repo holding kit.json and previews/, and where the full-size files live. */
   kit?: PursuitKitRef;
+  /** the product it moves, by id in docs/scorecard/products.json; its kit is the product's. */
+  product?: string;
   parked: boolean;
   epics: { repo: string; path: string }[];
   goal?: PursuitGoal;
@@ -217,7 +222,8 @@ export function parsePursuits(text: string): PursuitsDoc {
     });
     const g = obj(o.goal);
     const goal = typeof g.now === "number" && typeof g.target === "number" && g.target > 0 ? { now: g.now, target: g.target, ...(str(g.by) ? { by: str(g.by) } : {}) } : undefined;
-    return [{ id, name, greenWhen, watch, lines, totems, ...(kit ? { kit } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
+    const product = str(o.product);
+    return [{ id, name, greenWhen, watch, lines, totems, ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
   });
   const said = obj(doc.said);
   const checks: Record<string, Check> = {};
@@ -470,8 +476,9 @@ export async function lastMoveOf(
 /** Each pursuit with its lines read, its colour and whether it moved. */
 export async function buildPursuits(
   doc: PursuitsDoc,
-  o: { board: BoardView | null; spineText: (repo: string, file: string) => string | undefined; repoDir: (name: string) => string | undefined; git: GitOut; now?: number },
+  o: { board: BoardView | null; spineText: (repo: string, file: string) => string | undefined; repoDir: (name: string) => string | undefined; git: GitOut; now?: number; products?: ProductRef[] },
 ): Promise<PursuitsBody> {
+  const products = new Map((o.products ?? []).map((p) => [p.id, p]));
   const now = o.now ?? Date.now();
   const staleMs = doc.staleDays * 86_400_000;
   const pursuits: Pursuit[] = [];
@@ -502,7 +509,8 @@ export async function buildPursuits(
       totems: d.totems,
       motion,
       lastMove,
-      ...(d.kit ? { kit: true } : {}),
+      ...(d.kit || (d.product && products.get(d.product)?.kit) ? { kit: true } : {}),
+      ...(d.product && products.get(d.product) ? { product: { id: d.product, name: products.get(d.product)!.name } } : {}),
       ...(d.goal ? { goal: d.goal } : {}),
       owner: d.owner,
       rank: ranks.get(d.id) ?? null,
@@ -544,7 +552,7 @@ export function createPursuits(o: { reposRoot: string; board: () => BoardView | 
       } catch {
         /* no pursuits file: none */
       }
-      const body = text ? await buildPursuits(parsePursuits(text), { board: o.board(), spineText, repoDir, git: o.git, now }) : { pursuits: [], staleDays: 3 };
+      const body = text ? await buildPursuits(parsePursuits(text), { board: o.board(), spineText, repoDir, git: o.git, now, products: home ? productsIn(home) : [] }) : { pursuits: [], staleDays: 3 };
       cached = { at: now, body };
       return body;
     },
@@ -573,37 +581,20 @@ export function createPursuits(o: { reposRoot: string; board: () => BoardView | 
     },
     /** The home repo checkout (where the file is written). */
     homeDir: () => repoDir(o.home ?? homeRepo()),
-    /** one pursuit's social kit (its kit.json) for the console's Social kit tab; null when it has none. */
+    /** one pursuit's social kit (its kit.json) for the console's Social kit tab, its product's when it names one; null when it has none. */
     kit(id: string): PursuitKitBody | null {
       const ref = kitRef(id);
       if (!ref) return null;
-      try {
-        const kit = obj(JSON.parse(fs.readFileSync(path.join(ref.root, ref.kit.dir, "kit.json"), "utf8")));
-        return { pursuit: { id, name: ref.name }, kit, ...(ref.kit.files ? { files: ref.kit.files } : {}) };
-      } catch {
-        return null;
-      }
+      const kit = readKit(ref.root, ref.kit);
+      return kit ? { pursuit: { id, name: ref.name }, ...(ref.product ? { product: ref.product } : {}), kit, ...(ref.kit.files ? { files: ref.kit.files } : {}) } : null;
     },
     /** A kit's preview (previews/<name>.webp) or font (../fonts/<name>.woff2), by a plain file name only. */
     kitFile(id: string, kind: "previews" | "fonts", name: string): { body: Buffer; type: string } | null {
       const ref = kitRef(id);
-      const ext = kind === "previews" ? "webp" : "woff2";
-      if (!ref || !new RegExp(`^[a-z0-9][a-z0-9-]*\\.${ext}$`).test(name)) return null;
-      const rel = kind === "previews" ? path.posix.join(ref.kit.dir, "previews", name) : path.posix.join(path.posix.dirname(ref.kit.dir), "fonts", name);
-      const type = kind === "previews" ? "image/webp" : "font/woff2";
-      try {
-        return { body: fs.readFileSync(path.join(ref.root, rel)), type };
-      } catch {
-        /* not on disk: a checkout without media (sparse) still holds the file in git */
-      }
-      try {
-        return { body: execFileSync("git", ["-C", ref.root, "show", `HEAD:${rel}`], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }), type };
-      } catch {
-        return null;
-      }
+      return ref ? readKitFile(ref.root, ref.kit, kind, name) : null;
     },
   };
-  function kitRef(id: string): { root: string; name: string; kit: PursuitKitRef } | null {
+  function kitRef(id: string): { root: string; name: string; kit: PursuitKitRef; product?: { id: string; name: string } } | null {
     const home = repoDir(o.home ?? homeRepo());
     if (!home) return null;
     let text = "";
@@ -613,13 +604,46 @@ export function createPursuits(o: { reposRoot: string; board: () => BoardView | 
       return null;
     }
     const d = parsePursuits(text).pursuits.find((p) => p.id === id);
-    return d?.kit ? { root: home, name: d.name, kit: d.kit } : null;
+    if (!d) return null;
+    // the product's kit, written once, wins over a kit the wheel still names itself.
+    const prod = d.product ? productsIn(home).find((p) => p.id === d.product) : undefined;
+    if (prod?.kit) return { root: home, name: d.name, kit: prod.kit, product: { id: prod.id, name: prod.name } };
+    return d.kit ? { root: home, name: d.name, kit: d.kit } : null;
+  }
+}
+
+/** A kit's kit.json, read from the home repo; null when missing or bad. */
+export function readKit(root: string, ref: PursuitKitRef): Record<string, unknown> | null {
+  try {
+    return obj(JSON.parse(fs.readFileSync(path.join(root, ref.dir, "kit.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+/** A kit's preview (previews/<name>.webp) or font (../fonts/<name>.woff2), by a plain file name only. */
+export function readKitFile(root: string, ref: PursuitKitRef, kind: "previews" | "fonts", name: string): { body: Buffer; type: string } | null {
+  const ext = kind === "previews" ? "webp" : "woff2";
+  if (!new RegExp(`^[a-z0-9][a-z0-9-]*\\.${ext}$`).test(name)) return null;
+  const rel = kind === "previews" ? path.posix.join(ref.dir, "previews", name) : path.posix.join(path.posix.dirname(ref.dir), "fonts", name);
+  const type = kind === "previews" ? "image/webp" : "font/woff2";
+  try {
+    return { body: fs.readFileSync(path.join(root, rel)), type };
+  } catch {
+    /* not on disk: a checkout without media (sparse) still holds the file in git */
+  }
+  try {
+    return { body: execFileSync("git", ["-C", root, "show", `HEAD:${rel}`], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }), type };
+  } catch {
+    return null;
   }
 }
 
 /** GET /api/pursuits/<id>/kit: the kit as its kit.json holds it, the pursuit it belongs to, and the full-size file store. */
 export interface PursuitKitBody {
   pursuit: { id: string; name: string };
+  /** the product the kit belongs to, when the wheel names one (the kit is written once, on the product). */
+  product?: { id: string; name: string };
   kit: Record<string, unknown>;
   files?: string;
 }

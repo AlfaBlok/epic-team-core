@@ -14,6 +14,8 @@ import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import {
   SCORECARDS_PATH,
+  PRODUCTS_PATH,
+  productHref,
   SET_NAME,
   homeOf,
   inScorecard,
@@ -607,8 +609,8 @@ export function IdlePill({ n, testId = "wheel-idle" }: { n: Pick<ScorecardNode, 
   );
 }
 
-/** (the owner: "a wheel without a persona is not going to turn"): its Delivery Manager is missing or off. */
-export const NO_PERSONA_TITLE = { none: "No Delivery Manager: this wheel does not turn.", off: "Its Delivery Manager is there but switched off: it turns once you switch it on." } as const;
+/** (the owner: "a wheel without a persona is not going to turn"): no persona on it, or all of them switched off. */
+export const NO_PERSONA_TITLE = { none: "No persona: this wheel does not turn.", off: "Its personas are switched off: it turns once one is switched on." } as const;
 export function NoPersonaPill({ n, testId = "wheel-no-persona" }: { n: Pick<ScorecardNode, "noPersona">; testId?: string }) {
   if (!n.noPersona) return null;
   return (
@@ -715,6 +717,15 @@ export function SidebarGoalSets({ onNavigate }: { onNavigate?: () => void }) {
           <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
+      {/* each product defined once; its objectives and its social kit read it there. */}
+      <NavLink
+        to={`/${PRODUCTS_PATH}`}
+        onClick={onNavigate}
+        className={({ isActive }) => cn("mt-1 flex min-h-9 min-w-0 items-center rounded-md px-2.5 text-sm", isActive ? "bg-card font-semibold text-foreground ring-1 ring-border" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
+        data-testid="sidebar-products"
+      >
+        Products
+      </NavLink>
     </div>
   );
 }
@@ -1078,6 +1089,7 @@ export function GoalSetPage() {
   const krs = node ? keyResultsOf(node) : [];
   const only = useCallback((i: Placeable) => !!node && inScorecard(inbox.ix, node.id, i), [node, inbox.ix]);
   const kitId = pursuit ? kitPursuitOf(pursuitsBody?.pursuits, pursuit.id) : undefined;
+  const pursuitP = pursuit ? pursuitsBody?.pursuits.find((x) => x.id === pursuit.id) : undefined;
   const tabs = kitId ? TABS : TABS.filter((t) => t.id !== SET_KIT_TAB);
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-3" data-testid="goal-set-page" data-set={id}>
@@ -1104,6 +1116,11 @@ export function GoalSetPage() {
               <p className="text-[15px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere] sm:text-base" data-testid="set-answer">
                 {krAnswer(krs)}
               </p>
+              {pursuitP?.product && (
+                <Link to={productHref(pursuitP.product.id)} className="w-fit text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground" data-testid="set-product">
+                  Product: {pursuitP.product.name}
+                </Link>
+              )}
             </div>
           </header>
           <TabStrip tabs={tabs} tab={tab} counts={{ inbox: mine.length, kanban: queueOf(data, node).length + counts.review }} />

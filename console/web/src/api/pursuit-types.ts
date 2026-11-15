@@ -14,6 +14,8 @@ export interface PursuitTotem {
 export interface Pursuit {
   id: string;
   name: string;
+  /** the product it moves (docs/scorecard/products.json); its kit and words live there once. */
+  product?: { id: string; name: string };
   greenWhen: string;
   state: PursuitLineState;
   greens: number;
@@ -92,7 +94,10 @@ export interface SocialKit {
   versions?: { version: string; date: string; what: string }[];
 }
 export interface PursuitKitBody {
-  pursuit: { id: string; name: string };
+  /** the objective it was opened from (absent on a product's own kit, GET /api/products/<id>/kit). */
+  pursuit?: { id: string; name: string };
+  /** the product the kit belongs to: a kit is written once, on its product. */
+  product?: { id: string; name: string };
   kit: SocialKit;
   /** The file store for the full-size downloads. */
   files?: string;
@@ -181,7 +186,7 @@ export interface ScorecardNode {
   /** the file its declared rows come from (docs/scorecards/<id>.json in the home repo). */
   file?: { path: string; present: boolean; proposal?: string };
   teams?: PursuitTeam[];
-  /** no Delivery Manager turns it ("none"), or its one is switched off ("off"). */
+  /** no persona on it ("none"), or all of them switched off ("off"). */
   noPersona?: "none" | "off";
   /** its 4 to 6 key results; an epic's are its Done means. */
   keyResults?: ScorecardRow[];
@@ -221,4 +226,26 @@ export interface PersonaGapsBody {
   gaps: PersonaGap[];
   checked: { objectives: number; milestones: number };
   at: string;
+}
+
+/** GET /api/products: each product defined once: its deck's four parts, its kit, the objectives naming it. */
+export interface ProductPart {
+  part: string;
+  label: string;
+  body: string;
+  from?: string;
+}
+export interface ProductView {
+  id: string;
+  name: string;
+  group?: string;
+  url?: string;
+  tagline?: string;
+  accent?: string;
+  deck?: { repo: string; path: string; title: string | null; parts: ProductPart[]; missing: string[] };
+  kit: boolean;
+  wheels: { id: string; name: string; state: PursuitLineState; greens: number; total: number; rank: number | null; parked?: boolean }[];
+}
+export interface ProductsBody {
+  products: ProductView[];
 }

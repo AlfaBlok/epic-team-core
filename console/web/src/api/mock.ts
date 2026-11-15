@@ -880,6 +880,19 @@ const mockMail = () => ({
       if (!p) throw new Error("no kit");
       return ok({ pursuit: { id: p.id, name: p.name }, kit: SAMPLE_KIT, files: "http://kits.example.com/sample/assets/" });
     },
+    async listProducts() {
+      return ok({ products: SAMPLE_PRODUCTS });
+    },
+    async getProduct(id: string) {
+      const p = SAMPLE_PRODUCTS.find((x) => x.id === id);
+      if (!p) throw new Error("not_found");
+      return ok(p);
+    },
+    async getProductKit(id: string) {
+      const p = SAMPLE_PRODUCTS.find((x) => x.id === id && x.kit);
+      if (!p) throw new Error("no kit");
+      return ok({ product: { id: p.id, name: p.name }, kit: SAMPLE_KIT, files: "http://kits.example.com/sample/assets/" });
+    },
     async listTicketSessions(milestoneId) {
       return ok([...ticketSessions.values()].filter((s) => s.milestoneId === milestoneId).map((s) => ({ ...s, launched: false })));
     },
@@ -2143,6 +2156,29 @@ const SAMPLE_PURSUITS: import("./pursuit-types").PursuitsBody = {
     },
   ],
 };
+/** the Products section: one product with its deck's four parts and its kit. */
+const SAMPLE_PRODUCTS: import("./pursuit-types").ProductView[] = [
+  {
+    id: "sample",
+    name: "Sample",
+    url: "https://sample.example.com",
+    tagline: "A sample product",
+    deck: {
+      repo: "sample-campaign",
+      path: "data/product.md",
+      title: "Sample: the product deck",
+      parts: [
+        { part: "Why it exists", label: "The problem it solves", body: "Work gets lost." },
+        { part: "Who it is for", label: "Who it is for", body: "- Builders" },
+        { part: "How it works", label: "How it works", body: "1. **Say it.**\n2. **Done.**" },
+        { part: "What it does for you", label: "What it does for you", body: "- **You stop repeating yourself.**" },
+      ],
+      missing: [],
+    },
+    kit: true,
+    wheels: [],
+  },
+];
 const SAMPLE_KIT: import("./pursuit-types").SocialKit = {
   id: "sample",
   name: "Sample",

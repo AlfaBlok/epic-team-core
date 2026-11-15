@@ -174,4 +174,8 @@ export const SET_NAME = { one: "Objective", many: "Objectives", all: "All object
 /** a neutral address that survives the rename. */
 export const SCORECARDS_PATH = "sets";
 export const SCORECARD_PATH = `${SCORECARDS_PATH}/:id`;
+/** the Products section: each product defined once, /products and /products/<id>. */
+export const PRODUCTS_PATH = "products";
+export const PRODUCT_DEF_PATH = `${PRODUCTS_PATH}/:id`;
+export const productHref = (id: string, tab?: "kit") => `/${PRODUCTS_PATH}/${encodeURIComponent(id)}${tab ? `?tab=${tab}` : ""}`;
 export const scorecardHref = (id?: string, tab?: string) => `/${SCORECARDS_PATH}${id ? `/${encodeURIComponent(id)}` : ""}${tab && tab !== "numbers" ? `?tab=${tab}` : ""}`;

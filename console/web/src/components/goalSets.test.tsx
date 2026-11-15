@@ -358,8 +358,8 @@ describe("the key-result table of every wheel", () => {
     vi.spyOn(api, "personaGaps").mockResolvedValue({
       ok: false,
       gaps: [
-        { kind: "objective", id: "vault", title: "Vault", world: "home", turner: "none", why: "No Delivery Manager: this wheel does not turn", milestoneId: "ms_9" },
-        { kind: "milestone", id: "ms_8", title: "Company and accountant", world: "home", turner: "off", why: "Its Delivery Manager is switched off: this wheel does not turn", milestoneId: "ms_8" },
+        { kind: "objective", id: "vault", title: "Vault", world: "home", turner: "none", why: "No persona: this wheel does not turn", milestoneId: "ms_9" },
+        { kind: "milestone", id: "ms_8", title: "Company and accountant", world: "home", turner: "off", why: "Its personas are switched off: it turns once one is switched on", milestoneId: "ms_8" },
       ],
       checked: { objectives: 2, milestones: 9 },
       at: "2026-11-15T04:00:00Z",
@@ -378,7 +378,7 @@ describe("the key-result table of every wheel", () => {
     const vault = (await screen.findAllByTestId("all-sets-row")).find((r) => r.getAttribute("data-set") === "vault")!;
     const pill = within(vault).getByTestId("wheel-no-persona");
     expect(pill.textContent).toBe("no persona");
-    expect(pill.getAttribute("title")).toBe("No Delivery Manager: this wheel does not turn.");
+    expect(pill.getAttribute("title")).toBe("No persona: this wheel does not turn.");
     const launch = screen.getAllByTestId("all-sets-row").find((r) => r.getAttribute("data-set") === "launch")!;
     expect(within(launch).getByTestId("wheel-no-persona").textContent).toBe("persona off");
   });

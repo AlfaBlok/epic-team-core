@@ -1,7 +1,7 @@
 import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef } from "./review-types";
 import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { PersonaGapsBody, PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
+import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
@@ -241,6 +241,10 @@ export interface ApiClient {
   getXStats(date?: string): Promise<XStatsBody>;
   /** one pursuit's social kit, shown inside the console on the pursuit's page. */
   getPursuitKit(id: string): Promise<PursuitKitBody>;
+  /** the Products section: each product defined once, its deck's parts, its kit and the objectives naming it. */
+  listProducts(): Promise<ProductsBody>;
+  getProduct(id: string): Promise<ProductView>;
+  getProductKit(id: string): Promise<PursuitKitBody>;
   /** the milestone's live ticket sessions from before (no new ones are launched; a row that closed meanwhile is left out). */
   listTicketSessions(milestoneId: string): Promise<TicketSession[]>;
   /** the Team desk chat (user + assistant text read back from its T3 thread; launches the thread on first open). */

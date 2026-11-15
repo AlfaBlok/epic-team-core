@@ -67,6 +67,7 @@ import { withCounts, worldPriorities, worldRedLines } from "./inbox/jordiPriorit
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, priorityLines } from "./pursuits.js";
+import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
@@ -981,6 +982,8 @@ export function createApp(
   // the owner's pursuits (docs/pursuits.json of the code repo): scorecard, totems, moving or stalled, and the effort
   // each rank buys (pursuits.ts); only the home world's milestones follow it.
   const pursuits = createPursuits({ reposRoot: read.reposRoot, board: () => launchBoard?.board() ?? null, git: gitOut(20_000) });
+  // products, each defined once (docs/scorecard/products.json: its deck and its kit); objectives name theirs.
+  const products = createProducts({ reposRoot: read.reposRoot, pursuits: () => pursuits.get() });
   const pursuitEffort = (m: Milestone) => {
     if (worldOf(m.id) !== DEFAULT_TENANT) return null;
     const doc = pursuits.doc();
@@ -1846,6 +1849,22 @@ export function createApp(
     const kind = c.req.param("kind");
     if (kind !== "previews" && kind !== "fonts") return c.json({ error: "not_found" }, 404);
     const f = pursuits.kitFile(c.req.param("id"), kind, c.req.param("name"));
+    return f ? c.body(new Uint8Array(f.body), 200, { "Content-Type": f.type, "Cache-Control": "private, max-age=300" }) : c.json({ error: "not_found" }, 404);
+  });
+  // the Products section: each product's deck parts, its kit and the objectives naming it.
+  api.get("/products", async (c) => c.json(await products.list()));
+  api.get("/products/:id", async (c) => {
+    const p = await products.one(c.req.param("id"));
+    return p ? c.json(p) : c.json({ error: "not_found" }, 404);
+  });
+  api.get("/products/:id/kit", (c) => {
+    const k = products.kit(c.req.param("id"));
+    return k ? c.json(k) : c.json({ error: "no_kit" }, 404);
+  });
+  api.get("/products/:id/kit/:kind/:name", (c) => {
+    const kind = c.req.param("kind");
+    if (kind !== "previews" && kind !== "fonts") return c.json({ error: "not_found" }, 404);
+    const f = products.kitFile(c.req.param("id"), kind, c.req.param("name"));
     return f ? c.body(new Uint8Array(f.body), 200, { "Content-Type": f.type, "Cache-Control": "private, max-age=300" }) : c.json({ error: "not_found" }, 404);
   });
   // the owner's "wrong place" marks on a landing report's tree, one commit each in the code repo (landing.ts).

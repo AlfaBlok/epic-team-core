@@ -327,6 +327,9 @@ export function createRealClient(): ApiClient {
     listVoiceNotes: (product) => call("GET", `/voice-notes${product && product !== "all" ? qs({ product }) : ""}`),
     getXStats: (date) => call("GET", `/x-stats${date ? qs({ date }) : ""}`),
     getPursuitKit: (id) => call("GET", `/pursuits/${encodeURIComponent(id)}/kit`),
+    listProducts: () => call("GET", "/products"),
+    getProduct: (id) => call("GET", `/products/${encodeURIComponent(id)}`),
+    getProductKit: (id) => call("GET", `/products/${encodeURIComponent(id)}/kit`),
 
     listRuns: (q) => call("GET", `/runs${qs({ ...(q?.since ? { since: q.since } : {}), ...(q?.milestoneId ? { milestoneId: q.milestoneId } : {}) })}`),
     getRunStats: (milestones) => call("GET", `/runs/stats${milestones ? qs({ milestones: milestones.join(",") }) : ""}`),

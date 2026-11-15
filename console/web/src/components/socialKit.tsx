@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { api } from "@/api";
 import type { Pursuit, PursuitKitBody, SocialKit } from "@/api/pursuit-types";
 import { useQuery } from "@/lib/data";
+import { Link } from "react-router-dom";
+import { productHref } from "@/lib/scorecards";
 
 /**
  * A pursuit's social kit, inside the console: the Social kit tab of the pursuit's own page (/pursuits/<id>/social-kit),
@@ -32,7 +34,10 @@ export function kitPursuitOf(pursuits: Pursuit[] | undefined, setId: string): st
   return id && pursuits?.find((x) => x.id === id)?.kit ? id : undefined;
 }
 
-const fileUrl = (id: string, kind: "previews" | "fonts", name: string) => `/api/pursuits/${encodeURIComponent(id)}/kit/${kind}/${name}`;
+/** `id` is the kit's base: `/api/products/<id>` when the kit is its product's, else `/api/pursuits/<id>`. */
+const fileUrl = (base: string, kind: "previews" | "fonts", name: string) => `${base}/kit/${kind}/${name}`;
+/** where a kit body's files are read: its product's, else its pursuit's. */
+export const kitBase = (body: PursuitKitBody) => (body.product ? `/api/products/${encodeURIComponent(body.product.id)}` : `/api/pursuits/${encodeURIComponent(body.pursuit?.id ?? "")}`);
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -112,7 +117,7 @@ function KitFonts({ id, kit }: { id: string; kit: SocialKit }) {
 
 export function SocialKitBody({ body }: { body: PursuitKitBody }) {
   const { kit, files } = body;
-  const id = body.pursuit.id;
+  const id = kitBase(body);
   const display = kit.fonts?.display?.family ? `"kit ${kit.fonts.display.family}", system-ui, sans-serif` : undefined;
   const bodyFont = kit.fonts?.body?.family ? `"kit ${kit.fonts.body.family}", system-ui, sans-serif` : undefined;
   const accent = kit.page?.accent;
@@ -295,5 +300,18 @@ export function SocialKitView({ id }: { id: string }) {
   const { data, error, loading } = useQuery<PursuitKitBody>(() => api.getPursuitKit(id), [id]);
   if (loading && !data) return <div className="text-sm text-muted-foreground">Opening the kit…</div>;
   if (error || !data) return <div className="text-sm text-destructive">Could not open the social kit{error ? `: ${error.message}` : ""}.</div>;
-  return <SocialKitBody body={data} />;
+  return (
+    <div className="grid min-w-0 gap-3">
+      {/* the kit is the product's, written once there; every objective on the product shows the same one. */}
+      {data.product && (
+        <p className="text-sm text-muted-foreground" data-testid="kit-of-product">
+          {data.product.name}&rsquo;s kit, kept once on its product.{" "}
+          <Link to={productHref(data.product.id)} className="underline decoration-border underline-offset-4 hover:text-foreground">
+            Open {data.product.name}
+          </Link>
+        </p>
+      )}
+      <SocialKitBody body={data} />
+    </div>
+  );
 }

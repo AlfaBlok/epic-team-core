@@ -418,6 +418,9 @@ const OWNER_WORLD_READS: [string, RegExp][] = [
   ["GET", /^\/api\/(scorecards|pursuits)$/],
   // an objective's Social kit tab on the social site: its kit.json, previews and fonts, read only
   ["GET", new RegExp(`^/api/pursuits/${ID}/kit(/(previews|fonts)/[\\w.-]+)?$`)],
+  // the Products section on the social site: each product's words, its kit, previews and fonts, read only
+  ["GET", /^\/api\/products$/],
+  ["GET", new RegExp(`^/api/products/${ID}(/kit(/(previews|fonts)/[\\w.-]+)?)?$`)],
 ];
 const isOwnersOwnWorld = (db: DB, identity: Identity): boolean => {
   if (identity.kind !== "session" || identity.role !== "owner" || identity.door) return false;

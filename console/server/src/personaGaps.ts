@@ -3,28 +3,28 @@ import { milestoneOfEpic } from "./pursuitRoutes.js";
 import type { Assignment, Milestone, Persona } from "./store.js";
 
 /**
- * Every goal comes with a Delivery Manager (the owner: "a wheel
- * without a persona is not going to turn"; the house sat 19 h with none). A milestone or objective turns only when a
- * Delivery Manager is on it: switched on, or auto-parked with nothing to do (it wakes again by itself). One check
- * for the objectives screen (the pill), GET /api/persona-gaps and scripts/persona_check.py, run every wake.
+ * Every goal comes with a persona (the owner: "a wheel without a persona is not going to turn"; the house sat 19 h
+ * with none). A new milestone gets its world's Delivery Manager at once; a milestone or objective turns only when a
+ * persona is on it: switched on, or auto-parked with nothing to do (it wakes again by itself). One check for the
+ * objectives screen (the pill), GET /api/persona-gaps and scripts/persona_check.py, run every wake.
  */
 
 /** the one sentence every place says (a wheel without a persona does not turn). */
-export const NO_TURNER = "No Delivery Manager: this wheel does not turn";
-export const TURNER_OFF = "Its Delivery Manager is switched off: this wheel does not turn";
+export const NO_TURNER = "No persona: this wheel does not turn";
+export const TURNER_OFF = "Its personas are switched off: it turns once one is switched on";
 
-/** on: a Delivery Manager wakes on it; off: one is assigned but switched off; none: no Delivery Manager at all. */
+/** on: a persona wakes on it (switched on, or auto-parked with nothing to do); off: personas assigned, all switched off; none: no persona at all. */
 export type Turner = "on" | "off" | "none";
 
 export function turnerOf(teams: { persona: string; enabled: boolean; parked?: boolean }[] | undefined): Turner {
-  const dms = (teams ?? []).filter((t) => isDeliveryManager(t.persona));
-  if (!dms.length) return "none";
-  return dms.some((t) => t.enabled || t.parked) ? "on" : "off";
+  const ts = (teams ?? []).filter((t) => !!t.persona);
+  if (!ts.length) return "none";
+  return ts.some((t) => t.enabled || t.parked) ? "on" : "off";
 }
 
 export const gapWords = (t: Turner) => (t === "none" ? NO_TURNER : t === "off" ? TURNER_OFF : "");
 
-/** a gap is a goal with no persona at all; a Delivery Manager switched off is there, only not waking (shown, never failed). */
+/** a gap is a goal with no persona at all; personas switched off are there, only not waking (shown, never failed). */
 export const isGap = (g: Pick<PersonaGap, "turner">) => g.turner === "none";
 
 export interface PersonaGap {

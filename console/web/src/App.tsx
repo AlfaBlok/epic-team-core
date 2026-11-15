@@ -11,7 +11,7 @@ import { ALL_PIPELINE_PATH, PRODUCT_PATH, socialPath } from "@/pages/social/nav"
 import { HomePage } from "@/components/homeView";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/components/pursuits";
-import { SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
+import { PRODUCT_DEF_PATH, PRODUCTS_PATH, SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
 import { Empty } from "@/components/common";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { type ScreenId, type Skin, SkinProvider, skinFromFlag, useRoutes, useSkin, useWords } from "@/lib/skin";
@@ -63,6 +63,8 @@ const PursuitPage = lazyPage(() => import("@/components/pursuits"), "PursuitPage
 const PagesIndexPage = lazyPage(() => import("@/components/pagesIndex"), "PagesIndexPage");
 const GoalSetPage = lazyPage(() => import("@/components/goalSets"), "GoalSetPage");
 const GoalSetsPage = lazyPage(() => import("@/components/goalSets"), "GoalSetsPage");
+const ProductsPage = lazyPage(() => import("@/components/products"), "ProductsPage");
+const ProductDefPage = lazyPage(() => import("@/components/products"), "ProductPage");
 const PursuitsListPage = lazyPage(() => import("@/components/pursuitsList"), "PursuitsListPage");
 const OneOffsPage = lazyPage(() => import("@/components/oneOffs"), "OneOffsPage");
 const OutcomesPage = lazyPage(() => import("@/components/outcomes"), "OutcomesPage");
@@ -138,6 +140,9 @@ const CORE_ROUTES: ScreenRoute[] = [
   // the goal sets: every set in one place with the combined inbox and the team desk, and each set's own page.
   { screen: "goalSets", path: SCORECARDS_PATH, element: <GoalSetsPage /> },
   { screen: "goalSets", path: SCORECARD_PATH, element: <GoalSetPage /> },
+  // the Products section: each product defined once (its deck and its kit), the objectives on it name it.
+  { screen: "goalSets", path: PRODUCTS_PATH, element: <ProductsPage /> },
+  { screen: "goalSets", path: PRODUCT_DEF_PATH, element: <ProductDefPage /> },
   // an old social kit link opens the set's Social kit tab in both skins.
   { screen: "goalSets", path: PURSUIT_KIT_PATH, element: <PursuitKitRedirect /> },
   // the launch board, every product (both skins; the home world only on the server).

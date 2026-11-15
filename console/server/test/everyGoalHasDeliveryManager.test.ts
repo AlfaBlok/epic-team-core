@@ -5,7 +5,7 @@ import { tempApp } from "./helpers.js";
 /**
  * (the owner: "a wheel without a persona is not going to turn"; the house sat 19 h
  * with none): a new milestone gets its world's Delivery Manager at once, and the console flags any milestone or
- * objective that no Delivery Manager turns.
+ * objective with no persona.
  */
 let t: ReturnType<typeof tempApp>;
 beforeEach(() => {
@@ -56,11 +56,13 @@ describe("the persona check", () => {
   });
   const home = () => "default";
 
-  it("on: a Delivery Manager switched on or auto-parked; off: assigned but switched off; none: no Delivery Manager", () => {
+  it("on: a persona switched on or auto-parked; off: personas assigned, all switched off; none: no persona at all", () => {
     expect(turnerOf([{ persona: "Delivery Manager", enabled: true }])).toBe("on");
     expect(turnerOf([{ persona: "Delivery manager", enabled: false, parked: true }])).toBe("on");
     expect(turnerOf([{ persona: "Delivery Manager", enabled: false }])).toBe("off");
-    expect(turnerOf([{ persona: "Unblocker", enabled: true }])).toBe("none");
+    expect(turnerOf([{ persona: "Writer", enabled: true }])).toBe("on");
+    expect(turnerOf([{ persona: "Writer", enabled: false }])).toBe("off");
+    expect(turnerOf([])).toBe("none");
     expect(turnerOf(undefined)).toBe("none");
   });
 
