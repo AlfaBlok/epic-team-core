@@ -17,7 +17,8 @@ describe("the desk asks open questions until it understands him", () => {
 
   it("it keeps asking until it can restate him in one sentence, then writes it where every agent reads it", () => {
     expect(UNDERSTOOD_LEAD).toBe("I think I know what you mean:");
-    expect(seed).toContain(`${UNDERSTOOD_LEAD} <one sentence>. Is that it?`);
+    expect(seed).toContain(`${UNDERSTOOD_LEAD} <one sentence>\``);
+    expect(seed).not.toContain("Is that it? …");
     expect(seed).toContain("restate it in ONE sentence, never a paragraph");
     expect(seed).toContain('understood.py restate "<the sentence>"');
     expect(seed).toContain("understood.py write --sentence");

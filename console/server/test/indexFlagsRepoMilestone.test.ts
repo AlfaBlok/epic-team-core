@@ -101,29 +101,29 @@ describe("E41-5 the index flags a repo with no milestone", () => {
 });
 
 describe("E41-5 the desk's instruction text", () => {
-  it("endpoint list: one-line notice, the offer, nothing created before Sam's yes, then the existing create routes", () => {
+  it("endpoint list: one-line notice, then created at once when he asks for work there (root L-68: no offer), with the existing create routes", () => {
     const text = endpointLines(BASE).join("\n");
     const rule = text.split("\n").find((l) => l.includes("- Repo with no milestone:"))!;
     expect(rule).toBeDefined();
     expect(rule).toContain("`no milestone`");
     expect(rule).toContain("`noMilestone: true`");
     expect(rule).toContain("say so in one line");
-    expect(rule).toContain("Add it as a milestone?");
-    expect(rule).toContain("Create nothing until Sam says yes in his own message here");
+    expect(rule).not.toContain("Add it as a milestone?");
+    expect(rule).toContain("When he asks for work in that repo (his ask is his yes, root L-68), add it as a milestone in the same turn, never asking first");
     expect(rule).toContain(`POST ${BASE}/api/milestones -H`);
     expect(rule).toContain(`POST ${BASE}/api/milestones/bootstrap -H`);
     expect(rule).toContain("X-Console-Run: team-desk");
-    expect(rule).toContain("if he says no, do not offer it again");
+    expect(rule).toContain("Say it once per repo per conversation");
   });
 
   it("seed and update carry it; seed version moved past T41-S1's", () => {
     expect(SEED_VERSION).toBeGreaterThanOrEqual(9);
     const seed = deskSeed({ persona: { name: "Team desk", remit: "r" }, publicUrl: BASE, reposRoot: "/x" });
-    expect(seed).toContain("A repo it lists with `no milestone`: tell Sam in one line and offer to add it as a milestone");
+    expect(seed).toContain("A repo it lists with `no milestone`: tell Sam in one line; when he asks for work there, add it as a milestone at once");
     expect(seed).toContain("Repo with no milestone");
     const upd = updateMessage(BASE);
     expect(upd.startsWith(`[team-desk update] v${SEED_VERSION}`)).toBe(true);
-    expect(upd).toContain("a repo with no milestone: say so in one line and offer to add it, created only after Sam says yes");
+    expect(upd).toContain("a repo with no milestone: say so in one line, and add it at once when he asks for work there");
     expect(upd).toContain("Repo with no milestone");
   });
 
