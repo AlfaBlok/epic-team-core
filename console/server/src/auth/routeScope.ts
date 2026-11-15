@@ -52,6 +52,8 @@ const OPEN: [string, RegExp][] = [
   // the owner's one-tap Approve or Deny of one password-manager login read (hosted mcp/vaultApprovals.ts); the token in
   // the path is the credential, single-use, 10 minutes.
   ["GET|POST", /^\/api\/public\/vault-ok\/[a-f0-9]{32}$/],
+  // the screenshot on a go-on ask's page (where the last failed sign-in stopped), behind the same token
+  ["GET", /^\/api\/public\/vault-ok\/[a-f0-9]{32}\/shot\.png$/],
   ["GET", /^\/api\/public\/pv$/], // epicspine.dev's page-view counter, a 1x1 image (siteKpis.ts: known pages only, no cookie, nothing about the visitor kept)
   ["POST", /^\/api\/public\/testers$/], // the tester signup form on epicspine.dev (testers.ts guards it)
   ["POST", /^\/api\/public\/stripe\/tester$/], // the Stripe webhook of the tester link (signature-checked in stripeTesters.ts)
