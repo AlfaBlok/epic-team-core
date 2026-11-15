@@ -118,10 +118,15 @@ export function backfillReceiptLine(day: string, to: DeskSide, items: Item[]): s
   ].join("\n");
 }
 
+/** one-off markers of the note crossing (the backfill day ran), its own table so the registry scan creates it too. */
+export function ensureNoteCrossMeta(db: DB): void {
+  db.exec("CREATE TABLE IF NOT EXISTS desk_note_cross_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+}
+
 export function createNoteCross(d: NoteCrossDeps) {
   const { db } = d;
   ensureCrossTables(db);
-  db.exec("CREATE TABLE IF NOT EXISTS desk_note_cross_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  ensureNoteCrossMeta(db);
   const now = () => (d.now ? d.now() : Date.now());
   const iso = (t = now()) => new Date(t).toISOString();
   const since = d.since || process.env.CONSOLE_NOTE_CROSS_SINCE || NOTE_CROSS_BACKFILL_DAY;

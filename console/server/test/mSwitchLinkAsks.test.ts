@@ -82,12 +82,14 @@ async function loadLoginPage(search: string, answer: (url: string) => { ok: bool
   const nav: string[] = [];
   const sandbox = {
     URLSearchParams,
-    document: { title: "", getElementById: (id: string) => els.get(id) },
+    document: { title: "", getElementById: (id: string) => els.get(id), querySelectorAll: () => [] }, // e662d6838 wires a.toLogin links
     location: { hostname: SOCIAL, search, hash, replace: (u: string) => nav.push(u), href: "" },
     history: { replaceState: (_s: unknown, _t: string, u: string) => nav.push(`replace:${u}`) },
     fetch: async (url: string) => {
       // every load also asks which sign-in buttons this site shows (none here)
       if (url === "/api/access/oauth/providers") return { ok: true, status: 200, json: async () => ({ providers: [] }) };
+      // and whether email sign-up is open here (e662d6838)
+      if (url === "/api/access/email/status") return { ok: true, status: 200, json: async () => ({}) };
       calls.push(url);
       const a = answer(url);
       return { ok: a.ok, status: a.status ?? 200, json: async () => a.body };

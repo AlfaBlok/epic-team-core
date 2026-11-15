@@ -451,6 +451,8 @@ describe("cross-tenant refusal over every route (E22-1 evidence)", () => {
           "GET /api/health",
           "GET /landing", // a bare 302 to /landing/, which answers 404 to any world but the home world (landing.ts)
           "POST /api/public/testers", // the open signup form (writes only tester_signups, answers nothing of a world)
+          "GET /api/access/email/status", // the login page asks whether this site shows the email forms (e662d6838): two booleans of the host, nothing of a world
+          "POST /api/access/oauth/making", // a new sign-up's waiting page: 400 without its own one-time token, answers nothing of a world
           "GET /api/public/pv", // epicspine.dev's page-view counter (a 1x1 image; counts known pages only, answers nothing of a world)
           "GET /api/inbox/team-cards", // B is the social world, a card world: its own idea cards only (empty here), never A's
           // B's owner logged in answers B's own idea cards (400 on an empty body); A's card ids are a 404; a token never (403)

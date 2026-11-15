@@ -88,7 +88,7 @@ describe("T77-S8 L-3: the token never travels in a query string", () => {
       const els = new Map<string, Record<string, unknown>>();
       vm.runInNewContext(script, {
         URLSearchParams,
-        document: { title: "", getElementById: (id: string) => els.get(id) ?? (els.set(id, el()), els.get(id)) },
+        document: { title: "", getElementById: (id: string) => els.get(id) ?? (els.set(id, el()), els.get(id)), querySelectorAll: () => [] }, // e662d6838 wires a.toLogin links
         location: { hostname: SOCIAL, search, hash, replace: () => {}, href: "" },
         history: { replaceState: (_s: unknown, _t: string, u: string) => order.push(`replace:${u}`) },
         fetch: async (url: string, init: { body: string }) => {

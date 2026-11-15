@@ -39,6 +39,7 @@ describe("E996-S43 the ask dry-run gate", () => {
   });
 
   it("offers the judge route a dryrun answer shape", () => {
-    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "verdict", "firstProblem"]);
+    // f0ec50e81 added the fresh reader's one sentence and the most ambiguous part
+    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem"]);
   });
 });

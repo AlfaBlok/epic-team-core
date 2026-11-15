@@ -217,14 +217,15 @@ describe("milestone derivation + backlog", () => {
       expect(b.some((t) => t.id === "E1" || t.id === "VH-T10")).toBe(false);
     });
 
-    it("DoD = the 5 Exit Test items, untracked; status + shape", () => {
+    // 109e99e93 turned this fixture's numbered Exit Test into a Definition Of Done of five open checkboxes;
+    // the untracked numbered list is covered by dod.test.ts and doneMeansDod.test.ts ("old spine regression").
+    it("DoD = the 5 Definition Of Done checkboxes, all open; status + shape", () => {
       const d = deriveMilestone(fx.root, ms("ops", "docs/EPIC-902-MAIN-CONTROL.md"));
-      expect(d.dod).toMatchObject({ done: 0, total: 0, tracked: false });
+      expect(d.dod).toMatchObject({ done: 0, total: 5, tracked: true });
       expect(d.dod.items).toHaveLength(5);
-      expect(d.dod.items.every((i) => i.checked === null)).toBe(true);
-      expect(d.dod.items.map((i) => i.id)).toEqual(["1", "2", "3", "4", "5"]);
-      expect(d.dod.items[0].text).toMatch(/^\*\*CPU\*\*: production/);
-      expect(d.dod.items[4].text).toMatch(/^\*\*Nothing silent\*\*/);
+      expect(d.dod.items.every((i) => i.checked === false)).toBe(true);
+      expect(d.dod.items[0].text).toMatch(/^DOD-1 \*\*CPU\*\*: production/);
+      expect(d.dod.items[4].text).toMatch(/^DOD-5 \*\*Nothing silent\*\*/);
       expect(d.status).toBe("active"); // Status: active; "Waiting on: the owner …" is context only
       expect(d.waitingOn).toMatch(/^Sam: S2 root stop/);
       expect(d.blockedReason).toBeUndefined();

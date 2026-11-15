@@ -7,7 +7,7 @@ import { milestoneWorld } from "../tenancy/world.js";
 import { hooks } from "../plug/hooks.js";
 import { listRepos } from "../adapters/repos.js";
 import { intakeSection, type IntakeRunner } from "./packIntake.js";
-import { homeRepo, ownerName } from "../identity.js";
+import { homeRepo, homeWorld, ownerName } from "../identity.js";
 
 /**
  * the milestone chat. Every milestone page has a Chat tab on ONE long-lived T3 thread for that milestone (key
@@ -72,7 +72,8 @@ export function spinesBindRunner(skillDir: string, timeoutMs = 30_000) {
 }
 
 /** What a repo desk may call (seed + every `[repo-desk update]`). Raise MILESTONE_SEED_VERSION when it changes. */
-export function milestoneEndpointLines(base: string, m: Pick<Milestone, "id">): string[] {
+/** `world`: the milestone's world; the wheel notes (the owner's companies, in the home repo) are the home world's routes only. */
+export function milestoneEndpointLines(base: string, m: Pick<Milestone, "id">, world?: string): string[] {
   const h = `-H 'X-Console-Run: ${milestoneRunHeader(m.id)}' -H 'content-type: application/json'`;
   return [
     `What you may call, and only these for run control (never a raw send into another persona's thread, so runs, Activity and retries stay true). Act only on this milestone and the epics below it: the console refuses anything else with 403 \`out_of_scope\` and names the milestone chat (or the Team desk) to use; pass that on to ${ownerName()} with its link, do not retry.`,
@@ -90,7 +91,9 @@ export function milestoneEndpointLines(base: string, m: Pick<Milestone, "id">): 
     `- Register an answer ${ownerName()} gave you in THIS chat (never one you decided): \`curl -sS -X POST ${base}/api/waiting-on-owner/<item id>/respond ${h} -d '{"kind":"answer","text":"<his answer>","via":"milestone-chat","chat":"<his words from this chat, verbatim>","milestoneId":"${m.id}"}'\` (\`kind\` approve, deny or feedback for approve asks: feedback = he wants changes, his words in \`text\`, and the work reopens; words on an approve ask are never an approval, E67). The console checks \`chat\` against his messages in this thread, writes the spine line \`(by ${ownerName()} via milestone chat)\` and wakes the persona who asked. 409 \`not_in_chat\`: ask him to say it here. One answer closes many: the console also closes every other open ask his answer clearly settles, quoting him; a few seconds later \`curl -sS ${base}/api/owner-responses?itemId=<item id> ${h}\` shows \`settles.line\` (what it also closed, and any maybes): tell him that line in one sentence.`,
     `- Marking an outcome and stamping an epic ready stay ${ownerName()}'s own taps on ${base}/milestones/${m.id}: the console refuses them from this chat; give him the link.`,
     `- Ticket detail: Discuss on a ledger row or a run opens THIS chat, and ${ownerName()}'s message then starts with \`[page: <milestone> · <row id or run id>]\`: answer about that item here yourself (read its ledger row, ticket file and runs fresh); no other thread is launched for it.`,
-    `- A wheel note: a message whose \`[page: …]\` reads \`Company view · <company> · <Build|Promo|Operations> wheel (<company id>/<wheel>…)\` is ${ownerName()}'s note dropped in that wheel of a company on the Company view (typed, or a voice note). Act on it like any message from him (his ask is ready, L-37). It stays in the wheel's inbox until it is handled: once you placed it (a row added, an answer given, or passed on), mark it: \`curl -sS -X POST ${base}/api/companies/notes/<note id>/handled ${h}\` (the id is \`wn_…\` in the page hint for a typed note, the \`vn_…\` of a voice note; \`GET ${base}/api/companies/notes\` lists the open ones).`,
+    ...(!world || world === homeWorld() ? [
+      `- A wheel note: a message whose \`[page: …]\` reads \`Company view · <company> · <Build|Promo|Operations> wheel (<company id>/<wheel>…)\` is ${ownerName()}'s note dropped in that wheel of a company on the Company view (typed, or a voice note). Act on it like any message from him (his ask is ready, L-37). It stays in the wheel's inbox until it is handled: once you placed it (a row added, an answer given, or passed on), mark it: \`curl -sS -X POST ${base}/api/companies/notes/<note id>/handled ${h}\` (the id is \`wn_…\` in the page hint for a typed note, the \`vn_…\` of a voice note; \`GET ${base}/api/companies/notes\` lists the open ones).`,
+    ] : []),
     `- Links: \`GET ${base}/api/desk/links?repo=<checkout name>&path=<spine path>\` returns \`markReady\` and \`spine\`.`,
     "- The EpicSpine skill dir on this host is `~/.claude/skills/epic-spine` (else `~/.agents/skills/epic-spine`): `spines.py`, `spine_new.py`.",
     `- Desk intake: when ${ownerName()}'s message is about a repo whose AGENTS.md has \`Pack: <name>\` (e.g. \`Pack: social\`), file it by that pack's intake rule: the \`## Desk intake\` section below when there is one, else \`python3 <skill dir>/scripts/pack.py <name> --wake-text\` (read it fresh). Sort the message into one kind, write it where the kind says, and reply first with where it landed: the file and section as a link, the line written, who acts next, undo; a kind you cannot tell gets one line back, never a guess.`,
@@ -109,6 +112,8 @@ export function milestoneSeed(o: {
   bind?: string;
   summary?: string;
   intake?: string;
+  /** the milestone's world (milestoneEndpointLines) */
+  world?: string;
 }): string {
   const base = o.publicUrl.replace(/\/+$/, "");
   const m = o.milestone;
@@ -132,7 +137,7 @@ export function milestoneSeed(o: {
     "",
     "## Console",
     `Console API: ${base}/api. Send -H 'X-Console-Run: ${milestoneRunHeader(m.id)}' -H 'content-type: application/json' on every call you make, so the console knows the caller is this chat, not ${ownerName()}.`,
-    ...milestoneEndpointLines(base, m),
+    ...milestoneEndpointLines(base, m, o.world),
     ...(o.intake ? ["", o.intake.trim()] : []),
     ...(bind ? ["", `## Where it stands at launch (\`spines.py --bind ${o.rel}\`)`, bind.length > BIND_MAX_CHARS ? `${bind.slice(0, BIND_MAX_CHARS)}\n… (cut; run it yourself for the rest)` : bind] : []),
     ...(o.summary ? ["", "## What happened before this session", o.summary.trim()] : []),
@@ -142,13 +147,13 @@ export function milestoneSeed(o: {
 }
 
 /** `remit`: the persona's current remit, sent with every version (it replaces the seed's). */
-export function milestoneUpdateMessage(publicUrl: string, m: Pick<Milestone, "id">, remit?: string, intake?: string): string {
+export function milestoneUpdateMessage(publicUrl: string, m: Pick<Milestone, "id">, remit?: string, intake?: string, world?: string): string {
   return [
     `${MILESTONE_UPDATE_MARKER} v${MILESTONE_SEED_VERSION}`,
     "The console's endpoint list for this chat changed. This list replaces the one in your first message; use it from now on.",
     ...(remit?.trim() ? ["", "## Your remit (replaces the one in your first message)", remit.trim()] : []),
     "",
-    ...milestoneEndpointLines(publicUrl.replace(/\/+$/, ""), m),
+    ...milestoneEndpointLines(publicUrl.replace(/\/+$/, ""), m, world),
     ...(intake?.trim() ? ["", intake.trim()] : []),
     "",
     "Reply with exactly: `Updated.`",
@@ -187,13 +192,13 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
         const { repoDir, rel } = await d.locate(m).catch(() => ({}) as { repoDir?: string; rel?: string });
         const bind = repoDir && rel ? await d.bind?.(repoDir, rel).catch(() => undefined) : undefined;
         const intake = repoDir ? await intakeFor(repoDir) : undefined;
-        return hooks.worldPrompt(milestoneSeed({ persona, milestone: m, publicUrl: d.publicUrl, repoDir, rel, bind, summary, intake }), { tenant, personaId: chat.persona().id, consoleUrl: d.publicUrl });
+        return hooks.worldPrompt(milestoneSeed({ persona, milestone: m, publicUrl: d.publicUrl, repoDir, rel, bind, summary, intake, world: tenant }), { tenant, personaId: chat.persona().id, consoleUrl: d.publicUrl });
       },
       // the persona's remit rides along (the Personas page owns it; a remit change reaches live threads with the version).
       update: async () => {
         const { repoDir } = await d.locate(m).catch(() => ({}) as { repoDir?: string });
         const intake = repoDir ? await intakeFor(repoDir) : undefined;
-        return hooks.worldPrompt(milestoneUpdateMessage(d.publicUrl, m, chat.persona().remit, intake), { tenant, personaId: chat.persona().id, consoleUrl: d.publicUrl });
+        return hooks.worldPrompt(milestoneUpdateMessage(d.publicUrl, m, chat.persona().remit, intake, tenant), { tenant, personaId: chat.persona().id, consoleUrl: d.publicUrl });
       },
       unavailable: "The milestone chat needs the console's T3 connection (the cycle is off on this console).",
     });
