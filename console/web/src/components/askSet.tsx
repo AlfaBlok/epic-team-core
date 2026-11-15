@@ -109,7 +109,7 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
     showClosed({ said: "Snoozed", title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
   };
   const project = projectLabel(group.items[0]?.milestoneTitle);
-  // one quiet card, Accept all, Snooze in its meta line, the feedback block last.
+  // one quiet card, then one decisions block: Accept all, Park, Snooze and the feedback block.
   return (
     <section className={CARD_FRAME} data-card-shell="ask-set" data-testid="ask-set" data-persona={group.persona}>
       <div className={CARD_META} data-card-meta="">
@@ -118,7 +118,6 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
         <span>
           {group.items.length} from the {group.persona}
         </span>
-        {!readOnly && snoozable.length > 0 && <SnoozeDropdown id={`set:${group.persona}`} className="ml-auto" onPick={snoozeAll} />}
       </div>
       <h3 className={CARD_TITLE}>
         The {group.persona}&apos;s {group.items.length} recommendations
@@ -149,6 +148,8 @@ export function AskSet({ group, readOnly }: { group: AskSetGroup; readOnly?: str
               }}
             />
           )}
+          {/* the owner 2026-11-15: Snooze beside Park, never in the meta line. */}
+          {snoozable.length > 0 && <SnoozeDropdown id={`set:${group.persona}`} disabled={!!busy} onPick={snoozeAll} />}
         </div>
       )}
       {/* E948-S60: the set takes feedback as a whole, to the Team desk with the set named; right under its buttons, nothing

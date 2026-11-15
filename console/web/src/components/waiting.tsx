@@ -660,17 +660,18 @@ export function SnoozeMenu({ item, className, label }: { item: WaitingItem; clas
  * the Snooze dropdown itself (3 hours / 3 days / 1 week / 1 month), shared by ask cards and review cards. `id`
  * is the item whose write error (lib/snooze) shows under the button.
  */
-export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a while; it stays waiting" }: { id: string; onPick: (c: SnoozeChoice) => void; className?: string; title?: string }) {
+export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a while; it stays waiting", disabled }: { id: string; onPick: (c: SnoozeChoice) => void; className?: string; title?: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   // a pick closes the menu and hides the card at once (lib/snooze); a failed write brings the card back with this.
   const error = useSnoozes().errors.get(id);
   return (
     <div className={cn("relative", className)} data-testid="snooze">
+      {/* (the owner 2026-11-15 03:16Z, vn_5ef65752: "don't give me the snooze at the top and the other
+          buttons at the bottom ... one section that is kind of decisions about the card"): Snooze is one of the card's
+          buttons, beside Park, the same size and look, never on the meta line. */}
       <CardButton
-        variant="ghost"
-        // on a phone it is its 44 px tap target without making the card's meta line 44 px taller (the
-        // negative margin), and only its clock, so it stays on the meta line instead of dropping to a line of its own
-        className="h-7 px-2 text-xs text-muted-foreground max-sm:-my-3 max-sm:px-1.5"
+        variant="outline"
+        disabled={disabled}
         aria-label="Snooze"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -680,10 +681,12 @@ export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a w
         }}
         title={title}
       >
-        <AlarmClock /> <span className="max-sm:hidden">Snooze</span> <ChevronDown className="h-3 w-3" />
+        <AlarmClock />
+        Snooze
+        <ChevronDown className="h-3 w-3" />
       </CardButton>
       {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 grid w-36 grid-cols-1 rounded-md border bg-popover p-1 text-sm shadow-md" data-testid="snooze-menu">
+        <div role="menu" className="absolute left-0 z-20 mt-1 grid w-36 grid-cols-1 rounded-md border bg-popover p-1 text-sm shadow-md" data-testid="snooze-menu">
           {SNOOZE_CHOICES.map((c) => (
             <button
               key={c.label}
@@ -702,7 +705,7 @@ export function SnoozeDropdown({ id, onPick, className, title = "Hide it for a w
         </div>
       )}
       {error && (
-        <div role="alert" className="absolute right-0 z-20 mt-1 w-64 rounded-md border bg-popover p-2 text-xs text-red-700 shadow-md dark:text-red-400" data-testid="snooze-error">
+        <div role="alert" className="absolute left-0 z-20 mt-1 w-64 rounded-md border bg-popover p-2 text-xs text-red-700 shadow-md dark:text-red-400" data-testid="snooze-error">
           {error}
         </div>
       )}
@@ -1181,7 +1184,6 @@ export function WaitingCard({
           <OwnerPriorityTag p={item.ownerPriority} />
           {item.source === "needs_jordi" && <span>persona request</span>}
           {item.improvement && <span data-testid="improvement-tag">improvement request</span>}
-          {canSnooze && <SnoozeMenu item={item} className="ml-auto" />}
         </div>
         {/* his long voice note touched this ask: stale or updated until its owner rewrites it. */}
         {item.state === "open" && item.noteMark && <NoteMarkBand mark={item.noteMark} />}
@@ -1416,6 +1418,8 @@ export function WaitingCard({
               ) : null}
               {/* E948-S83 iteration 2: Park beside the card's own buttons (a month on its spine line, nothing decided). */}
               {canSnooze && <ParkButton disabled={busy} onPark={() => parkAsk(item)} />}
+              {/* the owner 2026-11-15: Snooze beside Park, in the one decisions block, never at the top of the card. */}
+              {canSnooze && <SnoozeMenu item={item} />}
               {editing && (
                 <CardButton
                   variant="ghost"

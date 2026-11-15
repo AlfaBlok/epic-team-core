@@ -160,7 +160,28 @@ export function useNote(props: {
   const sub = useMemo(() => (held ? (fn: () => void) => held.engine.subscribe(fn) : nothing), [held]);
   const get = held ? held.engine.view : idle;
   const v = useSyncExternalStore(sub, get, get);
-  useEffect(() => (held ? tab.dock(held) : undefined), [tab, held]);
+  // (the owner 2026-11-15 03:16Z, vn_5ef65752: "if I'm recording a voice note and it goes out of the
+  // screen ... the red thing where I have the timing and the voice bar ... should stay visible when I scroll down"): while a
+  // card's note is on and its strip is scrolled off screen, the card lets go of it, so the floating pill (NoteWidget: the
+  // red dot, the time, the level, Cancel and Send) shows at the bottom of the screen; back in view, the strip holds it again.
+  const [stripEl, setStripEl] = useState<HTMLDivElement | null>(null);
+  const [away, setAway] = useState(false);
+  const watch = card && noteOn(v.phase) && !!stripEl;
+  useEffect(() => {
+    if (!watch || typeof IntersectionObserver === "undefined") return setAway(false);
+    const io = new IntersectionObserver(([e]) => setAway(!e.isIntersecting), { threshold: 0.6 });
+    io.observe(stripEl!);
+    return () => (io.disconnect(), setAway(false));
+  }, [watch, stripEl]);
+  const floats = watch && away;
+  useEffect(() => {
+    if (!held) return undefined;
+    if (floats) {
+      held.show = () => stripEl?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return () => void (held.show = undefined);
+    }
+    return tab.dock(held);
+  }, [tab, held, floats, stripEl]);
   const loc = useContext(UNSAFE_LocationContext)?.location;
 
   // A card's reply goes out with what is typed at the moment the note is written out, through the card's latest press.
@@ -220,7 +241,9 @@ export function useNote(props: {
   const show = on || sending || v.phase === "sent" || failed || !!out;
   const strip = show ? (
     <div
+      ref={setStripEl}
       data-testid={`${tid}-strip`}
+      data-floating={floats ? "yes" : undefined}
       data-phase={out ? `out-${out.state}` : v.phase}
       role="status"
       className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-2.5 py-1.5 text-xs", !card && "mb-2", on ? "border-red-500/40 bg-red-500/[0.06]" : "bg-card")}

@@ -36,7 +36,7 @@ beforeEach(() => {
     { cards: false },
   );
   addCard(repo.dir, "E979-G20261108", LIVE, {
-    title: "Gap finder found 2 things you asked for more than once that are not done yet.",
+    title: "Gap finder found 2 things you asked for twice, still not done.",
     next: [
       'on: Show one voice note going all the way to the next post — asked 4 times — words: "I have been asking for this URL" 8 Nov — in: EPIC-964',
       "off: Count posts per day on the campaign page — in: EPIC-964",

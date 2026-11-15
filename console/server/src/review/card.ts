@@ -356,6 +356,13 @@ export function hasVerb(text: string): boolean {
   return tokens.some((w) => AUX.test(w) || IRREGULAR.test(w) || (w.length > 3 && /ed$/i.test(w) && !NOT_VERB_ED.test(w)));
 }
 
+/**
+ * (the owner 2026-11-15 03:16Z, vn_5ef65752: "maybe 50% the amount of text that we have right now"):
+ * the card's word limits, about half of what they were (title and goal 20, delivered 2 to 4 lines of 20, source 40,
+ * decision 30). One place, so the rule text every brief carries (cardRule.ts) and the gate never disagree.
+ */
+export const CARD_LIMITS = { title: 12, goal: 12, deliveredMin: 1, deliveredMax: 3, delivered: 12, source: 20, decision: 15, next: 12, after: 12, name: 8 } as const;
+
 /** What is not plain in one card text, or undefined (no `;`, `(`, `/`, `|` outside links; no row code, path or "approve"). */
 export function plainProblem(label: string, text: string, max: number): string | undefined {
   const bare = outsideLinks(text);
@@ -374,7 +381,7 @@ export function plainProblem(label: string, text: string, max: number): string |
  */
 export function sourceProblem(text: string): string | undefined {
   const bare = outsideLinks(text);
-  if (words(text) > 40) return "the source is longer than 40 words";
+  if (words(text) > CARD_LIMITS.source) return `the source is longer than ${CARD_LIMITS.source} words: quote only his key words and link the note`;
   if (ROW_CODE.test(bare)) return "the source names a row code: link the card instead";
   if (FILE_PATH.test(bare)) return "the source names a file";
   return undefined;
@@ -402,19 +409,19 @@ export function gateProblems(g: GateInput): string[] {
   add(need(c.title, "the title"));
   if (c.title) {
     if (!hasVerb(c.title)) out.push("the title has no verb: write one full sentence in the past tense");
-    add(plainProblem("the title", c.title, 20));
+    add(plainProblem("the title", c.title, CARD_LIMITS.title));
   }
   add(need(c.goal, "the goal of this task"));
-  if (c.goal) add(plainProblem("the goal of this task", c.goal, 20));
-  if (c.delivered.length < 2 || c.delivered.length > 4) out.push(`it has ${c.delivered.length} delivered lines, it needs 2 to 4`);
-  c.delivered.forEach((d, i) => add(plainProblem(`delivered line ${i + 1}`, d.text, 20)));
+  if (c.goal) add(plainProblem("the goal of this task", c.goal, CARD_LIMITS.goal));
+  if (c.delivered.length < CARD_LIMITS.deliveredMin || c.delivered.length > CARD_LIMITS.deliveredMax) out.push(`it has ${c.delivered.length} delivered lines, it needs ${CARD_LIMITS.deliveredMin} to ${CARD_LIMITS.deliveredMax}`);
+  c.delivered.forEach((d, i) => add(plainProblem(`delivered line ${i + 1}`, d.text, CARD_LIMITS.delivered)));
   add(need(g.project, "the project name"));
   if (g.project) add(plainProblem("the project name", g.project, 8));
   add(need(g.goalSentence, "the goal sentence of the epic"));
   if (g.goalSentence) add(plainProblem("the goal sentence of the epic", g.goalSentence, 20));
-  if (c.name) add(plainProblem("the task name", c.name, 12));
-  if (c.after) add(plainProblem("the after line", c.after, 25));
-  c.next.forEach((n, i) => add(plainProblem(`next step ${i + 1}`, n.title, 20)));
+  if (c.name) add(plainProblem("the task name", c.name, CARD_LIMITS.name));
+  if (c.after) add(plainProblem("the after line", c.after, CARD_LIMITS.after));
+  c.next.forEach((n, i) => add(plainProblem(`next step ${i + 1}`, n.title, CARD_LIMITS.next)));
   // the label is the link's own words (it may name the page, memory.dev/connect)
   if (c.evidenceLabel && c.evidence) add(plainProblem("the evidence label", c.evidence, 6));
   // the card opens with where it came from and ends with the one decision asked: a card with neither is held back
@@ -422,7 +429,7 @@ export function gateProblems(g: GateInput): string[] {
   if (c.source?.trim()) add(sourceProblem(c.source));
   if (!c.decision?.trim()) out.push("the decision is missing: name the one decision asked of him, in plain words, with the team's recommendation");
   else {
-    add(plainProblem("the decision", c.decision, 30));
+    add(plainProblem("the decision", c.decision, CARD_LIMITS.decision));
     // E948-S85: a decision that sends him to act somewhere off the card links that place (his voice note of 12 Nov: "I need to see a link")
     add(decisionLinkProblem(c.decision));
   }

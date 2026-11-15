@@ -195,16 +195,16 @@ export const sampleConnect = (): ConnectItem => ({
 });
 
 export const CARD_TYPES: CardType[] = [
-  { id: "decide-options", kind: "decision", buttons: "One button per option, its own words, the recommended one filled. Park. Give feedback.", name: "Decide: pick one of several options (E946-A29)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleA29()} showMilestone /> },
-  { id: "decide-listed-semicolons", kind: "decision", buttons: "One button per listed option, the team's pick filled. Park. Give feedback.", name: "Decide: options written with semicolons (E946-A31)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["yes as it stands", "yes with changes said in the page's feedback box", "no"], recommendation: "yes as it stands" })} /> },
-  { id: "decide-no-options", kind: "decision", buttons: "Yes, <the action> · No, built from the question, the team's pick filled. Park. Give feedback.", name: "Decide: an ask that lists no options", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31_bare", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["Yes, agree this plan for the testers", "No"], optionsDerived: true, recommendation: "Yes, agree this plan for the testers" } as Partial<WaitingItem>)} /> },
-  { id: "decide-yes-no", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Give feedback.", name: "Decide: a yes or no question", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_yesno", ask: "decide", question: "Should the team post twice a day this week?" })} /> },
-  { id: "answer", kind: "answer", buttons: "Park. His words are the answer. Send in the feedback box.", name: "Answer: words, a key place or a screenshot", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk()} /> },
-  { id: "approve", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Give feedback.", name: "Approve: a recommendation the team wants your yes on", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_approve", ask: "approve", decidable: true, question: "Approve sending the week's report to the testers?", recommendation: "Approve" })} /> },
-  { id: "do", kind: "do", buttons: "Done · Stuck. Park. Give feedback.", name: "Do: steps only you can do, then Done or Stuck", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_do", ask: "do", question: "Turn on two-step sign-in for the X account.", steps: "1. Open X settings · 2. Turn on two-step sign-in", stepsLink: { label: "steps", url: "https://example.com/steps/two-step" } } as Partial<WaitingItem>)} /> },
-  { id: "key", kind: "key", buttons: "The private box and Save key. Park.", name: "Key: paste a secret into its private box", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_key", question: "Paste the Mailgun sending key.", secret: { app: "socialapp", name: "MAILGUN_KEY" } } as Partial<WaitingItem>)} /> },
+  { id: "decide-options", kind: "decision", buttons: "One button per option, its own words, the recommended one filled. Park. Snooze. Give feedback.", name: "Decide: pick one of several options (E946-A29)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleA29()} showMilestone /> },
+  { id: "decide-listed-semicolons", kind: "decision", buttons: "One button per listed option, the team's pick filled. Park. Snooze. Give feedback.", name: "Decide: options written with semicolons (E946-A31)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["yes as it stands", "yes with changes said in the page's feedback box", "no"], recommendation: "yes as it stands" })} /> },
+  { id: "decide-no-options", kind: "decision", buttons: "Yes, <the action> · No, built from the question, the team's pick filled. Park. Snooze. Give feedback.", name: "Decide: an ask that lists no options", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31_bare", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["Yes, agree this plan for the testers", "No"], optionsDerived: true, recommendation: "Yes, agree this plan for the testers" } as Partial<WaitingItem>)} /> },
+  { id: "decide-yes-no", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Decide: a yes or no question", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_yesno", ask: "decide", question: "Should the team post twice a day this week?" })} /> },
+  { id: "answer", kind: "answer", buttons: "Park. Snooze. His words are the answer. Send in the feedback box.", name: "Answer: words, a key place or a screenshot", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk()} /> },
+  { id: "approve", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Approve: a recommendation the team wants your yes on", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_approve", ask: "approve", decidable: true, question: "Approve sending the week's report to the testers?", recommendation: "Approve" })} /> },
+  { id: "do", kind: "do", buttons: "Done · Stuck. Park. Snooze. Give feedback.", name: "Do: steps only you can do, then Done or Stuck", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_do", ask: "do", question: "Turn on two-step sign-in for the X account.", steps: "1. Open X settings · 2. Turn on two-step sign-in", stepsLink: { label: "steps", url: "https://example.com/steps/two-step" } } as Partial<WaitingItem>)} /> },
+  { id: "key", kind: "key", buttons: "The private box and Save key. Park. Snooze.", name: "Key: paste a secret into its private box", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_key", question: "Paste the Mailgun sending key.", secret: { app: "socialapp", name: "MAILGUN_KEY" } } as Partial<WaitingItem>)} /> },
   { id: "persona-request", kind: "decision", buttons: "One button per option, a bare Yes or No gets its next step. Give feedback.", name: "Persona request: a persona asks you directly", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_nj", source: "needs_jordi", needsJordiId: "nj_sample", ask: "decide", question: "Can the Writer use your photo on the about page?", options: ["Yes", "No, use the logo"] } as Partial<WaitingItem>)} /> },
-  { id: "improvement", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Give feedback.", name: "Improvement request from another world", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_impr", ask: "approve", decidable: true, question: "SocialApp asks for a bulk schedule button.", improvement: { to: "EpicTeam", doneMeans: "Testers schedule ten posts at once." } } as Partial<WaitingItem>)} /> },
+  { id: "improvement", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Improvement request from another world", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_impr", ask: "approve", decidable: true, question: "SocialApp asks for a bulk schedule button.", improvement: { to: "EpicTeam", doneMeans: "Testers schedule ten posts at once." } } as Partial<WaitingItem>)} /> },
   { id: "answered", kind: "news", buttons: "None: it shows his answer being written. Give feedback.", name: "Answered: your answer is being written", where: "Inbox, Answered", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_answered", state: "answered", answer: "hello@example.com" })} /> },
   { id: "fyi", kind: "news", buttons: "Reverse. Give feedback.", name: "Decided for you: the team decided, you can reverse it", where: "Inbox, Decided for you", component: "FyiCard", render: () => <FyiCard item={sampleAsk({ id: "sample_fyi", decidedBy: "Delivery Manager", question: "Posts go out at 14:00 UTC.", answer: "Chosen because most replies came then." })} /> },
   { id: "status-ready", kind: "do", buttons: "Mark ready for delivery. Give feedback.", name: "Do: stamp a task ready", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("mark_ready")} /> },
@@ -213,7 +213,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "ask-set",
     kind: "decision",
-    buttons: "Per line: Yes: make it a task · Ask a question · No: drop it. Then Yes to all: make them tasks · Park.",
+    buttons: "Per line: Yes: make it a task · Ask a question · No: drop it. Then Yes to all: make them tasks · Park · Snooze.",
     name: "A persona's set of recommendations",
     where: "Inbox, Waiting on you",
     component: "AskSet",
@@ -229,12 +229,12 @@ export const CARD_TYPES: CardType[] = [
       />
     ),
   },
-  { id: "review", kind: "review", buttons: "Mark complete · Park · Give feedback.", name: "Review: a finished task to accept or send back", where: "Inbox, Waiting for your review", component: "ReviewCard", render: () => <ReviewCard item={sampleReview()} /> },
+  { id: "review", kind: "review", buttons: "Mark complete · Park · Snooze · Give feedback.", name: "Review: a finished task to accept or send back", where: "Inbox, Waiting for your review", component: "ReviewCard", render: () => <ReviewCard item={sampleReview()} /> },
   // E948-S53 (the owner, vn_ebf81fab: "Mark complete, close the goal"): the last open part of a goal says on its own button that it closes the goal; no live card may be one tonight, so the sample shows it
   {
     id: "review-last-part",
     kind: "review",
-    buttons: "Mark complete, close the goal · Park · Give feedback.",
+    buttons: "Mark complete, close the goal · Park · Snooze · Give feedback.",
     name: "Review: the last open part of a goal (Mark complete, close the goal)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -261,7 +261,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-switches",
     kind: "review",
-    buttons: "Start N, counting the switches that are on (Close, start nothing when all are off) · Park · Give feedback.",
+    buttons: "Start N, counting the switches that are on (Close, start nothing when all are off) · Park · Snooze · Give feedback.",
     name: "Review: a persona's follow-ups, each switched on or off (Start N)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -288,7 +288,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-next-steps",
     kind: "review",
-    buttons: "Start N, counting the steps set to Start now (Close, start nothing when all are parked) · Park · Give feedback.",
+    buttons: "Start N, counting the steps set to Start now (Close, start nothing when all are parked) · Park · Snooze · Give feedback.",
     name: "Review: a finished task with next steps, each Start now or Park (Start N)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -318,7 +318,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-decision",
     kind: "decision",
-    buttons: "Yes: plan it · No: park it, the team's pick filled. Park. Give feedback. Never Mark complete.",
+    buttons: "Yes: plan it · No: park it, the team's pick filled. Park. Snooze. Give feedback. Never Mark complete.",
     name: "Decide: a finished piece that asks a decision (the used-car lookup)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -346,7 +346,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-decision-options",
     kind: "decision",
-    buttons: "The card's own options, each Answer: next step. Park. Give feedback. Never Mark complete.",
+    buttons: "The card's own options, each Answer: next step. Park. Snooze. Give feedback. Never Mark complete.",
     name: "Decide: a finished piece with its own options",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",

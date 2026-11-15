@@ -51,7 +51,7 @@ describe("WaitingCard", () => {
     expect(screen.queryByTestId("ask-code")).toBeNull();
     // E948-S69: a question's options are its buttons, the recommended one first and filled, never Send my pick, Approve, No or Changes wanted.
     const buttons = [...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent);
-    expect(buttons).toEqual(["one", "two", "Park"]); // E948-S83 iteration 2: Park beside the options
+    expect(buttons).toEqual(["one", "two", "Park", "Snooze"]); // E948-S83 iteration 2: Park beside the options; Snooze beside Park (the owner 2026-11-15)
     expect(screen.getAllByTestId("ask-option")[0].className).not.toMatch(/border-input/);
     expect(screen.getAllByTestId("ask-option")[1].className).toMatch(/border-input/);
     expect(screen.queryByTestId("send-pick")).toBeNull();
@@ -188,7 +188,7 @@ describe("WaitingCard", () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_7", itemId: "wj_1", kind: "approve", text: "simpler", delivery: "sent", createdAt: new Date().toISOString() });
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined, recommendation: "yes" })} />);
     const set = screen.getByTestId("answer-buttons");
-    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Yes: go ahead", "No: drop it", "Park"]);
+    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Yes: go ahead", "No: drop it", "Park", "Snooze"]);
     expect(set.textContent).not.toContain("Yes. The team goes ahead.");
     expect(set.textContent).not.toContain("It closes as a no. A reason is optional.");
     expect(screen.queryByRole("button", { name: /^\s*Answer$/ })).toBeNull();
@@ -221,7 +221,7 @@ describe("WaitingCard", () => {
 
   it("T72-S7, E948-S52: a do step has Done and Stuck, in that order, no hint line", () => {
     wrap(<WaitingCard item={item({ ask: "do", options: undefined, question: "Scan the QR code" })} />);
-    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck", "Park"]);
+    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck", "Park", "Snooze"]);
     expect(screen.queryByTestId("hint-yes")).toBeNull();
   });
 

@@ -29,7 +29,7 @@ export const cardText = (ref: string, o: { evidence?: string; title?: string; ne
   [
     "---",
     `row: ${ref}`,
-    `title: ${o.title ?? "The test page was built so you can open it and check it."}`,
+    `title: ${o.title ?? "The test page was built so you can check it."}`,
     "goal: You can open the page and see that it works.",
     "delivered:",
     "  - ✓ The page opens on a laptop.",

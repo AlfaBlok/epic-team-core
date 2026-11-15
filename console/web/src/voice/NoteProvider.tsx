@@ -36,6 +36,11 @@ export interface HeldNote {
   docks: number;
   /** A card's note: send the written-out note through the card's own press. Absent: the note posts itself (a chat). */
   deliver?: (note: SentNote) => Promise<unknown>;
+  /**
+   * the owner 2026-11-15: set while a card's recording strip is scrolled off screen on the page it was started on (the pill
+   * then floats it); the pill's link scrolls back to the card instead of opening the page again.
+   */
+  show?: () => void;
   /** A delivered note's way out (cards): sending, landed, nothing heard, or failed (Send again). */
   out?: { state: "sending" | "done" | "empty" | "failed"; error?: string; note?: SentNote };
 }
@@ -412,7 +417,7 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
       )}
     >
       <LiveDot phase={v.phase} />
-      <Link to={back} data-testid="note-widget-back" className="min-w-0 flex-1 underline-offset-2 hover:underline max-sm:font-medium" title="Back to where you started this voice note">
+      <Link to={back} onClick={(e) => h.show && (e.preventDefault(), h.show())} data-testid="note-widget-back" className="min-w-0 flex-1 underline-offset-2 hover:underline max-sm:font-medium" title="Back to where you started this voice note">
         <span className={cn("block", kept ? "whitespace-normal font-medium text-amber-700 dark:text-amber-400" : "truncate", failed && "text-destructive")} title={kept ? KEPT_FAILED_TEXT : undefined}>
           {label}
         </span>

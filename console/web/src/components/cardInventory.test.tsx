@@ -169,7 +169,7 @@ describe("E948-S60 every card type ends with the feedback block", () => {
     const review = CARD_TYPES.find((c) => c.id === "review")!;
     const { container } = render(<MemoryRouter>{review.render()}</MemoryRouter>);
     const buttons = within(container).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Park", "Give feedback"]);
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Park", "Snooze", "Give feedback"]);
     expect(container.querySelector("[data-card-feedback] [data-feedback-send]")).toBeTruthy();
   });
 
@@ -254,7 +254,7 @@ describe("E948-S69 a decision card's buttons are its options, each naming its ne
     const { container } = render(<MemoryRouter>{car.render()}</MemoryRouter>);
     const row = within(container).getByTestId("review-buttons");
     expect(row.getAttribute("data-card-buttons")).toBe("decision");
-    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Park", "Give feedback"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Park", "Snooze", "Give feedback"]);
     const [yes, no] = within(row).getAllByTestId("review-choice");
     expect(yes.dataset.start).toBe("yes");
     expect(no.dataset.start).toBe("no");
@@ -416,5 +416,35 @@ describe("E948-S83 iteration 2 every card that waits on him has Park", () => {
     const { container } = render(<MemoryRouter>{c.render()}</MemoryRouter>);
     fireEvent.click(within(container).getByTestId("card-park"));
     await waitFor(() => expect(spy).toHaveBeenCalledWith("sample_a29", expect.objectContaining({ days: 30, park: true })));
+  });
+});
+
+describe("the owner 2026-11-15: one decisions block on every card", () => {
+  // the owner 2026-11-15 03:16Z, vn_5ef65752: "don't give me the snooze at the top and the other buttons at the bottom ... the card
+  // has to have like one section that is kind of decisions about the card ... Like a close start, park, give feedback, snooze
+  // should also be there, you know, because otherwise I need to keep scrolling up and down"
+  it("no card kind has Snooze at the top: it sits in the button row beside Park, before the feedback box, and the table names it", () => {
+    const snoozed: string[] = [];
+    for (const c of CARD_TYPES) {
+      const { container, unmount } = render(<MemoryRouter>{c.render()}</MemoryRouter>);
+      const snoozes = container.querySelectorAll("[data-testid=snooze]");
+      expect(snoozes.length, `${c.id}: one Snooze at most`).toBeLessThanOrEqual(1);
+      if (snoozes.length) {
+        const s = snoozes[0];
+        expect(s.closest("[data-card-meta]"), `${c.id}: Snooze is not on the meta line`).toBeNull();
+        const park = container.querySelector("[data-testid=card-park]");
+        expect(park, `${c.id}: Snooze has Park beside it`).toBeTruthy();
+        expect(s.parentElement, `${c.id}: Snooze and Park share one button row`).toBe(park!.parentElement);
+        const block = container.querySelector("[data-card-feedback], [data-testid=review-note], [data-testid^=answer-][data-testid$=-box]");
+        if (block) expect(s.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING, `${c.id}: Snooze comes before the answer box`).toBeTruthy();
+        expect(c.buttons, `${c.id}: the table names Snooze`).toMatch(/\bSnooze\b/);
+        snoozed.push(c.id);
+      } else expect(c.buttons, `${c.id}: the table names no Snooze it does not show`).not.toMatch(/\bSnooze\b/);
+      // nothing to press on the meta line: every decision is in the one block
+      const meta = container.querySelector("[data-card-meta]");
+      if (meta) expect([...meta.querySelectorAll("button")].map((b) => b.textContent?.trim()), `${c.id}: no button on the meta line`).toEqual([]);
+      unmount();
+    }
+    for (const id of ["review", "review-decision", "review-next-steps", "decide-options", "decide-yes-no", "approve", "do", "answer", "ask-set"]) expect(snoozed).toContain(id);
   });
 });

@@ -172,7 +172,7 @@ describe("E948-S26 what becomes a card (decided from the spine)", () => {
       ["E941-S6", "needs-evidence"],
       ["E941-S7", "needs-rewriting"],
     ]);
-    expect(agents.find((i) => i.ref === "E941-S4")!.verdict.problems).toEqual(expect.arrayContaining(["the title has no verb: write one full sentence in the past tense", "the title has a semicolon, a bracket or a pipe"]));
+    expect(agents.find((i) => i.ref === "E941-S4")!.verdict.problems).toEqual(expect.arrayContaining(["the title has no verb: write one full sentence in the past tense", "the title is longer than 12 words"]));
     // the count is the cards (badge = sidebar = header)
     expect(reviewItemsOf(db, createStore(db), tmp).map((i) => i.ref)).toEqual(["E941-S1"]);
   });
@@ -288,7 +288,7 @@ describe("E948-S26 the card face", () => {
       project: { name: "The team console", url: "https://team.example/" },
       goal: { text: "Give the team desk a home of its own", code: "EPIC-941" },
       tasks: { done: 1, total: 4 },
-      title: "The test page was built so you can open it and check it.",
+      title: "The test page was built so you can check it.",
       evidence: { url: LIVE },
       screenshot: "docs/cards/shot.png",
       after: "Next the team desk places your next idea.",

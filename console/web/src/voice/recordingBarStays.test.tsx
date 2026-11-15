@@ -1,0 +1,138 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import type { NoteMedia, NotesApi } from "./noteEngine";
+import { clearAnswerVoiceState, useAnswerVoice } from "./AnswerVoice";
+import { NoteProvider, NoteTab, NoteWidget } from "./NoteProvider";
+
+// (the owner 2026-11-15 03:16Z, vn_5ef65752): "if I'm recording a voice note and it goes out of the screen
+// ... the voice note should kind of stay the red thing where I have the timing and the voice bar. That part should stay visible
+// when I scroll down". While a card's note records and its strip leaves the screen, the floating pill (red dot, time, level,
+// Cancel, Send) shows at the bottom; back in view, only the strip shows it again. The pill's link scrolls back to the card.
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  clearAnswerVoiceState();
+});
+
+/** IntersectionObserver as the browser runs it: `seen(false)` is the strip scrolled off screen. */
+function viewport() {
+  const live: { cb: IntersectionObserverCallback; el?: Element }[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      o: { cb: IntersectionObserverCallback; el?: Element };
+      constructor(cb: IntersectionObserverCallback) {
+        this.o = { cb };
+        live.push(this.o);
+      }
+      observe(el: Element) {
+        this.o.el = el;
+      }
+      disconnect() {
+        live.splice(live.indexOf(this.o), 1);
+      }
+      unobserve() {}
+    },
+  );
+  return {
+    watching: () => live.filter((o) => o.el).length,
+    seen: (on: boolean) =>
+      act(() => {
+        for (const o of [...live]) o.cb([{ isIntersecting: on, target: o.el } as IntersectionObserverEntry], {} as IntersectionObserver);
+      }),
+  };
+}
+
+function fakes() {
+  const track: any = { stop: () => undefined, readyState: "live", muted: false, addEventListener: () => undefined };
+  const stream: any = { getAudioTracks: () => [track], getTracks: () => [track] };
+  const media: NoteMedia = {
+    microphone: async () => stream,
+    recorder: () => ({ mimeType: "audio/webm;codecs=opus", ondataavailable: null, onstop: null, start: () => undefined, stop: () => undefined }) as never,
+  };
+  const api = {
+    start: vi.fn(async () => ({ note: { id: "vn_1" }, segmentS: 120, maxMin: 30, usdPerMin: 0.003, monthUsd: 0.2, monthCapUsd: 25 })),
+    segment: vi.fn(async (_id: string, n: number) => ({ segment: { n, text: `t${n}`, costUsd: 0.001 }, note: { costUsd: 0.001 } })),
+    finish: vi.fn(async (_id: string, segments: number) => ({ note: { id: "vn_1", state: "posted", seconds: 5, costUsd: 0.001, segments } })),
+    discard: vi.fn(async () => ({})),
+  } satisfies NotesApi;
+  return { media, api };
+}
+
+function Card({ f }: { f: ReturnType<typeof fakes> }) {
+  const voice = useAnswerVoice({
+    origin: "review:r1:changes",
+    to: "The card",
+    page: "card r1",
+    typed: "",
+    deliver: async () => undefined,
+    api: f.api,
+    media: f.media,
+    state: async () => ({ enabled: true, monthUsd: 0.2, limits: { monthCapUsd: 25 } }),
+    big: true,
+  });
+  return (
+    <article>
+      {voice.button}
+      {voice.strip}
+    </article>
+  );
+}
+
+describe("the owner 2026-11-15: the recording bar stays on screen", () => {
+  it("a card's strip scrolled off screen while recording floats the pill; back in view the pill goes", async () => {
+    const vp = viewport();
+    const f = fakes();
+    render(
+      <NoteProvider tab={new NoteTab()}>
+        <MemoryRouter initialEntries={["/inbox"]}>
+          <Card f={f} />
+          <NoteWidget />
+        </MemoryRouter>
+      </NoteProvider>,
+    );
+    const mic = await screen.findByTestId("answer-voice-button", {}, { timeout: 3000 });
+    await act(async () => void fireEvent.click(mic));
+    await waitFor(() => expect(screen.getByTestId("answer-voice-strip").dataset.phase).toBe("recording"));
+    expect(vp.watching()).toBe(1);
+    // in view: the strip shows it, nothing floats
+    vp.seen(true);
+    expect(screen.queryByTestId("note-widget")).toBeNull();
+    // scrolled away: the pill with the time, the level and Send at the bottom of the screen
+    vp.seen(false);
+    const pill = await screen.findByTestId("note-widget");
+    expect(pill.dataset.phase).toBe("recording");
+    expect(screen.getByTestId("note-widget-time")).toBeTruthy();
+    expect(screen.getByTestId("note-widget-send")).toBeTruthy();
+    expect(screen.getByTestId("answer-voice-strip").dataset.floating).toBe("yes");
+    // its link scrolls back to the card, it does not open the page again
+    const scrolled = vi.fn();
+    screen.getByTestId("answer-voice-strip").scrollIntoView = scrolled;
+    fireEvent.click(screen.getByTestId("note-widget-back"));
+    expect(scrolled).toHaveBeenCalled();
+    // back in view: only the strip
+    vp.seen(true);
+    await waitFor(() => expect(screen.queryByTestId("note-widget")).toBeNull());
+  });
+
+  it("an idle microphone is never watched and never floats", async () => {
+    const vp = viewport();
+    const f = fakes();
+    render(
+      <NoteProvider tab={new NoteTab()}>
+        <MemoryRouter>
+          <Card f={f} />
+          <NoteWidget />
+        </MemoryRouter>
+      </NoteProvider>,
+    );
+    await screen.findByTestId("answer-voice-button");
+    expect(vp.watching()).toBe(0);
+    vp.seen(false);
+    expect(screen.queryByTestId("note-widget")).toBeNull();
+  });
+});

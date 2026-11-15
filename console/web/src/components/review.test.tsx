@@ -94,11 +94,13 @@ describe("T48-S26 the card, as the approved mockup", () => {
     mount();
     const c = await screen.findByTestId("review-card");
     const crumb = within(c).getByTestId("review-crumb");
-    // the meta line is the kind word, the project (a link), the age and Snooze; the goal and its count live in the foot
+    // the meta line is the kind word, the project (a link) and the age; Snooze is a button beside Park
     expect(crumb.textContent).toMatch(/^ReviewMemo, the memory app/);
     expect(within(crumb).getByText("Memo, the memory app").getAttribute("href")).toBe("https://memo.example.com/");
-    expect(within(crumb).getByTestId("snooze")).toBeTruthy();
-    expect(within(c).getByTestId("review-foot").textContent).toBe("Memo, the memory app · Get Memo into every AI tool directory · 1 of 9 tasks done");
+    expect(within(crumb).queryByTestId("snooze")).toBeNull();
+    expect(within(within(c).getByTestId("review-buttons")).getByTestId("snooze")).toBeTruthy();
+    // no foot repeating the project, the goal and the count (half the words)
+    expect(within(c).queryByTestId("review-foot")).toBeNull();
     // the heading is short; the body holds the full title, the Why line the task's goal
     const title = within(c).getByTestId("review-title");
     expect(title.tagName).toBe("BUTTON");
@@ -121,7 +123,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
     expect(within(lines[0] as HTMLElement).getByText("memo.example.com/connect").getAttribute("href")).toBe("https://memo.example.com/connect");
     // two buttons, the main one's sub-line is its title; the green evidence link its own line above them
     const buttons = within(c).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Give feedback"]); // E948-S83 iteration 2: Park on every card
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Snooze", "Give feedback"]); // E948-S83 iteration 2: Park on every card
     expect(within(buttons).getByTestId("review-complete").getAttribute("title")).toBe("The goal stays open. Next the team lists Memo in the official MCP registry, once you say yes to publishing.");
     const go = within(c).getByTestId("review-go");
     expect(buttons.contains(go)).toBe(false);

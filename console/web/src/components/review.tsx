@@ -803,23 +803,6 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {item.createdAt && <RelTime iso={item.createdAt} />}
         {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}
-        {item.state === "review" && (
-          <SnoozeDropdown
-            id={item.id}
-            className="ml-auto"
-            title="Hide it for a while; it stays waiting for your review"
-            onPick={(c) => {
-              void snoozeReview(item, c, face.title);
-              // the same floating note; Bring it back unsnoozes it
-              showClosed({
-                said: "Snoozed",
-                title: face.title,
-                ...(cardOf(item) ? { card: cardOf(item) } : {}),
-                back: async () => (await unsnoozeReview(item), { back: true, line: "It is back in your inbox." }),
-              });
-            }}
-          />
-        )}
       </div>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
@@ -1044,9 +1027,8 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
           .
         </p>
       )}
-      <div className="mt-3 text-xs text-muted-foreground" data-testid="review-foot">
-        {face.project.name} · {face.goal.text} · {tasks}
-      </div>
+      {/* (the owner 2026-11-15, vn_5ef65752: "maybe 50% the amount of text"): no foot repeating the project, the goal and the
+          task count: the meta line names the project and More (the title) shows the goal and its tasks. */}
       {/* the card ends with the one decision asked of him, right above the buttons that answer it. */}
       {face.decision && (
         <div className="mt-3 rounded-lg border border-emerald-700/40 bg-emerald-50/60 px-3 py-2 dark:border-emerald-400/40 dark:bg-emerald-950/30" data-testid="review-decision">
@@ -1073,6 +1055,25 @@ export function ReviewCard({ closedRefs, ...card }: CardProps & { closedRefs?: S
         )}
         {/* E948-S83 iteration 2: Park on every card, beside its own buttons (a month, nothing decided, brought back any time). */}
         {item.state === "review" && <ParkButton disabled={busy} onPark={() => parkReview(item, face.title, cardOf(item))} />}
+        {/* (the owner 2026-11-15, vn_5ef65752): Snooze beside Park, in the one decisions block, never at the top of the card. */}
+        {item.state === "review" && (
+          <SnoozeDropdown
+            id={item.id}
+            disabled={busy}
+            title="Hide it for a while; it stays waiting for your review"
+            onPick={(c) => {
+              void snoozeReview(item, c, face.title);
+              // the same floating note; Bring it back unsnoozes it
+              showClosed({
+                said: "Snoozed",
+                title: face.title,
+                ...(cardOf(item) ? { card: cardOf(item) } : {}),
+                back: async () => (await unsnoozeReview(item), { back: true, line: "It is back in your inbox." }),
+              });
+            }}
+          />
+        )}
+
         <CardButton variant="outline" {...props("changes", voice.busy || !files.ready)} onClick={giveFeedback} data-testid="review-iteration">
           Give feedback
         </CardButton>
