@@ -151,6 +151,18 @@ export interface CampaignPlanFields {
   readerAction?: string;
   targets?: string;
   personas?: string;
+  /** the campaign template's own parts: the frame, who it is for, the offer, two goals, the evening count. */
+  frame?: string;
+  who?: string;
+  offer?: string;
+  goals?: string;
+  eveningCount?: string;
+}
+/** GET /api/tenants/:id/campaigns/template: the template every new campaign starts from. */
+export interface CampaignTemplate {
+  source: { name: string; url: string; said: string };
+  parts: { key: keyof CampaignPlanFields; title: string; help: string; example: string }[];
+  plan: CampaignPlanFields;
 }
 export interface NamedCampaignInput {
   repo: string;
@@ -159,6 +171,8 @@ export interface NamedCampaignInput {
   /** Pack roles that work it: each moves the repo's assignment holding the role (same persona and cadence). */
   roles?: string[];
   move?: boolean;
+  /** start from the campaign template: its parts fill what the plan leaves empty, and the campaign gets its brief file. */
+  template?: boolean;
 }
 export interface NamedCampaignResult {
   tenantId: string;

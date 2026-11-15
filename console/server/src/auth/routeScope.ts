@@ -196,7 +196,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // the Team desk (desk/messages, the platform's one thread), POST /milestones/bootstrap (launches on any checkout), platform
   // credits writes; the social skin never calls them for another world (Chat points at the campaign's chat, Add is the
   // campaign wizard, credits admin shows only to the platform). routeList3.test.ts
-  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns(/repos)?$`)],
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns(/repos|/template)?$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns(/preview)?$`)],
   // named campaigns inside a repo: create (a spine in one of the path world's own social repos, its milestone and
   // the copies of that world's assignments), rename, plan, retire and restore act on a milestone of the path world only

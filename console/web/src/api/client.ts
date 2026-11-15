@@ -118,7 +118,7 @@ import type {
   ChatAttachment,
   ChatHistory,
   MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
-import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult } from "./campaign-types";
+import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate } from "./campaign-types";
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult } from "./inbox-types";
 
 /** GET /api/push. */
@@ -467,6 +467,8 @@ export interface ApiClient {
   addJob(tenantId: string, input: JobInput): Promise<JobResult>;
   /** named campaigns inside a repo: create, rename, replace the plan, retire (pause + hide), restore. */
   createNamedCampaign(tenantId: string, input: NamedCampaignInput): Promise<NamedCampaignResult>;
+  /** the campaign template every new campaign starts from. */
+  campaignTemplate(tenantId: string): Promise<CampaignTemplate>;
   renameCampaign(tenantId: string, milestoneId: string, name: string): Promise<unknown>;
   setCampaignPlan(tenantId: string, milestoneId: string, plan: string): Promise<unknown>;
   /** the owner saves the campaign's one-pager (his lines; a held draft's row closes). */

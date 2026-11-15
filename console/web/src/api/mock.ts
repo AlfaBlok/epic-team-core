@@ -1338,6 +1338,17 @@ const mockMail = () => ({
       const m = await this.createMilestone({ title: input.name, repo: input.repo, path, owner: "Sam" });
       return { tenantId, repo: input.repo, milestoneId: m.id, campaign: { code: "EPIC-999", name: input.name, path, platform: input.plan?.platform ?? null, period: input.plan?.period ?? null }, commit: "mock", push: { state: "skipped" }, team: [], skipped: [] };
     },
+    /** the mock's template: two parts and an empty prefill (the real one is the console's). */
+    async campaignTemplate() {
+      return {
+        source: { name: "The example plan", url: "http://example.com/plan", said: "mock" },
+        parts: [
+          { key: "frame" as const, title: "Frame", help: "The one idea every post serves", example: "Bring your context home" },
+          { key: "cadence" as const, title: "Cadence per channel", help: "The equal test, then lean in", example: "10 posts per message in days 1 to 3" },
+        ],
+        plan: { frame: "(to fill in: the one idea every post serves)", cadence: "The equal test." },
+      };
+    },
     async renameCampaign(_t: string, id: string, name: string) {
       return this.updateMilestone(id, { title: name });
     },

@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, ExternalLink, Plus } from "lucide-react";
 import { api } from "@/api";
 import { worldId } from "@/lib/useSocial";
-import type { CampaignCard, CampaignInput, CampaignPlan, CampaignResult } from "@/api/campaign-types";
+import type { CampaignCard, CampaignInput, CampaignPlan, CampaignPlanFields, CampaignResult } from "@/api/campaign-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -403,7 +403,22 @@ export function NewCampaignPage() {
  */
 function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string; repo: string; where: string; onBack: () => void }) {
   const navigate = useNavigate();
-  const [f, setF] = useState({ name: "", platform: "", period: "", keyMessages: "", voice: "", format: "", postingStyle: "", replyStyle: "", cadence: "", readerAction: "", targets: "", personas: "" });
+  const [f, setF] = useState({ name: "", platform: "", period: "", keyMessages: "", voice: "", format: "", postingStyle: "", replyStyle: "", cadence: "", readerAction: "", targets: "", personas: "", frame: "", who: "", offer: "", goals: "", eveningCount: "" });
+  // every new campaign opens prefilled from the campaign template (the plan the owner approved as the model).
+  const tpl = useQuery(() => api.campaignTemplate(tenantId), [tenantId]);
+  useEffect(() => {
+    const p = tpl.data?.plan;
+    if (!p) return;
+    setF((cur) => {
+      const next = { ...cur };
+      for (const [k, v] of Object.entries(p) as [keyof CampaignPlanFields, string | string[] | undefined][]) {
+        const text = Array.isArray(v) ? v.join("\n") : (v ?? "");
+        if (k in next && !next[k as keyof typeof next].trim()) next[k as keyof typeof next] = text;
+      }
+      return next;
+    });
+  }, [tpl.data]);
+  const hint = (k: string) => tpl.data?.parts.find((p) => p.key === k);
   const [roles, setRoles] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<Error>();
@@ -414,7 +429,7 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
     try {
       const keyMessages = f.keyMessages.split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
       const plan = Object.fromEntries(Object.entries({ ...f, keyMessages: undefined, name: undefined }).filter(([, v]) => typeof v === "string" && v.trim()));
-      const r = await mutate(() => api.createNamedCampaign(tenantId, { repo, name: f.name.trim(), plan: { ...plan, ...(keyMessages.length ? { keyMessages } : {}) }, ...(roles.length ? { roles } : {}) }));
+      const r = await mutate(() => api.createNamedCampaign(tenantId, { repo, name: f.name.trim(), plan: { ...plan, ...(keyMessages.length ? { keyMessages } : {}) }, ...(roles.length ? { roles } : {}), ...(tpl.data ? { template: true } : {}) }));
       navigate(`/milestones/${encodeURIComponent(r.milestoneId)}?tab=brief`);
     } catch (e) {
       setErr(e instanceof Error ? e : new Error(String(e)));
@@ -426,6 +441,11 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
     <div className="grid gap-1">
       <Label htmlFor={`named-${k}`}>{label}</Label>
       {rows ? <Textarea id={`named-${k}`} rows={rows} value={f[k]} onChange={set(k)} placeholder={placeholder} /> : <Input id={`named-${k}`} value={f[k]} onChange={set(k)} placeholder={placeholder} />}
+      {hint(k) && (
+        <div className="text-xs text-muted-foreground" data-testid={`named-${k}-example`}>
+          {hint(k)!.help}. Example: {hint(k)!.example}
+        </div>
+      )}
     </div>
   );
   return (
@@ -434,14 +454,28 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
         <div className="text-sm font-medium">2. The campaign in {where}</div>
         {err && <ErrorBox error={err} />}
         {field("name", "Name", 0, "e.g. Reddit awareness week 37")}
+        {tpl.data && (
+          <div className="rounded-md border p-3 text-sm" data-testid="named-campaign-template">
+            Starts from the campaign template:{" "}
+            <a className="underline" href={tpl.data.source.url} target="_blank" rel="noreferrer">
+              {tpl.data.source.name.toLowerCase()}
+            </a>
+            . Equal posts per message for 3 days, then lean into what works. Replace each line that says to fill in.
+          </div>
+        )}
+        {field("frame", "Frame", 2)}
+        {field("who", "Who it is for", 3)}
+        {field("keyMessages", "Key messages (one per line)", 4)}
+        {field("cadence", "Cadence: the equal test", 3, "Reddit: 1 thread a day · X: 1 to 2 posts a day")}
         <div className="grid gap-3 sm:grid-cols-2">
           {field("platform", "Channels", 0, "Reddit and X")}
           {field("period", "Period", 0, "2026-11-02 to 2026-11-08")}
         </div>
-        {field("keyMessages", "Topics: key messages (one per line)", 3)}
+        {field("offer", "Offer", 0)}
+        {field("goals", "Two goals", 2)}
+        {field("eveningCount", "Evening count", 2)}
         {field("voice", "Voice", 2)}
         {field("format", "Format", 0, "text only, text + images, video, or a mix")}
-        {field("cadence", "Cadence per channel", 2, "Reddit: 1 thread a day · X: 1 to 2 posts a day")}
         {field("readerAction", "Reader action", 0, "the one thing we want a reader to do")}
         {field("postingStyle", "Posting style", 2)}
         {field("replyStyle", "Reply style", 2)}

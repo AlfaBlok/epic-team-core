@@ -181,18 +181,22 @@ describe("New campaign in a repo that runs campaigns", () => {
     expect(screen.getByTestId("rerun-setup")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Next/ }));
     const form = await screen.findByTestId("named-campaign-form");
+    // it opens prefilled from the campaign template, with the example plan's answer beside each part
+    expect(await within(form).findByTestId("named-campaign-template")).toBeTruthy();
+    await waitFor(() => expect((within(form).getByLabelText("Frame") as HTMLTextAreaElement).value).toBe("(to fill in: the one idea every post serves)"));
+    expect(within(form).getByTestId("named-frame-example").textContent).toMatch(/Example: Bring your context home/);
     fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "Reddit awareness week 37" } });
     fireEvent.change(within(form).getByLabelText("Channels"), { target: { value: "Reddit" } });
-    fireEvent.change(within(form).getByLabelText("Topics: key messages (one per line)"), { target: { value: "- Memory you own\nOpen source\n" } });
+    fireEvent.change(within(form).getByLabelText("Key messages (one per line)"), { target: { value: "- Memory you own\nOpen source\n" } });
     // the brief's other set parts
     fireEvent.change(within(form).getByLabelText("Format"), { target: { value: "text only" } });
-    fireEvent.change(within(form).getByLabelText("Cadence per channel"), { target: { value: "Reddit: 1 thread a day" } });
+    fireEvent.change(within(form).getByLabelText("Cadence: the equal test"), { target: { value: "Reddit: 1 thread a day" } });
     fireEvent.change(within(form).getByLabelText("Reader action"), { target: { value: "answer the question" } });
     fireEvent.click(within(form).getByLabelText("Writer"));
     fireEvent.click(within(form).getByLabelText("Responder"));
     fireEvent.click(within(form).getByTestId("named-campaign-create"));
     await waitFor(() =>
-      expect(create).toHaveBeenCalledWith("social", { repo: "social", name: "Reddit awareness week 37", plan: { platform: "Reddit", format: "text only", cadence: "Reddit: 1 thread a day", readerAction: "answer the question", keyMessages: ["Memory you own", "Open source"] }, roles: ["Writer", "Responder"] }),
+      expect(create).toHaveBeenCalledWith("social", { repo: "social", name: "Reddit awareness week 37", plan: { platform: "Reddit", format: "text only", cadence: "Reddit: 1 thread a day", readerAction: "answer the question", frame: "(to fill in: the one idea every post serves)", keyMessages: ["Memory you own", "Open source"] }, roles: ["Writer", "Responder"], template: true }),
     );
     expect(await screen.findByText("campaign page")).toBeTruthy();
   });

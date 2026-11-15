@@ -466,6 +466,7 @@ export function createRealClient(): ApiClient {
     createCampaign: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns`, input),
     addJob: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/jobs`, input),
     createNamedCampaign: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/named`, input),
+    campaignTemplate: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/template`),
     renameCampaign: (tenantId, id, name) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/rename`, { name }),
     setCampaignPlan: (tenantId, id, plan) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan`, { plan }),
     saveOnePager: (tenantId, id, fields) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/onepager`, { fields }),
