@@ -127,6 +127,23 @@ describe("E948-S62 the card quality check in the review gate", () => {
     expect(qcVerdict({ row: "E941-S1", required: false, qc: undefined, cardText: "x" })).toBeUndefined();
   });
 
+  it("a card the fresh reader finds ambiguous is held, naming the ambiguous part; nothing ambiguous passes", () => {
+    const amb = qcFile("E941-S1", cardText("E941-S1"), {
+      pass: false,
+      held: ['ambiguous: "Keep it?": the new page or the old one?'],
+      reader: { asked: "Keep the page?", ambiguous: '"Keep it?": the new page or the old one?' },
+    });
+    const clear = qcFile("E941-S2", cardText("E941-S2"), { reader: { asked: "Keep the new page?", ambiguous: "" } });
+    const made = repo({ "E941-S1": amb, "E941-S2": clear });
+    expect(byRef("E941-S1").verdict).toMatchObject({
+      kind: "fails-qc",
+      reason: "ambiguous",
+      problems: ['a fresh reader found this most ambiguous: "Keep it?": the new page or the old one?', "they read the card as asking: Keep the page?"],
+    });
+    expect(readQc(made.dir, "E941-S2")?.reader).toEqual({ asked: "Keep the new page?", ambiguous: "" });
+    expect(byRef("E941-S2").verdict.kind).toBe("card");
+  });
+
   it("a broken result file never passes: it reads as no check", () => {
     const made = repo({ "E941-S1": "{not json", "E941-S2": qcFile("E941-S2", cardText("E941-S2")) });
     expect(readQc(made.dir, "E941-S1")).toBeUndefined();
@@ -146,6 +163,12 @@ describe("E948-S62 judge fix: the model answers breaches as a list", () => {
     expect(w.required).toEqual(["n", "status", "how", "onPage", "changed"]);
     expect(w.properties.onPage.type).toBe("boolean");
     expect(w.properties.changed.type).toBe("string");
+  });
+  it("the card judge and the ask dry run both answer what is asked and the most ambiguous part", () => {
+    expect(QC_JUDGE_SCHEMA.required).toContain("reader");
+    expect(QC_JUDGE_SCHEMA.properties.reader.required).toEqual(["asked", "ambiguous"]);
+    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem"]);
+    expect(JUDGE_SCHEMAS.dryrun.properties.ambiguous.type).toBe("string");
   });
 });
 

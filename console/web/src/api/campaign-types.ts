@@ -28,6 +28,8 @@ export interface CampaignCard {
   waiting?: { asks: { code: string | null; question: string }[]; held: number; line: string };
   /** per channel the account, its sign-in, cadence, what we post and the summed counts of its posts with the trend. */
   channels?: CampaignChannel[];
+  /** the product it is for (the one product list, or its spine's `Product:` line); its words are read there, never copied. */
+  product?: { id: string; name: string };
 }
 export interface ChannelTotals {
   views: number | null;

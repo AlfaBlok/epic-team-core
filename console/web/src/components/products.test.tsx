@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api } from "@/api";
 import type { ProductView, PursuitKitBody } from "@/api/pursuit-types";
-import { ProductPage, ProductsPage } from "@/components/products";
+import { CampaignProductWords, ProductPage, ProductsPage } from "@/components/products";
 import { SocialKitView } from "@/components/socialKit";
 
 /** each product defined once; its objectives name it and its kit is read from it. */
@@ -100,5 +100,22 @@ describe("products", () => {
     );
     const line = await screen.findByTestId("kit-of-product");
     expect(within(line).getByRole("link").getAttribute("href")).toBe("/products/live");
+  });
+
+  it("a campaign shows its product's words read from the product, with links to its page and kit", async () => {
+    const get = vi.spyOn(api, "getProduct").mockResolvedValue(LIVE);
+    render(
+      <MemoryRouter>
+        <CampaignProductWords id="live" name="Live" />
+      </MemoryRouter>,
+    );
+    expect(get).toHaveBeenCalledWith("live");
+    const box = await screen.findByTestId("campaign-product-words");
+    await waitFor(() => expect(within(box).getAllByTestId("product-part")).toHaveLength(4));
+    expect(within(box).getByText("For Live")).toBeTruthy();
+    expect(within(box).getByTestId("campaign-product-line").textContent).toContain("Agents that post for you.");
+    expect(within(box).getByTestId("campaign-product-link").getAttribute("href")).toBe("/products/live");
+    expect(within(box).getByTestId("campaign-product-kit").getAttribute("href")).toBe("/products/live?tab=kit");
+    expect(within(box).getByTestId("product-source").textContent).toContain("live-campaign data/product.md");
   });
 });

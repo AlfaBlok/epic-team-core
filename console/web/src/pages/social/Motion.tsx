@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/api";
+import { CampaignProductWords } from "@/components/products";
 import type { CatalogRow, Milestone, MotionBody, PersonaSlide, ProductSlide, TargetView } from "@/api/types";
 import { PageHeader } from "@/components/common";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
@@ -266,10 +267,25 @@ export function ProductPage() {
  * (docs/campaigns/<epic-n>/product.md), with its target and a link up to the project's deck. A repo-level page (no
  * campaign code) shows the project's deck.
  */
-export function CampaignProductTab({ repo, code, m }: { repo: string; code?: string; m?: Pick<Milestone, "id"> }) {
+export function CampaignProductTab({ repo, code, m, product }: { repo: string; code?: string; m?: Pick<Milestone, "id">; product?: { id: string; name: string } }) {
   const { data, error } = useMotion(repo, code);
   const own = data?.campaignProduct;
   const target = code ? data?.targets.find((t) => t.code.toUpperCase() === code.toUpperCase()) : undefined;
+  // a campaign that names its product shows the product's words from the Products section (written once there),
+  // then only what this campaign itself pushes; the project deck is that same product file, so it is not shown twice.
+  if (product)
+    return (
+      <div className="grid gap-4" data-testid="campaign-product">
+        <CampaignProductWords id={product.id} name={product.name} />
+        {own && data && (
+          <section className="grid gap-3" data-testid="campaign-own-deck">
+            <h2 className="text-lg font-semibold">What {own.name} pushes</h2>
+            {m ? <NotedProductView m={m} data={data} deck={own} target={target?.now} /> : <ProductView m={data} deck={own} target={target?.now} />}
+          </section>
+        )}
+        {target && <TargetsView targets={[target]} />}
+      </div>
+    );
   return (
     <div className="grid gap-3" data-testid="campaign-product">
       <div className="flex flex-wrap items-baseline justify-between gap-2">

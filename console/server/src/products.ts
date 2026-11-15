@@ -23,6 +23,8 @@ export interface ProductRef {
   /** its product deck, a file in another repo checkout (read only). */
   deck?: { repo: string; path: string };
   kit?: PursuitKitRef;
+  /** the campaign repos whose posts count for it (`posts[].repo`): a campaign there names this product. */
+  campaigns?: string[];
 }
 
 /** The deck parts the Products page shows, in his order (his words: benefits, problems it solves, how it works, target audience). */
@@ -57,7 +59,11 @@ export function parseProducts(text: string): ProductRef[] {
     const files = str(k.files);
     const kit = SAFE_REL(str(k.dir)) ? { dir: str(k.dir)!, ...(files && /^https?:\/\//.test(files) ? { files } : {}) } : undefined;
     const url = str(o.url);
-    return [{ id, name, ...(str(o.group) ? { group: str(o.group) } : {}), ...(url && /^https?:\/\//.test(url) ? { url } : {}), ...(deck ? { deck } : {}), ...(kit ? { kit } : {}) }];
+    const campaigns = (Array.isArray(o.posts) ? o.posts : []).flatMap((x) => {
+      const r = str(obj(x).repo);
+      return r && /^[\w.-]+$/.test(r) ? [r] : [];
+    });
+    return [{ id, name, ...(campaigns.length ? { campaigns } : {}), ...(str(o.group) ? { group: str(o.group) } : {}), ...(url && /^https?:\/\//.test(url) ? { url } : {}), ...(deck ? { deck } : {}), ...(kit ? { kit } : {}) }];
   });
 }
 
@@ -68,6 +74,26 @@ export function productsIn(home: string): ProductRef[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * the product a campaign is for, never written again on the campaign. A `Product: <name or id>` line in its
+ * spine (the named campaign's, else the repo's root spine) says it; with none, the product whose deck or posts live in
+ * the campaign's repo (docs/scorecard/products.json). A repo name matches as a bare name or an `owner/name` slug.
+ */
+export function productOfCampaign(products: ProductRef[], repo: string, spineTexts: (string | null | undefined)[] = []): { id: string; name: string } | null {
+  const bare = (r: string) => r.trim().toLowerCase().replace(/\.git$/, "").split("/").pop() ?? "";
+  const pick = (p: ProductRef | undefined) => (p ? { id: p.id, name: p.name } : null);
+  for (const text of spineTexts) {
+    const line = text ? /^Product:\s*(.+?)\s*$/m.exec(text.replace(/<!--[\s\S]*?-->/g, ""))?.[1] : undefined;
+    if (!line) continue;
+    const flat = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const said = flat(line.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1"));
+    const named = products.find((p) => flat(p.id) === said || flat(p.name) === said) ?? products.find((p) => said.startsWith(flat(p.name)) || said.startsWith(flat(p.id)));
+    if (named) return pick(named);
+  }
+  const r = bare(repo);
+  return pick(products.find((p) => p.deck && bare(p.deck.repo) === r) ?? products.find((p) => p.campaigns?.some((c) => bare(c) === r)));
 }
 
 /** The deck's own source marks ([home], [connect], [README]) are for the personas; the page leaves them out. */

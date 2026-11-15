@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { gitOut } from "../src/freshness.js";
 import { createPursuits } from "../src/pursuits.js";
-import { createProducts, followPart, parseProducts } from "../src/products.js";
+import { createProducts, followPart, parseProducts, productOfCampaign } from "../src/products.js";
 import { openDb } from "../src/db.js";
 import { judge } from "../src/auth/routeScope.js";
 import type { Identity } from "../src/auth/identity.js";
@@ -164,5 +164,34 @@ describe("products on the social site", () => {
     expect(judge(d, session("customer"), "GET", "/api/products")).toMatchObject({ allow: false, status: 403 });
     expect(judge(d, session("own-social"), "GET", "/api/products/live/kit/other/x.webp")).toMatchObject({ allow: false, status: 403 });
     expect(judge(d, session("own-social"), "POST", "/api/products")).toMatchObject({ allow: false, status: 403 });
+  });
+});
+
+describe("each campaign names its product, never repeats it", () => {
+  const list = parseProducts(
+    JSON.stringify({
+      products: [
+        { id: "notes", name: "Notes", deck: { repo: "notes-social", path: "data/product.md" }, posts: [{ repo: "notes-social" }] },
+        { id: "live", name: "Live", deck: { repo: "live-campaign", path: "data/product.md" } },
+        { id: "crew", name: "Crew", posts: [{ repo: "crew-campaign" }] },
+        { id: "deals", name: "Deals", posts: [{ repo: "deals-campaign", community: "Deals" }] },
+      ],
+    }),
+  );
+  it("reads the product from the one list by the campaign's repo, bare name or owner/name slug", () => {
+    expect(productOfCampaign(list, "acme/notes-social")).toEqual({ id: "notes", name: "Notes" });
+    expect(productOfCampaign(list, "live-campaign")).toEqual({ id: "live", name: "Live" });
+    expect(productOfCampaign(list, "acme/crew-campaign.git")).toEqual({ id: "crew", name: "Crew" });
+    expect(productOfCampaign(list, "acme/deals-campaign")).toEqual({ id: "deals", name: "Deals" });
+    expect(productOfCampaign(list, "acme/other-campaign")).toBeNull();
+  });
+  it("a Product: line in the campaign's spine wins, then the root spine's, by name or id", () => {
+    const camp = "# Get testers\n\n## Current State\nProduct: [Crew](https://crew.example.com)\n";
+    const root = "# Live campaign\nProduct: live\n";
+    expect(productOfCampaign(list, "live-campaign", [camp, root])).toEqual({ id: "crew", name: "Crew" });
+    expect(productOfCampaign(list, "live-campaign", [null, root])).toEqual({ id: "live", name: "Live" });
+    // an unknown name falls back to the repo's product; a commented line or "Product deck:" is not a Product line
+    expect(productOfCampaign(list, "live-campaign", ["Product: Nothing we know"])).toEqual({ id: "live", name: "Live" });
+    expect(productOfCampaign(list, "deals-campaign", ["<!-- Product: notes -->\nProduct deck: [data/product.md](x)"])).toEqual({ id: "deals", name: "Deals" });
   });
 });

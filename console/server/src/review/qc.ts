@@ -42,6 +42,8 @@ export interface QcResult {
   visual: { pass: boolean; problems: string[]; summary?: string };
   pass: boolean;
   held?: string[];
+  /** the fresh reader's one sentence on what the card asks, and its most ambiguous part ("" = nothing). */
+  reader?: { asked: string; ambiguous: string };
   shots: QcShot[];
 }
 
@@ -79,6 +81,7 @@ export function readQc(repoDir: string, row: string): QcResult | undefined {
       visual: { pass: v.visual.pass === true, problems: Array.isArray(v.visual.problems) ? v.visual.problems.map(String) : [], ...(v.visual.summary ? { summary: String(v.visual.summary) } : {}) },
       pass: v.pass === true,
       ...(Array.isArray(v.held) ? { held: v.held.map(String) } : {}),
+      ...(v.reader && typeof v.reader === "object" ? { reader: { asked: String(v.reader.asked ?? ""), ambiguous: String(v.reader.ambiguous ?? "") } } : {}),
       shots: Array.isArray(v.shots) ? v.shots.filter((s) => s && typeof s.file === "string" && !s.file.includes("/") && !s.file.includes("..")).map((s) => ({ width: Number(s.width) || 0, file: s.file, ...(s.url ? { url: String(s.url) } : {}) })) : [],
     };
   } catch {
@@ -120,6 +123,9 @@ export function qcVerdict(o: { row: string; required: boolean; qc: QcResult | un
       problems: missed.map((w) => `${ownerName()} said "${w.said}"${w.where ? ` (${w.where})` : ""}: ${w.how || "the result does not show it"}`),
     };
   if (!qc.visual.pass) return { kind: "fails-qc", reason: "failed the visual check", problems: qc.visual.problems.length ? qc.visual.problems : ["the look failed and named no reason"] };
+  // "Ambiguity is our enemy": held until the fresh reader finds nothing ambiguous
+  if (qc.reader?.ambiguous)
+    return { kind: "fails-qc", reason: "ambiguous", problems: [`a fresh reader found this most ambiguous: ${qc.reader.ambiguous}`, ...(qc.reader.asked ? [`they read the card as asking: ${qc.reader.asked}`] : [])] };
   if (!qc.pass) return { kind: "fails-qc", reason: "failed the quality check", problems: qc.held?.length ? qc.held : ["the check did not pass"] };
   return undefined;
 }
@@ -148,8 +154,15 @@ export const qcPicture = (q: CardQc | undefined) => (q?.pass ? (q.shots.find((s)
 export const QC_JUDGE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["words", "visual"],
+  required: ["words", "visual", "reader"],
   properties: {
+    // the fresh reader says what the card asks in one sentence and its most ambiguous part
+    reader: {
+      type: "object",
+      additionalProperties: false,
+      required: ["asked", "ambiguous"],
+      properties: { asked: { type: "string" }, ambiguous: { type: "string" } },
+    },
     words: {
       type: "array",
       items: {
@@ -225,7 +238,8 @@ export const DELIVERY_LIVE_SCHEMA = {
 export const ASK_DRY_RUN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["steps", "verdict", "firstProblem"],
+  // asked, ambiguous: the fresh reader's one sentence and the card's most ambiguous part ("" = nothing)
+  required: ["steps", "asked", "ambiguous", "verdict", "firstProblem"],
   properties: {
     steps: {
       type: "array",
@@ -243,6 +257,8 @@ export const ASK_DRY_RUN_SCHEMA = {
         },
       },
     },
+    asked: { type: "string" },
+    ambiguous: { type: "string" },
     verdict: { type: "string", enum: ["pass", "fail"] },
     firstProblem: { type: "string" },
   },

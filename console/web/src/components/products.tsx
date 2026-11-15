@@ -94,6 +94,74 @@ function Steps({ body }: { body: string }) {
   );
 }
 
+/** the deck's four parts, read where they live (the product page and every campaign of the product show these). */
+function ProductParts({ p }: { p: ProductView }) {
+  return (
+    <>
+      {p.deck && p.deck.parts.length > 0 ? (
+        <div className="grid min-w-0 gap-3 md:grid-cols-2" data-testid="product-parts">
+          {p.deck.parts.map((x) => (
+            <section key={x.part} className={cn("min-w-0 rounded-xl border bg-card p-3 sm:p-4", x.part === "How it works" && "md:col-span-2")} data-testid="product-part" data-part={x.part}>
+              <h2 className="mb-1.5 text-[15px] font-semibold text-foreground">{x.label}</h2>
+              <div className="min-w-0 text-sm [overflow-wrap:anywhere]">
+                {x.part === "How it works" ? <Steps body={x.body} /> : <ChatMarkdown text={x.body} />}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No product deck is named for it yet.</p>
+      )}
+    </>
+  );
+}
+
+/** where the words were read from, written once there. */
+function ProductSource({ p }: { p: ProductView }) {
+  if (!p.deck) return null;
+  return (
+    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="product-source">
+      Read from {p.deck.repo} {p.deck.path}
+      {p.deck.parts.some((x) => x.from) ? ` and ${p.deck.parts.flatMap((x) => (x.from ? [x.from] : [])).join(", ")}` : ""}, written once there.
+    </p>
+  );
+}
+
+/**
+ * a campaign's product, never written again on the campaign: its name and line, the deck's four parts and its
+ * social kit, read from the Products section (the owner: goals and campaigns reuse the product, never repeat it).
+ */
+export function CampaignProductWords({ id, name }: { id: string; name: string }) {
+  const { data: p, error, loading } = useQuery<ProductView>(() => api.getProduct(id), [id]);
+  return (
+    <section className="grid min-w-0 gap-3" data-testid="campaign-product-words" data-product={id}>
+      <header className="flex min-w-0 items-start gap-3 rounded-xl border border-l-[6px] bg-card p-3 shadow-sm sm:p-4" style={{ borderLeftColor: p?.accent }}>
+        <Mark p={p ?? { name }} size={36} />
+        <div className="grid min-w-0 flex-1 gap-1">
+          <h2 className="text-lg font-semibold leading-tight">For {p?.name ?? name}</h2>
+          <p className="text-sm text-foreground [overflow-wrap:anywhere]" data-testid="campaign-product-line">
+            {p?.tagline ? `${p.tagline.replace(/[.!?]+$/, "")}. ` : ""}Its words are written once, on its product page.
+          </p>
+          <span className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link to={productHref(id)} className="underline underline-offset-4" data-testid="campaign-product-link">
+              Product page ›
+            </Link>
+            {p?.kit && (
+              <Link to={`${productHref(id)}?tab=kit`} className="underline underline-offset-4" data-testid="campaign-product-kit">
+                Social kit ›
+              </Link>
+            )}
+          </span>
+        </div>
+      </header>
+      {loading && !p && <div className="text-sm text-muted-foreground">Reading the product…</div>}
+      {error && <div className="text-sm text-muted-foreground">The product page could not be read: {error.message}</div>}
+      {p && <ProductParts p={p} />}
+      {p && <ProductSource p={p} />}
+    </section>
+  );
+}
+
 /** /products: every defined product, one row each, opening its page. */
 export function ProductsPage() {
   const { data, error, loading } = useQuery<ProductsBody>(() => api.listProducts(), []);
@@ -178,30 +246,12 @@ export function ProductPage() {
           <TabStrip tabs={tabs} tab={tab} label="Product pages" />
           {tab === "table" && (
             <div className="grid gap-4">
-              {p.deck && p.deck.parts.length > 0 ? (
-                <div className="grid min-w-0 gap-3 md:grid-cols-2" data-testid="product-parts">
-                  {p.deck.parts.map((x) => (
-                    <section key={x.part} className={cn("min-w-0 rounded-xl border bg-card p-3 sm:p-4", x.part === "How it works" && "md:col-span-2")} data-testid="product-part" data-part={x.part}>
-                      <h2 className="mb-1.5 text-[15px] font-semibold text-foreground">{x.label}</h2>
-                      <div className="min-w-0 text-sm [overflow-wrap:anywhere]">
-                        {x.part === "How it works" ? <Steps body={x.body} /> : <ChatMarkdown text={x.body} />}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No product deck is named for it yet.</p>
-              )}
+              <ProductParts p={p} />
               <section className="grid gap-2">
                 <h2 className="text-sm font-semibold text-foreground">{SET_NAME.many} on it</h2>
                 <Wheels p={p} />
               </section>
-              {p.deck && (
-                <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="product-source">
-                  Read from {p.deck.repo} {p.deck.path}
-                  {p.deck.parts.some((x) => x.from) ? ` and ${p.deck.parts.flatMap((x) => (x.from ? [x.from] : [])).join(", ")}` : ""}, written once there.
-                </p>
-              )}
+              <ProductSource p={p} />
             </div>
           )}
           {tab === "kit" && p.kit && <ProductKit id={p.id} />}

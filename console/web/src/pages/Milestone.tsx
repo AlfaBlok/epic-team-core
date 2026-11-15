@@ -57,7 +57,7 @@ import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
 import { InlineMd } from "@/components/inlineMd";
 import type { ScorecardNode } from "@/api/pursuit-types";
-import { scorecardHref } from "@/lib/scorecards";
+import { productHref, scorecardHref } from "@/lib/scorecards";
 export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
@@ -273,6 +273,12 @@ function MilestoneScreen() {
                 {m.repo} · <MilestonePath path={m.path} />
               </span>
               <span>Owner: {m.owner}</span>
+              {/* the product this campaign is for, its words written once on the product page. */}
+              {card?.product && (
+                <Link to={five ? "?tab=product" : productHref(card.product.id)} className="underline decoration-border underline-offset-4 hover:text-foreground" data-testid="campaign-product-name">
+                  Product: {card.product.name}
+                </Link>
+              )}
               {/* the campaign's Auto-approve toggle, in this quiet line, one click away. */}
               {five && scope && (
                 <CampaignProvider scope={scope}>
@@ -435,7 +441,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
       </TabsList>
       <div className="mt-4 min-w-0">
         {tab === "deck" && <BriefTab m={m} />}
-        {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} />}
+        {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
         {tab === "pipeline" && (
           <CampaignProvider scope={scope}>
