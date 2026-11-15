@@ -982,8 +982,24 @@ export function rowClaimIn(dir: string, ref: string): (ClaimedRow & { dir: strin
   return undefined;
 }
 
-/** a lease expired: Owner `unassigned (lease of <by> expired <UTC>: re-dispatch)`, Status `ready` (if it was active). */
-export function expireLeaseText(text: string, ref: string, by: string, until: string, at: string): string | { skip: string } {
+/**
+ * the Status cell row `ref` had in a spine's text before it was claimed: the cell that `spines.py --claim`
+ * overwrote with `active`. Undefined when the row is missing, has no status, or was already being worked on (active,
+ * claimed) or closed: the lease then gives the row back to `ready` as before.
+ */
+export function statusBeforeClaimIn(text: string, ref: string): string | undefined {
+  const r = ledgerLines(text).find((x) => x.id === ref && x.col.status >= 0);
+  const cell = r ? (r.cells[r.col.status] ?? "").trim() : "";
+  const st = stripInline(cell);
+  if (!st || /^(?:active|claimed|ready)\b/i.test(st) || CLOSED_STATUS.test(st)) return undefined;
+  return cell;
+}
+
+/**
+ * a lease expired: Owner `unassigned (lease of <by> expired <UTC>: …)`, and an `active` Status goes back to the status
+ * the row had when it was claimed (`back`: review stays review, monitoring stays monitoring), else `ready`.
+ */
+export function expireLeaseText(text: string, ref: string, by: string, until: string, at: string, back?: string): string | { skip: string } {
   const raw = text.split("\n");
   const r = ledgerLines(text).find((x) => x.id === ref && x.col.owner >= 0);
   if (!r) return { skip: `row ${ref} is not in this spine any more` };
@@ -993,8 +1009,10 @@ export function expireLeaseText(text: string, ref: string, by: string, until: st
   const st = r.col.status >= 0 ? stripInline(r.cells[r.col.status] ?? "") : "";
   if (!/^(?:active|claimed)\b/i.test(st)) return { skip: `row ${ref} is ${st || "without a status"}, not active: a lease expires only on a row being worked on` };
   const cells = [...r.cells];
-  cells[r.col.owner] = cellText(`unassigned (lease of ${by} expired ${at}: re-dispatch)`);
-  if (r.col.status >= 0 && /^active\b/i.test(stripInline(cells[r.col.status] ?? ""))) cells[r.col.status] = "ready";
+  const to = back?.trim() || "ready";
+  const isReady = /^ready\b/i.test(stripInline(to));
+  cells[r.col.owner] = cellText(`unassigned (lease of ${by} expired ${at}: ${isReady ? "re-dispatch" : `back to ${stripInline(to).split(/\s/)[0]}`})`);
+  if (r.col.status >= 0 && /^active\b/i.test(stripInline(cells[r.col.status] ?? ""))) cells[r.col.status] = to.replace(/\|/g, "/");
   raw[r.line] = joinRow(cells) + (raw[r.line].endsWith("\r") ? "\r" : "");
   return raw.join("\n");
 }

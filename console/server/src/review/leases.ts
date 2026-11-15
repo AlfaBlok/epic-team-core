@@ -2,14 +2,15 @@ import type { Hono } from "hono";
 import type { Store } from "../store.js";
 import type { SpineWriter } from "../inbox/spineWrite.js";
 import type { GitOut } from "../freshness.js";
-import { computeClaims, expireLeaseText, type ClaimedRow } from "./rows.js";
+import { computeClaims, expireLeaseText, statusBeforeClaimIn, type ClaimedRow } from "./rows.js";
 
 /**
  * A worker claims its row with the EpicSpine
  * `spines.py --claim <row> --by <run>`: the row's Owner cell reads `<by> — claimed <UTC>, lease until <UTC>`. Its later
  * commits that name the row renew the lease (each one moves the end to that commit + the lease's length). When the
  * lease has run out, this sweep gives the row back through the one spine writer (L-45): Owner `unassigned (lease of
- * <by> expired …)`, Status `ready`; the Delivery Manager's normal wake re-dispatches it. No schedule per project: one
+ * <by> expired …)`, Status back to what it was when the row was claimed (a fix worker's claim on a row in
+ * review must not drop the owner's card), else `ready`; the Delivery Manager's normal wake re-dispatches a ready row. No schedule per project: one
  * console tick for every tracked repo.
  */
 export interface ClaimView extends Omit<ClaimedRow, "dir"> {
@@ -46,6 +47,17 @@ export async function lastCommitNaming(git: GitOut, dir: string, ref: string, si
   return best;
 }
 
+/**
+ * the row's Status just before `by` claimed it: `spines.py --claim` sets Status `active` in a commit
+ * `Claim <ref>: <by> …`; the spine as it stood in that commit's parent holds the status to give back.
+ */
+export async function statusBeforeClaim(git: GitOut, dir: string, file: string, ref: string, by: string): Promise<string | undefined> {
+  const sha = (await git(dir, ["log", "-n", "1", "--format=%H", "-F", `--grep=Claim ${ref}: ${by}`, "--", file]).catch(() => "")).trim();
+  if (!/^[0-9a-f]{7,}$/.test(sha)) return undefined;
+  const before = await git(dir, ["show", `${sha}^:${file}`]).catch(() => "");
+  return before ? statusBeforeClaimIn(before, ref) : undefined;
+}
+
 export function createLeases(o: { store: () => Pick<Store, "listMilestones">; reposRoot: string; writer?: SpineWriter; git: GitOut; now?: () => number; log?: (m: string) => void; wrote?: (dir: string) => void }) {
   const now = () => o.now?.() ?? Date.now();
   async function view(): Promise<(ClaimView & { dir: string })[]> {
@@ -64,14 +76,19 @@ export function createLeases(o: { store: () => Pick<Store, "listMilestones">; re
     if (!o.writer) return done;
     for (const c of (await view()).filter((x) => x.expired)) {
       const at = utc(now());
+      const back = await statusBeforeClaim(o.git, c.dir, c.path, c.ref, c.by);
+      const to = back ?? "ready";
       const w = await o.writer.edit({
         repoDir: c.dir,
         path: c.path,
         label: c.ref,
         edit: (text) => {
-          const t = expireLeaseText(text, c.ref, c.by, c.until, at);
+          const t = expireLeaseText(text, c.ref, c.by, c.until, at, back);
+          const word = to.replace(/[*`]/g, "").trim().split(/\s/)[0];
           return typeof t === "string"
-            ? { text: t, msg: `Lease expired ${c.ref}: ${c.by} (back to ready, re-dispatch)`, body: `${c.by} claimed ${c.ref} at ${c.at}; the lease ran out at ${c.liveUntil} with no commit naming the row since${c.lastCommitAt ? ` ${c.lastCommitAt}` : ""}. The row is ready again; the Delivery Manager's next wake dispatches it.` }
+            ? back
+              ? { text: t, msg: `Lease expired ${c.ref}: ${c.by} (back to ${word}, as claimed)`, body: `${c.by} claimed ${c.ref} at ${c.at} while it was ${word}; the lease ran out at ${c.liveUntil} with no commit naming the row since${c.lastCommitAt ? ` ${c.lastCommitAt}` : ""}. The row keeps the status it had when it was claimed.` }
+              : { text: t, msg: `Lease expired ${c.ref}: ${c.by} (back to ready, re-dispatch)`, body: `${c.by} claimed ${c.ref} at ${c.at}; the lease ran out at ${c.liveUntil} with no commit naming the row since${c.lastCommitAt ? ` ${c.lastCommitAt}` : ""}. The row is ready again; the Delivery Manager's next wake dispatches it.` }
             : t;
         },
       });

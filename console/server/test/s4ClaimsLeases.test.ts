@@ -31,6 +31,7 @@ beforeEach(() => {
       { id: "T9-S1", status: "active" },
       { id: "T9-S2", status: "active" },
       { id: "T9-S3", status: "ready" },
+      { id: "T9-S4", status: "review" },
     ]),
   });
   setOwner("T9-S1", "run_A — claimed 2026-11-02T20:00Z, lease until 2026-11-02T21:00Z");
@@ -51,6 +52,27 @@ function setOwner(id: string, owner: string) {
   lines[i] = cells.join(" | ");
   fs.writeFileSync(f, lines.join("\n"));
   git(repo.dir, "commit", "-q", "-am", `Claim ${id}: test`, "--date", "2026-11-02T20:00:00Z");
+  git(repo.dir, "push", "-q", "origin", "main");
+}
+
+/** what `spines.py --claim` writes: Owner `<by> — claimed …`, Status `active`, subject `Claim <row>: <by> (lease until …)`. */
+function claimRow(id: string, by: string, from?: string) {
+  const f = path.join(repo.dir, EPIC);
+  const lines = fs.readFileSync(f, "utf8").split("\n");
+  const i = lines.findIndex((l) => l.startsWith(`| ${id} |`));
+  const cells = lines[i].split(" | ");
+  if (from) {
+    // the status it had before the claim, in a commit that does not name the row (a naming commit renews the lease)
+    cells[4] = from;
+    lines[i] = cells.join(" | ");
+    fs.writeFileSync(f, lines.join("\n"));
+    git(repo.dir, "commit", "-q", "-am", "set up a monitoring row", "--date", "2026-11-02T19:00:00Z");
+  }
+  cells[2] = `${by} — claimed 2026-11-02T20:00Z, lease until 2026-11-02T21:00Z`;
+  cells[4] = "active";
+  lines[i] = cells.join(" | ");
+  fs.writeFileSync(f, lines.join("\n"));
+  git(repo.dir, "commit", "-q", "-am", `Claim ${id}: ${by} (lease until 2026-11-02T21:00Z)`, "--date", "2026-11-02T20:00:00Z");
   git(repo.dir, "push", "-q", "origin", "main");
 }
 
@@ -81,6 +103,27 @@ describe("T63-S3/S4 claims and leases", () => {
     expect(repo.rowLine(EPIC, "T9-S2")).toContain("run_B — claimed");
     expect(repo.originLog()[0]).toBe("Lease expired T9-S1: run_A (back to ready, re-dispatch)");
     expect(await leases.sweep()).toEqual([]); // once
+  });
+
+  it("an expired lease gives the row back the status it had when claimed: review stays review, monitoring stays monitoring", async () => {
+    claimRow("T9-S4", "run_C");
+    claimRow("T9-S3", "run_D", "monitoring (check 2026-11-20)");
+    expect(repo.rowLine(EPIC, "T9-S4")).toContain("| active |");
+    const store = createStore(db);
+    store.createMilestone({ title: "home_repo", repo: "home_repo", path: "docs/spines/root.md", owner: "", paused: false });
+    const leases = createLeases({ store: () => store, reposRoot: tmp, writer: createSpineWriter(), git: gitOut(), now: () => T0 });
+    const done = await leases.sweep();
+    expect(done.map((d) => [d.ref, d.status])).toEqual([
+      ["T9-S1", "written"],
+      ["T9-S2", "written"],
+      ["T9-S3", "written"],
+      ["T9-S4", "written"],
+    ]);
+    expect(repo.rowLine(EPIC, "T9-S4")).toContain("| unassigned (lease of run_C expired 2026-11-02T22:00Z: back to review) | T9-S4 work | review |");
+    expect(repo.rowLine(EPIC, "T9-S3")).toContain("| unassigned (lease of run_D expired 2026-11-02T22:00Z: back to monitoring) | T9-S3 work | monitoring (check 2026-11-20) |");
+    // a claim made with no status before it (the fixture's own claim commits) still goes back to ready
+    expect(repo.rowLine(EPIC, "T9-S1")).toContain("| T9-S1 work | ready |");
+    expect(repo.originLog()).toContain("Lease expired T9-S4: run_C (back to review, as claimed)");
   });
 
   it("the console shows the holder: GET /api/claims and the goal header's running rows", async () => {
