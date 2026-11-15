@@ -107,7 +107,9 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     // the whole name stands with the mark again: the bar has room for it at 360 px
     expect(screen.getByTestId("topbar-brand-name").className).not.toMatch(/sr-only/);
     const more = (await screen.findAllByTestId("sidebar-more-pages"))[0];
+    // a page pinned by name (the sample's Daily reports, at its short address) leads the list, then the fixed pages
     expect(within(more).getAllByRole("link").map((a) => [a.textContent?.trim(), a.getAttribute("href")])).toEqual([
+      ["Daily reports", "/daily"],
       ["One-offs", "/one-offs"],
       ["Outcomes", "/outcomes"],
       ["Pages", "/pages"],

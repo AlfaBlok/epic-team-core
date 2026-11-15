@@ -141,7 +141,10 @@ describe("E908-S8 ask card in human format", () => {
     wrap(<WaitingCard item={item({ code: "E942-A2", contextText: "Why.", impact: "I.", risk: "R.", recommendation: "yes" })} />);
     more();
     const html = screen.getByTestId("waiting-card").innerHTML;
-    const order = ["card-kind", "ask-lead", "ask-context", "ask-impact", "ask-risk", "ask-recommendation", "ask-code"].map((id) => html.indexOf(`data-testid="${id}"`));
+    // the owner asked for nothing between the buttons and the feedback box, so the foot with
+    // the code sits under the heading, above the folded sections, so the answer block stays whole
+    expect(screen.getByTestId("card-foot").contains(screen.getByTestId("ask-code"))).toBe(true);
+    const order = ["card-kind", "ask-lead", "ask-code", "ask-context", "ask-impact", "ask-risk", "ask-recommendation"].map((id) => html.indexOf(`data-testid="${id}"`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     // the kind word is the first element of the card's meta line; no kind pill
