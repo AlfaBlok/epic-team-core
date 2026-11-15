@@ -157,7 +157,9 @@ export function CardFeedback({
       setLine("Sent ✓ The team has your words.");
       return true;
     } catch (e) {
-      setLine(`Not sent: ${(e as Error).message}`);
+      // typed words stay in the box, so Not sent is true; a voice note's own line says where his words went
+      // (his memory, and the Team desk when the card refuses them), so the card never says Not sent over it.
+      setLine(via === "text" ? `Not sent: ${(e as Error).message}` : undefined);
       return false;
     } finally {
       setSending(false);

@@ -1,3 +1,4 @@
+import { HIS_WORDS_MAX } from "../hisWords.js";
 import crypto from "node:crypto";
 import type { Context, Hono } from "hono";
 import { DEFAULT_TENANT, type DB } from "../db.js";
@@ -21,7 +22,7 @@ import type { StepPage, WakeAnswer } from "./steps.js";
  */
 
 export const QUESTION_MAX = 1_200;
-export const ANSWER_MAX = 4_000;
+export const ANSWER_MAX = HIS_WORDS_MAX;
 /** open questions one page may hold at once (a loop that asks again and again is refused). */
 export const OPEN_PER_PAGE = 3;
 /** questions one page may ask in a day. */

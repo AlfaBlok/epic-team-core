@@ -190,7 +190,11 @@ export function useNote(props: {
   const deliver = useRef(props.deliver);
   deliver.current = props.deliver;
   const hook = (h: HeldNote) => {
-    if (card) h.deliver = (n) => deliver.current!(withVoiceNote(typed.current, n));
+    if (card) {
+      h.deliver = (n) => deliver.current!(withVoiceNote(typed.current, n));
+      h.words = (n) => withVoiceNote(typed.current, n);
+      h.page = props.page;
+    }
     h.to = props.to;
   };
   if (held) hook(held);
@@ -281,7 +285,7 @@ export function useNote(props: {
         </span>
       )}
       {out && (
-        <span data-testid={`${tid}-out`} className={cn(out.state === "failed" && "text-destructive")}>
+        <span data-testid={`${tid}-out`} className={cn(out.state === "failed" && "text-amber-700 dark:text-amber-400")}>
           {outText(out, "this card")}
         </span>
       )}

@@ -1,3 +1,4 @@
+import { HIS_WORDS_MAX } from "../hisWords.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -28,7 +29,7 @@ import { ownerName } from "../identity.js";
  *   back with feedback) is set back to `review` and the Delivery manager is told to hold what the press started. Inside
  *   the undo window the press itself is taken back instead (`POST /presses/:id/undo`, `/owner-responses/:id/undo`).
  */
-export const COMMENT_MAX = 4000;
+export const COMMENT_MAX = HIS_WORDS_MAX;
 const SPINE = /^(?!\/)[\w.-]+(?:\/[\w.-]+)*\.md$/;
 const REF = /^[A-Za-z][\w.-]{0,60}$/;
 
@@ -108,7 +109,7 @@ export function createAfterClose(o: AfterCloseOptions) {
     if (!target) return { wakeError: "no persona to wake: the milestone has no assignment; the next Delivery manager wake reads the spine" };
     if (!o.cycle) return { wakeError: "the console cycle is off; the next Delivery manager wake reads the spine" };
     try {
-      await wakeSoon(o.cycle.runNowRequest(target, { instructions: instructions.slice(0, 6000), instructionsBy: who() }, key), `comment ${c.ref}`);
+      await wakeSoon(o.cycle.runNowRequest(target, { instructions: instructions.slice(0, HIS_WORDS_MAX + 2000), instructionsBy: who() }, key), `comment ${c.ref}`);
       return { woke: target };
     } catch (e) {
       return { wakeError: (e instanceof Error ? e.message : String(e)).slice(0, 300) };

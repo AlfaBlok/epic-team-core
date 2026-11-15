@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import { outbox, outboxState, startOutbox, subscribeOutbox } from "./outbox";
+import { deskFallback } from "./deskFallback";
 import { browserNoteMedia, fetchNotesApi, KEPT_FAILED_TEXT, KEPT_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
 
 /**
@@ -41,9 +42,21 @@ export interface HeldNote {
    * then floats it); the pill's link scrolls back to the card instead of opening the page again.
    */
   show?: () => void;
-  /** A delivered note's way out (cards): sending, landed, nothing heard, or failed (Send again). */
-  out?: { state: "sending" | "done" | "empty" | "failed"; error?: string; note?: SentNote };
+  /** A card's note: the reply the press carries (his typed words, the spoken words, the note's id and link). */
+  words?: (note: SentNote) => string;
+  /** The page the note names (`card <ref>: <title>`), for the Team desk when the card refuses it. */
+  page?: string;
+  /**
+   * A delivered note's way out (cards): sending, landed, nothing heard, `desk` (the card refused it, so his words
+   * went to the Team desk whole), or failed (Send again; his words are already in his memory, so never "Not sent").
+   */
+  out?: { state: "sending" | "done" | "empty" | "desk" | "failed"; error?: string; note?: SentNote };
 }
+
+/** a refused card note goes here whole (the world's Team desk); `id` keys it so a retry never posts twice. */
+export type ToDesk = (text: string, page: string | undefined, id: string) => Promise<unknown>;
+/** How long a note that went to the desk instead says so (longer than a plain Sent: he should read where it went). */
+export const DESK_SHOW_MS = 12_000;
 
 /** The pill shows a note in these phases (sent: a few seconds, then it goes). */
 const SHOWN: NotePhase[] = ["starting", "recording", "paused", "sending", "failed", "sent"];
@@ -72,7 +85,11 @@ export class NoteTab {
   private unhook?: () => void;
   private version = 0;
 
-  constructor(private win: Window | undefined = typeof window === "undefined" ? undefined : window) {}
+  constructor(
+    private win: Window | undefined = typeof window === "undefined" ? undefined : window,
+    /** where a card note goes when its card refuses it; none = it stays failed with Send again (tests). */
+    public toDesk?: ToDesk,
+  ) {}
 
   /** The tab's pagehide (finish what is recorded) and visibility (lock and unlock), for every note at once. */
   hook(): () => void {
@@ -158,18 +175,33 @@ export class NoteTab {
       h.out = { state: "done", note: n };
       this.later(h);
     } catch (e) {
-      h.out = { state: "failed", error: (e as Error).message || "The answer was not sent.", note: n };
+      const why = (e as Error).message || "the card did not answer";
+      // his words never end at a refusal. The note is already in his memory (the
+      // console forwards every card note once transcribed); the card's part goes to the Team desk whole, keyed on the note.
+      if (this.toDesk && h.words) {
+        this.changed();
+        try {
+          await this.toDesk(`Feedback on ${h.page ?? h.to} (the card did not take it: ${why}): ${h.words(n)}`, h.page, `card-note:${n.id}`);
+          h.out = { state: "desk", error: why, note: n };
+          this.later(h);
+          this.changed();
+          return;
+        } catch {
+          /* the desk is down too: it stays failed with Send again, his words kept on the note */
+        }
+      }
+      h.out = { state: "failed", error: why, note: n };
     }
     this.changed();
   }
 
   /** A landed or empty card note says so for a few seconds, then its line goes. */
   private later(h: HeldNote) {
-    if (h.out?.state !== "done" && h.out?.state !== "empty") return;
+    if (h.out?.state !== "done" && h.out?.state !== "empty" && h.out?.state !== "desk") return;
     const was = h.out;
     setTimeout(() => {
       if (h.out === was) this.forget(h);
-    }, SENT_SHOW_MS);
+    }, h.out.state === "desk" ? DESK_SHOW_MS : SENT_SHOW_MS);
   }
 
   /** Done with a note: its line goes (and a card's holder with it, if no control shows it). */
@@ -241,7 +273,7 @@ const Ctx = createContext<NoteTab | undefined>(undefined);
 
 /** The app's voice-note owner: wraps the router (App.tsx), so no page change ever stops a note. */
 export function NoteProvider(props: { children: ReactNode; tab?: NoteTab }) {
-  const [tab] = useState(() => props.tab ?? new NoteTab());
+  const [tab] = useState(() => props.tab ?? new NoteTab(undefined, deskFallback));
   useEffect(() => {
     const off = tab.hook();
     if (!props.tab) tab.restore();
@@ -361,9 +393,22 @@ export function CancelNote({ engine, elapsedS }: { engine: NoteEngine; elapsedS:
   );
 }
 
+/** a refused card note, sent to the Team desk instead. */
+export const OUT_DESK_TEXT = "✓ The Team desk has all your words, and they are in your memory. The card itself did not take them.";
+/** card and desk both refused: his words are still in his memory (forwarded when written out), never "Not sent". */
+export const outFailedText = (why: string | undefined) => `Your words are in your memory. The card did not take them yet${why ? `: ${why}` : ""}. Send again.`;
+
 /** What a delivered (card) note's line says on its way out. */
 export const outText = (out: NonNullable<HeldNote["out"]>, to: string) =>
-  out.state === "sending" ? `Sending your answer to ${to}…` : out.state === "done" ? `Sent to ${to}${/[.?!…]$/.test(to) ? "" : "."}` : out.state === "empty" ? "Nothing was heard, so nothing was sent." : `Not sent: ${out.error}`;
+  out.state === "sending"
+    ? `Sending your answer to ${to}…`
+    : out.state === "done"
+      ? `Sent to ${to}${/[.?!…]$/.test(to) ? "" : "."}`
+      : out.state === "empty"
+        ? "Nothing was heard, so nothing was sent."
+        : out.state === "desk"
+          ? OUT_DESK_TEXT
+          : outFailedText(out.error);
 
 /** One floating note: live dot, where it goes, the time, Send, Cancel, and the link back to the page it was started on. */
 function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
@@ -404,6 +449,8 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
   // a note the console has not confirmed yet is kept on this device and goes by itself: never shown as lost.
   const kept = !out && v.phase === "failed" && v.info === KEPT_FAILED_TEXT;
   const failed = (out?.state === "failed" || v.phase === "failed") && !kept;
+  // a card note that failed is already in his memory: said calmly, never in red.
+  const calm = out?.state === "failed" || out?.state === "desk";
   return (
     <div
       role="region"
@@ -418,7 +465,7 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
     >
       <LiveDot phase={v.phase} />
       <Link to={back} onClick={(e) => h.show && (e.preventDefault(), h.show())} data-testid="note-widget-back" className="min-w-0 flex-1 underline-offset-2 hover:underline max-sm:font-medium" title="Back to where you started this voice note">
-        <span className={cn("block", kept ? "whitespace-normal font-medium text-amber-700 dark:text-amber-400" : "truncate", failed && "text-destructive")} title={kept ? KEPT_FAILED_TEXT : undefined}>
+        <span className={cn("block", kept ? "whitespace-normal font-medium text-amber-700 dark:text-amber-400" : "truncate", failed && !calm && "text-destructive", calm && "whitespace-normal text-amber-700 dark:text-amber-400", out?.state === "desk" && "text-foreground")} title={kept ? KEPT_FAILED_TEXT : undefined}>
           {label}
         </span>
         {!out && v.phase !== "sent" && (
@@ -441,7 +488,7 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
             </Button>
           )}
           {(on || v.phase === "failed") && v.phase !== "starting" && <CancelNote engine={h.engine} elapsedS={v.elapsedS} />}
-          {out?.state === "failed" && (
+          {(out?.state === "failed" || out?.state === "desk") && (
             <Button size="sm" variant="ghost" className={cn(PHONE_TAP, "h-8")} data-testid="note-widget-close" onClick={() => tab.forget(h)}>
               <X /> Close
             </Button>

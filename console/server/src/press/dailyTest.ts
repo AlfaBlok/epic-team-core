@@ -54,6 +54,12 @@ export const TEST_ROWS: TestRow[] = [
 ];
 export const REOPEN_ROW: TestRow = { ref: "T972-D6", title: "TEST row a closed goal hides", card: "A test card was put up behind a closed goal." };
 
+/**
+ * the feedback and Decline words are as long as a long voice note (about 9,000 characters): a card once refused the owner's
+ * note at a 4,000 character limit, so every day's run proves a long note still lands whole.
+ */
+export const LONG_TEST_WORDS = (what: string) => `TEST: the daily press test's ${what}, as long as a long voice note. ${"Every word said on a card is taken, however long. ".repeat(180)}End of the TEST ${what}.`;
+
 export type PressKind = "snooze" | "unsnooze" | "approve" | "complete" | "feedback" | "deny" | "reopen";
 
 const LEDGER_HEAD = [
@@ -337,8 +343,8 @@ export function createPressTest(d: PressTestDeps) {
         { kind: "unsnooze", target: d1, path: () => (id(d1) ? `/review-items/${id(d1)}/snooze` : undefined), body: { until: null } },
         { kind: "approve", target: d2, path: () => (id(d2) ? `/review-items/${id(d2)}/approve` : undefined), body: {} },
         { kind: "complete", target: d3, path: () => (id(d3) ? `/review-items/${id(d3)}/complete` : undefined), body: {} },
-        { kind: "feedback", target: d4, path: () => (id(d4) ? `/review-items/${id(d4)}/relaunch` : undefined), body: { feedback: "TEST: the daily press test's feedback." } },
-        { kind: "deny", target: d5, path: () => (id(d5) ? `/review-items/${id(d5)}/deny` : undefined), body: { reason: "TEST: the daily press test's deny." } },
+        { kind: "feedback", target: d4, path: () => (id(d4) ? `/review-items/${id(d4)}/relaunch` : undefined), body: { feedback: LONG_TEST_WORDS("feedback") } },
+        { kind: "deny", target: d5, path: () => (id(d5) ? `/review-items/${id(d5)}/deny` : undefined), body: { reason: LONG_TEST_WORDS("deny") } },
         { kind: "reopen", target: "EPIC-974", path: () => (d.goalKey(REOPEN_SPINE) ? "/review-goals/reopen" : undefined), body: { key: d.goalKey(REOPEN_SPINE) } },
       ];
       // the closing buttons act only on a card whose link answered: check the TEST rows' link now (no press, not logged),

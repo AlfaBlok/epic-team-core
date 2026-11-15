@@ -1,3 +1,4 @@
+import { HIS_WORDS_MAX } from "../hisWords.js";
 import { execFile } from "node:child_process";
 import { secureDeep } from "../steps/secureLinks.js";
 import { TEXT_WALL_PREFIX, textWallProblem } from "./pageShape.js";
@@ -153,7 +154,8 @@ export const runReview = z
   .passthrough();
 export type RunReview = z.infer<typeof runReview>;
 
-export const RELAUNCH_MAX = 4000;
+/** his feedback, Not yet and Decline words are never cut or refused below this (HIS_WORDS_MAX). */
+export const RELAUNCH_MAX = HIS_WORDS_MAX;
 
 /** Wake prompt line: how finished work reaches the owner's review list. */
 export const REVIEW_RULE =
@@ -1089,7 +1091,7 @@ const completeIn = z
     // per follow-up index, the one-line reason of a switch turned off
     why: z.array(z.string().max(300)).max(50).optional(),
     slot: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z$/, "a UTC time like 2026-11-03T09:00Z").optional(),
-    feedback: z.string().trim().max(2_000).optional(),
+    feedback: z.string().trim().max(HIS_WORDS_MAX).optional(),
     now: z.boolean().optional(),
     release: z.boolean().optional(),
     // E948-S69: the decision button he pressed, and a plan row to start when the decision has no next step

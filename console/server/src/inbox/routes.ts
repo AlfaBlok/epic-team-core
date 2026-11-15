@@ -1,3 +1,4 @@
+import { HIS_WORDS_MAX } from "../hisWords.js";
 import { addGrant, grantPrefix } from "../approvals.js";
 import { listView, wantsListView } from "./slimList.js";
 import { RecordError } from "../team/milestoneRecord.js";
@@ -163,7 +164,7 @@ const stripQ = (q: string) => q.replace(/\s+/g, " ").trim().slice(0, 200);
 const respondIn = z
   .object({
     kind: z.enum(["approve", "deny", "answer", "feedback"]),
-    text: z.string().max(20_000).default(""),
+    text: z.string().max(HIS_WORDS_MAX).default(""),
     milestoneId: z.string().optional(),
     // "Approve and grant write": approve a Needs the owner item and give the asking run's assignment write, limited to scope.
     grantWrite: z.object({ scope: z.string().trim().min(1).max(2000) }).strict().optional(),
@@ -171,7 +172,7 @@ const respondIn = z
     wake: z.boolean().default(true),
     // the Team desk registers an answer the owner gave in the chat: `via` + his words verbatim (checked against the desk thread).
     via: z.enum(["team-desk", "milestone-chat"]).optional(),
-    chat: z.string().max(20_000).optional(),
+    chat: z.string().max(HIS_WORDS_MAX).optional(),
     // the web's idempotency key for this click (also accepted as header Idempotency-Key): a retried request with
     // the same key returns the answer already stored, never records a second one.
     clientKey: z.string().trim().min(8).max(128).optional(),
@@ -218,7 +219,7 @@ const requestAsksIn = z.object({ milestoneId: z.string().min(1), path: z.string(
 const changeIn = z
   .object({
     kind: z.enum(["approve", "deny", "answer", "feedback"]),
-    text: z.string().max(20_000).default(""),
+    text: z.string().max(HIS_WORDS_MAX).default(""),
     wake: z.boolean().default(true),
     attachments: z.array(z.string().trim().max(40)).max(ATTACH_MAX_PER_MESSAGE).optional(),
   })
@@ -227,7 +228,7 @@ const messageIn = z
   .object({
     milestoneId: z.string().min(1),
     assignmentId: z.string().min(1),
-    text: z.string().trim().min(1).max(20_000),
+    text: z.string().trim().min(1).max(HIS_WORDS_MAX),
     refItemId: z.string().optional(),
   })
   .strict();

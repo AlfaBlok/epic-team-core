@@ -1,3 +1,4 @@
+import { HIS_WORDS_MAX } from "../hisWords.js";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type { Assignment, Store } from "../store.js";
@@ -17,7 +18,7 @@ const bootstrapIn = z
   .strict();
 const steerIn = z.object({ message: z.string().optional(), clientRequestId: z.string().optional() });
 /** optional one-off instructions for this Run now (empty = none). */
-export const RUN_NOW_NOTE_MAX = 4000;
+export const RUN_NOW_NOTE_MAX = HIS_WORDS_MAX;
 /** who gave the note (default the owner; the Unblocker sends `noteBy: "Unblocker"` when it wakes the Delivery Manager). */
 const runNowIn = z.object({
   note: z.string().trim().max(RUN_NOW_NOTE_MAX).optional(),
