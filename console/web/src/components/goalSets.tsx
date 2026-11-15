@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Link, NavLink, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api, type ChatRead, type DeskChat, type PendingItem, type ReviewItem } from "@/api";
-import type { ScorecardNode, ScorecardRow, ScorecardRowState, ScorecardsBody, ScorecardWork } from "@/api/pursuit-types";
+import type { PersonaGapsBody, ScorecardNode, ScorecardRow, ScorecardRowState, ScorecardsBody, ScorecardWork } from "@/api/pursuit-types";
 import { CountPill, PILL_SHAPE, PILL_TITLES, SortControl, useSectionSort, type SectionSort } from "@/components/homeSection";
 import { InboxSearchBox } from "@/components/inboxSearch";
 import { TeamCardsSections } from "@/components/teamCards";
@@ -607,6 +607,45 @@ export function IdlePill({ n, testId = "wheel-idle" }: { n: Pick<ScorecardNode, 
   );
 }
 
+/** (the owner: "a wheel without a persona is not going to turn"): its Delivery Manager is missing or off. */
+export const NO_PERSONA_TITLE = { none: "No Delivery Manager: this wheel does not turn.", off: "Its Delivery Manager is switched off: this wheel does not turn." } as const;
+export function NoPersonaPill({ n, testId = "wheel-no-persona" }: { n: Pick<ScorecardNode, "noPersona">; testId?: string }) {
+  if (!n.noPersona) return null;
+  return (
+    <span className={cn(PILL_SHAPE, "border border-[hsl(0_72%_51%)] bg-[hsl(0_72%_51%)] text-white")} title={NO_PERSONA_TITLE[n.noPersona]} data-testid={testId}>
+      {n.noPersona === "off" ? "persona off" : "no persona"}
+    </span>
+  );
+}
+
+/** every goal with no Delivery Manager turning it, any world: one line on the objectives screen, nothing when all turn. */
+export function PersonaGapsLine() {
+  const { data } = useQuery<PersonaGapsBody>(() => api.personaGaps(), [], { tag: "inbox" });
+  if (!data || data.ok || !data.gaps.length) return null;
+  const n = data.gaps.length;
+  return (
+    <div className="rounded-xl border border-[hsl(0_72%_51%)] bg-card px-3 py-2.5 text-sm" data-testid="persona-gaps">
+      <p className="font-medium text-foreground">
+        {n} {n === 1 ? "goal has" : "goals have"} no Delivery Manager turning {n === 1 ? "it" : "them"}. A wheel without a persona does not turn.
+      </p>
+      <ul className="mt-1 grid gap-0.5">
+        {data.gaps.map((g) => (
+          <li key={`${g.kind}:${g.id}`} className="flex flex-wrap items-baseline gap-x-2 [overflow-wrap:anywhere]" data-testid="persona-gap" data-kind={g.kind}>
+            {g.milestoneId ? (
+              <Link to={`/milestones/${g.milestoneId}`} className="text-foreground underline-offset-2 hover:underline">
+                {g.title}
+              </Link>
+            ) : (
+              <span className="text-foreground">{g.title}</span>
+            )}
+            <span className="text-xs text-muted-foreground">{g.turner === "off" ? "switched off" : "none"}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** the top objectives in his order, less the ones shown inside another (their file's `foldedInto`). */
 export const topObjectives = (nodes: ScorecardNode[] | undefined) => (nodes ?? []).filter((n) => !n.foldedInto);
 
@@ -1187,6 +1226,7 @@ export function WheelsTable({
                 );
               })()}
               <span className="flex shrink-0 items-center gap-1 pr-2">
+                <NoPersonaPill n={n} />
                 <IdlePill n={n} />
                 {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} />}
                 {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} />}
@@ -1230,6 +1270,7 @@ export function GoalSetsPage() {
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the {SET_NAME.many.toLowerCase()}…</div>}
       {error && <div className="text-sm text-destructive">Could not read the {SET_NAME.many.toLowerCase()}: {error.message}</div>}
       <TabStrip tabs={ALL_TABS} tab={tab} counts={{ inbox: inbox.rows.length }} />
+      {tab === "table" && <PersonaGapsLine />}
       {tab === "table" && (
         <WheelsTable nodes={sets.map((x) => x.n)} countFor={inbox.countFor} />
       )}

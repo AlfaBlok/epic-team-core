@@ -286,6 +286,11 @@ export interface SessionDeps {
    * seats.json), else undefined. Unset = never blocked (as before).
    */
   seatBlocked?: (seat: string | undefined) => string | undefined;
+  /**
+   * the seat the broker keeps for the owner when his pick would get it now (ownerSeatFree over seats.json), else
+   * undefined. A chat whose profile has `preferOwnerSeat` (the Team desk) moves there before his send. Unset = no move.
+   */
+  ownerSeat?: () => string | undefined;
   /** T3 environment of the local T3 (t3code:// links), when known. */
   environmentId?: () => string | undefined;
   now?: () => number;
@@ -329,6 +334,7 @@ export function sessionNote(prev: Pick<DeskSession, "endReason" | "host"> | unde
   if (!prev) return undefined;
   const r = prev.endReason ?? "";
   if (r.startsWith(HOST_MOVE)) return `New session: the desk moved from ${prev.host} to ${r.slice(HOST_MOVE.length)}. The earlier chat is above.`;
+  if (r.startsWith(SEAT_MOVE) && r.includes("the seat kept for")) return `New session: the Team desk moved to the seat kept for you. The earlier chat is above.`;
   if (r.startsWith(SEAT_MOVE)) return `New session: the desk moved to a seat with headroom (${r.slice(SEAT_MOVE.length)}). The earlier chat is above.`;
   return `New session: the earlier thread was gone${r ? ` (${r})` : ""}. What could still be read is above.`;
 }
@@ -361,6 +367,8 @@ export interface ChatProfile {
   unavailable: string;
   /** Client request id of the endpoint-list update (stable per version and session). */
   updateRequestId?: (seq: number) => string;
+  /** this chat (the Team desk) runs on the seat kept for the owner whenever that seat can take a turn. */
+  preferOwnerSeat?: boolean;
 }
 
 const rowTo = (r: any): DeskSession => ({
@@ -538,7 +546,10 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     return lines.join("\n");
   }
 
-  async function launch(old?: DeskSession): Promise<DeskSession> {
+  /** a home-world chat is the owner's own: its pick may take the seat kept for him (`pick --for owner`). */
+  const ownerChat = (p.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT;
+  /** `only`: launch only on that seat (a move to the owner's kept seat); any other answer releases it and keeps the old session. */
+  async function launch(old?: DeskSession, only?: string): Promise<DeskSession> {
     const per = persona();
     const host = launchHost(per);
     const c = clientOn(host);
@@ -550,11 +561,12 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     if (!project) throw new DeskError(503, "unknown_project", `no T3 project is registered for repo ${p.repo}${host === mainHost() ? "" : ` on ${host}`}`);
     const dispatcher = d.dispatcherFor?.(host) ?? d.dispatcher;
     if (!dispatcher) throw new DeskError(503, "no_dispatcher", "EPICSPINE_DISPATCHER is not set");
-    const pick = await dispatcher.pick();
+    const pick = await dispatcher.pick(ownerChat ? { for: "owner" } : undefined);
     // say what refused (load-cap on the worker server …, all seats busy …), never a bare "no seat available"
     if (pick.seat === null) throw new DeskError(503, "no_seat", refusalText([classifyRefusal(pick.reason)]));
     // A long-lived thread holds no seat: release it right away (same as a persona's home thread).
     await dispatcher.done(pick.seat).catch(() => undefined);
+    if (only && pick.seat !== only) throw new DeskError(503, "no_seat", `the seat kept for ${ownerName()} (${only}) was not given (${pick.seat})`);
     const message = await p.seed({ persona: per, summary: old ? await summaryOf(old) : undefined });
     let threadId: string;
     try {
@@ -639,6 +651,12 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
 
   /** why the live session's seat cannot take a turn now, else undefined. */
   const blocked = (s: DeskSession | undefined = current()) => (s ? d.seatBlocked?.(s.seat) : undefined);
+  /** the kept seat this chat should move to (it prefers it, can take a turn there now, and is elsewhere), else undefined. */
+  const keptSeat = (s: DeskSession): string | undefined => {
+    if (!p.preferOwnerSeat || !ownerChat) return undefined;
+    const k = d.ownerSeat?.();
+    return k && s.seat !== k ? k : undefined;
+  };
   let moving: Promise<DeskSession> | undefined;
   /**
    * before the owner's send, a session on a limited / logged-out seat moves to a new thread on a seat from `pick`,
@@ -646,14 +664,15 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
    * any launch error) keeps the old session: plumbing never fails a chat.
    */
   function moveIfBlocked(s: DeskSession): Promise<DeskSession> {
-    const why = blocked(s);
+    const kept = blocked(s) ? undefined : keptSeat(s);
+    const why = blocked(s) ?? (kept ? `${s.seat ?? "its seat"}: the Team desk goes to ${kept}, the seat kept for ${ownerName()}` : undefined);
     if (!why) return Promise.resolve(s);
     moving ??= (async () => {
       const cur = current();
       if (!cur || cur.seq !== s.seq) return cur ?? s; // someone moved it meanwhile
       const reason = `${SEAT_MOVE}${why}`;
       try {
-        const next = await launch({ ...cur, endedAt: iso(), endReason: reason });
+        const next = await launch({ ...cur, endedAt: iso(), endReason: reason }, kept);
         d.db.prepare("UPDATE desk_session SET ended_at = ?, end_reason = ? WHERE seq = ? AND ended_at IS NULL").run(iso(), reason, cur.seq);
         console.log(`desk ${p.key}: ${why}: moved to ${next.seat} thread ${next.threadId} (old ${cur.threadId} left as is)`);
         return next;

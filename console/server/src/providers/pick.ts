@@ -27,9 +27,17 @@ export function pickArgsFor(db: DB, personaId: string | undefined, personaModel:
   return { world, ...(p ? { persona: p.id } : {}), ...(provider ? { provider } : {}), ...(model.trim() ? { model } : {}) };
 }
 
-/** Pick through the dispatcher: world-aware when on and supported, else exactly today's plain `pick`. */
-export async function pickWith(d: Dispatcher, worldPick: boolean, args: PickArgs, modelId: (m: string) => string): Promise<PickResult & { stamp?: Stamp }> {
-  const r = worldPick && d.pickFor ? await d.pickFor({ ...args, ...(args.model ? { model: modelId(args.model) } : {}) }) : await d.pick();
+/**
+ * Pick through the dispatcher: world-aware when on and supported, else exactly today's plain `pick`. `owner` (the
+ * owner's own action, home world) asks a plain `pick --for owner`, which may give the seat kept for him.
+ */
+export async function pickWith(d: Dispatcher, worldPick: boolean, args: PickArgs, modelId: (m: string) => string, owner = false): Promise<PickResult & { stamp?: Stamp }> {
+  const r =
+    owner && args.world === homeWorld()
+      ? await d.pick({ for: "owner" })
+      : worldPick && d.pickFor
+        ? await d.pickFor({ ...args, ...(args.model ? { model: modelId(args.model) } : {}) })
+        : await d.pick();
   if (r.seat === null) return r;
   const w = r as WorldPick;
   return {

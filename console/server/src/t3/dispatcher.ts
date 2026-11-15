@@ -25,9 +25,17 @@ export interface HostSessions {
   full: boolean;
 }
 
+/**
+ * `for: "owner"` marks the owner's own pick (his Team desk chat, his hand dispatch, a handover): the broker then
+ * may give the one seat kept for him (`pick --for owner`), which every other pick skips. Unset = a persona's pick.
+ */
+export interface PickOpts {
+  for?: "owner";
+}
+
 /** M1 seat pool via EPICSPINE_DISPATCHER (`pick` reserves a seat, `done <seat>` releases it). */
 export interface Dispatcher {
-  pick(): Promise<{ seat: string; providerInstanceId: string } | { seat: null; reason: string }>;
+  pick(o?: PickOpts): Promise<{ seat: string; providerInstanceId: string } | { seat: null; reason: string }>;
   /** `pick --world W [--persona P] [--provider C] [--model M]`. Optional: without it the console uses `pick`. */
   pickFor?(a: PickArgs): Promise<PickResult>;
   /** `signal` (`--signal TEXT`) is the failure text; one matching "could not start this turn" makes the broker avoid the seat 10 min. */
@@ -54,8 +62,8 @@ export function envDispatcher(cmd = process.env.EPICSPINE_DISPATCHER): Dispatche
 /** The dispatcher contract over any runner (args → stdout); reuses it for the worker server's own client over ssh. */
 export function runnerDispatcher(run: (args: string[]) => Promise<string>): Dispatcher {
   return {
-    async pick() {
-      const j = JSON.parse(await run(["pick"]));
+    async pick(o) {
+      const j = JSON.parse(await run(o?.for === "owner" ? ["pick", "--for", "owner"] : ["pick"]));
       return j.id ? { seat: String(j.id), providerInstanceId: String(j.providerInstanceId) } : { seat: null, reason: String(j.reason ?? "no seat") };
     },
     async pickFor(a) {

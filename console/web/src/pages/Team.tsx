@@ -12,7 +12,7 @@ import { useQuery, useWaitingList } from "@/lib/data";
 import { dodCount, milestoneName } from "@/lib/format";
 import { milestoneTiming } from "@/lib/derive";
 import { milestoneState, openAskCodes, statusOf } from "@/lib/status";
-import { blockedItems, useStatusBatch } from "@/lib/inbox";
+import { blockedItems, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
 import { liveWorkers, OpenAsksContext, StateWord, stripLines, WORD_TONE } from "@/components/status";
 import { cn } from "@/lib/utils";
@@ -98,6 +98,11 @@ export function TeamPage({
   // the shared fetch the pills and Blocked read; each card's count is its blocked list's length (lib/inbox).
   const { data: statuses } = useStatusBatch();
   const { entries: snoozing } = useSnoozes();
+  // the owner: what he was frustrated about or asked for again leads his inbox until answered.
+  // No section of its own: each list puts it first (the server's order), and when only a review card is pressing,
+  // the review list moves above Blocked so that card is the first thing he sees.
+  const { cards: reviewNow } = useReviewCards({ keep: project.keep });
+  const reviewFirst = pressingInReviewOnly(reviewNow, waiting, blockedItems(statuses, { keep: project.keep, snoozing }));
   const [newOpen, setNewOpen] = useState(false);
   // E948-S66: the inbox shows all, or one kind (Blocked, Digests, Ideas, Goals, Review), kept in the address as ?show=.
   const [show, setShow] = useInboxShow();
@@ -472,6 +477,11 @@ export function TeamPage({
           {/* an account the team needs, connected with one tap (Google's own page, the account named). */}
           {keeps.blocked && <ConnectCards where="inbox" />}
           <SlotStack name="inbox">
+            {reviewFirst && keeps.review && (
+              <Slot name="review" fallback={420}>
+                <WaitingForReview fold="review" />
+              </Slot>
+            )}
             {keeps.blocked && (
               <Slot name="blocked" fallback={420}>
                 <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" />
@@ -490,7 +500,7 @@ export function TeamPage({
                 <TeamCardsSections kinds={keeps.kinds} scorecard={scorecardId} extra={{ goal: <GoalTalk />, digest: <SinceYesterday /> }} />
               </Slot>
             )}
-            {keeps.review && (
+            {!reviewFirst && keeps.review && (
               <Slot name="review" fallback={420}>
                 <WaitingForReview fold="review" />
               </Slot>
@@ -853,4 +863,15 @@ export function WakesDidSomething({ counts }: { counts?: { did: number; total: n
       {did} of {total} wake{total === 1 ? "" : "s"} in 24 h did something
     </p>
   );
+}
+
+/** a review card is pressing and no open ask is: the review list goes first (an open pressing ask already leads Blocked). */
+export function pressingInReviewOnly(
+  review: { ownerPriority?: { pressing?: unknown } }[] | undefined,
+  asks: { id: string; ownerPriority?: { pressing?: unknown } }[],
+  blocked: { id: string; ownerPriority?: { pressing?: unknown } }[],
+): boolean {
+  if (!review?.some((i) => i.ownerPriority?.pressing)) return false;
+  const open = new Set(blocked.map((b) => b.id));
+  return !blocked.some((b) => b.ownerPriority?.pressing) && !asks.some((a) => open.has(a.id) && a.ownerPriority?.pressing);
 }

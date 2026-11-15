@@ -27,6 +27,11 @@ const RED = "text-muted-foreground";
 const RED_LABEL = "On the red line";
 /** a named line's marker names it ("Red line: Data-product flywheel"). */
 const redLabel = (r: NonNullable<OwnerPriority["redLine"]>) => (r.name ? `Red line: ${r.name}` : RED_LABEL);
+/** what he was frustrated about or said again leads the inbox; its marker says which, in his terms. */
+const PRESSING_LABEL: Record<NonNullable<OwnerPriority["pressing"]>["kind"], string> = {
+  frustrated: "You were frustrated",
+  repeated: "You asked again",
+};
 
 /**
  * the owner's level for an inbox item (the Prioritizer read his voice notes and wrote it into the repo); a tap shows
@@ -37,14 +42,18 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
   const [open, setOpen] = useState(false);
   if (!p) return null;
   const red = p.redLine;
-  const label = red ? redLabel(red) : LABEL[p.level];
+  const hot = p.pressing;
+  const label = hot ? PRESSING_LABEL[hot.kind] : red ? redLabel(red) : LABEL[p.level];
+  const why = hot ? hot.why : red ? red.sentence : p.why;
+  const words = hot ? hot.words : p.words;
+  const said = hot ? hot.said : p.said;
   return (
     <>
       <button
         type="button"
         className={cn("shrink-0 text-xs font-medium hover:underline max-sm:-my-3 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center", red ? RED : LOOK[p.level], className)}
         aria-expanded={open}
-        title={open ? undefined : `${label}: ${red ? red.sentence : p.why}`}
+        title={open ? undefined : `${label}: ${why}`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(!open);
@@ -52,26 +61,28 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
         data-testid="owner-priority"
         data-level={p.level}
         {...(red ? { "data-red-line": red.name ?? "" } : {})}
+        {...(hot ? { "data-pressing": hot.kind } : {})}
       >
         {label}
       </button>
       {open && (
         <div className="basis-full rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground" data-testid="owner-priority-why">
-          {red && (
+          {red && !hot && (
             <div className="mb-1 font-medium" data-testid="owner-priority-red-line">
               {red.name ? `Red line, ${red.name}: ` : "Red line: "}
               {red.sentence}
             </div>
           )}
-          <div>{p.why}</div>
-          {p.words && (
+          <div>{hot ? hot.why : p.why}</div>
+          {words && (
             <div className="mt-1 italic text-muted-foreground">
-              “{p.words}”{p.said ? ` · you said this on ${p.said}` : ""}
+              “{words}”{said ? ` · you said this on ${said}` : ""}
             </div>
           )}
           <div className="mt-1 text-xs text-muted-foreground">
-            Set by the Prioritizer from your voice notes
-            {(red?.at ?? p.at) ? ` on ${red?.at ?? p.at}` : ""}.
+            {hot
+              ? "First in your inbox until you answer it."
+              : <>Set by the Prioritizer from your voice notes{(red?.at ?? p.at) ? ` on ${red?.at ?? p.at}` : ""}.</>}
           </div>
         </div>
       )}

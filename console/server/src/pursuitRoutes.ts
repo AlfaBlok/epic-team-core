@@ -18,6 +18,8 @@ import { PURSUITS_FILE, parkText, reorderText, scaleCadence, type PursuitsBody }
 export interface PursuitTeam {
   persona: string;
   enabled: boolean;
+  /** auto-parked by the wake gate (nothing to do): it wakes again by itself, so it still turns the wheel . */
+  parked?: boolean;
   /** the pace as set ("every 60 min") and, when the rank changes it, as it runs now ("every 30 min"); parked: none. */
   pace: string;
   paceNow: string;
@@ -70,7 +72,7 @@ export function withMilestones(
               if (!persona) return null;
               const pace = paceWords(a.cadence);
               const paceNow = !a.enabled ? "off" : eff?.parked ? "no wakes (parked)" : paceWords(scaleCadence(a.cadence, eff, eff?.minWakeMinutes));
-              return { persona, enabled: a.enabled, pace, paceNow };
+              return { persona, enabled: a.enabled, ...(a.parkedAt && a.parkedReason !== "settled" ? { parked: true } : {}), pace, paceNow };
             })
             .filter((t): t is PursuitTeam => !!t)
             .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.persona.localeCompare(b.persona));

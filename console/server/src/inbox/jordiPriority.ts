@@ -49,7 +49,30 @@ export interface JordiPriority {
    * sentence, the day it was proposed and whether he agreed come along so the marker can say it.
    */
   redLine?: RedLineMark;
+  /** the owner was frustrated about it or asked for it again (the file's `pressing`): first of all, until it is answered. */
+  pressing?: PressingMark;
 }
+
+/**
+ * a general rule, no section of its own: an item tied to something the owner said with frustration or said again leads
+ * every list (above the red line) until it is answered or closed. `scripts/pressing.py` writes the entries into the
+ * levels file from his voice notes (and the desk adds one by hand); the console only reads them.
+ */
+export type PressingKind = "frustrated" | "repeated";
+export interface PressingMark {
+  kind: PressingKind;
+  why: string;
+  words?: string;
+  said?: string;
+  source?: string;
+}
+export interface PressingEntry extends PressingMark {
+  repo: string;
+  ref: string;
+  path?: string;
+}
+/** At most this many items lead the inbox as pressing (the newest first in the file): a few, never a second backlog. */
+export const PRESSING_MAX = 7;
 
 /** what a red-line item carries: the line's sentence and where it stands with the owner. */
 export interface RedLineMark {
@@ -136,15 +159,19 @@ export interface PriorityFile {
   /** one line. `redLines`, several named ones; `redLine` is still read as the only line. */
   redLine?: RedLine;
   redLines?: RedLine[];
+  pressing?: PressingEntry[];
 }
 
 const LEVELS = new Set<JordiLevel>(["high", "normal", "low"]);
 /** tier 0 is the red line, above every level. */
 const TIER: Record<JordiLevel, number> = { high: 1, normal: 2, low: 3 };
 export const RED_LINE_TIER = 0;
+/** above the red line: what he was frustrated about or said again (a negative tier keeps every other number as it was). */
+export const PRESSING_TIER = -1;
 /** The tier of an item the persona did not rank: with the normal ones. */
 export const UNRANKED_TIER = TIER.normal;
-export const tierOf = (p?: Pick<JordiPriority, "level" | "redLine">) => (p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER);
+export const tierOf = (p?: Pick<JordiPriority, "level" | "redLine" | "pressing">) =>
+  p?.pressing ? PRESSING_TIER : p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER;
 
 const STATES = new Set<RedLineState>(["proposed", "agreed", "changed"]);
 /** At most this many items lead the inbox, whatever the file says (the owner: a line, not a second backlog). */
@@ -250,6 +277,35 @@ export function parsePriorities(text: string, repoName: string): Entry[] {
   return out;
 }
 
+/** the file's pressing entries (a broken one is skipped, a ref twice keeps the first), at most PRESSING_MAX. */
+export function parsePressing(text: string, repoName: string): PressingEntry[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const list = raw && typeof raw === "object" && Array.isArray((raw as PriorityFile).pressing) ? ((raw as PriorityFile).pressing as unknown[]) : [];
+  const out: PressingEntry[] = [];
+  const seen = new Set<string>();
+  for (const it of list) {
+    if (!it || typeof it !== "object" || Array.isArray(it)) continue;
+    const e = it as Record<string, unknown>;
+    const s = (k: string) => (typeof e[k] === "string" && (e[k] as string).trim() ? (e[k] as string).trim() : undefined);
+    const ref = s("ref");
+    const why = s("why");
+    const kind = s("kind");
+    if (!ref || !why || (kind !== "frustrated" && kind !== "repeated")) continue;
+    const repo = s("repo") ?? repoName;
+    const key = `${norm(repo)}#${norm(ref)}#${s("path") ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ repo, ref, kind, why, ...(s("path") ? { path: s("path") } : {}), ...(s("words") ? { words: s("words") } : {}), ...(s("said") ? { said: s("said") } : {}), ...(s("source") ? { source: s("source") } : {}) });
+    if (out.length >= PRESSING_MAX) break;
+  }
+  return out;
+}
+
 /** What an inbox item tells about where it lives: its repo (checkout name), spine file, row code and own code. */
 export interface Locatable {
   repo?: string;
@@ -272,9 +328,34 @@ const strip = ({ repo: _r, path: _p, ...p }: Entry): JordiPriority => p;
  * row code `` belongs to of the same repo; a number two epics share is no match), then its epic by spine
  * file; never another repo's.
  */
-export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[]): PriorityLookup {
-  const base = levelLookup(entries);
-  const lines = (Array.isArray(redLines) ? redLines : redLines ? [redLines] : []).map((l, n) => lineMatcher(l, n));
+export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], pressing: PressingEntry[] = []): PriorityLookup {
+  const lined = linedLookup(levelLookup(entries), (Array.isArray(redLines) ? redLines : redLines ? [redLines] : []).map((l, n) => lineMatcher(l, n)));
+  if (!pressing.length) return lined;
+  const hit = pressingMatcher(pressing);
+  return (i) => {
+    const p = lined(i);
+    const repo = i.repo ? norm(i.repo) : undefined;
+    const h = repo ? hit(i, repo) : undefined;
+    if (!h) return p;
+    const { repo: _r, ref, path: _p, ...mark } = h;
+    return { ...(p ?? { level: "high" as const, ref, why: mark.why }), pressing: mark };
+  };
+}
+
+/** a pressing entry is matched like a red-line item: by its own code (row, ask), or an epic's own status item by its file. */
+function pressingMatcher(list: PressingEntry[]) {
+  const clean = (f?: string) => f?.replace(/^\.?\//, "");
+  return (i: Locatable, repo: string): PressingEntry | undefined =>
+    list.find((e) => {
+      if (norm(e.repo) !== repo) return false;
+      if (IS_EPIC.test(e.ref) && e.path) return !i.code && !i.row && !i.ref && clean(i.path) === clean(e.path);
+      // a review row is matched in its own spine (a code is unique only there); an ask, by its code or the row it blocks, from any spine
+      if (i.ref && norm(i.ref) === norm(e.ref)) return !e.path || !i.path || clean(e.path) === clean(i.path);
+      return [i.code, i.row].some((c) => c && norm(c) === norm(e.ref));
+    });
+}
+
+function linedLookup(base: PriorityLookup, lines: ReturnType<typeof lineMatcher>[]): PriorityLookup {
   if (!lines.length) return base;
   return (i) => {
     const p = base(i);
@@ -388,10 +469,10 @@ function textOf(f: string): string | undefined {
 }
 
 /** a checkout's levels (docs/priorities.json) and red lines (the objectives file when they live there). */
-function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[] } {
+function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[] } {
   const levels = textOf(path.join(dir, PRIORITIES_FILE));
   const lines = textOf(path.join(dir, redLinesFile(dir)));
-  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [] };
+  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [] };
 }
 
 /**
@@ -399,8 +480,8 @@ function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedL
  * own). None written yet: undefined, so the lists keep the milestone order exactly as before.
  */
 export function worldPriorities(store: Pick<Store, "listMilestones">, reposRoot: string): PriorityLookup | undefined {
-  const { entries, redLines } = worldFiles(store, reposRoot);
-  return entries.length || redLines.length ? lookupOf(entries, redLines) : undefined;
+  const { entries, redLines, pressing } = worldFiles(store, reposRoot);
+  return entries.length || redLines.length || pressing.length ? lookupOf(entries, redLines, pressing) : undefined;
 }
 
 /**
@@ -416,9 +497,10 @@ export function worldRedLines(store: Pick<Store, "listMilestones">, reposRoot: s
   return worldFiles(store, reposRoot).redLines;
 }
 
-function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[] } {
+function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[] } {
   const seen = new Set<string>();
   const entries: Entry[] = [];
+  const pressing: PressingEntry[] = [];
   let redLines: RedLine[] = [];
   for (const m of store.listMilestones({ includeSettled: true })) {
     const r = m.repo ? resolveRepo(reposRoot, m.repo) : undefined;
@@ -426,9 +508,10 @@ function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { 
     seen.add(r.path);
     const f = readFile(r.path, r.name);
     entries.push(...f.entries);
+    pressing.push(...f.pressing);
     if (!redLines.length) redLines = f.redLines;
   }
-  return { entries, redLines };
+  return { entries, redLines, pressing };
 }
 
 /** the lines with their counts read now (each remote source at most once an hour; a failed read says so). */

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { turnerOf } from "./personaGaps.js";
 import path from "node:path";
 import { ledgerLines } from "./review/rows.js";
 import { FOLDS_FILE, foldMap, parseFolds } from "./folds.js";
@@ -124,6 +125,7 @@ export interface WorkLink {
 export interface ScorecardTeam {
   persona: string;
   enabled: boolean;
+  parked?: boolean;
   pace: string;
   paceNow: string;
 }
@@ -161,6 +163,8 @@ export interface ScorecardNode {
   file?: { path: string; present: boolean; proposal?: string };
   /** the personas on the milestone that runs it. */
   teams?: ScorecardTeam[];
+  /** no Delivery Manager turns it ("none") or its one is switched off ("off"); the objectives screen flags it. */
+  noPersona?: "none" | "off";
   /**
    * Its key results (the owner's yes to the objectives mock-up: "build as shown"): 4 to 6 coloured rows, each the epic's
    * Done-means box it measures, its value now and the work under it. A set's come from its file; an epic's are its
@@ -429,10 +433,16 @@ export function buildScorecards(
       ...(p.owner ? { owner: p.owner } : {}),
       spines,
       children,
-      ...pursuitRows(p, children),
+      ...withTurner(pursuitRows(p, children)),
     };
   });
   return { nodes, spineInfo };
+
+  /** a wheel without a persona does not turn: the pursuit's milestone has no Delivery Manager on. */
+  function withTurner<T extends { teams?: ScorecardTeam[] }>(r: T): T & { noPersona?: "none" | "off" } {
+    const t = turnerOf(r.teams);
+    return t === "on" ? r : { ...r, noPersona: t };
+  }
 
   /** the file's rows first (a `line` row reads that pursuit line live), then every live line not used, then one row per epic. */
   function pursuitRows(p: PursuitIn, children: ScorecardNode[]): Pick<ScorecardNode, "rows" | "objective" | "file" | "teams" | "keyResults" | "spineRef" | "sidebar" | "foldedInto" | "headline" | "objectiveStatus" | "objectiveWas"> {

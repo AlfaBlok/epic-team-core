@@ -115,6 +115,8 @@ export interface DeskDeps {
   environmentIdFor?: SessionDeps["environmentIdFor"];
   /** why a seat cannot take a turn now (seatBlockerFor); the desk moves off it before the owner's send. */
   seatBlocked?: (seat: string | undefined) => string | undefined;
+  /** the seat kept for the owner when it can take a turn (see SessionDeps.ownerSeat); the Team desk moves there. */
+  ownerSeat?: SessionDeps["ownerSeat"];
   /** Console base URL the desk calls (CONSOLE_PUBLIC_URL). */
   publicUrl: string;
   /** Checkouts root (~/github): where the desk finds every repo. */
@@ -267,6 +269,7 @@ export function createDesk(d: DeskDeps) {
     plumbing: [DELIVERED_MARKER, DIGEST_MARKER, TESTER_MARKER],
     unavailable: "The Team desk needs the console's T3 connection (the cycle is off on this console).",
     updateRequestId: (seq) => `desk-seed-v${SEED_VERSION}-s${seq}`,
+    preferOwnerSeat: true, // his Team desk runs on the seat kept for him
   });
   const { current, syncSeed } = chat;
 

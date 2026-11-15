@@ -300,6 +300,7 @@ export function createRealClient(): ApiClient {
     listBuilding: () => call("GET", "/building"),
     listPursuits: () => call("GET", "/pursuits"),
     listScorecards: () => call("GET", "/scorecards"),
+    personaGaps: () => call("GET", "/persona-gaps"),
     reorderPursuits: (ids) => call("POST", "/pursuits/order", { ids }),
     parkPursuit: (id, parked) => call("POST", `/pursuits/${encodeURIComponent(id)}/park`, { parked }),
     listOneOffs: () => call("GET", "/one-offs"),

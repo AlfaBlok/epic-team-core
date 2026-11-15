@@ -784,6 +784,10 @@ const mockMail = () => ({
         spineInfo: {},
       });
     },
+    // every goal turns in the sample .
+    async personaGaps() {
+      return ok({ ok: true, gaps: [], checked: { objectives: SAMPLE_PURSUITS.pursuits.length, milestones: 0 }, at: new Date(0).toISOString() });
+    },
     // one sample one-off, in work.
     async listOneOffs() {
       return ok(SAMPLE_ONE_OFFS);

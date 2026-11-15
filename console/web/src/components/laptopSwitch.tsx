@@ -68,7 +68,7 @@ const ticketOf = (i: WaitingItem) => leadUrl(i.question ?? "") ?? i.contextLinks
  */
 export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTask[] = []): LaptopRow[] {
   const mac = macAll.filter((i) => !isListAsk(i));
-  const rankOf = (i: WaitingItem | undefined, n: number) => (i ? (i.ownerPriority?.redLine ? -1e12 : 0) + (i.priority ?? n) : Number.MAX_SAFE_INTEGER);
+  const rankOf = (i: WaitingItem | undefined, n: number) => (i ? (i.ownerPriority?.pressing ? -2e12 : i.ownerPriority?.redLine ? -1e12 : 0) + (i.priority ?? n) : Number.MAX_SAFE_INTEGER);
   const index = new Map(mac.map((i, n) => [i.id, n]));
   const mine = (t: MacTask) => (i: WaitingItem) => (!i.repo || same(i.repo, t.repo)) && (same(i.code, t.ask) || (!!t.row && (same(ticketRowOf(i), t.row) || same(i.row, t.row))));
   const used = new Set<string>();

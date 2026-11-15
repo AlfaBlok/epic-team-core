@@ -13,6 +13,8 @@ export interface OwnerPriority {
   at?: string;
   /** on the owner's red line: above every level, with a red marker. */
   redLine?: { sentence: string; state: RedLine["state"]; ask?: string; at?: string; name?: string; line?: number };
+  /** he was frustrated about it or asked for it again: first of all, until it is answered. */
+  pressing?: { kind: "frustrated" | "repeated"; why: string; words?: string; said?: string; source?: string };
 }
 
 /**

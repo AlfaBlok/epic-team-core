@@ -1,7 +1,7 @@
 import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef } from "./review-types";
 import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
+import type { PersonaGapsBody, PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
@@ -207,6 +207,8 @@ export interface ApiClient {
   listPursuits(): Promise<PursuitsBody>;
   /** the goal sets: the scorecard tree (pursuits, their epics inside), each spine's queue and codes. */
   listScorecards(): Promise<ScorecardsBody>;
+  /** every milestone and objective with no Delivery Manager turning it . */
+  personaGaps(): Promise<PersonaGapsBody>;
   /** his order of the pursuits (every id once); one commit in docs/pursuits.json. */
   reorderPursuits(ids: string[]): Promise<{ ok: true; sha?: string }>;
   /** park or resume one pursuit (parked: no wakes, no workers); one commit. */

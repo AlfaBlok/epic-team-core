@@ -53,6 +53,8 @@ export interface PursuitEpic {
 export interface PursuitTeam {
   persona: string;
   enabled: boolean;
+  /** auto-parked with nothing to do: it still wakes by itself. */
+  parked?: boolean;
   /** the pace as set, and as it runs now that the rank changes it. */
   pace: string;
   paceNow: string;
@@ -179,6 +181,8 @@ export interface ScorecardNode {
   /** the file its declared rows come from (docs/scorecards/<id>.json in the home repo). */
   file?: { path: string; present: boolean; proposal?: string };
   teams?: PursuitTeam[];
+  /** no Delivery Manager turns it ("none"), or its one is switched off ("off"). */
+  noPersona?: "none" | "off";
   /** its 4 to 6 key results; an epic's are its Done means. */
   keyResults?: ScorecardRow[];
   /** the spine whose Goal sentence is this objective. */
@@ -201,3 +205,20 @@ export interface ScorecardsBody {
 
 /** a pursuit's name as the owner reads it: with its goal's number when it has one ("5 testers using SocialApp · 0 of 5"). */
 export const pursuitTitle = (p: Pick<Pursuit, "name" | "goal">) => (p.goal ? `${p.name} · ${p.goal.now} of ${p.goal.target}` : p.name);
+
+/** a milestone or objective, in any world, with no Delivery Manager turning it (GET /api/persona-gaps). */
+export interface PersonaGap {
+  kind: "milestone" | "objective";
+  id: string;
+  title: string;
+  world: string;
+  turner: "none" | "off";
+  why: string;
+  milestoneId?: string;
+}
+export interface PersonaGapsBody {
+  ok: boolean;
+  gaps: PersonaGap[];
+  checked: { objectives: number; milestones: number };
+  at: string;
+}

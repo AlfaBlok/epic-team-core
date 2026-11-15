@@ -211,7 +211,13 @@ export function createChatDispatch(d: ChatDispatchDeps) {
       if (!d.dispatcher) throw new DispatchError(503, "no_dispatcher", "EPICSPINE_DISPATCHER is not set on the console");
       // another world's worker is picked for that world (`pick --world`), so its credits gate holds it
       const world = d.worldOf?.(m) ?? DEFAULT_TENANT;
-      const pick = world !== DEFAULT_TENANT && d.dispatcher.pickFor ? await d.dispatcher.pickFor({ world, persona: d.persona(m).id }) : await d.dispatcher.pick();
+      let pick = world !== DEFAULT_TENANT && d.dispatcher.pickFor ? await d.dispatcher.pickFor({ world, persona: d.persona(m).id }) : await d.dispatcher.pick();
+      // the owner's own dispatch takes the seat kept for him only when no other seat can take it (that seat
+      // stays his reserve for the desk); another world's worker never does
+      if (pick.seat === null && world === DEFAULT_TENANT && /^no seat\b|team worker ceiling/i.test(pick.reason)) {
+        const mine = await d.dispatcher.pick({ for: "owner" });
+        if (mine.seat !== null) pick = mine;
+      }
       if (pick.seat === null)
         throw /credits/.test(pick.reason)
           ? new DispatchError(409, "no_credits", `not started: world ${world} is out of credits (${pick.reason}); tell ${ownerName()}`)

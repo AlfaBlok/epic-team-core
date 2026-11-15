@@ -595,7 +595,9 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
    * must launch. A refusal throws CycleError `no_seat` with the owner's wording (`load-cap on the worker server (…), will retry`, never
    * "no seat available") and details `{ retryable, refusals }`: a retryable one defers the wake instead of failing it.
    */
-  const pickSeat = async (model: string, hold: boolean, personaId?: string, host?: Host, opt: { fallback?: boolean; startGate?: "take" | "mark" } = {}) => {
+  /** a wake note that is the owner's own (his words or his voice note): its wake may fall back to his kept seat. */
+  const ownersNote = (by: string | null | undefined) => by === ownerName() || by === "voice note";
+  const pickSeat = async (model: string, hold: boolean, personaId?: string, host?: Host, opt: { fallback?: boolean; startGate?: "take" | "mark"; owner?: boolean; ownerFallback?: boolean } = {}) => {
     if (!o.dispatcher) throw new CycleError(503, "no_dispatcher", "EPICSPINE_DISPATCHER is not set");
     const args = pickArgsFor(db, personaId, model);
     const what = `pick ${personaId ?? "seat"} (${model})`;
@@ -603,10 +605,15 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     // `mark` (the owner's own action: an answer, a handover, a bootstrap) never waits but counts once it got a seat.
     const marking = opt.startGate === "mark";
     let slot = host === workerHost() || marking ? 0 : takeStart(what);
-    let r = await pickWith(pickerFor(host, o.dispatcher, o.hostDispatchers), worldPick, args, modelId);
+    let r = await pickWith(pickerFor(host, o.dispatcher, o.hostDispatchers), worldPick, args, modelId, opt.owner);
     let at: Host | undefined = host;
     let fellBack: Refusal | undefined;
     const refusals: Refusal[] = [];
+    // a wake that carries the owner's own note takes the seat kept for him only when no other seat can take it
+    if (r.seat === null && opt.ownerFallback && !opt.owner && /^no seat\b|team worker ceiling/i.test(r.reason)) {
+      const mine = await pickWith(pickerFor(host, o.dispatcher, o.hostDispatchers), worldPick, args, modelId, true);
+      if (mine.seat !== null) r = mine;
+    }
     if (r.seat === null) {
       gate.cancel(slot);
       const first = classifyRefusal(r.reason);
@@ -657,7 +664,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   const gapRetryMs = (reason: string) => (isStartGap(reason) ? gate.waitMs() + 1_000 + Math.floor(Math.random() * 4_000) : undefined);
   /** a pick refusal a later attempt may get past (load-cap, all seats busy, ceiling, dispatcher unreachable). */
   /** why the home thread's seat cannot take a turn now (`seat1 limited until …`, `seat2 logged out`), else undefined. */
-  const seatBlocked = seatBlockerFor(o.seatsFile);
+  const seatBlocked = seatBlockerFor(o.seatsFile, { persona: true, owner: ownerName() }); // never the seat kept for the owner
   const isDeferrable = (e: unknown): e is CycleError =>
     e instanceof CycleError && e.code === "no_seat" && !!(e.details as { retryable?: boolean } | undefined)?.retryable;
   const track = (pr: Promise<unknown>) => {
@@ -1732,7 +1739,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       if (pw && link.toolFp === undefined) setLink(id, { toolFp: pw.toolFp }); // a thread from before with no tools: adopt
     } else {
       // pick first: the worker server at its load/memory cap → the new home thread launches on the main server when the main server has room
-      const { seat, modelSelection, stamp, host: at = host, fellBack } = await pickSeat(p.model, false, p.id, host, { fallback: true });
+      const { seat, modelSelection, stamp, host: at = host, fellBack } = await pickSeat(p.model, false, p.id, host, { fallback: true, ownerFallback: ownersNote(run?.instructionsBy) });
       const { project, chain } = await resolveProjectEx(m.repo, at);
       const apw = at === host ? pw : await preWake(m, at, runId); // the main server's own checkout, fetched current
       // just registered / cloned: fingerprint what this new session starts with
@@ -2016,7 +2023,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     try {
       await ensureHost(host);
       // pick first: the worker server at its load/memory cap → the thread launches on the main server when the main server has room
-      const { seat, modelSelection, stamp, host: picked = host, fellBack } = await pickSeat(p.model, false, p.id, host, { fallback: true });
+      const { seat, modelSelection, stamp, host: picked = host, fellBack } = await pickSeat(p.model, false, p.id, host, { fallback: true, ownerFallback: ownersNote(run.instructionsBy) });
       const at: Host = picked;
       const client = clientFor(at);
       const { project } = await resolveProjectEx(m.repo, at);
@@ -2091,7 +2098,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const run = async (): Promise<Handover> => {
       const host: Host = i.target;
       await ensureHost(host);
-      const { modelSelection, stamp } = await pickSeat(o.handoverModel ?? "opus", false, undefined, host, { startGate: "mark" });
+      const { modelSelection, stamp } = await pickSeat(o.handoverModel ?? "opus", false, undefined, host, { startGate: "mark", owner: true }); // his handover may take his seat
       const { project } = await resolveProjectEx(i.repo, host);
       const title = handoverTitle(i.epic);
       let threadId: string;

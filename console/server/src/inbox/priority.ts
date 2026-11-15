@@ -41,7 +41,7 @@ export function byMilestonePriority<T extends Ranked & Locatable>(
   return items
     .map((it, i) => {
       const p = lookup?.(it);
-      return { it, i, r: rankOf(it, ranks), p, t: lookup ? tierOf(p) : 0, l: p?.redLine?.line ?? 0 };
+      return { it, i, r: rankOf(it, ranks), p, t: lookup ? tierOf(p) : 0, l: p?.pressing ? 0 : (p?.redLine?.line ?? 0) };
     })
     .sort((a, b) => a.t - b.t || a.l - b.l || a.r - b.r || a.i - b.i)
     .map(({ it, r, p, t, l }) => {

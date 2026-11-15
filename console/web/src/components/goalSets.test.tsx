@@ -354,6 +354,49 @@ describe("goal sets: the screens", () => {
 });
 
 describe("the key-result table of every wheel", () => {
+  it("a wheel no Delivery Manager turns shows a red no persona pill, and the screen names every goal without one", async () => {
+    vi.spyOn(api, "personaGaps").mockResolvedValue({
+      ok: false,
+      gaps: [
+        { kind: "objective", id: "vault", title: "Vault", world: "home", turner: "none", why: "No Delivery Manager: this wheel does not turn", milestoneId: "ms_9" },
+        { kind: "milestone", id: "ms_8", title: "Company and accountant", world: "home", turner: "off", why: "Its Delivery Manager is switched off: this wheel does not turn", milestoneId: "ms_8" },
+      ],
+      checked: { objectives: 2, milestones: 9 },
+      at: "2026-11-15T04:00:00Z",
+    });
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => (n.id === "vault" ? { ...n, noPersona: "none" as const } : n)) });
+    render(
+      <MemoryRouter initialEntries={["/sets"]}>
+        <Routes>
+          <Route path={SCORECARDS_PATH} element={<GoalSetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const line = await screen.findByTestId("persona-gaps");
+    expect(line.textContent).toContain("2 goals have no Delivery Manager turning them. A wheel without a persona does not turn.");
+    expect(within(line).getAllByTestId("persona-gap").map((li) => li.textContent)).toEqual(["Vaultnone", "Company and accountantswitched off"]);
+    const vault = (await screen.findAllByTestId("all-sets-row")).find((r) => r.getAttribute("data-set") === "vault")!;
+    const pill = within(vault).getByTestId("wheel-no-persona");
+    expect(pill.textContent).toBe("no persona");
+    expect(pill.getAttribute("title")).toBe("No Delivery Manager: this wheel does not turn.");
+    const launch = screen.getAllByTestId("all-sets-row").find((r) => r.getAttribute("data-set") === "launch")!;
+    expect(within(launch).queryByTestId("wheel-no-persona")).toBeNull();
+  });
+
+  it("nothing shows when every goal turns", async () => {
+    vi.spyOn(api, "personaGaps").mockResolvedValue({ ok: true, gaps: [], checked: { objectives: 2, milestones: 9 }, at: "2026-11-15T04:00:00Z" });
+    render(
+      <MemoryRouter initialEntries={["/sets"]}>
+        <Routes>
+          <Route path={SCORECARDS_PATH} element={<GoalSetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findAllByTestId("all-sets-row");
+    expect(screen.queryByTestId("persona-gaps")).toBeNull();
+    expect(screen.queryByTestId("wheel-no-persona")).toBeNull();
+  });
+
   it("an idle wheel (below green, no worker, nothing waiting on him) shows a red idle pill on its row and in the sidebar; a moving one shows none", async () => {
     const { WheelsTable, IdlePill } = await import("@/components/goalSets");
     const nodes = BODY.nodes.map((n, i) => (i === 0 ? { ...n, idle: { idle: true, reason: "idle: 2 key results not green, no worker" } } : { ...n, idle: { idle: false, reason: "moving: worker on E907-S1" } }));

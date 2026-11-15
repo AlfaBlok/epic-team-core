@@ -53,7 +53,7 @@ export function vps3Dispatcher(t: SshTarget, o: { remote?: string; exec?: Exec; 
   const unreachable = (e: unknown) => ({ seat: null, reason: `${workerHost()} dispatcher unreachable: ${e instanceof Error ? e.message : String(e)}` }) as const;
   return {
     ...d,
-    pick: () => d.pick().catch(unreachable),
+    pick: (o) => d.pick(o).catch(unreachable),
     pickFor: (a) => d.pickFor!(a).catch(unreachable),
   };
 }

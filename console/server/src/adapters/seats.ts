@@ -79,12 +79,44 @@ export function seatBlock(seats: Seat[] | undefined, seat: string | undefined): 
   return undefined;
 }
 
-/** seatBlock over a seats.json path, read on every call (the broker rewrites it each beat). */
-export function seatBlockerFor(file: string | undefined): (seat: string | undefined) => string | undefined {
+/** the seat the broker keeps for the owner (seats.json `owner_seat`), else undefined. */
+export function ownerSeatOf(raw: unknown): string | undefined {
+  const r = raw as { owner_seat?: unknown; seats?: Record<string, unknown> } | undefined;
+  const k = str(r?.owner_seat);
+  return k && r?.seats && k in r.seats ? k : undefined;
+}
+
+/** The broker's 5-hour skip line (broker.py NEAR_5H): at or above it no pick takes the seat. */
+const NEAR_5H = 90;
+
+/**
+ * the seat kept for the owner when the broker would give it to his pick now (signed in, not limited, usage known
+ * and under the 5-hour skip line), else undefined. Unreadable seats.json = undefined.
+ */
+export function ownerSeatFree(file: string | undefined, now: Date = new Date()): string | undefined {
+  if (!file) return undefined;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const k = ownerSeatOf(raw);
+    const s = k ? mapSeats(raw, now).find((x) => x.id === k) : undefined;
+    return s && s.status === "ok" && (s.usage5h ?? 100) < NEAR_5H ? k : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * seatBlock over a seats.json path, read on every call (the broker rewrites it each beat). with `persona` (a
+ * persona's wake into its home thread) the seat kept for the owner blocks too (`seat4 kept for Sam`), so a home thread
+ * launched there before moves off it; the owner's desks leave `persona` unset.
+ */
+export function seatBlockerFor(file: string | undefined, o: { persona?: boolean; owner?: string } = {}): (seat: string | undefined) => string | undefined {
   return (seat) => {
     if (!file || !seat) return undefined;
     try {
-      return seatBlock(readSeats(file), seat);
+      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (o.persona && ownerSeatOf(raw) === seat) return `${seat} kept for ${o.owner ?? "the owner"}`;
+      return seatBlock(mapSeats(raw), seat);
     } catch {
       return undefined;
     }

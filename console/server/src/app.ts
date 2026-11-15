@@ -20,7 +20,7 @@ import { locate } from "./adapters/milestone.js";
 import { listRepos, resolveRepo } from "./adapters/repos.js";
 import { doorSession } from "./auth/owner.js";
 import { mountLanding, mountLandingMarks } from "./landing.js";
-import { readSeats, seatBlockerFor } from "./adapters/seats.js";
+import { ownerSeatFree, readSeats, seatBlockerFor } from "./adapters/seats.js";
 import { movingLimit, stalledWake, STALL_WATCH_BY } from "./cycle/movement.js";
 import { runStats, runsOfMilestones, wakesDidSomething } from "./runStats.js";
 import { activeSeries, BUCKETS, dayBounds, localDay, validTimeZone } from "./activeAgents.js";
@@ -70,6 +70,7 @@ import { createPursuits, effortForSpine, epicHeading, priorityLines } from "./pu
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
+import { DEFAULT_DM_CADENCE, deliveryManagerOf, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
 import { cardRepoOf, mountTeamCards } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { readHisWords } from "./desk/hisObjectives.js";
@@ -168,7 +169,7 @@ import { createRepoPuller, type PullResult } from "./cycle/repoPull.js";
 import { mountProviders } from "./providers/routes.js";
 import { noticeRef, parseNoticeRef } from "./plug/marks.js";
 import { ensureAuth } from "./auth/schema.js";
-import { authModeFromEnv, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
+import { authModeFromEnv, credentialWorld, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
 import { customerHosts, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
 import { mountOAuth } from "./auth/oauth.js";
 import { socialHead, TEAM_HEAD } from "./brand.js";
@@ -1069,7 +1070,7 @@ export function createApp(
     deskInbox: deskInboxOf, // notes other worlds dropped in this repo's desk/inbox/
     // Mac ticket questions to the Team desk still waiting for an answer (steps/deskQuestions.ts)
     deskQuestions: async (m, base) => (deskQs ? deskQuestionsSection(deskQs.listOpen([m.id]), base) : undefined),
-    createMilestone: (input) => recordFirst(() => recordedMilestones().createMilestone(input)),
+    createMilestone: async (input) => withDeliveryManager(await recordFirst(() => recordedMilestones().createMilestone(input))), // every goal has a persona
     monitorAlerts: monitorAlertsOf,
     readyToMark: readyToMarkOf((m) => withOutcome(m, 1_500)), // cadence / timed wakes skip a milestone waiting for the owner's mark
     // child epics of the milestone's spine, each with the enabled persona of its own milestone (if any).
@@ -1225,6 +1226,7 @@ export function createApp(
     dispatcher: cycleOpts.dispatcher,
     startGate: cycleOpts.startGate,
     seatBlocked: seatBlockerFor(read.seatsFile), // a desk on a limited seat moves before the owner's send
+    ownerSeat: () => ownerSeatFree(read.seatsFile), // the Team desk moves to the seat kept for him
     publicUrl: cycle.publicUrl,
     reposRoot: read.reposRoot,
     repo: process.env.CONSOLE_DESK_REPO || undefined,
@@ -1519,6 +1521,22 @@ export function createApp(
   /** Store writes to milestones that record first; a file not written is a 409 / 502 and nothing changed. */
   const recordedMilestones = () => milestoneRecord.recorded(store);
   const recordedPersonas = () => personaRecord.recorded(store);
+  /**
+   * (the owner: "a wheel without a persona is not going to turn"): a milestone created in any
+   * world gets that world's Delivery Manager the moment it exists, switched on, recorded in the team repo first.
+   * A failure never undoes the milestone: GET /api/persona-gaps and the objectives screen flag it.
+   */
+  const withDeliveryManager = async (m: Milestone): Promise<Milestone> => {
+    try {
+      if (store.listAssignments({ milestoneId: m.id }).some((a) => isDm(store.getPersona(a.personaId)?.name))) return m;
+      const dm = deliveryManagerOf(store.listPersonas());
+      if (dm) await recordFirst(() => recordedAssignments().createAssignment({ milestoneId: m.id, personaId: dm.id, cadence: DEFAULT_DM_CADENCE, enabled: true }));
+      else console.warn(`no Delivery Manager persona in the world of ${m.id}: the persona check flags it`);
+    } catch (e) {
+      console.warn(`Delivery Manager not assigned to ${m.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return m;
+  };
   const recordFirst = async <T>(fn: () => Promise<T>): Promise<T> => {
     try {
       return await fn();
@@ -1745,6 +1763,25 @@ export function createApp(
     objectivesMemo = { at: Date.now(), v };
     return v;
   };
+  // every milestone and objective (every world, his other worlds too) with no Delivery Manager turning it.
+  api.get("/persona-gaps", async (c) => {
+    const caller = credentialWorld();
+    if (caller && caller !== DEFAULT_TENANT) return c.json({ error: { code: "not_found", message: "the persona check is the home world's" } }, 404);
+    const all = createStore(db);
+    const world = (id: string) => all.worldOfMilestone(id) ?? DEFAULT_TENANT;
+    const body = await pursuits.get().catch(() => undefined);
+    const home = pursuits.homeDir();
+    let other: ObjectiveIn[] = [];
+    try {
+      const f = home ? (JSON.parse(fs.readFileSync(path.join(home, "docs/pursuits.json"), "utf8")) as { otherWorlds?: { id: string; name: string; repo: string; spine: string }[] }) : {};
+      other = (f.otherWorlds ?? []).map((w) => ({ id: w.id, name: w.name, epics: [{ repo: w.repo, spine: w.spine }] }));
+    } catch {
+      /* no file: his pursuits only */
+    }
+    const objectives: ObjectiveIn[] = [...(body?.pursuits ?? []).filter((p) => !p.parked).map((p) => ({ id: p.id, name: p.name, epics: p.epics })), ...other];
+    const gaps = [...objectiveGaps(objectives, all, world), ...milestoneGaps(all, world)];
+    return c.json({ ok: gaps.length === 0, gaps, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
+  });
   api.get("/objectives", async (c) => c.text(((await ownerObjectivesNow!().catch(() => undefined))?.block || "No objectives read.") + "\n"));
   // each objective's key results as the page shows them (its file's, a ticked Done-means box green), for the
   // WhatsApp line when one turns green or red. A TEST objective (its id or its repo says test) is marked TEST.
@@ -2859,7 +2896,7 @@ export function createApp(
   api.post("/milestones", async (c) => {
     const input = await body(c, s.milestoneCreate);
     ownRepo(input.repo);
-    const made = await recordFirst(() => recordedMilestones().createMilestone({ ...input, bigRoot: null }));
+    const made = await withDeliveryManager(await recordFirst(() => recordedMilestones().createMilestone({ ...input, bigRoot: null }))); // with its Delivery Manager
     // a big root's position goes to state/big-roots.json first, then console.db.
     let tw = {};
     if (input.bigRoot != null && store.worldOfMilestone(made.id) === homeWorld()) {
