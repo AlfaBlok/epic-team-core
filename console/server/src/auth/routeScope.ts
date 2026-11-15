@@ -34,7 +34,7 @@ const OPEN: [string, RegExp][] = [
   ["GET", /^\/api\/access\/oauth\/providers$/],
   ["GET", /^\/api\/access\/oauth\/(google|github|test)\/(start|callback)$/],
   ["GET|POST", /^\/api\/access\/oauth\/test\/authorize$/],
-  ["POST", /^\/api\/access\/oauth\/pick(\/peek)?$/],
+  ["POST", /^\/api\/access\/oauth\/(pick(\/peek)?|making)$/],
   // email sign-up (a confirm link) and password reset (auth/emailAccess.ts): the customer sites only, rate-limited,
   // one-time links bound to the site; status says whether this site shows the email forms
   ["GET", /^\/api\/access\/email\/status$/],

@@ -18,6 +18,7 @@ import { ENABLE_SCOPE, expectedChannels, projectNumberOf, resultPage, YOUTUBE_KE
  *   GET  /api/access/oauth/<p>/start?next=&s=    to the provider; the state is bound to this browser (a cookie) and host
  *   GET  /api/access/oauth/<p>/callback          back: a verified email signs in (or signs up), then on to `next`
  *   POST /api/access/oauth/pick/peek, /pick      a login in several worlds picks one (a one-time link in the fragment)
+ *   POST /api/access/oauth/making {token}        a new world still being made: 202 pending, then the session
  *
  * Who it is: the provider's verified email. A known provider account (oauth_identities) signs in as its login; else the
  * login with that email; else, for Google mail (gmail.com or a Google Workspace domain, where `a+tag@d` is delivered to
@@ -195,9 +196,19 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   const picks = new Map<string, { userIds: string[]; host: string; next: string; exp: number; via?: string }>();
   /** TEST provider: one-time codes from its page. */
   const testCodes = new Map<string, { email: string; name: string; exp: number }>();
+  /**
+   * A new world is made in the background. A world can take longer than a proxy waits (the social world about
+   * 106 s, past Cloudflare's 100 s), so the callback waits at most CONSOLE_SIGNUP_WAIT_MS (default 3 s) and otherwise sends
+   * the browser to /login#making=<token>, where the page asks POST /access/oauth/making until the world is ready.
+   * One job per product and email: a second sign-in, a refresh or an email confirm while it runs joins the same job, so a
+   * retry never makes a second world. In memory: after a restart the person signs in again and the world is picked up.
+   */
+  const jobs = new Map<string, { p: Promise<{ userId: string; world: string }>; settled: boolean; exp: number }>();
+  const makingTokens = new Map<string, { job: string; host: string; next: string; via: string; exp: number }>();
+  const MAKING_MS = 30 * 60_000;
   const sweep = () => {
     const t = now();
-    for (const m of [states, picks, testCodes, ytPending] as Map<string, { exp: number }>[]) {
+    for (const m of [states, picks, testCodes, ytPending, makingTokens, jobs] as Map<string, { exp: number }>[]) {
       for (const [k, v] of m) if (v.exp < t) m.delete(k);
       if (m.size > 10_000) m.clear();
     }
@@ -587,6 +598,29 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     const s = auth.createSession(userId, tenant, { via, host }); // the scorecard's proof of a provider sign-in
     setCookie(c, SESSION_COOKIE, s.id, { httpOnly: true, sameSite: "Lax", path: "/", secure: secure(c, host), maxAge: SESSION_DAYS * 86400 });
   };
+  /** One world-making per product and email at a time (Google, GitHub and the email confirm share it). */
+  const inFlight = new Map<string, Promise<{ world: string }>>();
+  const signupOnce = (i: SignupInput): Promise<{ world: string }> => {
+    const k = `${i.product}|${i.email.toLowerCase()}`;
+    let p = inFlight.get(k);
+    if (!p) {
+      p = outsideRequest(() => o.signup(i)).finally(() => inFlight.delete(k));
+      inFlight.set(k, p);
+    }
+    return p;
+  };
+  const jobKey = (product: Product, email: string) => `${product}|${email.toLowerCase()}`;
+  const waitFor = <T,>(p: Promise<T>, ms: number): Promise<T | undefined> => {
+    let timer: NodeJS.Timeout | undefined;
+    return Promise.race([p, new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), ms)))]).finally(() => clearTimeout(timer));
+  };
+  const envMs = (v: string | undefined, d: number) => (v === undefined || v === "" || !Number.isFinite(Number(v)) ? d : Math.max(0, Number(v)));
+  /** hand the browser a one-time link to wait on a running job (the fragment never reaches a server or a proxy log). */
+  const toMaking = (c: Context, job: string, host: string, next: string, via: string) => {
+    const token = random();
+    makingTokens.set(sha256(token), { job, host, next, via, exp: now() + MAKING_MS });
+    return c.redirect(`/login#making=${token}`, 302);
+  };
   const signupsToday = () =>
     (db.prepare("SELECT COUNT(*) AS n FROM oauth_identities WHERE signup_world IS NOT NULL AND created_at >= ?").get(new Date(now() - 86400_000).toISOString()) as Row).n as number;
 
@@ -594,7 +628,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   mountEmailAccess(api, {
     db,
     auth,
-    signup: o.signup,
+    signup: signupOnce,
     customers,
     signupsToday,
     startSession,
@@ -634,6 +668,9 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
       return back(c, "provider_down");
     }
     try {
+      // a world for this person is still being made (a second press, a refresh): wait on that one, never make another.
+      const running = jobs.get(jobKey(product, who.email));
+      if (running && !running.settled) return toMaking(c, jobKey(product, who.email), host, st.next, p);
       const logins = loginsFor(p, who, product);
       if (logins.length) {
         // Sign-in: the worlds of the login(s) this person is; one that fits this site's product first.
@@ -663,11 +700,28 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
       if (!customers.has(host) && p !== "test") return back(c, "no_account");
       if (env.CONSOLE_SIGNUP === "off") return back(c, "signup_closed");
       if (signupsToday() >= Math.max(0, Number(env.CONSOLE_SIGNUP_PER_DAY ?? 20) || 0)) return back(c, "signup_full");
-      const made = await outsideRequest(() => o.signup({ email: who.email, name: who.name, product, provider: p, host, ...(st.visitSource ? { visitSource: st.visitSource } : {}) }));
-      const userId = (db.prepare("SELECT id FROM users WHERE email = ?").get(who.email) as Row | undefined)?.id as string | undefined;
-      if (!userId) return back(c, "signup_failed");
-      link(p, who, userId, made.world);
-      startSession(c, host, userId, made.world, p);
+      const key = jobKey(product, who.email);
+      const job = {
+        p: signupOnce({ email: who.email, name: who.name, product, provider: p, host, ...(st.visitSource ? { visitSource: st.visitSource } : {}) }).then((made) => {
+          const userId = (db.prepare("SELECT id FROM users WHERE email = ?").get(who.email) as Row | undefined)?.id as string | undefined;
+          if (!userId) throw new AuthError(400, "signup_failed", "your account could not be made: try again in a few minutes");
+          link(p, who, userId, made.world);
+          return { userId, world: made.world };
+        }),
+        settled: false,
+        exp: now() + MAKING_MS,
+      };
+      job.p.then(
+        () => (job.settled = true),
+        (e) => {
+          job.settled = true;
+          console.error(`oauth ${p} sign-up of ${who.email} on ${host}: ${(e as Error).message}`);
+        },
+      );
+      jobs.set(key, job);
+      const done = await waitFor(job.p, envMs(env.CONSOLE_SIGNUP_WAIT_MS, 3_000));
+      if (!done) return toMaking(c, key, host, st.next, p);
+      startSession(c, host, done.userId, done.world, p);
       return c.redirect(st.next, 302);
     } catch (e) {
       console.error(`oauth ${p} sign-in: ${(e as Error).message}`);
@@ -713,6 +767,31 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     } catch (e) {
       if (e instanceof AuthError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
       throw e;
+    }
+  });
+
+  // the waiting page asks until the new world is ready (each ask answers within CONSOLE_MAKING_WAIT_MS, default
+  // 20 s, well inside a proxy's limit): 202 `pending` while it is made, then the session and where to go.
+  api.post("/access/oauth/making", async (c) => {
+    const host = hostOf(c);
+    const k = sha256(String((await body(c)).token ?? ""));
+    const m = makingTokens.get(k);
+    if (!m || m.exp < now() || m.host !== host) return c.json({ error: { code: "invalid_making", message: "this sign-up link has expired: sign in again, your account is kept" } }, 400);
+    const job = jobs.get(m.job);
+    if (!job) {
+      makingTokens.delete(k);
+      return c.json({ error: { code: "invalid_making", message: "this sign-up link has expired: sign in again, your account is kept" } }, 400);
+    }
+    try {
+      const done = await waitFor(job.p, envMs(env.CONSOLE_MAKING_WAIT_MS, 20_000));
+      if (!done) return c.json({ pending: true, message: "Your world is being made: this takes about two minutes the first time." }, 202);
+      makingTokens.delete(k);
+      startSession(c, host, done.userId, done.world, m.via);
+      return c.json({ ok: true, next: m.next });
+    } catch (e) {
+      makingTokens.delete(k);
+      if (e instanceof AuthError) return c.json({ error: { code: e.code, message: e.message } }, e.status);
+      return c.json({ error: { code: "signup_failed", message: "your account could not be made: try again in a few minutes" } }, 400);
     }
   });
 

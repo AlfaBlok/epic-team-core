@@ -92,6 +92,10 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
     <label for="rsPw2">Again</label><input id="rsPw2" type="password" autocomplete="new-password" minlength="12" required>
     <button type="submit">Save new password</button><p class="err" id="errRs"></p>
   </form>
+  <section id="making" hidden><h1>Your world is being made</h1><p class="note" id="mkNote">We are setting up your own space. This takes about two minutes the first time: keep this page open, it opens by itself when it is ready.</p>
+    <p class="note" id="mkTime" aria-live="polite"></p><p class="err" id="errMk"></p>
+    <p class="links" id="mkBack" hidden><a href="/login" class="toLogin">Back to sign in</a></p>
+  </section>
   <section id="confirm" hidden><h1>Confirming your email</h1><p class="note" id="cfNote">One moment…</p><p class="err" id="errCf"></p>
     <p class="links" id="cfBack" hidden><a href="/login" class="toLogin">Back to log in</a></p>
   </section>
@@ -217,7 +221,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   };
   // sign-up by email (a confirm link) and password reset, on the customer sites when mail is set up.
   // The links' one-time tokens ride in the fragment (#confirm=…, #reset=…), never sent to a server by the browser.
-  const show = (id) => { for (const f of ["oauth", "login", "pick", "handoff", "setup", "signup", "forgot", "reset", "confirm"]) $(f).hidden = f !== id; };
+  const show = (id) => { for (const f of ["oauth", "login", "pick", "handoff", "setup", "signup", "forgot", "reset", "confirm", "making"]) $(f).hidden = f !== id; };
   for (const a of document.querySelectorAll("a.toLogin")) a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "/login"); location.reload(); };
   const frag = new URLSearchParams(location.hash.slice(1));
   fetch("/api/access/email/status").then((r) => r.ok ? r.json() : null).then((j) => {
@@ -265,6 +269,28 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
         $("cfNote").textContent = "Confirmed. Opening your account…"; location.replace(okNext(j.next) ? j.next : "/");
       });
     ask(0).catch((err) => { $("cfNote").hidden = true; $("errCf").textContent = err.message; $("cfBack").hidden = false; });
+  }
+  // a Google or GitHub sign-up whose world is still being made waits here; the page asks until it is ready.
+  const makingToken = frag.get("making");
+  if (makingToken) {
+    history.replaceState(null, "", "/login");
+    show("making");
+    const t0 = Date.now();
+    const tick = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); $("mkTime").textContent = s < 5 ? "" : s + " seconds so far"; }, 1000);
+    const ask = (n) => fetch("/api/access/oauth/making", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: makingToken }) })
+      .then(async (r) => {
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 202 || (r.status >= 502 && r.status <= 524)) {
+          if (n > 60) throw new Error("this is taking longer than it should: sign in again in a few minutes, your account is kept");
+          if (r.status !== 202) await new Promise((ok) => setTimeout(ok, 3000));
+          return ask(n + 1);
+        }
+        if (!r.ok) throw new Error((j.error && j.error.message) || ("error " + r.status));
+        clearInterval(tick);
+        $("mkNote").textContent = "Ready. Opening your world…"; $("mkTime").textContent = "";
+        location.replace(okNext(j.next) ? j.next : "/");
+      }, () => new Promise((ok) => setTimeout(ok, 3000)).then(() => { if (n > 60) throw new Error("no connection: sign in again in a few minutes, your account is kept"); return ask(n + 1); }));
+    ask(0).catch((err) => { clearInterval(tick); $("mkNote").hidden = true; $("mkTime").textContent = ""; $("errMk").textContent = err.message; $("mkBack").hidden = false; });
   }
   const resetToken = frag.get("reset");
   if (resetToken) { history.replaceState(null, "", "/login"); show("reset"); }

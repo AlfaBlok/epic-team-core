@@ -96,4 +96,14 @@ describe("cards that need his decision have their own bucket, above Done waiting
     expect(done.map((c) => c.getAttribute("data-review-id")).sort()).toEqual(["rv_done", "rv_review_with_options"]);
     for (const c of done) expect(within(c).getByTestId("review-kind-word").textContent).toBe(CARD_WORD.review);
   });
+
+  it("one Snoozed reviews list, under review, holds a snoozed decision too", async () => {
+    vi.spyOn(api, "listReviewItems").mockImplementation(((q?: { state?: string }) =>
+      Promise.resolve(q?.state === "snoozed" ? [{ ...DECISION, id: "rv_snoozed_decision", snoozedUntil: "2026-12-01" }] : [DONE])) as never);
+    inbox();
+    await screen.findByTestId("inbox-decisions");
+    await waitFor(() => expect(screen.getAllByTestId("review-snoozed")).toHaveLength(1));
+    const s = sections();
+    expect(s.indexOf("review-snoozed")).toBe(s.indexOf("waiting-for-review") + 1);
+  });
 });

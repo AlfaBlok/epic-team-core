@@ -308,7 +308,7 @@ const DONE_STATUS = /^(done|closed|complete|completed|cancel+ed|won'?t ?fix|supe
 const STATUS_WORDS: [RegExp, string][] = [
   [/\b(done|closed|complete|completed|merged|shipped|cancel+ed|won'?t ?fix|superseded|retired)\b/i, "done"],
   [/\b(blocked|waiting|needs|on hold)\b/i, "blocked"],
-  [/\b(in[ -]progress|active|wip|ongoing|running|started)\b/i, "active"],
+  [/\b(review|testing|verifying|in[ -]progress|active|wip|ongoing|running|started)\b/i, "active"],
   [/\b(dispatched)\b/i, "dispatched"],
   [/\b(ready|todo|to do|open|queued)\b/i, "ready"],
   [/\b(pending|planned|proposed|draft|not started|backlog)\b/i, "pending"],

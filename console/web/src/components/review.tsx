@@ -60,6 +60,7 @@ export function WaitingForReview({
   testId = "waiting-for-review",
   tone = "review",
   empty = "Nothing finished waiting for your review.",
+  snoozedList = "own",
 }: {
   fold?: string;
   only?: (i: ReviewItem) => boolean;
@@ -70,6 +71,8 @@ export function WaitingForReview({
   testId?: string;
   tone?: "review" | "needs-you";
   empty?: string;
+  /** E948-S103: the Inbox keeps one Snoozed reviews list, under review, holding every snoozed card (decisions too). */
+  snoozedList?: "own" | "all" | "none";
 } = {}) {
   // tagged "inbox", so a snooze refreshes this list and the green pill (counts) together.
   // the cards are `useReviewCards`, the list the green pills count (one fetch, this browser's snoozes and presses
@@ -82,7 +85,7 @@ export function WaitingForReview({
   const { data: fetchedSnoozedAll } = useQuery(() => api.listReviewItems({ state: "snoozed" }) as Promise<Listed[]>, [], { tag: "inbox" });
   // the selected project's review cards only.
   const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
-  const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
+  const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId) && (!only || snoozedList === "all" || only(i)));
   // the Team home's section header folds like every section (L-39, remembered); the cards in it are never folded
   const [open, setOpen] = useSectionOpen(fold);
   const [snoozedOpen, setSnoozedOpen] = useState(false);
@@ -102,9 +105,10 @@ export function WaitingForReview({
   const [sort, setSort] = useSectionSort(fold);
   const shown = hits ? (cards as Listed[] | undefined)?.filter((i) => hits.has(i.id)) : (cards as Listed[] | undefined);
   const data = shown && sortSection(shown, sort, (i) => i.createdAt || undefined);
-  const snoozedAll = [
-    ...(fetched ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
-    ...(fetchedSnoozed ?? []).filter((i) => !back.has(i.id) && !fetched?.some((x) => x.id === i.id)),
+  const snoozedFrom = snoozedList === "all" ? fetchedAll?.filter((i) => project.keep(i.milestoneId)) : fetched;
+  const snoozedAll = snoozedList === "none" ? [] : [
+    ...(snoozedFrom ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
+    ...(fetchedSnoozed ?? []).filter((i) => !back.has(i.id) && !snoozedFrom?.some((x) => x.id === i.id)),
   ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
   const snoozed = hits ? snoozedAll.filter((i) => hits.has(i.id)) : snoozedAll;
   const items = data ?? [];
@@ -221,11 +225,11 @@ export function WaitingForReview({
 
 /** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
 export function InboxDecisions() {
-  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." />;
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
 }
 /** E948-S103: Done, waiting for your review keeps only finished work he marks done. */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="all" />;
 }
 
 /**
