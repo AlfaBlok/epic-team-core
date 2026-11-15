@@ -332,7 +332,7 @@ export function NewCampaignPage() {
               <div className="rounded-md border p-3 text-sm" data-testid="campaign-template">
                 Starts from the campaign template:{" "}
                 <a className="underline" href={tpl.data.source.url} target="_blank" rel="noreferrer">
-                  {tpl.data.source.name.toLowerCase()}
+                  {tpl.data.source.name.replace(/^The /, "the ")}
                 </a>
                 . After this first step, each named campaign in the repo opens with all its parts filled in.
               </div>
@@ -470,7 +470,7 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
           <div className="rounded-md border p-3 text-sm" data-testid="named-campaign-template">
             Starts from the campaign template:{" "}
             <a className="underline" href={tpl.data.source.url} target="_blank" rel="noreferrer">
-              {tpl.data.source.name.toLowerCase()}
+              {tpl.data.source.name.replace(/^The /, "the ")}
             </a>
             . Equal posts per message for 3 days, then lean into what works. Replace each line that says to fill in.
           </div>
