@@ -8,6 +8,8 @@ import { sameRepo } from "@/lib/repoNames";
  * objective holds, like the house) has its own Pages tab, and the global Pages list still shows them all together.
  * A page names its row and epic (docs/pages/registry.json); the row's spine sits in an objective's tree, so the page
  * does too. A row no objective holds goes by its epic (the spine whose code it names); else the page is "not placed".
+ * When neither sits in an objective's tree (the console's own epics hang off the root), the page's own `objective`
+ * (docs/pages/registry.json, written by scripts/pages.py place) names the objective or world it was made for.
  * Pure: one placement for the tab and the list, so they never disagree.
  */
 
@@ -27,7 +29,7 @@ function epicSpines(body: ScorecardsBody | undefined): Map<string, string> {
 
 export interface PlacedPage extends PageView {
   /** the objective it sits in (the top of his order that holds it), or none: not placed. */
-  wheel?: { id: string; name: string };
+  wheel?: { id: string; name: string; world?: boolean };
 }
 
 const nameOf = (n: ScorecardNode) => n.headline ?? n.name;
@@ -45,8 +47,25 @@ export function placePages(pages: PagesBody | undefined, body: ScorecardsBody | 
       const spine = epics.get(`${repoKey(p.repo)}:${p.epic}`);
       if (spine) home = homeOf(ix, nodes, { repo: p.repo, path: spine.slice(spine.indexOf(":") + 1) });
     }
-    return home ? { ...p, wheel: { id: home.pursuit.id, name: nameOf(home.pursuit) } } : { ...p };
+    if (home) return { ...p, wheel: { id: home.pursuit.id, name: nameOf(home.pursuit) } };
+    const named = byObjective(p, nodes);
+    return named ? { ...p, wheel: named } : { ...p };
   });
+}
+
+/** the objective (or world) a page names itself, when its spine sits in none. */
+function byObjective(p: PageView, nodes: ScorecardNode[]): PlacedPage["wheel"] {
+  if (!p.objective) return undefined;
+  const n = nodes.find((x) => x.id === p.objective);
+  if (n) return { id: n.id, name: nameOf(n) };
+  return p.objectiveName ? { id: p.objective, name: p.objectiveName, world: true } : undefined;
+}
+
+/** whether a page's row (or epic) spine sits in any objective's tree. */
+function inAnyTree(spine: string | undefined, ix: ScorecardIndex): boolean {
+  if (!spine) return false;
+  for (const set of ix.scope.values()) if (set.has(spine)) return true;
+  return false;
 }
 
 /** the pages one objective (or a set inside it) holds: its row's spine, or its epic's, is in that subtree. */
@@ -61,6 +80,8 @@ export function pagesOfObjective(pages: PagesBody | undefined, body: ScorecardsB
       const rowSpine = p.row ? ix.codes.get(`${repoKey(p.repo)}:${p.row}`) : undefined;
       const spine = rowSpine && scope.has(rowSpine) ? rowSpine : epics.get(`${repoKey(p.repo)}:${p.epic}`);
       if (spine && scope.has(spine)) out.push(p);
+      // a page no tree holds goes where it names itself (the objective's own tab, not its sets).
+      else if (p.objective === nodeId && !inAnyTree(rowSpine, ix) && !inAnyTree(spine, ix)) out.push(p);
     }
   return out;
 }
@@ -74,8 +95,17 @@ export function pagesOfMilestone(pages: PagesBody | undefined, repo: string | un
 }
 
 /** the global list's view by wheel: each objective in his order with its page count, then the pages not placed. */
-export function wheelCounts(placed: PlacedPage[], nodes: ScorecardNode[]): { id: string; name: string; count: number }[] {
+export function wheelCounts(placed: PlacedPage[], nodes: ScorecardNode[]): { id: string; name: string; count: number; world?: boolean }[] {
   const by = new Map<string, number>();
-  for (const p of placed) if (p.wheel) by.set(p.wheel.id, (by.get(p.wheel.id) ?? 0) + 1);
-  return nodes.filter((n) => by.has(n.id)).map((n) => ({ id: n.id, name: nameOf(n), count: by.get(n.id)! }));
+  const worlds = new Map<string, string>();
+  for (const p of placed)
+    if (p.wheel) {
+      by.set(p.wheel.id, (by.get(p.wheel.id) ?? 0) + 1);
+      if (p.wheel.world) worlds.set(p.wheel.id, p.wheel.name);
+    }
+  return [
+    ...nodes.filter((n) => by.has(n.id)).map((n) => ({ id: n.id, name: nameOf(n), count: by.get(n.id)! })),
+    // a world beside the objectives (the house) after them.
+    ...[...worlds].map(([id, name]) => ({ id, name, count: by.get(id)!, world: true })),
+  ];
 }

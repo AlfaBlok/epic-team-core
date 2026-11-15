@@ -14,6 +14,12 @@ export interface PageView {
   slug?: string;
   /** the unit on the page host that rebuilds it: the pin shows a Refresh button. */
   refresh?: string;
+  /** the objective (docs/pursuits.json id) or world it was made for, when its row's spine sits in none. */
+  objective?: string;
+  /** a world's name (the house) when `objective` names a world, not an objective. */
+  objectiveName?: string;
+  /** why no objective or world holds it (shown on the Pages list). */
+  notPlaced?: string;
 }
 /** GET /api/pages/pinned/:port/status (and the answer of POST …/refresh). */
 export interface PinnedStatus {

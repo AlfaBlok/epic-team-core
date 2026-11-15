@@ -140,24 +140,48 @@ export function NameForm({ p, onDone, label }: { p: PageView; onDone: () => void
  */
 function ByWheel({ placed, nodes }: { placed: PlacedPage[]; nodes: ScorecardsBody["nodes"] }) {
   const wheels = wheelCounts(placed, nodes);
-  const loose = placed.filter((p) => !p.wheel).length;
+  const loose = placed.filter((p) => !p.wheel);
   if (!placed.length) return null;
+  const line = (w: { name: string; count: number }) => (
+    <>
+      <span className="min-w-0 flex-1 text-sm text-foreground [overflow-wrap:anywhere]">{w.name}</span>
+      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(w.count, "page")}</span>
+    </>
+  );
   return (
     <section className="grid gap-1.5" data-testid="pages-by-wheel" aria-label={`By ${SET_NAME.one.toLowerCase()}`}>
       <h2 className="text-sm font-semibold text-foreground">By {SET_NAME.one.toLowerCase()}</h2>
       <ul className="divide-y rounded-xl border bg-card">
         {wheels.map((w) => (
           <li key={w.id} data-testid="pages-wheel" data-wheel={w.id}>
-            <Link to={scorecardHref(w.id, "pages")} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2 hover:bg-accent">
-              <span className="min-w-0 flex-1 text-sm text-foreground [overflow-wrap:anywhere]">{w.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(w.count, "page")}</span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            </Link>
+            {w.world ? (
+              // a world beside the objectives (the house): its pages are on its own milestone's Pages tab.
+              <div className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2">{line(w)}</div>
+            ) : (
+              <Link to={scorecardHref(w.id, "pages")} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2 hover:bg-accent">
+                {line(w)}
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Link>
+            )}
           </li>
         ))}
-        <li className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2" data-testid="pages-not-placed">
-          <span className="min-w-0 flex-1 text-sm text-muted-foreground">Not placed: its row sits in no {SET_NAME.one.toLowerCase()}</span>
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(loose, "page")}</span>
+        <li className="grid min-w-0 gap-1 px-3 py-2" data-testid="pages-not-placed">
+          <div className="flex min-h-7 min-w-0 items-center gap-3">
+            <span className="min-w-0 flex-1 text-sm text-muted-foreground">Not placed: made for no {SET_NAME.one.toLowerCase()}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{plural(loose.length, "page")}</span>
+          </div>
+          {loose.length > 0 && loose.length <= 12 && (
+            <ul className="grid gap-1" data-testid="pages-not-placed-list">
+              {loose.map((p) => (
+                <li key={p.url} className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="pages-not-placed-page">
+                  <a href={p.url} target="_blank" rel="noreferrer" className="text-foreground underline-offset-2 hover:underline">
+                    {p.name || p.title || p.url}
+                  </a>
+                  {p.notPlaced ? `: ${p.notPlaced}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       </ul>
     </section>
@@ -173,8 +197,8 @@ function PageRow({ p, wheel }: { p: PageView; wheel?: PlacedPage["wheel"] | null
           {p.name || p.title || p.url}
         </a>
         {wheel !== undefined && (
-          <span className="hidden max-w-[12rem] shrink-0 truncate text-xs text-muted-foreground sm:inline" data-testid="pages-page-wheel" title={wheel ? `Made for ${wheel.name}` : "Not placed in an objective"}>
-            {wheel ? <Link to={scorecardHref(wheel.id, "pages")} className="underline-offset-2 hover:text-foreground hover:underline">{wheel.name}</Link> : "Not placed"}
+          <span className="hidden max-w-[12rem] shrink-0 truncate text-xs text-muted-foreground sm:inline" data-testid="pages-page-wheel" title={wheel ? `Made for ${wheel.name}` : p.notPlaced || "Not placed in an objective"}>
+            {wheel?.world ? wheel.name : wheel ? <Link to={scorecardHref(wheel.id, "pages")} className="underline-offset-2 hover:text-foreground hover:underline">{wheel.name}</Link> : "Not placed"}
           </span>
         )}
         <span className="shrink-0 text-xs text-muted-foreground" title="The row that made this page keeps its link">

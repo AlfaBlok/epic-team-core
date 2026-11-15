@@ -33,6 +33,12 @@ export interface PageEntry {
   slug?: string;
   /** the user unit on the page host that rebuilds it; the Refresh button runs it through the page server. */
   refresh?: string;
+  /** the objective (docs/pursuits.json id) or world it was made for, when its row's spine sits in none (scripts/pages.py place). */
+  objective?: string;
+  /** a world's name (the house) when `objective` names a world. */
+  objectiveName?: string;
+  /** why no objective or world holds it. */
+  notPlaced?: string;
 }
 export interface PagesRegistry {
   rule?: string;

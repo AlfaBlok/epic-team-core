@@ -96,4 +96,50 @@ describe("pages inside their wheel", () => {
     expect(screen.getByTestId("pages-not-placed").textContent).toContain("2 pages");
     expect(screen.getByTestId("pages-summary").textContent).toBe("5 pages in 5 epics across 3 repos");
   });
+
+  // a page whose spine no tree holds names the objective (or world) it was made for, or why none holds it.
+  const NAMED: PagesBody = {
+    total: 3,
+    groups: [
+      {
+        id: "app-EPIC-908",
+        repo: "app",
+        epic: "EPIC-908",
+        epicTitle: "",
+        pages: [
+          { ...page(9302, "E907-S4", "app", "EPIC-908", "Plans"), objective: "testers" },
+          { ...page(9305, "E907-S8", "app", "EPIC-908", "Errand"), notPlaced: "a personal errand" },
+          // a page its row's tree places keeps that place, whatever it names.
+          { ...page(9303, "E907-S5", "app", "EPIC-909", "Week one"), objective: "testers" },
+        ],
+      },
+      { id: "home_pick-EPIC", repo: "home_pick", epic: "EPIC", epicTitle: "", pages: [{ ...page(9204, "E907-S7", "home_pick", "EPIC", "Where to live"), objective: "home", objectiveName: "The home" }] },
+    ],
+  };
+
+  it("places a page its tree misses where it names itself, a world after the objectives", () => {
+    const placed = placePages(NAMED, SETS, ix);
+    expect(Object.fromEntries(placed.map((p) => [p.row, p.wheel?.id ?? "not placed"]))).toEqual({ "E907-S4": "testers", "E907-S8": "not placed", "E907-S5": "social", "E907-S7": "home" });
+    expect(wheelCounts(placed, SETS.nodes)).toEqual([
+      { id: "testers", name: "Five testers use Notes", count: 1 },
+      { id: "social", name: "Five testers use Posts", count: 1 },
+      { id: "home", name: "The home", count: 1, world: true },
+    ]);
+    expect(pagesOfObjective(NAMED, SETS, ix, "testers").map((p) => p.row)).toEqual(["E907-S4"]);
+    expect(pagesOfObjective(NAMED, SETS, ix, "social").map((p) => p.row)).toEqual(["E907-S5"]);
+  });
+
+  it("the global list names each page not placed with its reason", async () => {
+    vi.spyOn(api, "listPages").mockResolvedValue(NAMED);
+    vi.spyOn(api, "listScorecards").mockResolvedValue(SETS);
+    render(
+      <MemoryRouter initialEntries={["/pages"]}>
+        <PagesIndexPage />
+      </MemoryRouter>,
+    );
+    const wheels = await screen.findAllByTestId("pages-wheel");
+    expect(wheels.map((w) => w.textContent)).toEqual(["Five testers use Notes1 page", "Five testers use Posts1 page", "The home1 page"]);
+    expect(within(wheels[2]).queryByRole("link")).toBeNull();
+    expect(screen.getAllByTestId("pages-not-placed-page").map((li) => li.textContent)).toEqual(["Errand: a personal errand"]);
+  });
 });
