@@ -5,6 +5,7 @@ import { STATE_FILL, TabStrip, titleOf, useGoalSets } from "@/components/goalSet
 import { SocialKitBody } from "@/components/socialKit";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { useQuery } from "@/lib/data";
+import { cn } from "@/lib/utils";
 import { PRODUCTS_PATH, SET_NAME, productHref, scorecardHref } from "@/lib/scorecards";
 
 /**
@@ -51,6 +52,45 @@ function Wheels({ p }: { p: ProductView }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A numbered list read as steps, the rest of the part as words. */
+export function stepsOf(body: string): { steps: string[]; rest: string } {
+  const lines = body.split("\n");
+  const steps = lines.flatMap((l) => {
+    const m = /^\d+\.\s+(.*)$/.exec(l.trim());
+    return m ? [m[1]] : [];
+  });
+  const rest = lines.filter((l) => !/^\d+\.\s+/.test(l.trim())).join("\n").trim();
+  return { steps, rest };
+}
+
+/** How it works is a sequence: its steps as boxes in one line with arrows (stacked down on a phone). */
+function Steps({ body }: { body: string }) {
+  const { steps, rest } = stepsOf(body);
+  if (steps.length < 2) return <ChatMarkdown text={body} />;
+  const intro = rest.split("\n\n");
+  return (
+    <div className="grid min-w-0 gap-3">
+      <ol className="flex min-w-0 flex-col items-stretch gap-1 md:flex-row md:items-stretch" data-testid="product-steps">
+        {steps.map((x, i) => (
+          <li key={i} className="flex min-w-0 flex-col items-center gap-1 md:flex-1 md:flex-row">
+            <div className="w-full min-w-0 flex-1 self-stretch rounded-lg border bg-background p-2.5 text-sm [overflow-wrap:anywhere]" data-testid="product-step">
+              <span className="mb-1 block text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+              <ChatMarkdown text={x} />
+            </div>
+            {i < steps.length - 1 && (
+              <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+                <span className="md:hidden">↓</span>
+                <span className="hidden md:inline">→</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+      {intro.some((t) => t.trim()) && <ChatMarkdown text={rest} />}
+    </div>
   );
 }
 
@@ -123,7 +163,7 @@ export function ProductPage() {
             <div className="grid min-w-0 gap-1">
               <h1 className="text-xl font-semibold leading-tight tracking-tight sm:text-3xl">{p.name}</h1>
               <p className="text-[15px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="product-line">
-                {p.tagline ? `${p.tagline}. ` : ""}
+                {p.tagline ? `${p.tagline.replace(/[.!?]+$/, "")}. ` : ""}
                 {p.wheels.length
                   ? `${p.wheels.length} ${p.wheels.length === 1 ? SET_NAME.one.toLowerCase() : SET_NAME.many.toLowerCase()} use${p.wheels.length === 1 ? "s" : ""} it.`
                   : ""}
@@ -141,10 +181,10 @@ export function ProductPage() {
               {p.deck && p.deck.parts.length > 0 ? (
                 <div className="grid min-w-0 gap-3 md:grid-cols-2" data-testid="product-parts">
                   {p.deck.parts.map((x) => (
-                    <section key={x.part} className="min-w-0 rounded-xl border bg-card p-3 sm:p-4" data-testid="product-part" data-part={x.part}>
+                    <section key={x.part} className={cn("min-w-0 rounded-xl border bg-card p-3 sm:p-4", x.part === "How it works" && "md:col-span-2")} data-testid="product-part" data-part={x.part}>
                       <h2 className="mb-1.5 text-[15px] font-semibold text-foreground">{x.label}</h2>
                       <div className="min-w-0 text-sm [overflow-wrap:anywhere]">
-                        <ChatMarkdown text={x.body} />
+                        {x.part === "How it works" ? <Steps body={x.body} /> : <ChatMarkdown text={x.body} />}
                       </div>
                     </section>
                   ))}

@@ -21,7 +21,7 @@ const LIVE: ProductView = {
     parts: [
       { part: "Why it exists", label: "The problem it solves", body: "Posting every day takes hours." },
       { part: "Who it is for", label: "Who it is for", body: "- Founders" },
-      { part: "How it works", label: "How it works", body: "1. **An idea.**" },
+      { part: "How it works", label: "How it works", body: "1. **An idea.**\n2. **Posted.**\n\nEvery step is a file." },
       { part: "What it does for you", label: "What it does for you", body: "- **You show up every day.**", from: "brief.md#benefits" },
     ],
     missing: [],
@@ -64,6 +64,9 @@ describe("products", () => {
     );
     const parts = await screen.findAllByTestId("product-part");
     expect(parts.map((p) => p.querySelector("h2")?.textContent)).toEqual(["The problem it solves", "Who it is for", "How it works", "What it does for you"]);
+    // a sequence reads as boxes in one line, the words after it
+    expect(screen.getAllByTestId("product-step").map((x) => x.textContent)).toEqual(["1An idea.", "2Posted."]);
+    expect(screen.getByTestId("product-steps").parentElement?.textContent).toContain("Every step is a file.");
     expect(screen.getByTestId("product-line").textContent).toBe("Agents that post for you. 2 objectives use it.");
     await waitFor(() => expect(screen.getAllByTestId("product-wheel")[0].textContent).toContain("5 testers using Live"));
     expect(screen.getAllByTestId("product-wheel")[1].getAttribute("href")).toBe("/sets/live-channels");
