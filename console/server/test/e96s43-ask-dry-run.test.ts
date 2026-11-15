@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DRY_RUN_FROM, dryRunProblem, lineHash, parseDryRuns } from "../src/inbox/askDryRun.js";
+import { DRY_RUN_FROM, dryRunNote, dryRunProblem, lineHash, parseDryRuns } from "../src/inbox/askDryRun.js";
 import { JUDGE_SCHEMAS } from "../src/review/qc.js";
 
 /**
@@ -40,6 +40,15 @@ describe("E996-S43 the ask dry-run gate", () => {
 
   it("offers the judge route a dryrun answer shape", () => {
     // f0ec50e81 added the fresh reader's one sentence and the most ambiguous part
-    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem"]);
+    // E996-S58 added what changed, the fact the card leaves out, the card's words that answer it, and changesAnswer
+    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem", "changed", "notStated", "answeredBy", "changesAnswer"]);
+  });
+
+  it("E996-S58: a capped ask passes the gate and carries the reader's last note to its card", () => {
+    const capped = parseDryRuns(JSON.stringify({ items: { a: { repo: "w", path: "s.md", lineHash: lineHash(RAW), verdict: "pass", capped: true, readerNote: "A fresh reader read this card 3 times and still found this unclear: which inbox" } } }));
+    expect(dryRunProblem(RAW, DRY_RUN_FROM, capped)).toBeUndefined();
+    expect(dryRunNote(RAW, capped)).toMatch(/3 times .* which inbox/);
+    expect(dryRunNote(RAW, verdicts("pass"))).toBeUndefined();
+    expect(dryRunNote(RAW, verdicts("fail"))).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
-import { createDryRunReader, dryRunProblem } from "./askDryRun.js";
+import { createDryRunReader, dryRunNote, dryRunProblem } from "./askDryRun.js";
 import { createAskLogReader, repeatProblem, sizeProblem, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "node:child_process";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
@@ -132,6 +132,8 @@ export interface WaitingItem {
   risk?: string;
   /** `why the owner:`: why an agent cannot decide it. */
   whyYou?: string;
+  /** E996-S58: what a fresh reader still found unclear after 3 rounds (the ask reaches the owner with it beside). */
+  readerNote?: string;
   /** `secret: <app> <NAME>` on a provide ask: the card shows a password box; the server stores it with `secret put`. */
   secret?: SecretTarget;
   /** environmentId = the T3 environment of threadId when known (link t3code://threads/<env>/<thread>). */
@@ -683,6 +685,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           const rowLinkAt = a.row ? link(rel, (row ? rowLineOf(linesOf(rel) ?? [], row.node) : rowLine(linesOf(rel) ?? [], a.row)), `row ${a.row}`)[0] : undefined;
           const stepsLink = a.stepsLink ? contextLink({ ...a, context: a.stepsLink, contextLabel: "runbook" })[0] : undefined;
           const choices = decideChoices(a);
+          const readerNote = !fyi && a.state === "open" && a.line !== undefined ? dryRunNote(linesOf(rel)?.[a.line], dryRunsOf(d.reposRoot)) : undefined;
           const noteMark = a.state === "open" && a.code ? activeMark(marksOf(rel), a.code, a.question) : undefined;
           out.push({
             id: askItemId(repo.name, rel, a.row, a.question),
@@ -726,6 +729,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             ...(a.impact ? { impact: a.impact } : {}),
             ...(a.risk ? { risk: a.risk } : {}),
             ...(a.why ? { whyYou: a.why } : {}),
+            ...(readerNote ? { readerNote } : {}),
             // a provide ask naming where the key goes gets a private paste box on its card.
             ...(a.secret ? { secret: a.secret } : {}),
             contextLinks: [...contextLink(a), ...link(rel, a.line, `${rel}${a.line !== undefined ? `:${a.line + 1}` : ""} · Waiting on`)],

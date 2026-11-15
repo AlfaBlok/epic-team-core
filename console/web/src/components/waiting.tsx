@@ -1306,6 +1306,12 @@ function WaitingCardBody({
               </div>
             )}
             {human ? <HumanSections item={item} /> : item.milestoneId ? <HumanSections item={item} linkOnly /> : null}
+            {item.readerNote && (
+              <div className="rounded-md border border-dashed px-3 py-2 text-sm" data-testid="ask-reader-note">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Still unclear to a fresh reader</div>
+                <div className="leading-snug">{item.readerNote}</div>
+              </div>
+            )}
             {(item.unblocks || item.effort || item.proposedAction) && <div className="grid grid-cols-1 gap-2">{technical}</div>}
             {!human && recommendText && (
               <div>

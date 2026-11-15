@@ -249,6 +249,8 @@ export interface WaitingItem {
   /** E948-S69: the options were built from the question (the ask listed none): `Yes, <the action>` and `No`, or its either-or. */
   optionsDerived?: true;
   recommendation?: string;
+  /** E996-S58: what a fresh reader still found unclear after 3 rounds. */
+  readerNote?: string;
   /** plain-words sections of an ask; the card shows them labelled, technical fields under Details. */
   contextText?: string;
   impact?: string;

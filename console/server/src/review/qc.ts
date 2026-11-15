@@ -248,14 +248,15 @@ export const ASK_DRY_RUN_SCHEMA = {
   type: "object",
   additionalProperties: false,
   // asked, ambiguous: the fresh reader's one sentence and the card's most ambiguous part ("" = nothing)
-  required: ["steps", "asked", "ambiguous", "verdict", "firstProblem"],
+  // E996-S58: changed, notStated, answeredBy, changesAnswer: a hold names what changed or the fact the card leaves out
+  required: ["steps", "asked", "ambiguous", "verdict", "firstProblem", "changed", "notStated", "answeredBy", "changesAnswer"],
   properties: {
     steps: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["n", "step", "placeNamed", "exists", "doable", "why"],
+        required: ["n", "step", "placeNamed", "exists", "doable", "why", "changed"],
         properties: {
           n: { type: "integer" },
           step: { type: "string" },
@@ -263,6 +264,7 @@ export const ASK_DRY_RUN_SCHEMA = {
           exists: { type: "string", enum: ["yes", "no", "unknown"] },
           doable: { type: "string", enum: ["yes", "no"] },
           why: { type: "string" },
+          changed: { type: "string" },
         },
       },
     },
@@ -270,6 +272,10 @@ export const ASK_DRY_RUN_SCHEMA = {
     ambiguous: { type: "string" },
     verdict: { type: "string", enum: ["pass", "fail"] },
     firstProblem: { type: "string" },
+    changed: { type: "string" },
+    notStated: { type: "string" },
+    answeredBy: { type: "string" },
+    changesAnswer: { type: "boolean" },
   },
 } as const;
 /** The answer shapes a caller may ask for by name (never a schema of its own). */

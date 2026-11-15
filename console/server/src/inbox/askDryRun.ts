@@ -27,6 +27,8 @@ export interface DryRunVerdict {
   verdict: "pass" | "fail";
   reason?: string;
   at?: string;
+  /** E996-S58: the ask failed the fresh reader 3 rounds in a row and goes to the owner anyway, this note beside it. */
+  readerNote?: string;
 }
 
 /** The hash both sides use: sha1 of the raw ask line, trimmed, inner whitespace collapsed (ask_dryrun.py line_hash). */
@@ -82,4 +84,11 @@ export function dryRunProblem(raw: string | undefined, since: string | null | un
   if (since === undefined || (!!since && since >= DRY_RUN_FROM))
     return `waiting for its dry run: a fresh agent has not yet done it from the card alone, so it does not reach ${ownerName()} yet (E996-S43, every 15 min)`;
   return undefined;
+}
+
+/** E996-S58: the fresh reader's last note on an ask that reached the owner after 3 failed rounds (its card shows it). */
+export function dryRunNote(raw: string | undefined, verdicts: Map<string, DryRunVerdict> | undefined): string | undefined {
+  if (raw === undefined || !verdicts) return undefined;
+  const v = verdicts.get(lineHash(raw));
+  return v?.verdict === "pass" && typeof v.readerNote === "string" && v.readerNote.trim() ? v.readerNote.trim() : undefined;
 }
