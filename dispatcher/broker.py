@@ -256,6 +256,17 @@ def age(at):
 AUTH_RECHECK = 15 * 60  # a seat whose usage cannot be read gets `claude auth status` again at most this often
 
 
+def login_changed(s, n):
+    """a fresh login (its credentials file written after the last sign-in check) is re-read at once for a seat
+    not shown signed in, whatever its usage: new seats logged in by hand showed "logged out" because only unknown-usage
+    seats were rechecked. A signed-in seat is skipped (its token file is rewritten at every renewal)."""
+    try:
+        m = os.path.getmtime(os.path.expanduser("~/.claude_%s/.credentials.json" % n))
+    except OSError:
+        return False
+    return not s.get("auth_checked") or m > parse(s["auth_checked"]).timestamp()
+
+
 def recheck_auth(d):
     """`beat` (the only auth check) no longer runs, so a seat that signed out (OAuth refresh failed) kept
     logged_in=true and showed only "usage unknown: HTTP 429" (seat1, 2026-11-14). Re-read sign-in for each seat whose
@@ -263,8 +274,9 @@ def recheck_auth(d):
     skip it unless BROKER_AUTH_CMD is set."""
     if os.environ.get("SEAT_BROKER_USAGE_FIXTURE") and not os.environ.get("BROKER_AUTH_CMD"):
         return
-    due = [n for n, s in d["seats"].items() if not (s["usage"] or {}).get("known")
+    due = [n for n, s in d["seats"].items() if (not (s["usage"] or {}).get("known") or s["logged_in"] is False)
            and not (s.get("auth_checked") and age(s["auth_checked"]) < AUTH_RECHECK)]
+    due += [n for n, s in d["seats"].items() if n not in due and s["logged_in"] is not True and login_changed(s, n)]
     if due:
         refresh_auth(d, only=due)
 
