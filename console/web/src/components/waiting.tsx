@@ -1743,8 +1743,10 @@ export function WaitingOnYou({
   // the milestone a status row belongs to, by name (only where the list spans milestones)
   const { data: milestones } = useQuery(() => (!milestoneId && !spine ? api.listMilestones() : Promise.resolve([])), [milestoneId, spine?.repo]);
   const names = new Map((milestones ?? []).map((m) => [m.id, milestoneName(m)]));
-  // monitor alerts that are not the owner's now (every ask snoozed, or the Delivery Manager's): one quiet line each, never counted.
-  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && (i.state === "snoozed" || i.state === "alarm") && (!hits || hits.has(i.id))) : [];
+  // a monitor alert whose every ask he snoozed: one quiet line with Unsnooze, never counted. One that names no ask for
+  // him (state alarm, the Delivery Manager's) is never in his inbox (the owner: "I can't take action on it so what's it
+  // doing there?"): the console hands it back to its team as one desk note (status/alertHandBack.ts).
+  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && i.state === "snoozed" && (!hits || hits.has(i.id))) : [];
   // the number is known as soon as the fast status batch is in (before the cards); unknown while it counts.
   const knownCount = status && !status.loading ? count : data && !status ? count : undefined;
   // Codes are qualified `<repo>/<code>` when the list spans repos (human-asks v2).

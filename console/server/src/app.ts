@@ -140,6 +140,8 @@ import { answeredReferences, isDm, waitingAndDefects, waitingAndHeld, waitingOnJ
 import { releaseHeld } from "./cycle/held.js";
 import { createUsageCollector, type UsageOptions } from "./usage/collector.js";
 import { createStatus, mountStatus, coverOfIn, statusRows } from "./status/routes.js";
+import { createAlertHandBack } from "./status/alertHandBack.js";
+import type { PendingItem } from "./status/compute.js";
 import { createInboxSearch, SEARCH_MAX_CHARS } from "./inbox/search.js";
 import { mountAlertActions } from "./status/alertActions.js";
 import { mountMorningRead } from "./desk/morning.js";
@@ -2070,6 +2072,34 @@ export function createApp(
   }
   const status = createStatus({ db, store, milestoneInfo: withOutcome, treeFor: (m) => treeFor(m, 1_500), waiting: (f) => waitingAndDefects(inboxDeps, f), t3State: cycle.runT3State, coverOf, askLookup: monitorAskLookup, priorities: () => worldPriorities(store, read.reposRoot), ...(soft ? { cold: coldOf(soft) } : {}) });
   mountStatus(api, status, store, readModel);
+  // the owner: "I can't take action on it so what's it doing there?": a stopped or overdue Monitoring item that names
+  // no open ask for him is out of his Blocked on you (web) and goes back to its team: one desk note in its repo, once
+  // per alert, read by that repo's Delivery Manager, who asks him one real question or clears it.
+  // Every world's stored status (both products alike); CONSOLE_ALERT_HANDBACK_MS (0 = off), default 15 min.
+  const alertHandBackMs = Number(process.env.CONSOLE_ALERT_HANDBACK_MS ?? (opts.passive || process.env.CONSOLE_STAGING === "1" ? 0 : 15 * 60_000));
+  const allWorldsStore = createStore(db);
+  const alertHandBack = createAlertHandBack({
+    items: async () => {
+      if (!readModel) return ((await status.all({ includeSettled: false })).items ?? []) as PendingItem[];
+      const worlds = new Set(["", ...(db.prepare("SELECT DISTINCT tenant_id AS t FROM milestones").all() as { t: string }[]).map((r) => r.t)]);
+      const seen = new Map<string, PendingItem>();
+      for (const world of worlds) {
+        const v = readModel.peek<{ items?: PendingItem[] }>({ kind: "status", world, includeSettled: false });
+        for (const it of v?.payload?.items ?? []) if (!seen.has(it.id)) seen.set(it.id, it);
+      }
+      return [...seen.values()];
+    },
+    target: (id) => {
+      const m = allWorldsStore.getMilestone(id);
+      if (!m?.repo || m.paused || m.settledAt) return undefined;
+      const r = resolveRepo(read.reposRoot, m.repo);
+      if (!r) return undefined;
+      return { world: allWorldsStore.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT, checkout: r.path, replyTo: r.remote ?? m.repo, policyPath: m.path || "docs/spines/root.md", milestoneTitle: m.title };
+    },
+    writer: spine,
+    log: (l) => console.log(l),
+  });
+  if (alertHandBackMs > 0) setInterval(() => void outsideRequest(() => alertHandBack.tick().catch((e) => console.error("alert hand-back:", e instanceof Error ? e.message : e))), alertHandBackMs).unref();
   // the owner 2026-11-12 21:17Z: the search box on top of the Inbox filters every section at once. Answers from
   // the lists the Inbox already reads (asks' stored view, his answers, review cards, status rows, voice-note index).
   const inboxSearch = createInboxSearch(async () => {

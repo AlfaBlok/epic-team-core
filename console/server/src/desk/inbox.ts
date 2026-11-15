@@ -54,6 +54,8 @@ export interface DeskNote {
   doneMeans?: string;
   /** product feedback: where and when he said it. */
   source?: string;
+  /** a monitor alert handed back to its team (status/alertHandBack.ts): the alert's id. */
+  alert?: string;
   body: string;
 }
 
@@ -96,6 +98,7 @@ export function parseNote(file: string, text: string): DeskNote | undefined {
     ...(f.campaign ? { campaign: f.campaign } : {}),
     ...(f["done-means"] ? { doneMeans: f["done-means"] } : {}),
     ...(f.source ? { source: f.source } : {}),
+    ...(f.alert ? { alert: f.alert } : {}),
     body: m[2].trim(),
   };
 }

@@ -14,3 +14,14 @@ describe("E84-4 hero journey habit", () => {
     expect(REVIEW_RULE).toContain("Hero journey");
   });
 });
+
+// No message of an approved plan and no ask of the owner, no clip.
+describe("no message, no video", () => {
+  it("the rule every worker and wake reads says when a clip is made", () => {
+    expect(FEATURE_LIST_RULE).toContain("planned makes no clip");
+    expect(FEATURE_LIST_RULE).toContain("only when it carries one of the messages");
+    expect(FEATURE_LIST_RULE).toContain("never a branded clip");
+    expect(FEATURE_LIST_RULE).not.toContain("so it is recorded as a short clip");
+    expect(ROW_CLOSE_RULE).toContain("never a branded clip");
+  });
+});

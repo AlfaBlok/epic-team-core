@@ -30,6 +30,7 @@ export const FEATURE_LIST_RULE =
   `Feature list: when ${ownerName()} closes a row done (approved) for something new a user can see, add it to the service's feature list in the same change or the next wake: ` +
   `one line in \`docs/features/<service>.json\` of the service's repo (EpicTeam: ${homeRepo()} docs/features/epicteam.json, ${socialProduct()}: ${homeRepo()} docs/features/${socialProduct().toLowerCase()}.json; public words in title and text, the rows that built it in \`rows\`), ` +
   "then run epicspine-skill `tools/feature_list.py` so epicspine.dev shows it too. A row whose card goes to review for such a feature drafts that line in the same change. " +
-  `Hero journey: the same row names its journey in ${homeRepo()} docs/features/hero-journeys.json as \`planned\` (one entry: public title, steps, the rows, the live screen), so it is recorded as a short clip. ` +
+  `Hero journey: the same row names its journey in ${homeRepo()} docs/features/hero-journeys.json as \`planned\` (one entry: public title, steps, the rows, the live screen); planned makes no clip. ` +
+  `Clips: a video or clip is made only when it carries one of the messages of a marketing plan ${ownerName()} approved (${homeRepo()} docs/features/hero-journeys.json \`messages\`) or he asks for that video by name; its storyboard names which in \`why\` and the render tool refuses one without it. Evidence for his review is a screenshot or a plain screen recording, never a branded clip. ` +
   `Check: every wake runs ${homeRepo()} \`python3 scripts/feature_gap.py\`; each approved row it names gets its feature line, or, when a user sees nothing new (plumbing, a fix, research, a demo clip), a skip reason in ${homeRepo()} docs/features/not-features.json.`;
 
