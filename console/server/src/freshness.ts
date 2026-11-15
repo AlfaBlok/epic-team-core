@@ -88,7 +88,8 @@ export function createFreshness(o: FreshnessOptions = {}) {
   const reopenWaitMs = o.reopenWaitMs ?? openWaitMs;
   const refreshMinMs = o.refreshMinMs ?? 5_000;
   const pollSkipMs = o.pollSkipMs ?? 0;
-  const puller = createRepoPuller({ git: (d, a) => git(d, a).then(() => undefined), log, now, healLock: o.healLock });
+  // the real git self-heals a stuck pull (a test's fake git does not)
+  const puller = createRepoPuller({ git: (d, a) => git(d, a).then(() => undefined), log, now, healLock: o.healLock, recover: o.git ? false : git });
   const state = new Map<string, RepoState>();
   const st = (dir: string) => state.get(dir) ?? (state.set(dir, {}), state.get(dir)!);
   const inFlight = new Map<string, Promise<boolean>>();

@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { HEAL_SCRIPT, healedLine, lockHealer, localHealRunner, type HealResult, type HealRunner } from "../gitStaleLock.js";
 import { type HostId, mainHost, workerHost } from "../identity.js";
+import { withRepoLock } from "../repoLock.js";
+import { recoverPull } from "./syncRecover.js";
 
 /**
  * every persona wake runs the repo's current tool code. Before the console sends a wake into a persona's home
@@ -9,7 +11,9 @@ import { type HostId, mainHost, workerHost } from "../identity.js";
  * fingerprints the repo's tool code: `.mcp.json` plus every repo path its stdio servers start (and that path's
  * directory, for sibling imports). Stdio MCP servers start once per T3 session, so when the fingerprint differs from the
  * one the home thread started with, the wake goes to a fresh home thread (new session, new MCP processes).
- * A failed pull is never reset or stashed: its reason is recorded on the run and told to the persona.
+ * A pull still failing after the lock retry and heal goes to `recoverPull` (fetch + merge by name, local
+ * commits already on main dropped, clean-merging local edits stashed and put back; never a reset); what it cannot
+ * heal is recorded on the run with its reason and told to the persona.
  */
 export type Host = HostId;
 /**
@@ -112,10 +116,12 @@ export interface PreWake {
   toolPaths: string[];
   /** a stale lock was removed before the (re)tried pull. */
   healed?: string;
+  /** what the self-heal did after the plain pull was refused. */
+  recovered?: string;
 }
 
 /** Fast-forward `dir` on `host` and fingerprint its tool code. Never throws: an unreadable checkout gives toolFp undefined. */
-export async function prepareCheckout(git: HostGit, host: Host, dir: string, retryMs = 2_000): Promise<PreWake | { error: string }> {
+export async function prepareCheckout(git: HostGit, host: Host, dir: string, retryMs = 2_000, recover = true): Promise<PreWake | { error: string }> {
   const head = async () => (await git(host, dir, ["rev-parse", "--short", "HEAD"])).trim();
   let from: string;
   try {
@@ -141,6 +147,18 @@ export async function prepareCheckout(git: HostGit, host: Host, dir: string, ret
       pull = await once();
     }
   }
+  let recovered: string | undefined;
+  if (!pull.ok && recover) {
+    const first = pull.reason;
+    const heal = () => recoverPull((args) => git(host, dir, args), { retryMs });
+    // the console's own git in this checkout (main server) waits its turn; the worker server has none
+    const r = await (host === mainHost() ? withRepoLock(dir, heal) : heal()).catch((e) => ({ ok: false as const, reason: (e as Error).message, tried: true }));
+    if (r.ok) {
+      pull = { ok: true };
+      recovered = `self-healed (${first}): ${r.did}`;
+      console.warn(`pre-wake ${dir} on ${host}: ${recovered}`);
+    } else if (r.tried) pull = { ok: false, reason: `${first} (self-heal: ${r.reason})` };
+  }
   const to = pull.ok ? await head().catch(() => from) : from;
   let mcp: string | undefined;
   try {
@@ -148,7 +166,7 @@ export async function prepareCheckout(git: HostGit, host: Host, dir: string, ret
   } catch {
     mcp = undefined; // no.mcp.json at HEAD
   }
-  const extra = healed ? { healed } : {};
+  const extra = { ...(healed ? { healed } : {}), ...(recovered ? { recovered } : {}) };
   if (mcp === undefined) return { from, to, pull, toolFp: NO_TOOLS, toolPaths: [], ...extra };
   const toolPaths = [".mcp.json", ...mcpToolPaths(mcp)];
   // ls-tree -r lists every blob under those paths (missing ones are skipped): "<mode> blob <id>\t<path>" per file.
@@ -183,5 +201,5 @@ export function changedPaths(a: string, b: string): string[] {
 export function preWakeLine(host: Host, pw: PreWake | { error: string }, fresh?: string): string {
   if ("error" in pw) return `pre-wake: ${host} checkout unreadable: ${pw.error}`;
   const pulled = pw.pull.ok ? (pw.from === pw.to ? `pulled ${host} (at ${pw.to})` : `pulled ${host} ${pw.from}→${pw.to}`) : `pull failed on ${host} (at ${pw.from}): ${pw.pull.reason}`;
-  return `pre-wake: ${pw.healed ? `${pw.healed} · ` : ""}${pulled}${fresh ? ` · fresh session: ${fresh}` : ""}`;
+  return `pre-wake: ${pw.healed ? `${pw.healed} · ` : ""}${pw.recovered ? `${pw.recovered} · ` : ""}${pulled}${fresh ? ` · fresh session: ${fresh}` : ""}`;
 }

@@ -25,12 +25,31 @@ export interface CheckoutSyncState {
 
 export const CHECKOUT_SYNC_AFTER_MS = 5 * 60_000;
 
-export function createCheckoutSync(o: { dirs: () => string[]; git: GitOut; /** read in-sync checkouts from the git files (default true) */ fromFiles?: boolean; now?: () => number; afterMs?: number; log?: (m: string) => void; alert?: (text: string) => void }) {
+/** the least time between two self-heal pulls of one checkout that is behind. */
+export const CHECKOUT_HEAL_EVERY_MS = 5 * 60_000;
+
+export function createCheckoutSync(o: {
+  dirs: () => string[];
+  git: GitOut;
+  /** read in-sync checkouts from the git files (default true) */ fromFiles?: boolean;
+  now?: () => number;
+  afterMs?: number;
+  log?: (m: string) => void;
+  alert?: (text: string) => void;
+  /**
+   * a checkout behind origin/main is pulled through this (the self-healing pull, cycle/syncRecover.ts) at most
+   * every `healEveryMs`, so it follows main even when no wake or press pulls it; its answer is checked again at once.
+   */
+  heal?: (dir: string) => Promise<{ ok: boolean; reason?: string }>;
+  healEveryMs?: number;
+}) {
   const now = () => o.now?.() ?? Date.now();
   const afterMs = o.afterMs ?? CHECKOUT_SYNC_AFTER_MS;
   const out = new Map<string, CheckoutSyncState>();
   const alerted = new Set<string>();
   let checkedAt: string | undefined;
+  const healedAt = new Map<string, number>();
+  const healEveryMs = o.healEveryMs ?? CHECKOUT_HEAL_EVERY_MS;
 
   async function check(dir: string): Promise<{ branch: string; ahead: number; behind: number } | undefined> {
     // the usual case (on main, main == origin/main) is read from the git files, with no fork
@@ -50,7 +69,13 @@ export function createCheckoutSync(o: { dirs: () => string[]; git: GitOut; /** r
     const t = now();
     const dirs = [...new Set(o.dirs().map((d) => path.resolve(d)))];
     for (const dir of dirs) {
-      const s = await check(dir);
+      let s = await check(dir);
+      if (s && s.behind > 0 && o.heal && t - (healedAt.get(dir) ?? -Infinity) >= healEveryMs) {
+        healedAt.set(dir, t);
+        const h = await o.heal(dir).catch((e) => ({ ok: false, reason: (e as Error).message }));
+        if (!h.ok) o.log?.(`checkout sync: ${dir} is ${s.behind} behind origin/main and the self-healing pull failed: ${h.reason ?? "no reason"}`);
+        s = await check(dir);
+      }
       if (!s || (s.ahead === 0 && s.behind === 0)) {
         if (out.has(dir) && alerted.has(dir)) o.log?.(`checkout sync: ${dir} matches origin/main again`);
         out.delete(dir);

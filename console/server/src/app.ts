@@ -167,7 +167,7 @@ import { arcFor, readArcs } from "./deck/arcs.js";
 import { deckList, epicDeck, findEpic, deckCode, deckHref, type DeckRef, type DeckTrendPoint, type EpicDeck } from "./deck/build.js";
 import { createDeckNotify, DECK_UPDATES_FILE, type DeckNotify } from "./deck/notify.js";
 import { deckWorkers, rocksAbout, utcHourText, type DeckAbout } from "./deck/about.js";
-import { createRepoPuller, type PullResult } from "./cycle/repoPull.js";
+import { createRepoPuller, gitRunner, type PullResult } from "./cycle/repoPull.js";
 import { mountProviders } from "./providers/routes.js";
 import { noticeRef, parseNoticeRef } from "./plug/marks.js";
 import { ensureAuth } from "./auth/schema.js";
@@ -359,7 +359,7 @@ export function createApp(
     /** the card quality check's model (tests pass a fake). */
     qcJudge?: QcJudge;
     /** compare every tracked checkout with origin/main this often; out of sync over 5 min alerts. 0 / absent = off (tests). */
-    checkoutSync?: { everyMs?: number; afterMs?: number };
+    checkoutSync?: { everyMs?: number; afterMs?: number; /** self-healing pull of a checkout left behind (default on) */ heal?: false };
     /** the worker server's home volume free space (`df` over the worker server ssh); no probe = off. */
     hostDisk?: { everyMs?: number; probe?: () => Promise<string>; minFreePct?: number };
     /** job servers' records from box/provision.py (status lines, alerts, spend) in `dir`; no dir = off. */
@@ -1164,7 +1164,7 @@ export function createApp(
       repoDir: cycleOpts.repoDir ?? ((m) => resolveRepo(read.reposRoot, m.repo)?.path),
       authorRun: gitAuthorRun(git),
       // read the asks as pushed, not as last synced (an ask answered meanwhile wakes nobody); the pull drops the spines cache.
-      pull: opts.newAskWake?.pull ?? createRepoPuller({ git: (dir, args) => gitOut(120_000)(dir, args).then(() => undefined), onPulled: pulledSpines }).pull,
+      pull: opts.newAskWake?.pull ?? createRepoPuller({ git: (dir, args) => gitOut(120_000)(dir, args).then(() => undefined), recover: gitOut(120_000), onPulled: pulledSpines }).pull,
       wake: (id, note, noteBy) => cycle.runNow(id, { instructions: note, instructionsBy: noteBy }),
       debounceMs: opts.newAskWake?.debounceMs,
     });
@@ -2257,6 +2257,8 @@ export function createApp(
     dirs: () => [...new Set(store.listMilestones({ includeSettled: false }).flatMap((m) => resolveRepo(read.reposRoot, m.repo)?.path ?? []))],
     git: gitOut(15_000),
     ...(opts.checkoutSync?.afterMs !== undefined ? { afterMs: opts.checkoutSync.afterMs } : {}),
+    // a checkout left behind is pulled by the self-healing puller (cycle/syncRecover.ts) every 5 min until it follows main
+    ...(opts.checkoutSync?.heal === false ? {} : { heal: createRepoPuller({ git: gitRunner(120_000), onPulled: pulledSpines }).pull }),
     log: (m) => console.warn(m),
     alert: (text) => {
       if (opts.readModel?.drift?.alert) void whatsapp.alert("checkout-sync", `${text}\nConsole spine writes to it are refused until it matches. Details: ${teamLink()}/api/checkout-sync`);
