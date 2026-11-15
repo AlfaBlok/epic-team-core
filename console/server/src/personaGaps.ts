@@ -24,6 +24,9 @@ export function turnerOf(teams: { persona: string; enabled: boolean; parked?: bo
 
 export const gapWords = (t: Turner) => (t === "none" ? NO_TURNER : t === "off" ? TURNER_OFF : "");
 
+/** a gap is a goal with no persona at all; a Delivery Manager switched off is there, only not waking (shown, never failed). */
+export const isGap = (g: Pick<PersonaGap, "turner">) => g.turner === "none";
+
 export interface PersonaGap {
   kind: "milestone" | "objective";
   id: string;
@@ -77,7 +80,8 @@ export function objectiveGaps(objectives: ObjectiveIn[], s: GapStore, worldOf: (
 
 /**
  * The world's Delivery Manager for a new milestone: the first persona of that world named Delivery Manager.
- * A milestone created anywhere gets one assigned at once, switched on, every 2 h (the house sat 19 h with none).
+ * A milestone created anywhere gets one assigned at once, switched off, every 2 h when switched on (the owner: "we
+ * should have by default a delivery manager turned off ... if it's a wheel, it has to have a persona").
  */
 export function deliveryManagerOf(personas: Persona[]): Persona | undefined {
   return personas.find((p) => isDeliveryManager(p.name));

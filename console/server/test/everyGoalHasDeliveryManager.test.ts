@@ -17,13 +17,13 @@ const dmIn = { name: "Delivery Manager", remit: "runs the epic", skills: [], mod
 const ms = (title: string, repo = "acme/house", path = "EPIC.md") => ({ title, repo, path, owner: "Sam" });
 
 describe("a new milestone comes with a Delivery Manager", () => {
-  it("assigns the world's Delivery Manager, switched on, every 2 h", async () => {
+  it("assigns the world's Delivery Manager, switched off by default, every 2 h when on", async () => {
     const dm = (await t.call("POST", "/api/personas", dmIn)).json;
     const m = (await t.call("POST", "/api/milestones", ms("House decision"))).json;
     const as = (await t.call("GET", `/api/assignments?milestoneId=${m.id}`)).json as { personaId: string; enabled: boolean; cadence: unknown; milestoneId: string }[];
     const mine = as.filter((a) => a.milestoneId === m.id);
     expect(mine).toHaveLength(1);
-    expect(mine[0]).toMatchObject({ personaId: dm.id, enabled: true, cadence: { type: "interval", everyMinutes: 120 } });
+    expect(mine[0]).toMatchObject({ personaId: dm.id, enabled: false, cadence: { type: "interval", everyMinutes: 120 } });
   });
 
   it("still makes the milestone when the world has no Delivery Manager, and the check flags it", async () => {
@@ -34,12 +34,13 @@ describe("a new milestone comes with a Delivery Manager", () => {
     expect(gaps.gaps).toContainEqual(expect.objectContaining({ kind: "milestone", id: m.id, turner: "none", why: NO_TURNER }));
   });
 
-  it("the check is green once every live milestone has its Delivery Manager on", async () => {
+  it("the check is green once every live milestone has its Delivery Manager, even switched off (shown, not failed)", async () => {
     await t.call("POST", "/api/personas", dmIn);
     await t.call("POST", "/api/milestones", ms("A"));
     await t.call("POST", "/api/milestones", ms("B", "acme/b"));
     const gaps = (await t.call("GET", "/api/persona-gaps")).json;
-    expect(gaps.gaps.filter((g: { kind: string }) => g.kind === "milestone")).toEqual([]);
+    expect(gaps.ok).toBe(true);
+    expect(gaps.gaps.filter((g: { kind: string; turner: string }) => g.kind === "milestone").map((g: { turner: string }) => g.turner)).toEqual(["off", "off"]);
     expect(gaps.checked.milestones).toBe(2);
   });
 });

@@ -608,28 +608,29 @@ export function IdlePill({ n, testId = "wheel-idle" }: { n: Pick<ScorecardNode, 
 }
 
 /** (the owner: "a wheel without a persona is not going to turn"): its Delivery Manager is missing or off. */
-export const NO_PERSONA_TITLE = { none: "No Delivery Manager: this wheel does not turn.", off: "Its Delivery Manager is switched off: this wheel does not turn." } as const;
+export const NO_PERSONA_TITLE = { none: "No Delivery Manager: this wheel does not turn.", off: "Its Delivery Manager is there but switched off: it turns once you switch it on." } as const;
 export function NoPersonaPill({ n, testId = "wheel-no-persona" }: { n: Pick<ScorecardNode, "noPersona">; testId?: string }) {
   if (!n.noPersona) return null;
   return (
-    <span className={cn(PILL_SHAPE, "border border-[hsl(0_72%_51%)] bg-[hsl(0_72%_51%)] text-white")} title={NO_PERSONA_TITLE[n.noPersona]} data-testid={testId}>
+    <span className={cn(PILL_SHAPE, n.noPersona === "none" ? "border border-[hsl(0_72%_51%)] bg-[hsl(0_72%_51%)] text-white" : "border border-border bg-transparent text-muted-foreground")} title={NO_PERSONA_TITLE[n.noPersona]} data-testid={testId}>
       {n.noPersona === "off" ? "persona off" : "no persona"}
     </span>
   );
 }
 
-/** every goal with no Delivery Manager turning it, any world: one line on the objectives screen, nothing when all turn. */
+/** every goal with no persona at all, any world: one line on the objectives screen, nothing when every goal has one. */
 export function PersonaGapsLine() {
   const { data } = useQuery<PersonaGapsBody>(() => api.personaGaps(), [], { tag: "inbox" });
-  if (!data || data.ok || !data.gaps.length) return null;
-  const n = data.gaps.length;
+  const gaps = (data?.gaps ?? []).filter((g) => g.turner === "none");
+  if (!gaps.length) return null;
+  const n = gaps.length;
   return (
     <div className="rounded-xl border border-[hsl(0_72%_51%)] bg-card px-3 py-2.5 text-sm" data-testid="persona-gaps">
       <p className="font-medium text-foreground">
-        {n} {n === 1 ? "goal has" : "goals have"} no Delivery Manager turning {n === 1 ? "it" : "them"}. A wheel without a persona does not turn.
+        {n} {n === 1 ? "goal has" : "goals have"} no persona. A wheel without a persona does not turn.
       </p>
       <ul className="mt-1 grid gap-0.5">
-        {data.gaps.map((g) => (
+        {gaps.map((g) => (
           <li key={`${g.kind}:${g.id}`} className="flex flex-wrap items-baseline gap-x-2 [overflow-wrap:anywhere]" data-testid="persona-gap" data-kind={g.kind}>
             {g.milestoneId ? (
               <Link to={`/milestones/${g.milestoneId}`} className="text-foreground underline-offset-2 hover:underline">
@@ -638,7 +639,7 @@ export function PersonaGapsLine() {
             ) : (
               <span className="text-foreground">{g.title}</span>
             )}
-            <span className="text-xs text-muted-foreground">{g.turner === "off" ? "switched off" : "none"}</span>
+            <span className="text-xs text-muted-foreground">{g.kind === "objective" ? "objective" : "milestone"}</span>
           </li>
         ))}
       </ul>

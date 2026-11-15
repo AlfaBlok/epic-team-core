@@ -91,3 +91,58 @@ export function readFeatureLists(repoDir: string, remote?: string): FeatureList[
   const files = names.map((n) => `${FEATURES_DIR}/${n}`).sort((a, b) => (a === FEATURES_FILE ? -1 : b === FEATURES_FILE ? 1 : a.localeCompare(b)));
   return files.map((f) => readFeatures(repoDir, remote, f)).filter((x): x is FeatureList => !!x);
 }
+
+/** The ranked top of the hero journeys (docs/features/hero-journeys.json `top`), drawn as a ladder on /deck/all. */
+export const HERO_FILE = "docs/features/hero-journeys.json";
+
+export interface TopJourney {
+  rank: number;
+  id: string;
+  title: string;
+  why: string;
+  belief?: string;
+  screen?: string;
+  /** Its short clip, when one is recorded. */
+  clip?: string;
+}
+
+export interface TopJourneys {
+  rankedAt?: string;
+  journeys: TopJourney[];
+  source: string;
+  href?: string;
+}
+
+/** The ranked top list, or undefined when the file has none. An entry naming no journey, or with no why, drops. */
+export function readTopJourneys(repoDir: string, remote?: string, file = HERO_FILE): TopJourneys | undefined {
+  const abs = inside(repoDir, file);
+  let raw: any;
+  try {
+    raw = abs ? JSON.parse(fs.readFileSync(abs, "utf8")) : undefined;
+  } catch {
+    return undefined;
+  }
+  const top = raw?.top;
+  if (!top || !Array.isArray(top.journeys) || !Array.isArray(raw.journeys)) return undefined;
+  const byId = new Map<string, any>(raw.journeys.filter((j: any) => str(j?.id)).map((j: any) => [str(j.id)!, j]));
+  const journeys: TopJourney[] = top.journeys
+    .map((t: any) => ({ t, j: byId.get(str(t?.id) ?? "") }))
+    .filter(({ t, j }: any) => j && str(j.title) && str(t.why) && Number.isFinite(Number(t.rank)))
+    .map(({ t, j }: any) => ({
+      rank: Number(t.rank),
+      id: str(j.id)!,
+      title: str(j.title)!,
+      why: str(t.why)!,
+      ...(str(t.belief) ? { belief: str(t.belief) } : {}),
+      ...(str(j.screen) ? { screen: str(j.screen) } : {}),
+      ...(str(j.demo?.clip) ? { clip: str(j.demo.clip) } : {}),
+    }))
+    .sort((a: TopJourney, b: TopJourney) => a.rank - b.rank);
+  if (journeys.length === 0) return undefined;
+  return {
+    ...(str(top.rankedAt) ? { rankedAt: str(top.rankedAt) } : {}),
+    journeys,
+    source: file,
+    ...(remote ? { href: `https://github.com/${remote}/blob/main/${file}` } : {}),
+  };
+}

@@ -162,6 +162,34 @@ describe("Epic Book page", () => {
     expect(within(list).getByText(/Data: docs\/features\/epicteam.json/).getAttribute("href")).toContain("/blob/main/docs/features/epicteam.json");
   });
 
+  it("the ranked top journeys show as a ladder above the feature list, rung 1 first", async () => {
+    const b = { ...sampleBook() };
+    b.repos = [
+      {
+        ...b.repos[0],
+        topJourneys: {
+          rankedAt: "2026-11-15",
+          journeys: [
+            { rank: 1, id: "whole-loop", title: "Say it once, and it comes back done.", why: "You talk, finished work comes back.", screen: "https://team.example/" },
+            { rank: 2, id: "review-card", title: "One card a task.", why: "A minute to check.", clip: "http://clips/r.mp4" },
+          ],
+          source: "docs/features/hero-journeys.json",
+        },
+      },
+      ...b.repos.slice(1),
+    ];
+    vi.spyOn(api, "getBook").mockResolvedValue({ book: b, building: false });
+    at("/deck/all#top-journeys");
+    const ladder = await screen.findByTestId("top-journeys");
+    expect(ladder.id).toBe("top-journeys");
+    expect(screen.getByTestId("book-top-journeys-link").getAttribute("href")).toBe("#top-journeys");
+    const rungs = within(ladder).getAllByTestId("top-journey");
+    expect(rungs.map((r) => within(r).getByTestId("top-journey-rank").textContent)).toEqual(["1", "2"]);
+    expect(rungs[0].textContent).toContain("You talk, finished work comes back.");
+    expect(within(rungs[0]).getByText("Open it").getAttribute("href")).toBe("https://team.example/");
+    expect(within(rungs[1]).getByText("Watch the clip").getAttribute("href")).toBe("http://clips/r.mp4");
+  });
+
   it("worker: a second service's list shows under its own anchor, each naming the page that draws it", async () => {
     const list = (service: string, file: string) => ({
       service,

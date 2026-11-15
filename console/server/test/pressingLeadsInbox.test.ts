@@ -57,6 +57,15 @@ describe("pressing: frustration and repeats lead the inbox", () => {
     expect(tierOf(out[0].ownerPriority)).toBe(PRESSING_TIER);
   });
 
+  it("inside the pressing tier the file's order leads (the newest or hand-added first)", () => {
+    const items = [
+      { repo: "repo1", code: "E907-A9", milestoneId: "m1" },
+      { repo: "repo1", ref: "E907-S3", milestoneId: "m2" },
+    ];
+    const out = byMilestonePriority(items, new Map([["m1", 0], ["m2", 1]]), lookup);
+    expect(out.map((i) => i.ref ?? i.code)).toEqual(["E907-S3", "E907-A9"]);
+  });
+
   it("no pressing entries: the order is exactly as before", () => {
     const plain = lookupOf(parsePriorities(file, "repo1"), parseRedLines(file, "repo1"));
     expect(plain({ repo: "repo1", ref: "E907-S3" })?.pressing).toBeUndefined();

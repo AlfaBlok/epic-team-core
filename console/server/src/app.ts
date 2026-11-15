@@ -70,7 +70,7 @@ import { createPursuits, effortForSpine, epicHeading, priorityLines } from "./pu
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
-import { DEFAULT_DM_CADENCE, deliveryManagerOf, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
+import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
 import { cardRepoOf, mountTeamCards } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { readHisWords } from "./desk/hisObjectives.js";
@@ -1523,14 +1523,14 @@ export function createApp(
   const recordedPersonas = () => personaRecord.recorded(store);
   /**
    * (the owner: "a wheel without a persona is not going to turn"): a milestone created in any
-   * world gets that world's Delivery Manager the moment it exists, switched on, recorded in the team repo first.
+   * world gets that world's Delivery Manager the moment it exists, switched off by default, recorded in the team repo first.
    * A failure never undoes the milestone: GET /api/persona-gaps and the objectives screen flag it.
    */
   const withDeliveryManager = async (m: Milestone): Promise<Milestone> => {
     try {
       if (store.listAssignments({ milestoneId: m.id }).some((a) => isDm(store.getPersona(a.personaId)?.name))) return m;
       const dm = deliveryManagerOf(store.listPersonas());
-      if (dm) await recordFirst(() => recordedAssignments().createAssignment({ milestoneId: m.id, personaId: dm.id, cadence: DEFAULT_DM_CADENCE, enabled: true }));
+      if (dm) await recordFirst(() => recordedAssignments().createAssignment({ milestoneId: m.id, personaId: dm.id, cadence: DEFAULT_DM_CADENCE, enabled: false }));
       else console.warn(`no Delivery Manager persona in the world of ${m.id}: the persona check flags it`);
     } catch (e) {
       console.warn(`Delivery Manager not assigned to ${m.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1780,7 +1780,7 @@ export function createApp(
     }
     const objectives: ObjectiveIn[] = [...(body?.pursuits ?? []).filter((p) => !p.parked).map((p) => ({ id: p.id, name: p.name, epics: p.epics })), ...other];
     const gaps = [...objectiveGaps(objectives, all, world), ...milestoneGaps(all, world)];
-    return c.json({ ok: gaps.length === 0, gaps, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
+    return c.json({ ok: !gaps.some(isGap), gaps, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
   });
   api.get("/objectives", async (c) => c.text(((await ownerObjectivesNow!().catch(() => undefined))?.block || "No objectives read.") + "\n"));
   // each objective's key results as the page shows them (its file's, a ticked Done-means box green), for the

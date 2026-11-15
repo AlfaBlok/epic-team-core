@@ -65,6 +65,8 @@ export interface PressingMark {
   words?: string;
   said?: string;
   source?: string;
+  /** its place in the file (0 = first): the order inside the pressing tier, the newest or hand-added first. */
+  order?: number;
 }
 export interface PressingEntry extends PressingMark {
   repo: string;
@@ -338,7 +340,7 @@ export function lookupOf(entries: Entry[], redLines?: RedLine | RedLine[], press
     const h = repo ? hit(i, repo) : undefined;
     if (!h) return p;
     const { repo: _r, ref, path: _p, ...mark } = h;
-    return { ...(p ?? { level: "high" as const, ref, why: mark.why }), pressing: mark };
+    return { ...(p ?? { level: "high" as const, ref, why: mark.why }), pressing: { ...mark, order: pressing.indexOf(h) } };
   };
 }
 

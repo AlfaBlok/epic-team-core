@@ -3,7 +3,7 @@ import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { section, stripInline, tables } from "../adapters/markdown.js";
 import type { SpineNode, SpinesJson } from "../adapters/spines.js";
-import { FEATURES_FILE, readFeatureLists, type FeatureList } from "./features.js";
+import { FEATURES_FILE, readFeatureLists, readTopJourneys, type FeatureList, type TopJourneys } from "./features.js";
 import { deliverablesFor, firstDates, readCards, readDocEntries, readNotedPreviews, type Deliverable, type PreviewEntry } from "./deliverables.js";
 import { applyFolds, readFolds } from "../folds.js";
 
@@ -231,6 +231,8 @@ export interface BookRepo {
   features?: FeatureList;
   /** Every service's feature list in the repo (docs/features/*.json), EpicTeam's first; set when there is more than one. */
   featureLists?: FeatureList[];
+  /** The ranked top hero journeys (docs/features/hero-journeys.json `top`), the ones shown first. */
+  topJourneys?: TopJourneys;
   /** spines.py or git failed for this repo: the reason (the repo still shows with what was read). */
   error?: string;
 }
@@ -435,7 +437,8 @@ export function buildRepoBook(
   const capabilities = readCapabilities(repo.path, repo.remote);
   const featureLists = readFeatureLists(repo.path, repo.remote);
   const features = featureLists.find((f) => f.source === FEATURES_FILE) ?? featureLists[0];
-  return { name: repo.name, ...(repo.remote ? { remote: repo.remote } : {}), root: spines.root, epics, counts, ...(capabilities ? { capabilities } : {}), ...(features ? { features } : {}), ...(featureLists.length > 1 ? { featureLists } : {}), ...(error ? { error } : {}) };
+  const topJourneys = readTopJourneys(repo.path, repo.remote);
+  return { name: repo.name, ...(repo.remote ? { remote: repo.remote } : {}), root: spines.root, epics, counts, ...(capabilities ? { capabilities } : {}), ...(topJourneys ? { topJourneys } : {}), ...(features ? { features } : {}), ...(featureLists.length > 1 ? { featureLists } : {}), ...(error ? { error } : {}) };
 }
 
 /** GET /api/book keeps its shape and size: the per-milestone fields stay on the server. */

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api, type BookEpic, type BookRepo, type BookState } from "@/api";
-import type { CapabilityCell, CapabilityEgress, CapabilityStatusLine, CapabilityTable, FeatureList } from "@/api/types";
+import type { CapabilityCell, CapabilityEgress, CapabilityStatusLine, CapabilityTable, FeatureList, TopJourneys as TopJourneysData } from "@/api/types";
 import { useLiveBook } from "@/lib/useLiveBook";
 import { BOOK_PATH, EGRESS_STYLE, PLAIN_LABEL, PLAIN_STYLE, FILTERS, questionsUrl, STATE_DOT, STATE_LABEL, day, orderRepos, plainOf, shows, titleRest, type BookFilter } from "@/lib/book";
 import { Card } from "@/components/ui/card";
@@ -246,6 +246,65 @@ function PlainStatus({ lines }: { lines: CapabilityStatusLine[] }) {
   );
 }
 
+/**
+ * The ranked top hero journeys as a ladder, rung 1 on top: rank, what you can do, why it is worth it, in the
+ * owner's words "a list of 10 ... ordered in terms of where the value we think it is". Words only as labels.
+ */
+export function TopJourneys({ t }: { t: TopJourneysData }) {
+  return (
+    <section id="top-journeys" className="mb-4 rounded-md border bg-card p-3" data-testid="top-journeys">
+      <h3 className="font-medium">What EpicTeam is most worth it for</h3>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Ranked by value to a new user{t.rankedAt && <>, {day(t.rankedAt)}</>}. Shown first to every tester and customer.
+      </p>
+      <ol className="relative grid gap-3 pl-1">
+        <span aria-hidden className="absolute bottom-4 left-[1.05rem] top-4 w-px bg-border" />
+        {t.journeys.map((j) => (
+          <li key={j.id} className="relative grid grid-cols-[2.25rem_1fr] items-start gap-3" data-testid="top-journey">
+            <span
+              className={`z-10 flex h-8 w-8 items-center justify-center rounded-full border text-sm font-semibold ${
+                j.rank === 1 ? "border-emerald-800 bg-emerald-800 text-white" : "bg-card"
+              }`}
+              data-testid="top-journey-rank"
+            >
+              {j.rank}
+            </span>
+            <span className="grid min-w-0 gap-0.5 pt-1 text-sm">
+              <span className="font-medium">{j.title}</span>
+              <span className="text-muted-foreground">{j.why}</span>
+              {(j.screen || j.clip) && (
+                <span className="text-xs">
+                  {j.screen && (
+                    <a href={j.screen} target="_blank" rel="noreferrer" className="underline">
+                      Open it
+                    </a>
+                  )}
+                  {j.screen && j.clip && " · "}
+                  {j.clip && (
+                    <a href={j.clip} target="_blank" rel="noreferrer" className="underline">
+                      Watch the clip
+                    </a>
+                  )}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-xs text-muted-foreground">
+        One list, kept current every wake.{" "}
+        {t.href ? (
+          <a href={t.href} target="_blank" rel="noreferrer" className="underline">
+            Data: {t.source}
+          </a>
+        ) : (
+          <>Data: {t.source}</>
+        )}
+      </p>
+    </section>
+  );
+}
+
 /** The first list keeps the #features anchor (links); another service's gets #features-<service>. */
 export const featuresAnchor = (f: FeatureList, first: boolean) => (first ? "features" : `features-${(f.service || f.source).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
 
@@ -462,6 +521,14 @@ export function BookPage() {
               Your open questions (28 Oct voice note)
             </a>
           )}
+          {book?.repos.some((r) => r.topJourneys) && (
+            <>
+              {" · "}
+              <a href="#top-journeys" className="underline" data-testid="book-top-journeys-link">
+                Top journeys
+              </a>
+            </>
+          )}
           {featureListsOf(book?.repos.find((r) => r.features) ?? ({} as BookRepo)).map((f, i) => (
             <span key={f.source}>
               {" · "}
@@ -548,6 +615,7 @@ export function BookPage() {
               <Counts counts={r.counts} />
             </div>
             {r.error && <p className="mb-2 text-xs text-amber-700 dark:text-amber-400">{r.error}</p>}
+            {r.topJourneys && <TopJourneys t={r.topJourneys} />}
             {featureListsOf(r).map((f, i) => (
               <Features key={f.source} f={f} first={i === 0} />
             ))}

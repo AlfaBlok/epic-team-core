@@ -2378,7 +2378,25 @@ export interface BookRepo {
   features?: FeatureList;
   /** Every service's feature list (docs/features/*.json), EpicTeam's first; set when the repo keeps more than one. */
   featureLists?: FeatureList[];
+  /** The ranked top hero journeys (server book/features.ts, docs/features/hero-journeys.json `top`). */
+  topJourneys?: TopJourneys;
   error?: string;
+}
+/** One rung of the ranked top list: what a user can do, and why it is worth it. */
+export interface TopJourney {
+  rank: number;
+  id: string;
+  title: string;
+  why: string;
+  belief?: string;
+  screen?: string;
+  clip?: string;
+}
+export interface TopJourneys {
+  rankedAt?: string;
+  journeys: TopJourney[];
+  source: string;
+  href?: string;
 }
 /** one line of a service's feature list. */
 export interface Feature {

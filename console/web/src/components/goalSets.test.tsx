@@ -354,7 +354,7 @@ describe("goal sets: the screens", () => {
 });
 
 describe("the key-result table of every wheel", () => {
-  it("a wheel no Delivery Manager turns shows a red no persona pill, and the screen names every goal without one", async () => {
+  it("a wheel with no persona shows a red no persona pill, and the screen names every goal without one; a switched-off one is only a quiet pill", async () => {
     vi.spyOn(api, "personaGaps").mockResolvedValue({
       ok: false,
       gaps: [
@@ -364,7 +364,7 @@ describe("the key-result table of every wheel", () => {
       checked: { objectives: 2, milestones: 9 },
       at: "2026-11-15T04:00:00Z",
     });
-    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => (n.id === "vault" ? { ...n, noPersona: "none" as const } : n)) });
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => (n.id === "vault" ? { ...n, noPersona: "none" as const } : n.id === "launch" ? { ...n, noPersona: "off" as const } : n)) });
     render(
       <MemoryRouter initialEntries={["/sets"]}>
         <Routes>
@@ -373,14 +373,14 @@ describe("the key-result table of every wheel", () => {
       </MemoryRouter>,
     );
     const line = await screen.findByTestId("persona-gaps");
-    expect(line.textContent).toContain("2 goals have no Delivery Manager turning them. A wheel without a persona does not turn.");
-    expect(within(line).getAllByTestId("persona-gap").map((li) => li.textContent)).toEqual(["Vaultnone", "Company and accountantswitched off"]);
+    expect(line.textContent).toContain("1 goal has no persona. A wheel without a persona does not turn.");
+    expect(within(line).getAllByTestId("persona-gap").map((li) => li.textContent)).toEqual(["Vaultobjective"]);
     const vault = (await screen.findAllByTestId("all-sets-row")).find((r) => r.getAttribute("data-set") === "vault")!;
     const pill = within(vault).getByTestId("wheel-no-persona");
     expect(pill.textContent).toBe("no persona");
     expect(pill.getAttribute("title")).toBe("No Delivery Manager: this wheel does not turn.");
     const launch = screen.getAllByTestId("all-sets-row").find((r) => r.getAttribute("data-set") === "launch")!;
-    expect(within(launch).queryByTestId("wheel-no-persona")).toBeNull();
+    expect(within(launch).getByTestId("wheel-no-persona").textContent).toBe("persona off");
   });
 
   it("nothing shows when every goal turns", async () => {
