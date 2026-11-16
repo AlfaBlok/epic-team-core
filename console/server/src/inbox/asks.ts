@@ -259,7 +259,10 @@ export const VISUAL_FIRST_RULE =
   "Clean, simple, sophisticated: every page, screen and site you make looks calm and few: one thing per screen, flat surfaces (no gradients, no shadows at rest), " +
   "colour only on data and the one action, two or three typefaces, no emoji or ornaments, nothing squeezed on a phone; take the look from the skills, never invent one " +
   "(pages: paper-deck; app screens: design-taste-frontend's references/app-screens.md; a new site: hallmark). " +
-  `Check it with \`python3 scripts/clean_look_check.py <page>\` in ${homeRepo()}, or \`--screens\` after you change a product screen (each product's home and inbox at phone, tablet and laptop size); fix what it names.`;
+  `Check it with \`python3 scripts/clean_look_check.py <page>\` in ${homeRepo()}, or \`--screens\` after you change a product screen (each product's home and inbox at phone, tablet and laptop size); fix what it names. ` +
+  // (the owner 2026-11-16, vn_5d118870: "settings is about things where the user has to input something ... If the user is not inputting something, it's not a setting")
+  "Settings is only what the user changes (root L-80): a page or item goes under Settings only when he inputs something there (a toggle, a field, a pick); " +
+  "a read-only page (a list, a status, a count, like Seats) goes in the menu's tools or on the page it describes, never under Settings.";
 /**
  * steps for the owner carry their own feedback. Every worker brief says so;
  * how to include the kit: docs/steps-kit.md.

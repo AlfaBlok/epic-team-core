@@ -20,14 +20,27 @@ write("a.json", { product: "alpha", name: "Alpha", order: 1, repos: ["w"], objec
   { id: "launch-board", name: "Launch board", shape: "table", tab: "launch", lives: { board: "alpha" } },
   { id: "bad", name: "Bad", shape: "blob", tab: "x", lives: {} },
 ] });
+write("c.json", { product: "gamma", name: "Gamma", order: 3, repos: [], objectives: ["gamma-live"], totems: [{ id: "marketing-plan", name: "Marketing plan", shape: "page", tab: "plan", lives: { plan: "its objective's plan entry" } }] });
+write("d.json", { product: "delta", name: "Delta", order: 4, repos: [], objectives: ["delta-live"], totems: [{ id: "marketing-plan", name: "Marketing plan", shape: "page", tab: "plan", lives: { plan: "its objective's plan entry" } }] });
+fs.writeFileSync(path.join(dir, "home/docs/pursuits.json"), JSON.stringify({ version: 1, pursuits: [
+  { id: "gamma-live", name: "Gamma live", greenWhen: "live", plan: { repo: "w", path: "docs/spines/camp.md" } },
+  { id: "delta-live", name: "Delta live", greenWhen: "live" },
+] }));
 const maps = readMaps(path.join(dir, "home"));
 const repoDir = (r: string) => path.join(dir, r);
 
 describe("the product map", () => {
   it("reads every product in its order, keeps only well-formed totems", () => {
-    expect(maps.products.map((p) => p.product)).toEqual(["alpha", "beta"]);
+    expect(maps.products.map((p) => p.product)).toEqual(["alpha", "beta", "gamma", "delta"]);
     expect(maps.products[0].totems.map((t) => t.id)).toEqual(["marketing-plan", "pricing", "missing", "launch-board"]);
     expect(maps.statement).toMatch(/read from at the start and write back to at the end/);
+  });
+  it("a marketing plan totem points where its objective's plan entry points, one source with the Plan tab", () => {
+    const g = maps.products.find((p) => p.product === "gamma")!.totems[0];
+    expect(g.lives).toEqual({ repo: "w", path: "docs/spines/camp.md", section: "Plan", plan: true });
+    const d = maps.products.find((p) => p.product === "delta")!.totems[0];
+    expect(d.lives.note).toMatch(/no plan named yet/);
+    expect(mapSection(maps, maps.products.find((p) => p.product === "gamma"))).toContain("w docs/spines/camp.md § Plan (its objective's plan entry in docs/pursuits.json)");
   });
   it("picks the product by objective, then by repo", () => {
     expect(productFor(maps, { objective: "beta-live", repo: "w" })?.product).toBe("beta");

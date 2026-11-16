@@ -2,26 +2,25 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/common";
 import { TeamPage } from "@/pages/Team";
 import { useOperatorPages } from "@/lib/settingsPath";
-import { useDashboardPanels } from "@/lib/dashboardPanels";
 
 /**
- * Settings: his team's setup, red lines and what he builds on top (they left the Inbox, the owner 2026-11-11:
- * "Don't stuff everything into Team!"), then every operator page, then projects and team activity.
+ * Settings: only what the owner changes (root L-80, the owner: "settings is about things where the
+ * user has to input something ... If the user is not inputting something, it's not a setting"): his red lines (edit,
+ * delete), the pages where he adds or replaces something, and the project actions. Read-only pages (Seats, Hosts,
+ * Applications, Voice feedback, the Dashboard) are in the menu's tools list; never add a read-only thing here.
  */
 export function SettingsPage() {
   const pages = useOperatorPages();
-  // the dashboard panels he does not use are off by default; one quiet switch at the foot brings them back.
-  const [dashboard, setDashboard] = useDashboardPanels();
   return (
     <>
-      <PageHeader title="Settings" description="Your red lines, then every operator page." />
+      <PageHeader title="Settings" description="Only what you change: red lines, keys, sign-ins, skills, credits." />
       <TeamPage
         section="settings"
-        dashboard={dashboard}
+        dashboard={false}
         between={
           pages.length > 0 && (
             <section className="mt-6" data-testid="operator-pages">
-              <h2 className="mb-3 text-[15px] font-semibold">Operator pages</h2>
+              <h2 className="mb-3 text-[15px] font-semibold">What you can change</h2>
               <div className="divide-y rounded-xl border bg-card">
                 {pages.map((p) => (
                   <div key={p.to} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
@@ -36,10 +35,19 @@ export function SettingsPage() {
           )
         }
       />
-      <label className="mt-6 flex items-center gap-2 text-xs text-muted-foreground" data-testid="dashboard-panels-switch">
-        <input type="checkbox" className="h-3.5 w-3.5 accent-current" checked={dashboard} onChange={(e) => setDashboard(e.target.checked)} />
-        Show the old dashboard panels (setup checklist, what you build, activity, project cards, personas)
-      </label>
+    </>
+  );
+}
+
+/**
+ * the old dashboard panels (setup checklist, what you build, activity, project cards, personas): read-only, so they
+ * left Settings (root L-80) for this page in the menu's tools list. Nothing on it was deleted.
+ */
+export function DashboardPage() {
+  return (
+    <>
+      <PageHeader title="Dashboard" description="Project cards, personas and what the team did." />
+      <TeamPage section="settings" dashboard redLines={false} />
     </>
   );
 }

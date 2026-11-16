@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { splitDecisions } from "@/lib/cardKind";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin } from "lucide-react";
+import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard } from "lucide-react";
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
 import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
@@ -25,7 +25,7 @@ import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
 import { COMPANY_PATH } from "@/lib/company";
 import { GAP_FINDER_PATH, NEW_CAMPAIGN_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
-import { SETTINGS_PATH, useOperatorPages } from "@/lib/settingsPath";
+import { SETTINGS_PATH, useOperatorPages, useToolPages } from "@/lib/settingsPath";
 import { useCompanyView } from "@/lib/companyView";
 import { useGapFinder } from "@/lib/gapFinder";
 import { reachSites, setupConnections } from "@/pages/Setup";
@@ -293,6 +293,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     </>
   );
   const operatorPages = useOperatorPages();
+  // read-only pages (Seats, Hosts, Applications, Voice feedback, Dashboard) sit with the console's pages, never under Settings (root L-80).
+  const toolPages = useToolPages();
   // the owner, 12 Nov 16:02Z: "I just want to see the thing that I put there": the social skin shows Home, Inbox, Chat
   // and his pinned campaigns; everything else folds into More (default folded). The console skin draws it all, unfolded.
   const [moreOpen, setMoreOpen] = useStoredFlag(MORE_STORE);
@@ -487,9 +489,18 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             {w.tickets}
           </NavLink>
         )}
+        {toolPages.map((p) => {
+          const Icon = TOOL_ICONS[p.testId] ?? Files;
+          return (
+            <NavLink key={p.to} to={p.to} className={itemClass} onClick={onNavigate} data-testid={`nav-tool-${p.testId.slice(3)}`}>
+              <Icon className="h-4 w-4" />
+              {p.label}
+            </NavLink>
+          );
+        })}
       </nav>
 
-      {/* Settings, then its pages, small and indented under it. */}
+      {/* Settings, then its pages (only what he changes, root L-80), small and indented under it. */}
       <nav className="grid min-w-0 grid-cols-1 gap-0.5 border-t pt-3" aria-label="Settings" data-testid="nav-settings">
         {shows("settings") && (
           <NavLink to={`/${SETTINGS_PATH}`} end className={itemClass} onClick={onNavigate} data-testid="nav-settings-link">
@@ -536,6 +547,15 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     </div>
   );
 }
+
+/** the read-only pages' icons in the menu's tools list (lib/settingsPath useToolPages). */
+const TOOL_ICONS: Record<string, typeof Files> = {
+  "op-seats": Armchair,
+  "op-hosts": Server,
+  "op-applications": UserPlus,
+  "op-feedback": AudioLines,
+  "op-dashboard": LayoutDashboard,
+};
 
 /** the social skin's add button (mockup note 6): a standing campaign or a one-off job, one dialog. */
 export const ADD_CAMPAIGN_OR_JOB = "Add campaign or job";

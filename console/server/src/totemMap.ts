@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { homeRepo } from "./identity.js";
+import { parsePursuits, PURSUITS_FILE } from "./pursuits.js";
 
 /**
  * Root L-77 (the owner, 2026-11-16: "we also tell the personas, here
@@ -29,6 +30,11 @@ export interface TotemLives {
   board?: string;
   /** no file: where it is in words (or why there is none yet). */
   note?: string;
+  /**
+   * the objective's plan: resolved from the `plan` entry of the product's objectives in the objectives file (the one
+   * source the Plan tab reads too), to that campaign spine's `## Plan` section; none named: a note, shown empty.
+   */
+  plan?: boolean;
 }
 export interface Totem {
   id: string;
@@ -82,6 +88,7 @@ function parseTotem(v: unknown): Totem[] {
     ...(str(l.section) ? { section: str(l.section) } : {}),
     ...(str(l.board) ? { board: str(l.board) } : {}),
     ...(str(l.note) ? { note: str(l.note) } : {}),
+    ...(l.plan ? { plan: true } : {}),
   };
   return [{ id, name, shape: shape as TotemShape, tab, lives, ...(str(o.live) ? { live: str(o.live) } : {}), ...(str(o.read) ? { read: str(o.read) } : {}), ...(str(o.write) ? { write: str(o.write) } : {}) }];
 }
@@ -146,6 +153,19 @@ export function readMaps(homeDir: string | undefined): TotemMaps {
     if (m) products.push(m);
   }
   products.sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
+  // a plan totem: where its objective's `plan` entry points (one source with the Plan tab), never a copy in the map file
+  let plans = new Map<string, { repo: string; path: string }>();
+  try {
+    plans = new Map(parsePursuits(fs.readFileSync(path.join(homeDir, PURSUITS_FILE), "utf8")).pursuits.flatMap((p) => (p.plan ? [[p.id, p.plan] as const] : [])));
+  } catch {
+    /* no objectives file: plan totems stay unnamed */
+  }
+  for (const p of products)
+    p.totems = p.totems.map((t) => {
+      if (!t.lives.plan) return t;
+      const at = p.objectives.map((o) => plans.get(o)).find(Boolean);
+      return { ...t, lives: at ? { repo: at.repo, path: at.path, section: "Plan", plan: true } : { note: "no plan named yet (its objective has no plan entry in docs/pursuits.json)", plan: true } };
+    });
   return { statement, every, products };
 }
 
@@ -158,7 +178,7 @@ const whereOf = (t: Totem): string =>
   t.lives.board
     ? `launch board lights of ${t.lives.board} (GET /api/launch-board)`
     : t.lives.repo && t.lives.path
-    ? `${t.lives.repo} ${t.lives.path}${t.lives.section ? ` § ${t.lives.section}` : ""}`
+    ? `${t.lives.repo} ${t.lives.path}${t.lives.section ? ` § ${t.lives.section}` : ""}${t.lives.plan ? " (its objective's plan entry in docs/pursuits.json)" : ""}`
     : t.lives.note ?? "not placed yet";
 
 export const MAP_HEAD = "## The map: read these totems first, write back into them last (root L-77)";

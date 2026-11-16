@@ -71,11 +71,14 @@ export function TeamPage({
   section = "inbox",
   between,
   dashboard = true,
+  redLines = true,
   only,
 }: {
   section?: "inbox" | "settings";
   between?: ReactNode;
   dashboard?: boolean;
+  /** the Dashboard page shows the panels without the red lines (they are Settings: he edits them there). */
+  redLines?: boolean;
   /** the social skin: "goals" is Home (the campaigns and widgets, the inbox one tap away), "inbox" the Inbox alone. */
   only?: "goals" | "inbox";
 } = {}) {
@@ -551,7 +554,7 @@ export function TeamPage({
           {/* Settings, on top: the readiness checklist, the owner's red lines (edit, delete; their cards lead the Inbox),
               what he builds, tester applications he has not opened yet. */}
           {board && scorecard && <OnboardingScorecard list />}
-          <RedLineBand list />
+          {redLines && <RedLineBand list />}
           {board && home && <BuildingLists milestones={ms.data} list />}
           {board && <NewApplications />}
           {between}
@@ -608,7 +611,8 @@ export function TeamPage({
       )}
       {settings && board && shownPersonas.length > 0 && personasList(shownPersonas)}
       {settings && board && <WakesDidSomething counts={runStats?.wakes24h} />}
-      <SyncFooter />
+      {/* a read-only line, so never on Settings (root L-80: Settings is only what he changes). */}
+      {!(settings && !board) && <SyncFooter />}
       <MilestoneDialog open={newOpen} onOpenChange={setNewOpen} job={campaigns} />
       <MilestoneDialog open={focusOpen} onOpenChange={setFocusOpen} focusAt={nextFocusPosition(list)} />
     </OpenAsksContext.Provider>
