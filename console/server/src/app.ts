@@ -86,6 +86,7 @@ import { setOutcomeDefsDir } from "./outcomeDefs.js";
 import { createAskLog, mountAskLog, type WaitingLike } from "./asks/askLog.js";
 import { createPagesReader, mountPinnedAddresses, pinnedStatus } from "./pagesIndex.js";
 import { mountPagePins } from "./pagePins.js";
+import { mountAudioStore } from "./voice/audioStore.js";
 import { createVoiceNotesReader } from "./voiceNotesIndex.js";
 import { createXStatsReader } from "./xStats.js";
 import { createLeases, mountClaims } from "./review/leases.js";
@@ -2761,6 +2762,8 @@ export function createApp(
     if (w === DEFAULT_TENANT || !store.getTenant(w)) return c.json({ error: { code: "not_found", message: `no world desk ${w}` } }, 404);
     return notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk");
   });
+  // every recording of his findable by note id, any world, for a video snippet later (voice/audioStore.ts).
+  mountAudioStore(api, db);
   mountVoiceNotesRec(api, "/milestones/:id/voice", (c) => {
     const id = c.req.param("id") ?? "";
     const v = campaignVoice(id);
