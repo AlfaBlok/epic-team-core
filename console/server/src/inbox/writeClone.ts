@@ -78,7 +78,17 @@ export interface CloneWriterOptions {
   now?: () => Date;
   /** how long a checked clone skips the full check (default ENSURE_TTL_MS). */
   checkTtlMs?: number;
+  /** waits before each retry of reading the shared checkout's origin URL (default ORIGIN_RETRY_MS). */
+  originRetryMs?: number[];
 }
+
+/**
+ * Reading origin's URL is retried before a write falls back to the shared checkout. Production 2026-11-16
+ * 04:22Z and 07:24Z: seconds after a restart (event loop blocked, host busy) `git remote get-url origin` failed in the
+ * shared checkout whose origin was there all along, the reason said "no origin remote" and the write fell back
+ * (the daily press test fails on any fallback). Only git's own "No such remote" answer is taken at once.
+ */
+export const ORIGIN_RETRY_MS = [1_000, 4_000];
 
 const env = (): NodeJS.ProcessEnv => ({
   ...process.env,
@@ -155,6 +165,23 @@ export function createCloneWriter(inner: SpineWriter, o: CloneWriterOptions): Cl
     return (await runner(dir, env())(["cat-file", "-e", "HEAD^{tree}"])).ok;
   }
 
+  /** origin's URL in the shared checkout: a failed git call is retried; only git's "No such remote" is final. */
+  async function originUrl(s: ReturnType<typeof runner>): Promise<{ url: string } | { error: string }> {
+    const waits = o.originRetryMs ?? ORIGIN_RETRY_MS;
+    let last = "";
+    for (let i = 0; ; i++) {
+      const r = await s(["remote", "get-url", "origin"], { timeout: 60_000 });
+      if (r.ok && r.out) {
+        if (i) log(`spine write: origin URL read on try ${i + 1} (before: ${last})`);
+        return { url: r.out };
+      }
+      if (/no such remote/i.test(r.stderr ?? r.err)) return { error: "the shared checkout has no origin remote" };
+      last = r.err || "git gave no URL";
+      if (i >= waits.length) return { error: `the shared checkout's origin URL could not be read after ${i + 1} tries: ${last}` };
+      await new Promise((res) => setTimeout(res, waits[i]));
+    }
+  }
+
   /** Make the clone (first write) or put it back to a clean main at origin's URL; undefined + reason when it cannot be. */
   async function ensure(shared: string): Promise<{ dir: string } | { error: string }> {
     const dir = cloneDirFor(o.root, shared);
@@ -164,8 +191,9 @@ export function createCloneWriter(inner: SpineWriter, o: CloneWriterOptions): Cl
       if (at !== undefined && ttl > 0 && Date.now() - at < ttl && fs.existsSync(path.join(dir, ".git"))) return { dir };
       unsure(dir);
       const s = runner(shared, env());
-      const url = (await s(["remote", "get-url", "origin"])).out;
-      if (!url) return { error: "the shared checkout has no origin remote" };
+      const origin = await originUrl(s);
+      if ("error" in origin) return origin;
+      const url = origin.url;
       // a clone whose borrowed store is gone (shared checkout moved) or that cannot read its tree is made again
       if (fs.existsSync(path.join(dir, ".git")) && !(await readable(dir))) {
         log(`spine write: ${dir} lost objects it borrows; making it again`);

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -669,5 +670,50 @@ describe("T72-S1 caps (ops PLAN-2-A44)", () => {
     expect(sparseExcluded("research/a.Pdf")).toBe(true);
     expect(sparseExcluded("docs/spines/root.md")).toBe(false);
     expect(sparseExcluded("docs/statusboard.md")).toBe(false);
+  });
+});
+
+describe("a failed origin read is retried before a write falls back", () => {
+  it("git failing once on `remote get-url origin` (a busy host after a restart) no longer sends the write to the shared checkout", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "console-origin-retry-"));
+    cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const repo = makeRepo(root, "team", { "a.md": "a\n" }, { cards: false });
+    // a git on PATH that fails the first origin read only, as production's did at 04:22Z and 07:24Z on 2026-11-16
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(bin);
+    const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    const flag = path.join(root, "failed-once");
+    fs.writeFileSync(
+      path.join(bin, "git"),
+      `#!/bin/sh\ncase "$*" in *"remote get-url origin"*) if [ ! -e ${flag} ]; then : > ${flag}; echo "fatal: transient" >&2; exit 128; fi;; esac\nexec ${real} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}:${oldPath}`;
+    cleanup.push(() => void (process.env.PATH = oldPath));
+    const logs: string[] = [];
+    const w = createCloneWriter(createSpineWriter(), { checkTtlMs: 0, root: path.join(root, "_write"), log: (m) => logs.push(m), originRetryMs: [10] });
+    const r = await w.edit({ repoDir: repo.dir, path: "a.md", label: "t", edit: () => ({ text: "a1\n", msg: "edit a", body: "b" }) });
+    expect(r.status).toBe("written");
+    expect(fs.existsSync(flag)).toBe(true);
+    expect(w.fallbacks()).toEqual([]);
+    expect(git(repo.bare, "show", "main:a.md")).toBe("a1");
+    expect(logs.join("\n")).toMatch(/origin URL read on try 2 \(before: fatal: transient\)/);
+  });
+
+  it("an origin that keeps failing falls back with git's own reason, never 'no origin remote'", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "console-origin-fail-"));
+    cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const repo = makeRepo(root, "team", { "a.md": "a\n" }, { cards: false });
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(bin);
+    const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *"remote get-url origin"*) echo "fatal: busy" >&2; exit 128;; esac\nexec ${real} "$@"\n`, { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}:${oldPath}`;
+    cleanup.push(() => void (process.env.PATH = oldPath));
+    const w = createCloneWriter(createSpineWriter(), { checkTtlMs: 0, root: path.join(root, "_write"), log: () => {}, originRetryMs: [5, 5] });
+    await w.edit({ repoDir: repo.dir, path: "a.md", label: "t", edit: () => ({ text: "a1\n", msg: "edit a", body: "b" }) });
+    expect(w.fallbacks().map((f) => f.reason)).toEqual(["the shared checkout's origin URL could not be read after 3 tries: fatal: busy"]);
   });
 });
