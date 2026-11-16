@@ -158,7 +158,7 @@ export interface ScorecardNode {
   rows: ScorecardRow[];
   /** the Objective: a set's file, or its epic's Goal sentence (else the pursuit's green-when line). */
   objective?: string;
-  /** the short objective the sidebar and the page lead with (a set's file `objective`), and whether he agreed it. */
+  /** the name the sidebar, the page and every wake lead with: the pursuit's `name` ("Product: short goal"), plus its goal count. */
   headline?: string;
   objectiveStatus?: "proposed" | "agreed";
   /** the longer line it replaces, kept for the record. */
@@ -532,7 +532,10 @@ export function buildScorecards(
       ...(doc?.foldedInto ? { foldedInto: doc.foldedInto } : {}),
       rows,
       objective: doc?.objective ?? p.greenWhen,
-      ...(doc?.objective ? { headline: p.goal ? `${doc.objective} · ${p.goal.now} of ${p.goal.target}` : doc.objective, objectiveStatus: doc.objectiveStatus ?? "proposed", objectiveWas: doc.objectiveWas ?? p.greenWhen } : {}),
+      // the owner asked for short, clear names: what the sidebar, the screen and every wake lead with is the objective's one name in
+      // docs/pursuits.json, "Product: short goal"; the scorecard's sentence stays its longer objective.
+      headline: p.goal ? `${p.name} · ${p.goal.now} of ${p.goal.target}` : p.name,
+      ...(doc?.objective ? { objectiveStatus: doc.objectiveStatus ?? "proposed", objectiveWas: doc.objectiveWas ?? p.greenWhen } : {}),
       file: { path: rel, present: !!doc, ...(doc?.proposal ? { proposal: doc.proposal } : {}) },
       ...(teams ? { teams } : {}),
     };

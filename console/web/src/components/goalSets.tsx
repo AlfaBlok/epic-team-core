@@ -1109,7 +1109,7 @@ function Context({ node, pursuit }: { node: ScorecardNode; pursuit: ScorecardNod
         <section className="rounded-xl border bg-card p-3">
           <div className="text-xs text-muted-foreground">Objective{node.kind === "epic" ? ", the epic's Goal sentence" : ""}</div>
           <p className="text-sm text-foreground [overflow-wrap:anywhere]">
-            {node.headline ?? node.objective ?? pursuit.objective}
+            {node.objective ?? node.headline ?? pursuit.objective}
             {node.objectiveStatus === "proposed" && <ProposedMark />}
           </p>
           {node.objectiveWas && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="objective-was">It replaces: {node.objectiveWas}</p>}

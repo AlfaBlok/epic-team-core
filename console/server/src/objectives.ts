@@ -60,11 +60,18 @@ const cut = (s: string | undefined, max: number) => {
 
 /** the first line of every plan and report: which objective this moves. */
 export const OBJECTIVE_LINE = "`Objective: <its name>: how this step moves it`";
+/** How every objective is named (the owner: "they have to be short and they need to be well clear"),
+ * carried by the worker rule, every wake's objectives block and the desk's; scripts/objectives_check.py fails a name that breaks it. */
+export const OBJECTIVE_NAME_RULE =
+  "Name an objective `Product: short goal`: the product it belongs to first, a colon, then 2 to 5 plain words " +
+  "(`Acme: 5 testers`, `Acme: team browser fully operational`), the owner's words where he said them, no two names alike; " +
+  "the name goes in docs/pursuits.json `name`, the longer sentence stays in its green-when.";
 export const OBJECTIVES_RULE =
   `Objectives first: before any work reread ${ownerName()}'s objectives below (his order, live; the same list opens every wake prompt and is served at GET /api/objectives). ` +
   `Ask "which objective does this move?" before you plan: the first line of your plan and of your report is ${OBJECTIVE_LINE} ` +
   "(several: name each; none: `Objective: none, <why it is still worth doing>`, and that work waits behind work that moves one). " +
-  "Keep to them and keep it lean: remove fluff rather than add it; never add a second list, priority file or order of your own.";
+  "Keep to them and keep it lean: remove fluff rather than add it; never add a second list, priority file or order of your own. " +
+  OBJECTIVE_NAME_RULE;
 
 interface Line {
   id: string;
@@ -140,6 +147,7 @@ export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWo
     OBJECTIVES_HEAD,
     `${ownerName()}'s objectives, his order, live from the objectives screen (docs/pursuits.json; his newest words from docs/his-words.json, read from his voice notes). Every wake and every worker reads this same list.`,
     `Before you plan, ask which objective it moves: the first line of your plan, of each worker brief you write and of your report is ${OBJECTIVE_LINE} (none: \`Objective: none, <why>\`, and it waits behind work that moves one). Remove fluff rather than add it.`,
+    OBJECTIVE_NAME_RULE,
   ];
   const body = lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${l.name}`, l.krs, l.today, l.words].filter(Boolean).join(" · "));
   const also = alsoHis(plot);

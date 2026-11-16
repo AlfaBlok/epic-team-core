@@ -111,10 +111,10 @@ describe("goal sets", () => {
     expect(set.rows.find((r) => r.label === "Site answers")).toBeUndefined();
   });
 
-  it("a pursuit with a goal number heads its set with the number: '5 testers using the app · 0 of 5'", () => {
+  it("a pursuit with a goal number heads its set with its name and the number: 'App: 5 testers · 0 of 5'", () => {
     const file = JSON.stringify({ objective: "5 testers using the app", objectiveStatus: "agreed", rows: [] });
-    const [set] = buildScorecards({ pursuits: [{ ...pursuit(), goal: { now: 0, target: 5 } }], staleDays: 3 }, read, { file: () => file }).nodes;
-    expect(set.headline).toBe("5 testers using the app · 0 of 5");
+    const [set] = buildScorecards({ pursuits: [{ ...pursuit({ name: "App: 5 testers" }), goal: { now: 0, target: 5 } }], staleDays: 3 }, read, { file: () => file }).nodes;
+    expect(set.headline).toBe("App: 5 testers · 0 of 5");
     expect(set.objective).toBe("5 testers using the app");
   });
 
@@ -187,16 +187,17 @@ describe("goal sets", () => {
     expect(applyGreenHistory(structuredClone(b2), h, Date.parse("2026-11-16T08:00:00Z")).progress.week).toBe(0);
   });
 
-  it("a set's file gives its short objective, proposed until agreed; an epic's objective is its Goal sentence", () => {
+  it("a set's file gives its objective sentence, proposed until agreed, under the pursuit's name; an epic's objective is its Goal sentence", () => {
     const file = JSON.stringify({ objective: "First customer pays", objectiveStatus: "proposed", objectiveWas: "A long line that reads like a problem.", rows: [] });
     const withGoal = (repo: string, rel: string) => (rel === "docs/spines/epic-1.md" ? SPINES["app:docs/spines/epic-1.md"].replace("Parent spine: none", "Parent spine: none\nGoal sentence: Customers pay for the product.") : read(repo, rel));
     const [set] = buildScorecards({ pursuits: [pursuit()], staleDays: 3 }, withGoal, { file: () => file }).nodes;
-    expect(set).toMatchObject({ headline: "First customer pays", objectiveStatus: "proposed", objectiveWas: "A long line that reads like a problem.", objective: "First customer pays" });
+    expect(set).toMatchObject({ headline: "Launch", objectiveStatus: "proposed", objectiveWas: "A long line that reads like a problem.", objective: "First customer pays" });
     // no file rows: the pursuit's checks stand in
     expect(set.rows.find((r) => r.label === "Site answers")).toBeTruthy();
     expect(set.children[0].objective).toBe("Customers pay for the product.");
     const [plain] = buildScorecards({ pursuits: [pursuit()], staleDays: 3 }, read).nodes;
-    expect(plain.headline).toBeUndefined();
+    // with no file the pursuit's name still heads it, the green-when line is its objective
+    expect(plain).toMatchObject({ headline: "Launch", objective: "A customer pays." });
   });
 
   it("each thing under a key result has a colour; an epic row lists its Done-means items and its rows", () => {
@@ -249,7 +250,8 @@ describe("goal sets", () => {
     const fsRead = (_repo: string, rel: string) => files[rel];
     const work = createWorkFinder(() => dir, fsRead);
     const [set] = buildScorecards({ pursuits: [pursuit()], staleDays: 3 }, fsRead, { file: () => file, work }).nodes;
-    expect(set.headline).toBe("Customers pay");
+    expect(set.headline).toBe("Launch");
+    expect(set.objective).toBe("Customers pay");
     expect(set.objectiveStatus).toBe("agreed");
     expect(set.spineRef).toEqual({ repo: "app", code: "EPIC-901" });
     expect(set.foldedInto).toBe("other");
