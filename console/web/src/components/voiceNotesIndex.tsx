@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/common";
 import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { ON_DEVICE_PATH, VOICE_NOTES_PATH } from "@/lib/routePaths";
+import { isVoiceNotesPin } from "@/lib/storedFlag";
 export { VOICE_NOTES_PATH };
 
 /**
@@ -71,6 +72,7 @@ export function VoiceNotesPage() {
   const product = params.get("product") || first;
   const filters = [...Object.entries(names).map(([id, label]) => ({ id, label })), { id: ALL, label: "All" }];
   const { data, error, loading } = useQuery<VoiceNotesBody>(() => api.listVoiceNotes(product), [product]);
+  const chart = useQuery(() => api.listPinnedPages(), []).data?.pinned.find(isVoiceNotesPin);
   const counts = data ? data.notes.reduce<Record<string, number>>((a, n) => ({ ...a, [n.state]: (a[n.state] ?? 0) + 1 }), {}) : {};
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4" data-testid="voice-notes-index">
@@ -78,9 +80,17 @@ export function VoiceNotesPage() {
         title="Voice notes"
         description="Everything you said in the last two days, from chat, cards and your phone, with what the team made of it."
         actions={
-          <Link to={`/${ON_DEVICE_PATH}`} className="text-sm underline underline-offset-2" data-testid="voice-notes-on-device">
-            On this device
-          </Link>
+          <span className="flex flex-wrap items-center gap-3">
+            {/* the pinned chart of every note over time (the menu's one Voice notes entry holds both). */}
+            {chart && (
+              <a href={chart.slug ? `/${chart.slug}` : chart.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-2" data-testid="voice-notes-chart">
+                Over time
+              </a>
+            )}
+            <Link to={`/${ON_DEVICE_PATH}`} className="text-sm underline underline-offset-2" data-testid="voice-notes-on-device">
+              On this device
+            </Link>
+          </span>
         }
       />
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="Product">

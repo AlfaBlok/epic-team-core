@@ -155,9 +155,10 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
   it("the the console skin home and menu keep their order", async () => {
     at(<SidebarNav />, "/", SKINS.console);
     const main = await screen.findByTestId("nav-main");
-    // Home (the goals view) then the Inbox, in both skins.
-    expect([...main.querySelectorAll("a")][0].textContent).toContain("Home");
-    expect([...main.querySelectorAll("a")][1].textContent).toContain("Inbox");
+    // the console skin's name at the top opens Home (the goals view); the list starts with the Inbox.
+    expect(screen.getByTestId("brand").getAttribute("href")).toBe("/");
+    expect(screen.queryByTestId("nav-home")).toBeNull();
+    expect([...main.querySelectorAll("a")][0].textContent).toContain("Inbox");
     expect(screen.queryByTestId("project-groups")).toBeNull();
     cleanup();
     at(<TeamPage />, "/", SKINS.console);

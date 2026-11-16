@@ -70,16 +70,18 @@ describe("T41-S2 Team home: Focus milestones", () => {
     spy.mockRestore();
   });
 
-  // the goals no objective holds are "Other goals" (the owner: every sidebar entry is a goal), never "projects".
-  it("the sidebar names them Other goals", async () => {
+  // the goals no objective holds sit in More objectives (the owner: everything is an objective), never "projects".
+  it("the sidebar holds them in More objectives", async () => {
     await api.createMilestone({ title: "Hair transplant", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam", bigRoot: 1 });
     render(
       <MemoryRouter>
         <SidebarNav />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(within(screen.getByTestId("sidebar-milestones")).getByText("Other goals")).toBeTruthy());
-    expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(/^More goals/);
+    const toggle = await screen.findByTestId("more-objectives-toggle");
+    expect(toggle.textContent).toMatch(/^More objectives/);
+    fireEvent.click(toggle);
+    expect(within(await screen.findByTestId("sidebar-milestones")).getByText("Hair transplant")).toBeTruthy();
   });
 });
 

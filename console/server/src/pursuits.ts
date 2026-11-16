@@ -62,6 +62,8 @@ export interface Pursuit {
   /** its place in the owner's order, 1 first; parked pursuits have none. */
   rank: number | null;
   parked: boolean;
+  /** `"pinned": false` in the file: the sidebar shows it folded under More objectives, not in the pinned list. */
+  unpinned?: boolean;
   /** what its rank buys: wake pace, worker ceiling, stall watch patience, in plain words too. */
   effort: PursuitEffort;
   /** the epics that carry it (spines), each with its deck code when the spine has one. */
@@ -146,6 +148,7 @@ interface Declared {
   /** the product it moves, by id in docs/scorecard/products.json; its kit is the product's. */
   product?: string;
   parked: boolean;
+  unpinned: boolean;
   epics: { repo: string; path: string }[];
   goal?: PursuitGoal;
   /** its owner persona: the one the idle watch wakes; default the Delivery Manager of the world holding it. */
@@ -231,7 +234,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     const pr = str(obj(o.plan).repo);
     const pp = str(obj(o.plan).path);
     const plan = pr && pp && /^[\w./-]+\.md$/.test(pp) && !pp.includes("..") && !pp.startsWith("/") ? { repo: pr, path: pp } : undefined;
-    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
+    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, unpinned: o.pinned === false, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
   });
   const said = obj(doc.said);
   // retired milestones: each by its repo and spine, as the epics name theirs.
@@ -530,6 +533,7 @@ export async function buildPursuits(
       owner: d.owner,
       rank: ranks.get(d.id) ?? null,
       parked: d.parked,
+      ...(d.unpinned ? { unpinned: true } : {}),
       effort: effortOf(ranks.get(d.id) ?? null, d.parked, doc.effort),
       epics: d.epics.map((e) => {
         const text = o.spineText(e.repo, e.path);

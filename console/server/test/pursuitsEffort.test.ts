@@ -37,7 +37,7 @@ const FILE = JSON.stringify(
         lines: [],
         totems: [],
       },
-      { id: "late", name: "Later", greenWhen: "Some day.", epics: [{ repo: "lab_repo", spine: "docs/spines/epic-999.md" }], lines: [], totems: [] },
+      { id: "late", name: "Later", greenWhen: "Some day.", pinned: false, epics: [{ repo: "lab_repo", spine: "docs/spines/epic-999.md" }], lines: [], totems: [] },
     ],
     checks: {},
   },
@@ -57,6 +57,12 @@ describe("priority and effort", () => {
       ["late", 4],
     ]);
     expect(doc.pursuits.find((p) => p.id === "tenants")!.epics).toHaveLength(2); // the path outside the repo is dropped
+  });
+
+  // `"pinned": false` folds an objective under More objectives in the sidebar; it keeps its rank and effort.
+  it("reads pinned: false as unpinned, every other one stays pinned", () => {
+    expect(doc.pursuits.filter((p) => p.unpinned).map((p) => p.id)).toEqual(["late"]);
+    expect(ranksOf(doc).get("late")).toBe(4);
   });
 
   it("a rank buys its tier's effort, in plain words; parked buys none", () => {

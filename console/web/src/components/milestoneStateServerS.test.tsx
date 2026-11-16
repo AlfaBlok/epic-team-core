@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Assignment, type MilestoneStatusView, type Run, type WaitingItem } from "@/api";
@@ -15,6 +15,8 @@ import { timelineGroups } from "@/lib/derive";
  * status object (GET /api/milestones/:id/status); the web only renders it.
  */
 
+// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
+beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

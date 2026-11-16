@@ -49,7 +49,7 @@ function fakeStatus() {
 }
 
 describe("T40-S3 sidebar: big roots", () => {
-  it("lists the big roots first in Sam's order with % and waiting count; others fold with their count", async () => {
+  it("lists the big roots first in Sam's order inside More objectives, their waiting count on the fold", async () => {
     await seed();
     const spy = fakeStatus();
     try {
@@ -58,8 +58,15 @@ describe("T40-S3 sidebar: big roots", () => {
           <SidebarNav />
         </MemoryRouter>,
       );
-      await waitFor(() => expect(screen.getAllByTestId("big-root")).toHaveLength(4));
-      const roots = screen.getAllByTestId("big-root");
+      // they sit in the folded More objectives, its count and waiting pills on the fold.
+      const toggle = await screen.findByTestId("more-objectives-toggle");
+      await waitFor(() => expect(within(toggle).getByTestId("more-objectives-count").textContent).toBe("7")); // 4 focus + the infra repo + the mock seed's two
+      await waitFor(() => expect(within(toggle).getByTestId("more-objectives-needs-you")).toBeTruthy());
+      expect(screen.queryAllByTestId("big-root")).toHaveLength(0);
+      fireEvent.click(toggle);
+      expect(localStorage.getItem("sidebar.moreObjectives.open")).toBe("1");
+      await waitFor(() => expect(screen.getAllByTestId("big-root")).toHaveLength(7));
+      const roots = screen.getAllByTestId("big-root").slice(0, 4);
       // the state word now shares the line under the bar with the percent, so read the name's own line
       expect(roots.map((r) => r.querySelector(".line-clamp-2")?.textContent?.trim())).toEqual(["SocialApp launch", "Memo launch", "Hair transplant", "House decision"]);
       // drawn like an objective: its circle, its name and its pills, no state word under it.
@@ -70,14 +77,8 @@ describe("T40-S3 sidebar: big roots", () => {
       expect(within(roots[0]).queryByTestId("tree-dot")).toBeNull();
       expect(within(roots[1]).queryByTestId("sidebar-needs-you")).toBeNull();
 
-      // The per-repo milestone is folded; its waiting count shows on the fold.
-      expect(screen.queryByText("ops · PLAN-2")).toBeNull();
-      const toggle = screen.getByTestId("other-milestones-toggle");
-      expect(toggle.textContent).toMatch(/^More goals \(3\)/); // the infra repo + the mock seed's two
-      expect(within(toggle).getByTestId("other-needs-you").textContent).toBe("1");
-      fireEvent.click(toggle);
+      // the per-repo milestone follows his focus ones
       expect(screen.getByText("ops · PLAN-2")).toBeTruthy();
-      expect(localStorage.getItem("sidebar.otherMilestones.open")).toBe("1");
     } finally {
       spy.mockRestore();
     }

@@ -10,7 +10,7 @@ import { SOCIAL_HEAD, socialHead, TEAM_HEAD } from "../brand.js";
 import { hasOwnerPower } from "./owner.js";
 import { crossSiteRefusal } from "./csrf.js";
 import { clientAddress } from "../clientAddress.js";
-import { homeWorld, hostOf, sites } from "../identity.js";
+import { homeWorld, hostOf, platformMoved, platformWorld, sites } from "../identity.js";
 import { companyViewOn } from "../plug/companyView.js";
 import { gunzipSync, inflateSync } from "node:zlib";
 
@@ -107,7 +107,25 @@ export type DoorKey = { email?: string; via?: string };
 export const throughDoor = (door: DoorKey | undefined, env: NodeJS.ProcessEnv = process.env): boolean =>
   !!door?.email && (door.via === undefined || DOOR_VIA.has(door.via)) && doorLogins(env).has(door.email.trim().toLowerCase());
 export const platformBlocked = (host: string | undefined, tenant: string | undefined, env: NodeJS.ProcessEnv = process.env, door?: DoorKey): boolean =>
-  tenant === DEFAULT_TENANT && !!host && customerHosts(env).has(host) && !throughDoor(door, env);
+  tenant === platformWorld(env) && !!host && customerHosts(env).has(host) && !throughDoor(door, env);
+/**
+ * A machine credential (an agent token, the host owner token, legacy trust) of the platform world or of the home
+ * world is no credential on a customer site, switch on or off: the home world's machines keep the platform's reach.
+ */
+export const machineBlocked = (host: string | undefined, tenant: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean =>
+  (tenant === platformWorld(env) || tenant === DEFAULT_TENANT) && !!host && customerHosts(env).has(host);
+/**
+ * Switch on (platformMoved): a login of the platform world acts as the platform on the home world's data (its
+ * rows, its servers, every world's platform pages: what the home world's owner login did before), and a login of the home
+ * world is a plain workspace, judged like the door (its own world's screens, no platform or owner powers), on every site.
+ * Off: the session as it is.
+ */
+export function platformSession<T extends Identity & { kind: "session" }>(i: T, env: NodeJS.ProcessEnv = process.env): T {
+  if (!platformMoved(env)) return i;
+  if (i.tenant === platformWorld(env)) return { ...i, tenant: DEFAULT_TENANT, platform: true };
+  if (i.tenant === DEFAULT_TENANT) return { ...i, plain: true };
+  return i;
+}
 const platformRefusal = () => new AuthError(403, PLATFORM_PRIVATE.code, PLATFORM_PRIVATE.message);
 
 /**
@@ -133,7 +151,7 @@ export function requestHost(header: (n: string) => string | undefined): string |
 function publicIdentity(i: Identity) {
   switch (i.kind) {
     case "session":
-      return { kind: i.kind, tenantId: i.tenant, email: i.email, name: i.name, role: i.role, ...(i.door ? { door: true } : {}) }; // door: the customer screens only
+      return { kind: i.kind, tenantId: i.tenant, email: i.email, name: i.name, role: i.role, ...(i.door || i.plain ? { door: true } : {}), ...(i.plain ? { plain: true } : {}), ...(i.platform ? { platform: true } : {}) }; // door: the customer screens only (a plain home world login too)
     case "token":
       return { kind: i.kind, tenantId: i.tenant, label: i.label };
     case "legacy":
@@ -174,9 +192,9 @@ export function mountAuth(
     if (i.kind === "session") {
       const host = hostOfReq(c);
       if (platformBlocked(host, i.tenant, process.env, { email: i.email })) return { kind: "none", peer: peerOf(c) };
-      return platformBlocked(host, i.tenant) ? { ...i, role: "member", door: true } : i;
+      return platformBlocked(host, i.tenant) ? { ...i, role: "member", door: true } : platformSession(i);
     }
-    return "tenant" in i && platformBlocked(hostOfReq(c), i.tenant) ? { kind: "none", peer: peerOf(c) } : i;
+    return "tenant" in i && machineBlocked(hostOfReq(c), i.tenant) ? { kind: "none", peer: peerOf(c) } : i;
   };
 
   // an API path with an encoded separator or a dot segment never reaches the gate or a route, in every auth

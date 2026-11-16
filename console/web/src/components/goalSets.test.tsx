@@ -130,7 +130,7 @@ describe("goal sets: the pure parts", () => {
 });
 
 describe("goal sets: the screens", () => {
-  it("the sidebar (as the mock-up): All objectives on top with its counts, each objective with its strip of key results and its child epics in short words, nested", async () => {
+  it("the sidebar (as the mock-up): the Objectives heading on top with its counts, each objective with its strip of key results and its child epics in short words, nested", async () => {
     render(
       <MemoryRouter initialEntries={["/sets/launch"]}>
         <SidebarGoalSets />
@@ -138,11 +138,12 @@ describe("goal sets: the screens", () => {
     );
     const all = await screen.findByTestId("sidebar-goal-sets-all");
     expect(all.getAttribute("href")).toBe(`/${SCORECARDS_PATH}`);
-    expect(all.textContent).toContain(SET_NAME.all);
-    expect(SET_NAME.all).toBe("All objectives");
+    // the heading says Objectives and opens every objective (its title still says All objectives).
+    expect(all.textContent).toContain(SET_NAME.many);
+    expect(all.getAttribute("title")).toBe("All objectives");
     expect(within(all).getByTestId("sidebar-all-counts").textContent).toBe("1 green · 3 red");
     expect(within(all).queryByTestId("sidebar-sets-asks")).toBeNull();
-    expect(screen.getByTestId("sidebar-goal-sets").textContent).toContain("Objectives · by priority");
+    expect(screen.getByTestId("sidebar-goal-sets").textContent).not.toContain("Objectives · by priority");
     const top = screen.getAllByTestId("sidebar-set").filter((x) => x.dataset.depth === "0");
     // a set folded into another objective is left out
     expect(top.map((x) => x.dataset.set)).toEqual(["launch", "vault"]);

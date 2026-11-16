@@ -33,6 +33,7 @@ import {
 } from "@/lib/scorecards";
 import { cn } from "@/lib/utils";
 import { lazyPage } from "@/lib/lazyPage";
+import { useStoredFlag } from "@/lib/storedFlag";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { ObjectivePlanTab } from "@/pages/social/PlanTab";
 import { TotemTab, productOfObjective, totemTabs, useTotemMaps } from "@/components/totemTabs";
@@ -810,46 +811,108 @@ export function SidebarGoalSets({ onNavigate }: { onNavigate?: () => void }) {
   const { data } = useGoalSets();
   return <SidebarGoalSetsOf data={data} onNavigate={onNavigate} />;
 }
-/** the same, on objectives the caller already read (the sidebar reads them once for this list and its other goals). */
-export function SidebarGoalSetsOf({ data, onNavigate }: { data: ScorecardsBody | undefined; onNavigate?: () => void }) {
+
+/** the More objectives fold, open or closed in this browser (default closed). */
+const MORE_OBJECTIVES_STORE = "sidebar.moreObjectives.open";
+export const MORE_OBJECTIVES = "More objectives";
+/** the pinned ones: his objectives in his order, less those he unpinned (`"pinned": false` in docs/pursuits.json). */
+export const pinnedObjectives = (nodes: ScorecardNode[] | undefined) => topObjectives(nodes).filter((n) => !n.unpinned);
+
+/**
+ * the same, on objectives the caller already read (the sidebar reads them once for this list and its other goals).
+ * the owner's yes to the sidebar mock-up ("Everything is an objective with key results ... maybe
+ * we can have like pinned and non-pinned"): the Objectives heading (it opens every objective), his pinned objectives in
+ * his order, then one folded More objectives holding the ones he unpinned and every goal no objective holds (`more`:
+ * the house, travel, hair), then `footer` (Add objective).
+ */
+export function SidebarGoalSetsOf({
+  data,
+  onNavigate,
+  more,
+  footer,
+  products = true,
+}: {
+  data: ScorecardsBody | undefined;
+  onNavigate?: () => void;
+  /** the goals no objective holds, drawn by the caller, with their inbox counts for the folded pills. */
+  more?: { links: ReactNode[]; count: number; ask: number; review: number; loading?: boolean; active?: boolean };
+  footer?: ReactNode;
+  /** the Products link (the social skin keeps it; the console's sidebar dropped it). */
+  products?: boolean;
+}) {
   const { countFor, rows } = useSetInbox(data);
   const { pathname } = useLocation();
+  const [open, setOpen] = useStoredFlag(MORE_OBJECTIVES_STORE);
   const activeId = pathname.startsWith(`/${SCORECARDS_PATH}/`) ? decodeURIComponent(pathname.slice(SCORECARDS_PATH.length + 2).split("/")[0]) : undefined;
   const top = topObjectives(data?.nodes);
   if (!top.length) return null;
+  const pinned = top.filter((n) => !n.unpinned);
+  const unpinned = top.filter((n) => n.unpinned);
   const asks = rows.filter((r) => r.kind === "ask").length;
   const reviews = rows.length - asks;
   const krs = top.flatMap(keyResultsOf);
+  const moreCount = unpinned.length + (more?.count ?? 0);
+  // the fold opens by itself while one of its objectives is the page shown.
+  const shown = open || !!more?.active || unpinned.some((n) => n.id === activeId);
+  const foldAsk = unpinned.reduce((t, n) => t + countFor(n.id).ask, more?.ask ?? 0);
+  const foldReview = unpinned.reduce((t, n) => t + countFor(n.id).review, more?.review ?? 0);
   return (
     <div className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-goal-sets">
       <NavLink
         to={`/${SCORECARDS_PATH}`}
         end
         onClick={onNavigate}
-        className={({ isActive }) => cn("mt-1 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-sm", isActive ? "bg-card font-semibold text-foreground shadow-sm ring-1 ring-border" : "bg-card/60 font-medium text-foreground hover:bg-accent/60")}
+        className={({ isActive }) => cn("mt-1 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-sm", isActive ? "bg-card font-semibold text-foreground shadow-sm ring-1 ring-border" : "bg-card/60 font-semibold text-foreground hover:bg-accent/60")}
+        title={SET_NAME.all}
         data-testid="sidebar-goal-sets-all"
       >
-        <span className="min-w-0 flex-1">{SET_NAME.all}</span>
+        <span className="min-w-0 flex-1">{SET_NAME.many}</span>
         {/* every key result of every objective; the inbox's own pills sit on Inbox above. */}
         <span className="shrink-0 text-xs font-normal text-muted-foreground" data-testid="sidebar-all-counts" title={`${asks} asks and ${reviews} cards wait on you across them`}>
           {krs.filter((r) => r.state === "green").length} green · {krs.filter((r) => r.state === "red").length} red
         </span>
       </NavLink>
-      <div className="px-2.5 pb-0.5 pt-2 text-xs font-medium text-muted-foreground">{SET_NAME.many} · by priority</div>
-      <ul className="grid min-w-0 gap-1">
-        {top.map((n, i) => (
-          <SidebarObjective key={n.id} n={n} nr={i + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+      <ul className="grid min-w-0 gap-1" data-testid="sidebar-pinned-objectives">
+        {pinned.map((n) => (
+          <SidebarObjective key={n.id} n={n} nr={top.indexOf(n) + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
+      {moreCount > 0 && (
+        <button
+          type="button"
+          className="mt-1 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          aria-expanded={shown}
+          data-testid="more-objectives-toggle"
+          onClick={() => setOpen(!shown)}
+        >
+          {shown ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {MORE_OBJECTIVES}
+          <span className="tabular-nums" data-testid="more-objectives-count">{moreCount}</span>
+          {!shown && <GoalPills c={{ ask: more?.loading ? 0 : foldAsk, review: foldReview }} ids={{ ask: "more-objectives-needs-you", review: "more-objectives-review" }} />}
+        </button>
+      )}
+      {shown && moreCount > 0 && (
+        <div className="grid min-w-0 gap-1 pl-3" data-testid="sidebar-more-objectives">
+          <ul className="grid min-w-0 gap-1">
+            {unpinned.map((n) => (
+              <SidebarObjective key={n.id} n={n} nr={top.indexOf(n) + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+            ))}
+          </ul>
+          {more?.links}
+        </div>
+      )}
+      {footer}
       {/* each product defined once; its objectives and its social kit read it there. */}
-      <NavLink
-        to={`/${PRODUCTS_PATH}`}
-        onClick={onNavigate}
-        className={({ isActive }) => cn("mt-1 flex min-h-9 min-w-0 items-center rounded-md px-2.5 text-sm", isActive ? "bg-card font-semibold text-foreground ring-1 ring-border" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
-        data-testid="sidebar-products"
-      >
-        Products
-      </NavLink>
+      {products && (
+        <NavLink
+          to={`/${PRODUCTS_PATH}`}
+          onClick={onNavigate}
+          className={({ isActive }) => cn("mt-1 flex min-h-9 min-w-0 items-center rounded-md px-2.5 text-sm", isActive ? "bg-card font-semibold text-foreground ring-1 ring-border" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
+          data-testid="sidebar-products"
+        >
+          Products
+        </NavLink>
+      )}
     </div>
   );
 }

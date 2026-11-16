@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
 import { AppRoutes } from "@/App";
@@ -97,7 +97,7 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     expect(screen.queryByTestId("project-campaigns")).toBeNull();
   });
 
-  it("the bar holds only Inbox, Chat and the mic; One-offs, Outcomes, Pages and Voice notes sit in the sidebar below the goal sets", async () => {
+  it("the bar holds only Inbox, Chat and the mic; One-offs, Outcomes, Pages and Voice notes sit in the sidebar's Tools fold below the objectives", async () => {
     // the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
     // microphone. The other things are in the sidebar."
     at(SKINS.console, "/inbox");
@@ -106,21 +106,25 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     for (const gone of ["topbar-home", "topbar-more", "topbar-one-offs", "topbar-outcomes", "topbar-pages"]) expect(screen.queryByTestId(gone)).toBeNull();
     // the whole name stands with the mark again: the bar has room for it at 360 px
     expect(screen.getByTestId("topbar-brand-name").className).not.toMatch(/sr-only/);
-    const more = (await screen.findAllByTestId("sidebar-more-pages"))[0];
-    // a page pinned by name (the sample's Daily reports, at its short address) leads the list, then the fixed pages
-    expect(within(more).getAllByRole("link").map((a) => [a.textContent?.trim(), a.getAttribute("href")])).toEqual([
-      ["Daily reports", "/daily"],
+    // his approved sidebar: every page you read sits in one folded Tools list, in the mock-up's order:
+    // Voice notes, Pages, One-offs, Outcomes, the pages pinned by name, X stats.
+    const tools = (await screen.findAllByTestId("nav-pages"))[0];
+    const toggle = within(tools).getByTestId("nav-pages-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(tools).queryAllByRole("link")).toHaveLength(0);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(within(tools).getAllByRole("link").length).toBeGreaterThan(5));
+    expect(within(tools).getAllByRole("link").slice(0, 6).map((a) => [a.textContent?.trim(), a.getAttribute("href")])).toEqual([
+      ["Voice notes", "/voice-notes"],
+      ["Pages", "/pages"],
       ["One-offs", "/one-offs"],
       ["Outcomes", "/outcomes"],
-      ["Pages", "/pages"],
-      ["Voice notes", "/voice-notes"],
+      ["Daily reports", "/daily"],
       ["X stats", "/x-stats"],
     ]);
-    // below the goal sets, above the projects
-    const sidebar = more.parentElement!;
-    const goal = sidebar.querySelector("[data-testid='sidebar-goal-sets']");
-    if (goal) expect(goal.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(more.compareDocumentPosition(within(sidebar).getByTestId("sidebar-milestones")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // below the objectives
+    const goal = document.querySelector("[data-testid='sidebar-goal-sets']");
+    if (goal) expect(goal.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("the social bar: Inbox, Chat and the mic only, no page links in it", async () => {

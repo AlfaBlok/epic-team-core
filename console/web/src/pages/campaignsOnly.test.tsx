@@ -21,6 +21,9 @@ afterEach(() => {
   forgetOtherWorlds();
 });
 beforeEach(() => localStorage.clear());
+// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
+beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
+
 globalThis.ResizeObserver ??= class {
   observe() {}
   unobserve() {}

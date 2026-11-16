@@ -107,6 +107,19 @@ export const homeWorld = (): string => identity().homeWorld;
 export const homeRepo = (): string => identity().homeRepo;
 export const mainHost = (): HostId => identity().mainHost;
 export const workerHost = (): HostId => identity().workerHost;
+/**
+ * The platform's home world, read from this one place: the world whose owner login holds the platform's powers
+ * (secrets, servers, other workspaces, deploys) and which no customer site opens. `CONSOLE_PLATFORM_WORLD` names it; unset
+ * (the switch off, the default) it is the home world, as before. Set (say `home`), the home world stays where the
+ * data lives (unscoped rows, the servers' own callers) but becomes a plain workspace for its people: its owner opens it on
+ * the customer site like any customer, and the platform world's login works as the platform on the private console.
+ */
+export const platformWorld = (env: NodeJS.ProcessEnv = process.env): string => {
+  const v = env.CONSOLE_PLATFORM_WORLD?.trim();
+  return v && /^[A-Za-z0-9_.-]+$/.test(v) ? v : homeWorld();
+};
+/** the switch is on: the platform lives in its own world, the home world is a plain workspace for its people */
+export const platformMoved = (env: NodeJS.ProcessEnv = process.env): boolean => platformWorld(env) !== homeWorld();
 /** the memory service's name (voice notes, the desk's citations) */
 export const memoryName = (): string => identity().memory;
 /** the social world the home desk pairs with */

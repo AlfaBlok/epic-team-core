@@ -2,6 +2,7 @@ import type { DB } from "../db.js";
 import { WORLD_WAKE_HOLD_CODE, type WorldWakeHold } from "../plug/hooks.js";
 import { createAuth, SESSION_COOKIE, type AuthMode } from "./identity.js";
 import { judge } from "./routeScope.js";
+import { platformSession } from "./gate.js";
 
 export interface Refusal {
   status: 401 | 403 | 404 | 409;
@@ -25,7 +26,8 @@ export function createPreflight(db: DB, mode: AuthMode, worldHold: WorldWakeHold
         .split(";")
         .map((p) => p.trim().split("="))
         .find(([k]) => k === SESSION_COOKIE)?.[1];
-      const v = judge(db, auth.resolve({ header, cookie: cookie ? decodeURIComponent(cookie) : undefined, peer }), req.method, url.pathname);
+      const i = auth.resolve({ header, cookie: cookie ? decodeURIComponent(cookie) : undefined, peer });
+      const v = judge(db, i.kind === "session" ? platformSession(i) : i, req.method, url.pathname); // as the gate sees it
       if (!v.allow) return { status: v.status, code: v.reason, message: v.message };
     }
     const wake = /^\/api\/assignments\/([^/]+)\/(run-now|wake)$/.exec(url.pathname);

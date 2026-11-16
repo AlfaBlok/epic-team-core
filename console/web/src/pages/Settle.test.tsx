@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api } from "@/api";
@@ -17,6 +17,8 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 } as unknown as typeof ResizeObserver;
 
+// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
+beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

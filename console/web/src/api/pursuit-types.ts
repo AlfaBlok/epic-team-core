@@ -168,6 +168,8 @@ export interface ScorecardNode {
   name: string;
   rank?: number | null;
   parked?: boolean;
+  /** `"pinned": false` in docs/pursuits.json: folded under More objectives in the sidebar. */
+  unpinned?: boolean;
   repo?: string;
   path?: string;
   code?: string;

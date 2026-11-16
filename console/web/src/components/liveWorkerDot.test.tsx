@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Milestone, type MilestoneStatusView } from "@/api";
@@ -13,6 +13,8 @@ import { SidebarNav } from "@/components/Layout";
  * live, the Activity header's rule): green and pulsing when > 0 (static under prefers-reduced-motion), grey otherwise.
  */
 
+// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
+beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

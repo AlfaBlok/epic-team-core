@@ -141,6 +141,8 @@ export interface ScorecardNode {
   /** pursuit: its rank (1 first; null parked). */
   rank?: number | null;
   parked?: boolean;
+  /** `"pinned": false` in docs/pursuits.json: folded under More objectives in the sidebar. */
+  unpinned?: boolean;
   repo?: string;
   path?: string;
   code?: string;
@@ -431,6 +433,7 @@ export function buildScorecards(
       name: p.name,
       rank: p.rank ?? null,
       ...(p.parked ? { parked: true } : {}),
+      ...(p.unpinned ? { unpinned: true } : {}),
       milestoneId: children.find((c) => c.milestoneId)?.milestoneId ?? p.milestones?.[0]?.id,
       greens: p.greens,
       total: p.total,

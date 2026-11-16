@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
@@ -7,6 +7,8 @@ import { Reconnecting, SidebarNav } from "@/components/Layout";
 import { createRealClient } from "@/api/real";
 
 afterEach(cleanup);
+// the goals no objective holds sit in the sidebar's More objectives fold; these tests read them open.
+beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
 
 const LONG = "M4 — Browser auth sync (Mac cookies → host1 for authed agent browsing)";
 

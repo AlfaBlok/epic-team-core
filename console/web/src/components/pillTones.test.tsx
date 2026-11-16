@@ -92,7 +92,8 @@ describe("T48-S19 sidebar pills", () => {
     expect(within(chat).getByTestId("chat-unread").title).toBe("3 unread messages");
 
     const line = (id: string) => document.querySelector(`[data-testid="sidebar-milestones"] a[href="/milestones/${id}"]`)!;
-    const open = screen.queryByTestId("other-milestones-toggle");
+    // the goals sit in the folded More objectives
+    const open = screen.queryByTestId("more-objectives-toggle") ?? screen.queryByTestId("other-milestones-toggle");
     if (open?.getAttribute("aria-expanded") === "false") act(() => open.click());
     await waitFor(() => expect(pills(line(a.id))).toEqual(["needs-you:2", "review:1"]));
     expect(pills(line(b.id))).toEqual(["review:2"]);

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { splitDecisions } from "@/lib/cardKind";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard } from "lucide-react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard, KeyRound, Sparkles, Coins, Globe } from "lucide-react";
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
 import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
@@ -10,7 +10,8 @@ import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, 
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
-import { GOAL_INBOX_TAB, GoalPills, SetWheel, SidebarGoalSetsOf, useGoalSets } from "@/components/goalSets";
+import { GOAL_INBOX_TAB, GoalPills, SetWheel, SidebarGoalSetsOf, topObjectives, useGoalSets } from "@/components/goalSets";
+import { isVoiceNotesPin, useStoredFlag } from "@/lib/storedFlag";
 import { objectiveOf } from "@/lib/scorecards";
 import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
@@ -135,27 +136,9 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
 const OTHERS_STORE = "sidebar.otherMilestones.open";
 /** the social skin's More fold open or folded, kept in localStorage (default folded). */
 const MORE_STORE = "sidebar.more.open";
-function useStoredFlag(key: string): [boolean, (v: boolean) => void] {
-  const [v, setV] = useState(() => {
-    try {
-      return window.localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  });
-  return [
-    v,
-    (next: boolean) => {
-      setV(next);
-      try {
-        window.localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        /* storage off: the toggle still works for this page */
-      }
-    },
-  ];
-}
-
+/** the console's Tools and Settings folds, each open or folded in this browser (default folded). */
+const TOOLS_STORE = "sidebar.tools.open";
+const SETTINGS_STORE = "sidebar.settings.open";
 /**
  * one big root in the sidebar: the root's tree color (done / in progress / draft / blocked on you / blocked on
  * a dependency, red ring when something under it waits on the owner), its name, a % done bar and the waiting-on-you count.
@@ -293,8 +276,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     </>
   );
   const operatorPages = useOperatorPages();
-  // read-only pages (Seats, Hosts, Applications, Voice feedback, Dashboard) sit with the console's pages, never under Settings (root L-80).
+  // read-only pages (Seats, Hosts, Applications, Voice feedback, Dashboard) sit with the console's pages, never under Settings (settings are only what he changes).
   const toolPages = useToolPages();
+  const pinnedPages = useQuery(() => api.listPinnedPages(), []);
   // the owner, 12 Nov 16:02Z: "I just want to see the thing that I put there": the social skin shows Home, Inbox, Chat
   // and his pinned campaigns; everything else folds into More (default folded). The console skin draws it all, unfolded.
   const [moreOpen, setMoreOpen] = useStoredFlag(MORE_STORE);
@@ -320,16 +304,103 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // one row for every goal no objective holds, pinned or not: its circle, name and the pills its Inbox tab shows.
   const rootLink = (m: Milestone) => <MilestoneGoalLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={milestoneInbox(statuses, allCards, m.id, snoozing)} onNavigate={onNavigate} />;
 
+  // ---- the console skin's sidebar as the owner approved it ("Yes: build it" on the mock-up):
+  // Inbox and Chat, his objectives (pinned in his order, then one folded More objectives), Tools folded, Settings
+  // folded, Worlds last. Nothing is removed: every page keeps its entry, inside a fold.
+  const [toolsOpen, setToolsOpen] = useStoredFlag(TOOLS_STORE);
+  const [settingsOpen, setSettingsOpen] = useStoredFlag(SETTINGS_STORE);
+  const { pathname } = useLocation();
+  const hasObjectives = shows("goalSets") && topObjectives(sets.data?.nodes).length > 0;
+  const addGoal = (
+    <button
+      type="button"
+      className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+      data-testid="add-milestone"
+      onClick={() => setNewOpen(true)}
+    >
+      <Plus className="h-4 w-4" />
+      {hasObjectives ? ADD_OBJECTIVE : w.addMilestone}
+    </button>
+  );
+  // every goal no objective holds (the house, travel, hair) sits in More objectives, his focus ones first.
+  const goalLinks = [
+    ...page.roots.map(rootLink),
+    ...page.rest.map(rootLink),
+    ...(page.hidden > 0 ? [<LoadMore key="load-more" hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} testId="sidebar-load-more" />] : []),
+  ];
+  const goalsAsk = new Set([...roots, ...rest].flatMap((m) => blockedItems(statusOf(statuses, m.id), { snoozing }).map((i) => i.id))).size;
+  const goalsReview = [...roots, ...rest].reduce((n, m) => n + reviewOf(allCards, m.id), 0);
+  // Tools: every page you read, nothing to change there (settings are only what he changes), in the mock-up's order.
+  const tools: ToolEntry[] = [
+    ...consoleTools(shows, !!gapFinder?.on, pinnedPages.data?.pinned),
+    ...(shows("spines") ? [{ to: "/spines", label: w.spines, icon: GitFork, testId: "nav-spines" }] : []),
+    ...(shows("runs") ? [{ to: "/runs", label: w.runs, icon: Activity, testId: "nav-runs" }] : []),
+    ...(shows("threads") ? [{ to: "/threads", label: w.threads, icon: MessagesSquare, testId: "nav-threads" }] : []),
+    ...(shows("tickets") ? [{ to: "/tickets", label: w.tickets, icon: Ticket, testId: "nav-tickets" }] : []),
+    ...toolPages.map((p) => ({ to: p.to, label: p.label, icon: TOOL_ICONS[p.testId] ?? Files, testId: `nav-tool-${p.testId.slice(3)}` })),
+  ];
+  // Settings: only what he changes (settings are only what he changes): personas he switches, priority mode, keys, sign-ins, skills, credits.
+  const settings: ToolEntry[] = [
+    ...(shows("settings") ? [{ to: `/${SETTINGS_PATH}`, label: "All settings", icon: Settings, testId: "nav-settings-link", end: true }] : []),
+    ...(shows("personas") ? [{ to: "/personas", label: w.personas, icon: Bot, testId: "nav-personas" }] : []),
+    ...(shows("runs") ? [{ to: `/${PRIORITY_PATH}`, label: "Priority mode", icon: Crosshair, testId: "nav-priority" }] : []),
+    ...operatorPages.map((p) => ({ to: p.to, label: p.label, icon: SETTING_ICONS[p.testId] ?? Settings, testId: `nav-${p.testId}` })),
+  ];
+  const here = (list: ToolEntry[]) => list.some((t) => !t.external && (pathname === t.to || pathname.startsWith(`${t.to}/`)));
+  const toolsShown = toolsOpen || here(tools);
+  const settingsShown = settingsOpen || here(settings);
+  const consoleMenu = (
+    <>
+      {hasObjectives ? (
+        <SidebarGoalSetsOf
+          data={sets.data}
+          onNavigate={onNavigate}
+          more={{
+            links: goalLinks.length ? [<div key="goals" className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-milestones">{goalLinks}</div>] : [],
+            count: roots.length + rest.length,
+            ask: goalsAsk,
+            review: goalsReview,
+            loading: restLoading,
+            active: [...roots, ...rest].some((m) => pathname.startsWith(`/milestones/${m.id}`) || pathname.startsWith(`/milestones/${encodeURIComponent(m.id)}`)),
+          }}
+          footer={addGoal}
+          products={false}
+        />
+      ) : (
+        <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-milestones">
+          <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground" data-testid="sidebar-focus-heading">
+            {OTHER_GOALS}
+          </div>
+          {goalLinks}
+          {addGoal}
+        </div>
+      )}
+      <SidebarFold label="Tools" items={tools} open={toolsShown} onToggle={() => setToolsOpen(!toolsShown)} onNavigate={onNavigate} testId="nav-pages" className="border-t" />
+      <SidebarFold label="Settings" items={settings} open={settingsShown} onToggle={() => setSettingsOpen(!settingsShown)} onNavigate={onNavigate} testId="nav-settings">
+        {shows("setup") && <SetupLink onNavigate={onNavigate} />}
+        <button
+          type="button"
+          onClick={toggle}
+          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        >
+          {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {dark ? "Light mode" : "Dark mode"}
+        </button>
+      </SidebarFold>
+    </>
+  );
+
   return (
     <div className="flex h-full min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden p-3">
-      <div className="flex items-center gap-2.5 px-2 pt-1" data-testid="brand">
+      {/* in the console skin the name at the top opens Home (the Home entry left the list). */}
+      <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 rounded-md px-2 pt-1" data-testid="brand" aria-label={`${w.appName}: Home`}>
         <BrandMark brand={brandOf(w.appName)} />
         {/* the name alone, centred on the mark. */}
         <span className="min-w-0 truncate font-brand text-lg font-semibold leading-none tracking-[-0.02em]" data-testid="brand-name">
           {w.appName}
         </span>
         {apiMode === "mock" && <span className="ml-auto rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:text-amber-400">mock</span>}
-      </div>
+      </Link>
       {/* while priority mode is on, a chip says so and opens /priority (where it is switched off); the console skin only. */}
       {shows("runs") && !campaigns && <PriorityModeChip onNavigate={onNavigate} />}
 
@@ -356,10 +427,12 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         )}
         {/* Home is the goals view (all goal sets), the Inbox its own entry with the pills, in both skins. */}
-        <NavLink to="/" end className={itemClass} onClick={onNavigate} data-testid="nav-home">
-          <Home className="h-4 w-4" />
-          Home
-        </NavLink>
+        {campaigns && (
+          <NavLink to="/" end className={itemClass} onClick={onNavigate} data-testid="nav-home">
+            <Home className="h-4 w-4" />
+            Home
+          </NavLink>
+        )}
         <NavLink to={`/${INBOX_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-inbox">
           <InboxIcon className="h-4 w-4" />
           Inbox
@@ -393,7 +466,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {/* The social skin: his pinned campaigns, each its number ring, name and inbox pills, right under Home, Inbox and Chat. */}
       {campaigns && <SidebarCampaigns onNavigate={onNavigate} />}
 
-      {fold(
+      {campaigns ? fold(
         <>
       {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
       {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
@@ -500,7 +573,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      {/* Settings, then its pages (only what he changes, root L-80), small and indented under it. */}
+      {/* Settings, then its pages (only what he changes, settings are only what he changes), small and indented under it. */}
       <nav className="grid min-w-0 grid-cols-1 gap-0.5 border-t pt-3" aria-label="Settings" data-testid="nav-settings">
         {shows("settings") && (
           <NavLink to={`/${SETTINGS_PATH}`} end className={itemClass} onClick={onNavigate} data-testid="nav-settings-link">
@@ -524,7 +597,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         </button>
       </nav>
         </>,
-      )}
+      ) : consoleMenu}
 
       <AccountBlock />
       {/* the worlds come last, in the flow of the menu, seen when you scroll to them. */}
@@ -555,6 +628,72 @@ const TOOL_ICONS: Record<string, typeof Files> = {
   "op-applications": UserPlus,
   "op-feedback": AudioLines,
   "op-dashboard": LayoutDashboard,
+};
+
+/** the console's add button under the objectives ("Add project becomes Add objective"). */
+export const ADD_OBJECTIVE = "Add objective";
+
+type ToolEntry = { to: string; label: string; icon: typeof Files; testId: string; end?: boolean; external?: boolean; title?: string };
+
+/**
+ * the Tools fold's pages in the approved mock-up's order: Voice notes (one entry; a pinned page named "… voice
+ * notes" folds into it), Pages, One-offs, Outcomes, the other pages he pinned by name, X stats, Gap finder.
+ */
+export function consoleTools(shows: (s: ScreenId) => boolean, gapFinderOn: boolean, pinned: { name?: string; slug?: string; url: string; title?: string }[] | undefined): ToolEntry[] {
+  const pages = morePages(shows, false, gapFinderOn);
+  const by = (id: string) => pages.filter((p) => p.testId === id);
+  const pins: ToolEntry[] = (pinned ?? [])
+    .filter((p) => !isVoiceNotesPin(p))
+    .map((p) => ({ to: p.slug ? `/${p.slug}` : p.url, label: p.name ?? p.title ?? p.url, icon: Pin, testId: "nav-pinned-page", external: true, title: p.title }));
+  if (!pages.length) return pins;
+  return [...by("nav-voice-notes"), ...by("nav-pages-list"), ...by("nav-one-offs"), ...by("nav-outcomes"), ...pins, ...by("nav-x-stats"), ...by("nav-gap-finder")];
+}
+
+/** one folded group of the console's sidebar (Tools, Settings): a header with its count, its pages when open. */
+function SidebarFold({ label, items, open, onToggle, onNavigate, testId, className, children }: { label: string; items: ToolEntry[]; open: boolean; onToggle: () => void; onNavigate?: () => void; testId: string; className?: string; children?: ReactNode }) {
+  if (!items.length && !children) return null;
+  return (
+    <nav className={cn("grid min-w-0 grid-cols-1 gap-0.5 pt-3", className)} aria-label={label} data-testid={testId}>
+      <button
+        type="button"
+        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        aria-expanded={open}
+        data-testid={`${testId}-toggle`}
+        onClick={onToggle}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        {label}
+        <span className="text-xs tabular-nums" data-testid={`${testId}-count`}>{items.length}</span>
+      </button>
+      {open && (
+        <div className="grid min-w-0 grid-cols-1 gap-0.5 pl-3" data-testid={`${testId}-list`}>
+          {items.map((t) =>
+            t.external ? (
+              <a key={t.to} href={t.to} target="_blank" rel="noreferrer" className={itemClass({ isActive: false })} onClick={onNavigate} data-testid={t.testId} title={t.title}>
+                <t.icon className="h-4 w-4" />
+                <span className="min-w-0 flex-1 truncate">{t.label}</span>
+              </a>
+            ) : (
+              <NavLink key={t.to} to={t.to} end={t.end} className={itemClass} onClick={onNavigate} data-testid={t.testId}>
+                <t.icon className="h-4 w-4" />
+                {t.label}
+              </NavLink>
+            ),
+          )}
+          {children}
+        </div>
+      )}
+    </nav>
+  );
+}
+
+/** each page in the Settings fold its own icon (the input pages, lib/settingsPath useOperatorPages). */
+const SETTING_ICONS: Record<string, typeof Files> = {
+  "op-secrets": KeyRound,
+  "op-connections": Plug,
+  "op-team-skills": Sparkles,
+  "op-credits": Coins,
+  "op-browser-auth": Globe,
 };
 
 /** the social skin's add button (mockup note 6): a standing campaign or a one-off job, one dialog. */

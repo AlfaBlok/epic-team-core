@@ -78,7 +78,10 @@ describe("the repo's own level is not a campaign", () => {
         <SidebarNav />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(new RegExp(`^More goals \\(${total + 1}\\)`)));
+    // the console skin holds every goal no objective holds in its folded More objectives, PLAN-0 among them.
+    expect(total).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
+    expect(await screen.findByText("PLAN-0: Memo social presence")).toBeTruthy();
   });
 });
 

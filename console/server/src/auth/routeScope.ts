@@ -504,7 +504,7 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
   if (owner !== undefined && owner !== identity.tenant)
     return { allow: false, status: 404, reason: "cross_tenant", message: `no route or id ${path} in this world` };
   // a door session into the home world (customer site) is judged like a customer world's, and more: only DOOR_SAFE.
-  const door = identity.kind === "session" && !!identity.door;
+  const door = identity.kind === "session" && (!!identity.door || !!identity.plain); // a plain home world login, judged like the door
   const doorOnly = door && isDoorOnly(method, path);
   if (door && path.startsWith("/api/") && !doorOnly && !(isTenantSafe(method, path) && isDoorSafe(method, path)))
     return { allow: false, status: 403, reason: "platform_private", message: "the platform is managed from the private console" };

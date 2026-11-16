@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type Assignment, type Persona, type ReviewItem } from "@/api";
@@ -10,6 +10,8 @@ import { GapFinderPage } from "@/pages/GapFinder";
 import { LevelMeter } from "@/voice/NoteProvider";
 import { levelOfSamples } from "@/voice/noteEngine";
 
+// the Gap finder sits in the sidebar's folded Tools; this test reads it open.
+beforeEach(() => localStorage.setItem("sidebar.tools.open", "1"));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

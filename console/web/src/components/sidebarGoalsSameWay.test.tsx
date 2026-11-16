@@ -108,11 +108,13 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
         <Where />
       </MemoryRouter>,
     );
+    // the goals no objective holds sit in the folded More objectives
+    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
     const list = await screen.findByTestId("sidebar-milestones");
     await waitFor(() => expect(within(list).getByText("House decision")).toBeTruthy());
     // the objective's milestone is the objective (listed once, above, with its wheel), never a second entry
     expect(within(list).queryByText("Held by Launch")).toBeNull();
-    expect(within(list).getByTestId("sidebar-focus-heading").textContent).toBe("Other goals");
+    expect(screen.queryByTestId("sidebar-focus-heading")).toBeNull();
     const row = within(list).getByText("House decision").closest("a")! as HTMLAnchorElement;
     expect(within(row).getByTestId("sidebar-goal-wheel")).toBeTruthy();
     await waitFor(() => expect(within(row).getByTestId("sidebar-needs-you").textContent).toBe("1"));
@@ -148,6 +150,8 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
         </Routes>
       </MemoryRouter>,
     );
+    // the goals no objective holds sit in the folded More objectives
+    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
     const list = await screen.findByTestId("sidebar-milestones");
     await waitFor(() => expect(within(list).getByText("Travel plans")).toBeTruthy());
     expect(within(list).queryByText("Market bots")).toBeNull();
