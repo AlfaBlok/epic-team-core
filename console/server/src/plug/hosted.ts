@@ -15,7 +15,7 @@ import type { RunT3State } from "../cycle/reconcile.js";
 import type { ChatSession, SessionDeps } from "../desk/session.js";
 import type { Attachments } from "../desk/attachments.js";
 import type { AskContext, ConnSummary, MemoryLookup, VoiceNoteList } from "./memory.js";
-import type { Notifiable } from "../notify/notice.js";
+import type { Notifiable, ReadyNotice } from "../notify/notice.js";
 import type { Persona, RuleBroken } from "../store.js";
 import type { GateDecision } from "../cycle/gateCore.js";
 import type { PackRunner } from "../packRunner.js";
@@ -185,7 +185,16 @@ export interface ServicesArea {
   /** the skill whose one holder per world sends WhatsApp. */
   notifySkill: string;
   /** the WhatsApp notifier and its routes (the skill's). */
-  whatsapp(o: { api: Hono; push: (pending: Notifiable[]) => Promise<string[]>; sources: () => Promise<Notifiable[]>; options?: object; store: Store; setSkills: (personaId: string, skills: string[]) => Promise<unknown> }): Notifier;
+  whatsapp(o: {
+    api: Hono;
+    push: (pending: Notifiable[]) => Promise<string[]>;
+    sources: () => Promise<Notifiable[]>;
+    options?: object;
+    store: Store;
+    setSkills: (personaId: string, skills: string[]) => Promise<unknown>;
+    /** one Decisions line on a ready card's row: when he was told and how, or why it was refused. */
+    readyNote?: (r: ReadyNotice, line: { outcome: string; decision: string; summary: string }) => Promise<unknown>;
+  }): Notifier;
   /** the team mailbox (a reply naming a row lands on it). */
   mail(o: { repos: () => { name: string; dir: string }[]; spineMilestone: (repo: string, spine: string) => Promise<string | undefined>; wake?: (milestoneId: string, note: string) => Promise<unknown>; post: Post }): void;
   /** the memory service per world, the forward, the helper; mounted where app.ts mounted them. */

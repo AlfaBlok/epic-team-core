@@ -4,6 +4,7 @@ import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
 import { byDeadline, deadlineWhen, timeLeft } from "@/lib/deadline";
 import { cn } from "@/lib/utils";
+import { isReady } from "@/lib/cardKind";
 import { FoldSection } from "@/components/homeSection";
 import { PostReviewCard, ReviewCard } from "@/components/review";
 
@@ -17,7 +18,8 @@ import { PostReviewCard, ReviewCard } from "@/components/review";
 export function DeadlineFirst() {
   const project = useProject();
   const { cards } = useReviewCards({ keep: project.keep });
-  const list = byDeadline(cards as ReviewItem[] | undefined);
+  // a ready card leads under Ready for you, with its deadline line there
+  const list = byDeadline(cards as ReviewItem[] | undefined).filter((c) => !isReady(c.face));
   const now = useMinuteClock(list.length > 0);
   if (!list.length) return null;
   return (

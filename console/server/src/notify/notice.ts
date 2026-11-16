@@ -27,6 +27,24 @@ export interface Notifiable {
    * never reads a test as a real application.
    */
   test?: boolean;
+  /**
+   * a review card for something the owner is waiting on: he is told once per ready event (`event`), loudly,
+   * outside the batch's caps (hosted notify/readyNotice.ts).
+   */
+  ready?: ReadyNotice;
+}
+
+export interface ReadyNotice {
+  /** `ready:<repo>:<row>:<iteration>`: one notice per row per ready event. */
+  event: string;
+  why: string;
+  where: string;
+  /** where he opens it ("" when the card names no link). */
+  url: string;
+  repo: string;
+  /** the row's spine, repo-relative. */
+  path: string;
+  row: string;
 }
 
 /**
@@ -87,10 +105,27 @@ export function asksFrom(items: OpenItem[], worldOf: (milestoneId: string) => st
 }
 
 /** the review list's cards (spine rows in review, live, not snoozed) of the owner's world, as notices. */
-export function reviewNotices(items: { id: string; title: string; ref?: string; repo?: string; liveUrl: string; milestoneId?: string }[]): Notifiable[] {
+export function reviewNotices(
+  items: { id: string; title: string; ref?: string; repo?: string; path?: string; liveUrl: string; milestoneId?: string; iteration?: number; face?: { title?: string; ready?: { whyText: string; where: string; url: string } } }[],
+): Notifiable[] {
   return items.map((r) => {
     const test = isTestItem({ repo: r.repo, code: r.ref, title: r.title });
-    return { key: `review:${r.id}`, kind: "review", title: r.title, ...(r.ref ? { code: r.ref } : {}), teamUrl: `${teamLink()}/`, liveUrl: r.liveUrl, ...(r.milestoneId ? { milestoneId: r.milestoneId } : {}), ...(test ? { test } : {}) };
+    const rd = r.face?.ready;
+    const ready: ReadyNotice | undefined =
+      rd && r.ref && r.repo && r.path
+        ? { event: `ready:${r.repo}:${r.ref}:${r.iteration ?? 1}`, why: rd.whyText, where: rd.where, url: rd.url, repo: r.repo, path: r.path, row: r.ref }
+        : undefined;
+    return {
+      key: `review:${r.id}`,
+      kind: "review",
+      title: r.title,
+      ...(r.ref ? { code: r.ref } : {}),
+      teamUrl: `${teamLink()}/`,
+      liveUrl: r.liveUrl,
+      ...(r.milestoneId ? { milestoneId: r.milestoneId } : {}),
+      ...(test ? { test } : {}),
+      ...(ready ? { ready } : {}),
+    };
   });
 }
 

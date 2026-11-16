@@ -15,7 +15,7 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
-import { CARD_WORD, DECIDE_QUESTION, hasDeadline, isDecisionCard } from "@/lib/cardKind";
+import { CARD_WORD, DECIDE_QUESTION, hasDeadline, isDecisionCard, isReady } from "@/lib/cardKind";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
@@ -225,11 +225,11 @@ export function WaitingForReview({
 
 /** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
 export function InboxDecisions() {
-  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face) && !hasDeadline(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face) && !hasDeadline(i.face) && !isReady(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
 }
 /** E948-S103: Done, waiting for your review keeps only finished work he marks done (a card with a deadline leads the inbox instead, components/deadlineFirst.tsx). */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face) && !hasDeadline(i.face)} snoozedList="all" />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face) && !hasDeadline(i.face) && !isReady(i.face)} snoozedList="all" />;
 }
 
 /**

@@ -1,6 +1,7 @@
 import type { PageNote } from "./pageNotes.js";
 import fs from "node:fs";
 import type { CardQc } from "./qc.js";
+import type { CardReady } from "./ready.js";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { field, stripInline } from "../adapters/markdown.js";
@@ -53,6 +54,8 @@ export interface CardFace {
   options?: string[];
   /** the card's `deadline:`: it leads the whole inbox with its time left (overdue in red, still first). */
   deadline?: CardDeadline;
+  /** something he is waiting on is ready: the card leads his inbox, set apart, and he is told once (review/ready.ts). */
+  ready?: CardReady;
 }
 
 /** a goal a follow-up names (`in:` or a spine file), found in the repo's docs/spines. */

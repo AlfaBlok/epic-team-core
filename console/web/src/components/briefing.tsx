@@ -36,15 +36,21 @@ function newest(krs: Pick<ScorecardRow, "measuredAt">[]): Pick<ScorecardRow, "me
 export function objectiveLines(n: ScorecardNode, place: number): [string, string] {
   const krs = keyResultsOf(n);
   const green = krs.filter((r) => r.state === "green").length;
-  const m = krMeasured(newest(krs));
-  return [`${place}. ${titleOf(n)}`, krs.length ? `${green} of ${krs.length} key results green, ${m.never ? "nothing measures them yet" : m.words.replace(/^stale: /, "")}.` : "No key results yet."];
+  return [`${place}. ${titleOf(n)}`, krs.length ? `${green} of ${krs.length} key results green. ${when(newest(krs), "Nothing measures them yet")}.` : "No key results yet."];
 }
 
-/** a key result's two lines: what it is, then its number now against its target and when it was measured. */
-export function keyResultLines(r: ScorecardRow): [string, string] {
+/** when it was measured, as a sentence's start: "Measured 3 h ago", "Measured 2 days ago, stale", or the never words. */
+function when(r: Pick<ScorecardRow, "measuredAt">, never: string): string {
   const m = krMeasured(r);
-  const now = r.value ? `${r.value} now` : "no number yet";
-  return [r.label, `${now}${r.target ? `, target ${r.target}` : ""}, ${m.never ? "nothing measures this yet" : m.words}.`];
+  if (m.never) return never;
+  const w = m.words.replace(/^stale: /, "");
+  return `${w.charAt(0).toUpperCase()}${w.slice(1)}${m.stale ? ", stale" : ""}`;
+}
+
+/** a key result's two lines: what it is, then where it is now, its target and when it was measured. */
+export function keyResultLines(r: ScorecardRow): [string, string] {
+  const now = r.value ? `Now: ${r.value}.` : "No number yet.";
+  return [r.label, `${now}${r.target ? ` Target: ${r.target}.` : ""} ${when(r, "Nothing measures this yet")}.`];
 }
 
 /** what Play says: the objective, each key result, then the question. */

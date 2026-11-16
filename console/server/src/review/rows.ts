@@ -15,6 +15,7 @@ import { activeMark, noteMarksOf, type NoteMark } from "./noteMarks.js";
 import { pageNotesFor, pageNotesOf, type PageNote } from "./pageNotes.js";
 import { cardFor, goalSentenceOf, plainName, plainNamesOf, projectOf, repoCards, screenshotPath, targetGoals, treeOf, type CardFace, type TargetGoal, type Sibling } from "./face.js";
 import { ownerName } from "../identity.js";
+import { readyOf } from "./ready.js";
 
 /**
  * "Done, waiting for your review" is a view of the spines. A review card is a spine ledger
@@ -702,6 +703,11 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
                 })(),
                 ...(card.options?.length ? { options: card.options } : {}),
                 ...(card.deadline ? { deadline: card.deadline } : {}),
+                // something he waits on (a deadline, urgent, his "send me…", or the card's `ready:`) leads his inbox
+                ...(() => {
+                  const ready = readyOf({ ready: card.ready, deadline: card.deadline, words: [titleCell, card.source ?? ""], source: card.source ?? "", evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card) } });
+                  return ready ? { ready } : {};
+                })(),
                 openInGoal: siblings
                   .filter((x) => x.ref !== r.id && !CLOSED_STATUS.test(stripInline(x.status)))
                   .map((x) => ({ ref: x.ref, ...(plainName(x.name) ? { name: plainName(x.name) } : {}) })),

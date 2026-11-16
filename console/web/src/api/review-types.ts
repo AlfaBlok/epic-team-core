@@ -252,6 +252,8 @@ export interface CardFace {
   options?: string[];
   /** the card's deadline (ISO UTC) and where it comes from: the card leads the whole inbox with its time left. */
   deadline?: { at: string; why?: string };
+  /** something he was waiting on is ready: why he waits, where it is, the one link to open it. It leads his inbox. */
+  ready?: { why: "ready" | "deadline" | "urgent" | "asked"; whyText: string; where: string; url: string };
 }
 
 /** a note left inside a page's own feedback box: date (YYYY-MM-DD), time (HH:MM UTC) when kept, his words, the page. */

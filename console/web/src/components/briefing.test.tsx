@@ -25,11 +25,11 @@ const B = node("team-browser", "EpicTeam: team browser fully operational", [{ la
 
 describe("the lines", () => {
   it("an objective: its place and name, then green of total and when measured", () => {
-    expect(objectiveLines(A, 1)).toEqual(["1. Memo: 5 testers", "0 of 2 key results green, measured 3 h ago."]);
+    expect(objectiveLines(A, 1)).toEqual(["1. Memo: 5 testers", "0 of 2 key results green. Measured 3 h ago."]);
   });
   it("a key result: its name, then its number now, its target and its time", () => {
-    expect(keyResultLines(A.keyResults![0])).toEqual(["Testers using it every day", "1 now, target 5, measured 3 h ago."]);
-    expect(keyResultLines(A.keyResults![1])[1]).toBe("I don't know now, nothing measures this yet.");
+    expect(keyResultLines(A.keyResults![0])).toEqual(["Testers using it every day", "Now: 1. Target: 5. Measured 3 h ago."]);
+    expect(keyResultLines(A.keyResults![1])[1]).toBe("Now: I don't know. Nothing measures this yet.");
   });
   it("'brief me' opens it, a longer message does not", () => {
     expect(["brief me", "Brief me.", "briefing", "give me my briefing", "start the briefing please"].every(isBriefMe)).toBe(true);

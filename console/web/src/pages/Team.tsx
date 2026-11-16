@@ -24,6 +24,7 @@ import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime 
 import { MilestoneDialog } from "@/components/dialogs";
 import { PinnedPriorityAsks, WaitingOnYou } from "@/components/waiting";
 import { DeadlineFirst } from "@/components/deadlineFirst";
+import { ReadyFirst } from "@/components/readyFirst";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
@@ -412,6 +413,8 @@ export function TeamPage({
           {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
           {/* (vn_cdcf1208): a question on what comes first sits first, above every section and pressing item. */}
           {/* (vn_c95c40ad): a card with a deadline leads the whole inbox, its time left counting down. */}
+          {/* ("came in too subtly"): what he was waiting on, now ready, leads above everything, deadlines included. */}
+          {only !== "goals" && keeps.review && <ReadyFirst />}
           {only !== "goals" && keeps.review && <DeadlineFirst />}
           {only !== "goals" && <PinnedPriorityAsks />}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
@@ -485,6 +488,8 @@ export function TeamPage({
               a question on what comes first (Put X first in your objectives?) sits first, above every section and pressing item. */}
           {/* (vn_c95c40ad): "something that was time sensitive ... how come that this is not the first thing on
               my inbox?": a card with a deadline leads the whole inbox, above every section, its time left counting down. */}
+          {/* (the owner 16 Nov 08:04Z: "came in too subtly"): what he was waiting on, now ready, leads above everything. */}
+          {keeps.review && <ReadyFirst />}
           {keeps.review && <DeadlineFirst />}
           <PinnedPriorityAsks />
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}

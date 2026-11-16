@@ -98,6 +98,7 @@ import { createAgentWake } from "./review/agentWake.js";
 import type { PostReview } from "./review/postCards.js";
 import { createWebPush, mountWebPush, vapidFromEnv, type PushTransport, type Vapid } from "./notify/webpush.js";
 import { asksFrom, isTestItem, reviewNotices, teamLink, type Sender } from "./notify/notice.js";
+import { addDecisionRow } from "./review/followups.js";
 import { cachedSudoRead as sudoRead } from "./secretCache.js";
 import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteList } from "./plug/memory.js";
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
@@ -2324,6 +2325,22 @@ export function createApp(
     options: opts.whatsapp,
     store: homeStore,
     setSkills: (id, skills) => recordFirst(() => personaRecord.recorded(homeStore).updatePersona(id, { skills })),
+    // a ready notice told or refused is a Decisions line on its row's spine (root L-45: the repo is the source).
+    readyNote: async (r, line) => {
+      const dir = resolveRepo(read.reposRoot, r.repo)?.path;
+      if (!dir) return `no checkout for ${r.repo}`;
+      const w = await spine.edit({
+        repoDir: dir,
+        path: r.path,
+        label: `ready notice ${r.row}`,
+        edit: (text, date) => {
+          const next = addDecisionRow(text, { date, outcome: line.outcome, decision: line.decision, summary: line.summary, evidence: `${teamLink()}/api/notify/ready`, revisit: "never" });
+          return next === undefined ? { skip: "no Decisions table" } : { text: next, msg: `${r.row}: ready notice ${line.outcome}`, body: `${line.decision}\n\nThe console's ready notice (hosted notify/whatsapp.ts readyPass).` };
+        },
+      });
+      if (w.status === "written") dropSpines(dir);
+      return w.status;
+    },
   }) ?? { alert: async () => undefined, tick: async () => undefined };
   // a console checkout ahead of or behind origin for over 5 min is an alert (log, /api/health, the Delivery
   // Manager's wake and, in production, one WhatsApp per episode); it was silent while the main server's the code repo stayed diverged.

@@ -36,3 +36,14 @@ export function splitDecisions<T extends { face?: Pick<CardFace, "decision" | "o
  * below leave it out (it is still counted where its kind belongs).
  */
 export const hasDeadline = (face: Pick<CardFace, "deadline"> | undefined | null) => !!face?.deadline?.at && Number.isFinite(Date.parse(face.deadline.at));
+
+/**
+ * (the owner 2026-11-16 08:04Z: "came in too subtly"): a card for something he was waiting on, now ready, leads
+ * the whole inbox under Ready for you (components/readyFirst.tsx), above the deadline cards; every other list leaves it out.
+ */
+export const isReady = (face: Pick<CardFace, "ready"> | undefined | null) => !!face?.ready;
+/** the ready cards, soonest deadline first, then the rest in the list's order. */
+export function byReady<T extends { face?: { ready?: unknown; deadline?: { at: string } } | null }>(cards: T[] | undefined): T[] {
+  const due = (c: T) => (c.face?.deadline?.at && Number.isFinite(Date.parse(c.face.deadline.at)) ? Date.parse(c.face.deadline.at) : Number.MAX_SAFE_INTEGER);
+  return (cards ?? []).filter((c) => !!c.face?.ready).sort((a, b) => due(a) - due(b));
+}

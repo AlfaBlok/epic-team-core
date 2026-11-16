@@ -125,6 +125,13 @@ export interface CardFields {
    * Airbnb mail's 72 hours), never guessed. A card with one leads the whole inbox with its time left.
    */
   deadline?: CardDeadline;
+  /**
+   * (the owner 2026-11-16 08:04Z: "email showed in the drafts but i was hping for an email or something in my
+   * epicteam inbox notifying - came in too subtly"): `ready: <where the thing is>` with its link, e.g.
+   * `ready: [Gmail Drafts, to help@example.com](https://mail.google.com/mail/u/0/#drafts)`. The card leads his inbox
+   * as ready for him and the console tells him once by WhatsApp or mail (review/ready.ts).
+   */
+  ready?: { where: string; url?: string };
 }
 
 export interface CardDeadline {
@@ -166,6 +173,7 @@ const KEYS: [RegExp, keyof CardFields | "skip"][] = [
   [/^(options|choices|buttons|decision options)$/, "options"],
   [/^(objective|objectives|serves|serves objective)$/, "objective"],
   [/^(deadline|due|due by|reply by|answer by)$/, "deadline"],
+  [/^(ready|ready at|where it is|find it at)$/, "ready"],
 ];
 /** the `from` fields (the persona that sends the card). */
 const FROM_KEYS: [RegExp, keyof CardFrom][] = [
@@ -321,6 +329,13 @@ export function parseCard(text: string): CardFields | undefined {
     if (key === "deadline") {
       const d = parseDeadline(v);
       if (d) out.deadline = d;
+      continue;
+    }
+    if (key === "ready") {
+      const l = MD_LINK.exec(v);
+      const url = (l?.[2] ?? URL_RE.exec(v)?.[0] ?? "").replace(/[.,;:]+$/, "");
+      const where = (l ? v.replace(l[0], l[1]) : url ? v.replace(url, "") : v).replace(/\s*(—|--|–)\s*$/, "").replace(/\s+/g, " ").trim();
+      out.ready = { where: unquote(where) || url, ...(url ? { url } : {}) };
       continue;
     }
     if (key === "completes") {

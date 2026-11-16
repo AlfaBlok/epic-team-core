@@ -125,7 +125,7 @@ export function searchLaptopView(view: LaptopView, macKept: WaitingItem[], q: st
 }
 
 /** Plain http (the tailnet) has no navigator.clipboard: copy through a hidden textarea. */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
