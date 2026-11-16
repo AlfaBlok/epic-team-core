@@ -61,6 +61,7 @@ import { milestoneAnswer, milestoneWheelRows } from "@/lib/bigRoots";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
 import { InlineMd } from "@/components/inlineMd";
+import { PlanTab } from "@/pages/social/PlanTab";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { pagesOfMilestone } from "@/lib/wheelPages";
 import { objectiveOf, productHref, scorecardHref } from "@/lib/scorecards";
@@ -68,12 +69,13 @@ export { objectiveOf };
 export { InlineMd };
 
 /** a campaign (a milestone whose repo has the social pack) gets three tabs in front; it opens on Pipeline. */
-const CAMPAIGN_TABS = ["pipeline", "brief", "history"] as const;
+const CAMPAIGN_TABS = ["pipeline", "plan", "brief", "history"] as const;
 const TABS = [...CAMPAIGN_TABS, "summary", "waiting", "tree", "chat", "deck", "activity", "personas", "pages", "approvals", "backlog", "definitions", "settings"] as const;
 type Tab = (typeof TABS)[number];
 /** each tab's name in the More menu (the Waiting and Tree tabs carry counts on the strip). */
 const TAB_LABEL: Record<Tab, string> = {
   pipeline: "Pipeline",
+  plan: "Plan",
   brief: "Brief & directions",
   history: "History",
   summary: "Summary",
@@ -360,7 +362,7 @@ function MilestoneScreen() {
   }, [item, waiting]);
   // the tabs stay on one line; what does not fit folds under More (a campaign's More is always there).
   const tabIds: Tab[] = card
-    ? ["pipeline", "brief", "history", "chat", "summary", "waiting", "tree", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "pages", "settings"]
+    ? ["pipeline", "plan", "brief", "history", "chat", "summary", "waiting", "tree", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "pages", "settings"]
     : ["summary", "waiting", "tree", "chat", ...(decks ? (["deck"] as Tab[]) : []), "activity", "personas", "pages", "approvals", "backlog", "definitions", "settings"];
   const { ref: tabsRef, folded } = useTabFold(tabIds, tab, !!card);
   const fold = (v: Tab, className?: string) => ({ "data-tab-id": v, className: cn(className, folded.has(v) && "hidden") });
@@ -461,6 +463,8 @@ function MilestoneScreen() {
           {card && (
             <>
               <TabsTrigger value="pipeline" {...fold("pipeline")}>Pipeline</TabsTrigger>
+              {/* the campaign's marketing plan, eight fixed sections, one tab. */}
+              <TabsTrigger value="plan" {...fold("plan")} data-testid="tab-plan">Plan</TabsTrigger>
               <TabsTrigger value="brief" {...fold("brief")}>Brief &amp; directions</TabsTrigger>
               <TabsTrigger value="history" {...fold("history")}>History</TabsTrigger>
               {/* the campaign's own chat (its context, with Call), next to its tabs, as the console's milestone Chat tab. */}
@@ -510,6 +514,7 @@ function MilestoneScreen() {
         {scope && (
           <CampaignProvider scope={scope}>
             <TabsContent value="pipeline">{tab === "pipeline" && <PipelinePage />}</TabsContent>
+            <TabsContent value="plan">{tab === "plan" && <PlanTab m={m} />}</TabsContent>
             <TabsContent value="brief">{tab === "brief" && <BriefDirectionsTab card={scope.card} />}</TabsContent>
             <TabsContent value="history">{tab === "history" && <HistoryPage />}</TabsContent>
           </CampaignProvider>
@@ -602,6 +607,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
       </TabsList>
       <div className="mt-4 min-w-0">
         {tab === "deck" && <BriefTab m={m} />}
+        {tab === "plan" && <PlanTab m={m} />}
         {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
         {tab === "pipeline" && (

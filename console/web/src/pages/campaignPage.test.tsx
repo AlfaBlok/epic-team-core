@@ -62,12 +62,12 @@ const page = (path: string, skin: Skin = SKINS.social) =>
   );
 
 describe("campaign page", () => {
-  it("opens on Pipeline; tabs Pipeline, Brief & directions, History in front; Approvals, Backlog, Definitions under more", async () => {
+  it("opens on Pipeline; tabs Pipeline, Plan, Brief & directions, History in front; Approvals, Backlog, Definitions under more", async () => {
     page("/milestones/ms-memo", SKINS.console); // the social skin shows the five tabs (fiveFixedTabs.test.tsx); these old tabs live on in the console skin
     const tabs = await screen.findByRole("tablist");
     const names = within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+/g, "").trim());
     // the campaign's own chat sits next to its tabs (as the console milestone's Chat tab, with Call).
-    expect(names.slice(0, 5)).toEqual(["Pipeline", "Brief & directions", "History", "Chat", "Summary"]);
+    expect(names.slice(0, 6)).toEqual(["Pipeline", "Plan", "Brief & directions", "History", "Chat", "Summary"]);
     expect(names.filter((n) => n === "Chat")).toHaveLength(1);
     expect(names).not.toContain("Approvals");
     expect(within(tabs).getByRole("tab", { name: "Pipeline" }).getAttribute("aria-selected")).toBe("true");

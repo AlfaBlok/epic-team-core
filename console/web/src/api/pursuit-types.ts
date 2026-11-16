@@ -149,6 +149,8 @@ export interface ScorecardRow {
   greenSince?: string;
   /** a key result: the Done-means box it measures (E907-4), or how it is read ("check", "light"). */
   doneMeans?: string;
+  /** when its value was last measured; absent: nothing measures it. Older than a day reads stale. */
+  measuredAt?: string;
 }
 export interface ScorecardWork {
   code: string;

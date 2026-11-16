@@ -471,6 +471,7 @@ export function createRealClient(): ApiClient {
     setCampaignPlan: (tenantId, id, plan) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan`, { plan }),
     saveOnePager: (tenantId, id, fields) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/onepager`, { fields }),
     getCampaignTotems: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/totems`),
+    getCampaignPlan: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan`),
     getOnboarding: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/onboarding`),
     fileProductNote: (tenantId, id, note) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/product-note`, note),
     keepSlide: (tenantId, id, slide) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/slide/keep`, slide),

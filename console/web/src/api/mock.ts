@@ -1362,6 +1362,12 @@ const mockMail = () => ({
     async getCampaignTotems() {
       return ok(mockTotems());
     },
+    /** a campaign with no plan written yet: every fixed section says so. */
+    async getCampaignPlan() {
+      const titles = ["Goal and numbers", "Who", "Messages", "Channels", "Offer", "This week's test", "Budget", "How we measure and change"];
+      const keys = ["goal", "who", "messages", "channels", "offer", "test", "budget", "measure"] as const;
+      return ok({ source: "none" as const, path: "docs/spines/root.md", repo: "demo", line: null, missing: titles, sections: keys.map((key, i) => ({ key, title: titles[i], written: false, lead: null, boxes: [], table: null, quotes: [] })) });
+    },
     /** customer zero today ('s path, 2 of 6). */
     async getOnboarding(tenantId: string) {
       return ok(mockOnboarding(tenantId));

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "@/api";
 import type { CampaignTotems } from "@/api/types";
+import type { MarketingPlan } from "@/api/campaign-types";
 import { mockCampaignCard } from "@/api/mockCampaigns";
 import { MilestonePage } from "@/pages/Milestone";
 import { sampleSocialExport } from "@/lib/social";
@@ -26,6 +27,25 @@ globalThis.ResizeObserver ??= class {
 
 const CARD = { ...mockCampaignCard(), repo: "social", remote: "memo-ai/social", title: "Reddit awareness week 37", milestoneId: "ms-memo" };
 let totems: CampaignTotems;
+// the campaign's Plan, eight fixed sections; two written, the rest not yet.
+const TITLES = ["Goal and numbers", "Who", "Messages", "Channels", "Offer", "This week's test", "Budget", "How we measure and change"];
+const KEYS = ["goal", "who", "messages", "channels", "offer", "test", "budget", "measure"] as const;
+const PLAN: MarketingPlan = {
+  source: "spine",
+  path: "docs/spines/c.md",
+  repo: "social",
+  line: "Bring your context home.",
+  missing: [],
+  sections: KEYS.map((key, i) => ({
+    key,
+    title: TITLES[i],
+    written: key === "goal" || key === "offer",
+    lead: key === "offer" ? "Your first 30 memories free." : null,
+    boxes: key === "offer" ? [{ label: "Gets", text: "first 30 memories free", note: "no card" }] : [],
+    table: key === "goal" ? { head: ["Step", "Today", "Goal"], rows: [["Signed up", "1", "10"]] } : null,
+    quotes: [],
+  })),
+};
 let sent: string[] = [];
 beforeEach(() => {
   totems = mockTotems();
@@ -34,6 +54,7 @@ beforeEach(() => {
   vi.spyOn(api, "listCampaigns").mockResolvedValue({ tenantId: "social", campaigns: [CARD] });
   vi.spyOn(api, "getSocial").mockResolvedValue({ tenantId: "social", repo: "social", data: sampleSocialExport(new Date("2026-11-03T10:00:00Z")) });
   vi.spyOn(api, "getCampaignTotems").mockImplementation(async () => totems);
+  vi.spyOn(api, "getCampaignPlan").mockResolvedValue(PLAN);
   vi.spyOn(api, "getMilestoneChat").mockResolvedValue({ messages: [] } as never);
   vi.spyOn(api, "sendMilestoneChatMessage").mockImplementation(async (_id: string, text: string) => (sent.push(text), { threadId: "t", pending: true }));
 });
@@ -65,10 +86,25 @@ describe("E964-S14 five fixed tabs", () => {
   it("opens on Deck; E978-S1 round 2: Deck, Product, Waiting on me, Pipeline, Tasks, Observations, History, Chat; Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Deck", "Product", "Waiting on me", "Pipeline", "Tasks", "Observations", "History", "Chat"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Deck", "Plan", "Product", "Waiting on me", "Pipeline", "Tasks", "Observations", "History", "Chat"]);
     expect(await screen.findByTestId("brief-tab")).toBeTruthy();
     for (const gone of ["Summary", "Tree", "Activity", "Personas", "Settings", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
     expect(screen.getByTestId("settings-and-personas").getAttribute("href")).toBe("/milestones/ms-memo?tab=settings");
+  });
+
+  it("the Plan tab shows the eight fixed sections in order, written ones as boxes, the rest Not written yet", async () => {
+    page("/milestones/ms-memo?tab=plan");
+    const tab = await screen.findByTestId("plan-tab");
+    expect(within(tab).getAllByRole("heading", { level: 3 }).map((h) => h.textContent?.replace(/^\d+/, ""))).toEqual(TITLES);
+    expect(within(screen.getByTestId("plan-section-offer")).getByText("first 30 memories free")).toBeTruthy();
+    expect(within(screen.getByTestId("plan-section-goal")).getByTestId("plan-funnel").textContent).toContain("today 1 · goal 10");
+    expect(within(tab).getAllByTestId("plan-not-written")).toHaveLength(6);
+  });
+
+  it("the console skin's campaign has the Plan tab too", async () => {
+    page("/milestones/ms-memo?tab=plan", SKINS.console);
+    expect(await screen.findByTestId("plan-tab")).toBeTruthy();
+    expect(screen.getByTestId("tab-plan")).toBeTruthy();
   });
 
   it("old links land on the tab that holds what they showed", () => {

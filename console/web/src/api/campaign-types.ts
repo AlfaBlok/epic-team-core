@@ -184,3 +184,27 @@ export interface NamedCampaignResult {
   team: { role: string; persona: string; assignmentId: string; from?: string; movedOff: boolean }[];
   skipped: string[];
 }
+
+/** GET /api/tenants/:id/campaigns/:mid/plan: the campaign's marketing plan, eight fixed sections (docs/campaign-plan.md). */
+export interface MarketingPlanBox {
+  label: string;
+  text: string;
+  note: string | null;
+}
+export interface MarketingPlanSection {
+  key: "goal" | "who" | "messages" | "channels" | "offer" | "test" | "budget" | "measure";
+  title: string;
+  written: boolean;
+  lead: string | null;
+  boxes: MarketingPlanBox[];
+  table: { head: string[]; rows: string[][] } | null;
+  quotes: string[];
+}
+export interface MarketingPlan {
+  source: "spine" | "copy" | "none";
+  path: string;
+  repo: string;
+  line: string | null;
+  sections: MarketingPlanSection[];
+  missing: string[];
+}

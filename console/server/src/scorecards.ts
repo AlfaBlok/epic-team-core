@@ -65,6 +65,9 @@ export interface ScorecardRow {
   doneMeans?: string;
   /** the file's `live` spec, read by the source registered for its kind; dropped once read. */
   live?: LiveSpec;
+  /** when its value was last measured: the daily measure's stamp in the file, or now for a value read live
+   * (a live source, a ticked Done-means box). Absent: nothing measures it; the screen says so. Older than a day: stale. */
+  measuredAt?: string;
 }
 
 /** a key result's `live` spec in its set's file: `kind` names the source, the rest is the source's own settings. */
@@ -100,6 +103,7 @@ export async function applyLiveKeyResults<T extends { nodes: ScorecardNode[] }>(
         if (!a) return;
         r.value = a.value;
         r.state = a.state;
+        r.measuredAt = new Date().toISOString();
         if (a.note) r.note = a.note;
         else delete r.note;
       } catch {
@@ -261,7 +265,7 @@ export interface ScorecardFile {
   /** where the shape came from. */
   proposal?: string;
   /** the key results: label, the Done-means id it measures, value, note (due date, aim), colour, work codes. */
-  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec }[];
+  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string }[];
   /** "repo CODE" of the epic whose Goal sentence is the objective. */
   spine?: string;
   /** the child epics the sidebar shows, short names: { epic: "EPIC-907" or a spine path, name }. */
@@ -504,6 +508,8 @@ export function buildScorecards(
         ...(k.target ? { target: k.target } : {}),
         ...(k.doneMeans ? { doneMeans: k.doneMeans.replace(/^[\w.-]+:/, "") } : {}),
         ...(!ticked && k.live && typeof k.live === "object" && typeof k.live.kind === "string" ? { live: k.live } : {}),
+        // a ticked box is read from its spine now; otherwise the daily measure's stamp, none when nothing measures it
+        ...(ticked ? { measuredAt: new Date().toISOString() } : typeof k.measuredAt === "string" && k.measuredAt ? { measuredAt: k.measuredAt } : {}),
         work,
       };
     });

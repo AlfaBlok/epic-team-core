@@ -468,6 +468,19 @@ function KrTarget({ r, label, full }: { r: ScorecardRow; label?: boolean; full?:
   );
 }
 
+/** a key result older than this reads stale (the owner: "are all the other ones also not up to date?"). */
+export const KR_STALE_MS = 24 * 3600 * 1000;
+/** when a key result was measured, in words: "measured 3 h ago", stale past a day, "nothing measures this" when never. */
+export function krMeasured(r: Pick<ScorecardRow, "measuredAt">, now = Date.now()): { words: string; stale: boolean; never: boolean } {
+  const t = r.measuredAt ? Date.parse(r.measuredAt) : NaN;
+  if (!Number.isFinite(t)) return { words: "nothing measures this yet", stale: true, never: true };
+  const ago = Math.max(0, now - t);
+  const h = Math.floor(ago / 3600000);
+  const when = ago < 3600000 ? `${Math.max(1, Math.round(ago / 60000))} min ago` : h < 48 ? `${h} h ago` : `${Math.floor(h / 24)} days ago`;
+  const stale = ago > KR_STALE_MS;
+  return { words: stale ? `stale: measured ${when}` : `measured ${when}`, stale, never: false };
+}
+
 /** where it stands now: the value, its note (when it was read, the due date), a dot in its colour. In the row it is cut to
  * two lines (the owner: "please make rows reasonable height"); the whole text opens with the row (`full`). */
 function KrNow({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
@@ -476,11 +489,23 @@ function KrNow({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: bo
       <span className="mt-[5px] shrink-0">
         <TrafficLight light={r.state} size="sm" testId="kr-light" />
       </span>
-      <span className={cn("min-w-0 [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : [r.value, r.note].filter(Boolean).join(" · ")} data-testid={full ? "kr-now-full" : "kr-now-short"}>
-        {label && <span className="text-muted-foreground">Now </span>}
-        <span className="font-semibold tabular-nums text-foreground">{r.value}</span>
-        {r.note && <span className="text-muted-foreground"> · {r.note}</span>}
+      <span className="grid min-w-0">
+        <span className={cn("min-w-0 [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : [r.value, r.note].filter(Boolean).join(" · ")} data-testid={full ? "kr-now-full" : "kr-now-short"}>
+          {label && <span className="text-muted-foreground">Now </span>}
+          <span className="font-semibold tabular-nums text-foreground">{r.value}</span>
+          {r.note && <span className="text-muted-foreground"> · {r.note}</span>}
+        </span>
+        {r.kind === "key-result" && <KrWhen r={r} />}
       </span>
+    </span>
+  );
+}
+/** the measured line under a key result's value: when, or stale, or that nothing measures it. */
+function KrWhen({ r }: { r: ScorecardRow }) {
+  const m = krMeasured(r);
+  return (
+    <span className={cn("block text-xs", m.stale ? "text-muted-foreground/70 italic" : "text-muted-foreground")} title={r.measuredAt} data-testid="kr-measured" data-stale={m.stale ? "1" : "0"}>
+      {m.words}
     </span>
   );
 }
@@ -489,6 +514,7 @@ function KrNow({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: bo
 export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow[]; setId: string; open?: string | null; onOpen?: (label: string | null) => void }) {
   const by = { green: 0, amber: 0, red: 0, unknown: 0 };
   krs.forEach((r) => by[r.state]++);
+  const stale = krs.filter((r) => krMeasured(r).stale).length;
   return (
     <div className="grid gap-2" data-testid="kr-sheet-wrap">
       <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm text-muted-foreground" data-testid="kr-summary">
@@ -497,6 +523,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
         </span>
         <span>
           {by.amber} amber · {by.red} red{by.unknown ? ` · ${by.unknown} no data yet` : ""}
+          {stale ? ` · ${stale} stale, greyed` : ""}
         </span>
         <span>tap a key result for the work under it</span>
       </p>
@@ -513,7 +540,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
           const all = r.work ?? [];
           const toggle = () => onOpen?.(isOpen ? null : r.label);
           return (
-            <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className="border-b last:border-b-0" data-testid="kr-item" data-state={r.state}>
+            <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className={cn("border-b last:border-b-0", krMeasured(r).stale && "opacity-55 grayscale")} data-testid="kr-item" data-state={r.state} data-stale={krMeasured(r).stale ? "1" : "0"}>
               <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
                 <i className="block self-stretch" style={{ background: STATE_FILL[r.state] }} aria-hidden="true" />
                 <span className="grid min-w-0 gap-0.5 py-3">
@@ -596,7 +623,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
             ["green", "green: at target"],
             ["amber", "amber: on its way"],
             ["red", "red: behind or stuck"],
-            ["unknown", "no data yet"],
+            ["unknown", "no data yet · greyed: not measured in the last day"],
           ] as const
         ).map(([k, w]) => (
           <span key={k} className="inline-flex items-center gap-1.5">

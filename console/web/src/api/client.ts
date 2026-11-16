@@ -118,7 +118,7 @@ import type {
   ChatAttachment,
   ChatHistory,
   MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
-import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate } from "./campaign-types";
+import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate, MarketingPlan } from "./campaign-types";
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult } from "./inbox-types";
 
 /** GET /api/push. */
@@ -475,6 +475,8 @@ export interface ApiClient {
   saveOnePager(tenantId: string, milestoneId: string, fields: Partial<Record<OnePagerKey, string>>): Promise<{ commit?: string; onePager?: OnePager; closedDraft?: string }>;
   /** the five tabs' read of the campaign's epic file; Keep or Undo a rebuilt slide; a proposal's Add to the brief / Not now. */
   getCampaignTotems(tenantId: string, milestoneId: string): Promise<CampaignTotems>;
+  /** the campaign's Plan tab: its marketing plan from the spine's `## Plan` section (docs/campaign-plan.md). */
+  getCampaignPlan(tenantId: string, milestoneId: string): Promise<MarketingPlan>;
   /** the world's onboarding scorecard (six ticks read from live state). */
   getOnboarding(tenantId: string): Promise<Onboarding>;
   /** the owner's note on a Product tab slide, filed to the campaign's spine; returns that slide's notes. */

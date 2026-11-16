@@ -177,8 +177,8 @@ describe("goal sets: the screens", () => {
     expect(within(krs[0]).getByTestId("kr-things").textContent).toBe("2 things under it");
     // each key result: its target and its status now, side by side (the owner 17:57Z: "what is the target? what is the status?")
     expect(within(krs[0]).getByTestId("kr-target").textContent).toBe("5 by 17 Nov");
-    expect(within(krs[0]).getByTestId("kr-now").textContent).toBe("0 of 5 · read 13 Nov");
-    expect(within(krs[0]).getByTestId("kr-target-status-phone").textContent).toBe("Target 5 by 17 NovNow 0 of 5 · read 13 Nov");
+    expect(within(krs[0]).getByTestId("kr-now").textContent).toBe("0 of 5 · read 13 Novnothing measures this yet"); // no stamp in this fixture
+    expect(within(krs[0]).getByTestId("kr-target-status-phone").textContent).toBe("Target 5 by 17 NovNow 0 of 5 · read 13 Novnothing measures this yet");
     // no target in the file: "no target yet", in grey
     expect(within(krs[1]).getByTestId("kr-target").textContent).toBe("no target yet");
     expect(screen.getByTestId("kr-sheet-head").textContent).toBe("Key resultTargetStatus now");
@@ -197,7 +197,7 @@ describe("goal sets: the screens", () => {
     // ...and a tap opens the whole status and target, uncut, above its work
     const whole = within(screen.getAllByTestId("kr-item")[0]).getByTestId("kr-detail-status");
     expect(within(whole).getByTestId("kr-now-full").className).not.toContain("line-clamp");
-    expect(whole.textContent).toBe("Status now0 of 5 · read 13 NovTarget 5 by 17 Nov");
+    expect(whole.textContent).toBe("Status now0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 Nov");
     const items = within(screen.getAllByTestId("kr-item")[0]).getAllByTestId("kr-work-item");
     expect(items.map((x) => [x.textContent, x.dataset.state])).toEqual([
       ["E901-S1Build the pageready", "amber"],

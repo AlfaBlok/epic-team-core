@@ -8,11 +8,12 @@ import { ownerName, socialWorld } from "@/lib/identity";
  * campaign pushes), Waiting on me, Pipeline (its posts), Tasks, Observations, History, Chat. Settings and personas sit
  * behind one header button. Old links land on the tab that now holds what they showed.
  */
-export const FIVE_TABS = ["deck", "product", "waiting", "pipeline", "work", "observations", "history", "chat"] as const;
+export const FIVE_TABS = ["deck", "plan", "product", "waiting", "pipeline", "work", "observations", "history", "chat"] as const;
 export type FiveTab = (typeof FIVE_TABS)[number] | "settings";
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
 export const FIVE_LABELS: Record<(typeof FIVE_TABS)[number] | "settings", string> = {
   deck: "Deck",
+  plan: "Plan",
   product: "Product",
   waiting: "Waiting on me",
   pipeline: "Pipeline",
