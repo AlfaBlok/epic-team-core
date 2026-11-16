@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { lazyPage } from "@/lib/lazyPage";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { ObjectivePlanTab } from "@/pages/social/PlanTab";
+import { TotemTab, productOfObjective, totemTabs, useTotemMaps } from "@/components/totemTabs";
 import { pagesOfObjective } from "@/lib/wheelPages";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
@@ -1201,8 +1202,9 @@ function Personas({ node }: { node: ScorecardNode }) {
 export function GoalSetPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const tab = objectiveTab(params.get("tab"));
+  const baseTab = objectiveTab(params.get("tab"));
   const { data: pursuitsBody } = usePursuits();
+  const totemMaps = useTotemMaps();
   const kr = params.get("kr");
   const openKr = (label: string | null) =>
     setParams(
@@ -1230,7 +1232,12 @@ export function GoalSetPage() {
   const only = useCallback((i: Placeable) => !!node && inScorecard(inbox.ix, node.id, i), [node, inbox.ix]);
   const kitId = pursuit ? kitPursuitOf(pursuitsBody?.pursuits, pursuit.id) : undefined;
   const pursuitP = pursuit ? pursuitsBody?.pursuits.find((x) => x.id === pursuit.id) : undefined;
-  const tabs = kitId ? TABS : TABS.filter((t) => t.id !== SET_KIT_TAB);
+  // root L-77: the objective's product map gives each hardwired totem a tab (Pricing, Launch board, ...); empty ones show empty.
+  const productMap = productOfObjective(totemMaps.data, pursuit?.id, pursuitP?.product?.id);
+  const extraTabs = totemTabs(productMap, TABS.map((t) => t.id));
+  const tabs = [...(kitId ? TABS : TABS.filter((t) => t.id !== SET_KIT_TAB)), ...extraTabs.map(({ id, label }) => ({ id, label }))];
+  const totemOn = extraTabs.find((t) => t.id === params.get("tab"));
+  const tab: string = totemOn ? totemOn.id : baseTab;
   const pagesList = useWheelPages();
   const myPages = useMemo(() => (node ? pagesOfObjective(pagesList.data, data, inbox.ix, node.id) : []), [pagesList.data, data, inbox.ix, node]);
   return (
@@ -1299,6 +1306,7 @@ export function GoalSetPage() {
           {tab === "context" && <Context node={node} pursuit={pursuit} />}
           {tab === "personas" && <Personas node={node} />}
           {tab === "plan" && <ObjectivePlanTab id={pursuit.id} />}
+          {totemOn && productMap && <TotemTab product={productMap.product} totem={totemOn.totem} />}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
           {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
         </>

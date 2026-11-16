@@ -600,7 +600,7 @@ export function AccountBlock() {
           </span>
           {world && (
             <span className="truncate text-muted-foreground" data-testid="account-world">
-              World: {world}
+              Workspace: {world}
               {role ? ` (${role})` : ""}
             </span>
           )}
@@ -886,7 +886,7 @@ export function BillingNote() {
         <p>Thank you. Stripe is confirming your payment. Your team starts as soon as it arrives, refresh in a moment.</p>
       ) : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="min-w-0 flex-1">Welcome to the console skin. Your account is ready. Your team starts working once your plan is paid: €49 a month.</p>
+          <p className="min-w-0 flex-1">Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid: €49 a month.</p>
           {world && api.startPlanCheckout && (
             <Button size="sm" onClick={pay} disabled={busy} pending={busy} pendingLabel="Opening…" data-testid="billing-pay">
               Pay €49 a month

@@ -1366,6 +1366,20 @@ const mockMail = () => ({
     async getObjectivePlan() {
       return ok(unwrittenPlan());
     },
+    async getTotems() {
+      return ok({
+        statement: "Each product's data graph is the known map its personas read from at the start and write back to at the end.",
+        every: { totems: [], grows: [] },
+        products: [{ product: "notes", name: "Notes", repos: ["notes"], objectives: ["notes-live"], grows: [], totems: [
+          { id: "marketing-plan", name: "Marketing plan", shape: "page" as const, tab: "plan", lives: {} },
+          { id: "pricing", name: "Pricing", shape: "page" as const, tab: "pricing", lives: {} },
+          { id: "launch-board", name: "Launch board", shape: "table" as const, tab: "launch", lives: { board: "notes" } },
+        ] }],
+      });
+    },
+    async getTotem(product: string, id: string) {
+      return ok({ product, id, name: id, shape: "page" as const, where: "not placed yet", empty: true });
+    },
     async getCampaignPlan() {
       return ok(unwrittenPlan());
     },

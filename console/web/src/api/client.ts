@@ -3,6 +3,7 @@ import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, Com
 import type { BuildingList } from "./building-types";
 import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
+import type { TotemMaps, TotemView } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
 import type { AskLogSummary, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
@@ -479,6 +480,9 @@ export interface ApiClient {
   getCampaignPlan(tenantId: string, milestoneId: string): Promise<MarketingPlan>;
   /** an objective's Plan tab: the same eight sections, read from the campaign spine the objective names. */
   getObjectivePlan(id: string): Promise<MarketingPlan>;
+  /** root L-77: every product's map (its hardwired totems) and one totem's content for its tab. */
+  getTotems(): Promise<TotemMaps>;
+  getTotem(product: string, id: string): Promise<TotemView>;
   /** the world's onboarding scorecard (six ticks read from live state). */
   getOnboarding(tenantId: string): Promise<Onboarding>;
   /** the owner's note on a Product tab slide, filed to the campaign's spine; returns that slide's notes. */

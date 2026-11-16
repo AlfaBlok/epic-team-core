@@ -67,7 +67,8 @@ import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } fr
 import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
-import { createPursuits, effortForSpine, epicHeading, priorityLines } from "./pursuits.js";
+import { createPursuits, effortForSpine, epicHeading, parsePursuits, priorityLines } from "./pursuits.js";
+import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
@@ -982,6 +983,22 @@ export function createApp(
   const skillCheck: typeof worldSkillCheck = (p, w) =>
     worldSkillCheck(p, w?.link && w.milestone && w.link.host === mainHost() ? { ...w, link: { ...w.link, checkout: async () => (await w.link!.checkout().catch(() => undefined)) ?? resolveRepo(read.reposRoot, w.milestone!.repo)?.path } } : w);
   const worldOf = (id: string) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT;
+  // root L-77: each product's map, read fresh from the home repo's docs/totems/ (one file per product).
+  const totemHome = () => resolveRepo(read.reposRoot, homeRepo())?.path;
+  const totemMaps = () => readMaps(totemHome());
+  /** the objective whose epics list this milestone's spine (docs/pursuits.json), for picking its product. */
+  const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => {
+    try {
+      const doc = parsePursuits(fs.readFileSync(path.join(totemHome() ?? "", "docs/pursuits.json"), "utf8"));
+      return doc.pursuits.find((p) => p.epics.some((e) => e.repo === m.repo && e.path === m.path) || (p.plan?.repo === m.repo && p.plan?.path === m.path))?.id;
+    } catch {
+      return undefined;
+    }
+  };
+  const totemMapFor = (m: { repo?: string; path: string }): string => {
+    const maps = totemMaps();
+    return mapSection(maps, productFor(maps, { objective: objectiveOfMilestone(m), repo: m.repo }));
+  };
   // the owner's pursuits (docs/pursuits.json of the code repo): scorecard, totems, moving or stalled, and the effort
   // each rank buys (pursuits.ts); only the home world's milestones follow it.
   const pursuits = createPursuits({ reposRoot: read.reposRoot, board: () => launchBoard?.board() ?? null, git: gitOut(20_000) });
@@ -1072,6 +1089,7 @@ export function createApp(
     },
     launchDrafts: launchDraftsOf, // launch board reds with no owner row
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
+    totemMap: async (m) => totemMapFor(m), // the product's map: read its totems first, write back last (root L-77)
     ownerObjectives: async (m) => (ownerObjectivesNow && worldOf(m.id) === DEFAULT_TENANT ? ownerObjectivesNow() : undefined), // his objectives open every wake and brief
     deskInbox: deskInboxOf, // notes other worlds dropped in this repo's desk/inbox/
     // Mac ticket questions to the Team desk still waiting for an answer (steps/deskQuestions.ts)
@@ -1842,6 +1860,18 @@ export function createApp(
   api.get("/x-stats", (c) => c.json(xStats.get(c.req.query("date") || undefined)));
   // the rules every worker brief carries verbatim, fresh from this release (a manager's brief helper reads them);
   // ?repo=<row's repo>&title=<row title> adds the owner's view only for a row on its topic (docs/his-views.json)
+  // root L-77: the map. Every product's totems (the hardwired nodes of its data graph), one totem's content
+  // for its tab on the objective screen (an empty one says where it will live), and the section a wake prompt carries.
+  api.get("/totems", (c) => c.json(totemMaps()));
+  api.get("/totems/:product/prompt", (c) => {
+    const maps = totemMaps();
+    const p = maps.products.find((x) => x.product === c.req.param("product"));
+    return p ? c.text(mapSection(maps, p) + "\n") : c.json({ error: "not_found" }, 404);
+  });
+  api.get("/totems/:product/:totem", (c) => {
+    const v = totemView({ maps: totemMaps(), product: c.req.param("product"), totem: c.req.param("totem"), repoDir: (r) => resolveRepo(read.reposRoot, r)?.path, board: () => launchBoard?.board() ?? null });
+    return v ? c.json(v) : c.json({ error: "not_found" }, 404);
+  });
   api.get("/worker-rules", async (c) => {
     const line = (await ownerObjectivesNow?.().catch(() => undefined))?.line;
     const repo = c.req.query("repo"), title = c.req.query("title");

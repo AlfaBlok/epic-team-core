@@ -161,6 +161,8 @@ export interface CycleOptions {
    * `line` rides in the first worker rule of every brief. Undefined: another world's milestone (none).
    */
   ownerObjectives?: (m: Milestone) => Promise<{ block: string; line: string } | undefined>;
+  /** the milestone's product map (totemMap.ts, root L-77): its totems to read first and write back last; "" = no map. */
+  totemMap?: (m: Milestone) => Promise<string | undefined>;
   /** the repo's open desk-to-desk notes from other worlds (desk/inbox.ts; undefined = none, or not the repo's home milestone). */
   deskInbox?: (m: Milestone) => Promise<string | undefined>;
   /** Mac ticket questions to the Team desk still open for this milestone (a Delivery Manager wake answers them first). */
@@ -1984,10 +1986,12 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const objectives = isDeliveryManager(p.name) && o.objectives ? (await o.objectives(m).catch(() => undefined))?.section : undefined;
     const services = o.teamServices ? await o.teamServices(p, run.id).catch(() => undefined) : undefined;
     const owned = o.ownerObjectives ? await o.ownerObjectives(m).catch(() => undefined) : undefined;
+    const map = o.totemMap ? await o.totemMap(m).catch(() => undefined) : undefined;
     const deckUrl = deckUrlOf(m);
     let prompt =
       buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl) +
       (owned?.block ? "\n\n" + owned.block : "") +
+      (map ? "\n\n" + map : "") +
       (priority ? "\n\n" + priority : "") +
       (objectives ? "\n\n" + objectives : "") +
       (rollup ? "\n\n" + rollup : "") +

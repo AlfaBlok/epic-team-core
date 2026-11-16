@@ -81,7 +81,7 @@ describe("what counts as an outcome", () => {
 
   it("every worker brief carries the Ticket worker's definition", () => {
     setOutcomeDefsDir(repo.dir);
-    expect(workerBriefRules()[1]).toContain("What counts as an outcome for you (Ticket worker): The row's result is live.");
+    expect(workerBriefRules()[2]).toContain("What counts as an outcome for you (Ticket worker): The row's result is live.");
   });
 
   it("the run PATCH refuses activity lines, logs a manager's child run as the Ticket worker, and GET serves the definitions", async () => {
