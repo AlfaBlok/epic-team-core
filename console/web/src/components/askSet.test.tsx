@@ -99,4 +99,67 @@ describe("AskSet", () => {
     ]);
     expect(screen.getByTestId("accept-all").textContent).toMatch(/Yes to all 1: make them tasks$/);
   });
+
+  // E948-S127: his 20:29Z note (vn_7f478843) on this card was saved as feedback only and the card came back open.
+  const NOTE = "So the first one, OK, the second one, no, I don't want to raise the limit. The third one, yes. Did you apply to OVH without my consent?";
+  const say = (words: string) => {
+    const box = screen.getByTestId("card-feedback-box");
+    fireEvent.change(within(box).getByLabelText("Feedback"), { target: { value: words } });
+    fireEvent.click(screen.getByTestId("card-feedback-send"));
+  };
+  it("his words in the box answer each ask, pressed as its button; the card collapses to one Sent row; the rest goes to the desk", async () => {
+    const calls: [string, { kind: string; text?: string; asRow?: boolean }][] = [];
+    vi.spyOn(api, "respondToWaiting").mockImplementation(async (id, input) => (calls.push([id, input as never]), { id: `jr_${id}` }) as never);
+    const read = vi.spyOn(api, "readSpokenAnswers").mockResolvedValue({
+      reads: [
+        { id: "wj_ROOT-A1", kind: "approve", quote: "the first one, OK,", how: "order" },
+        { id: "wj_ROOT-A2", kind: "deny", quote: "the second one, no, I don't want to raise the limit.", how: "order" },
+        { id: "wj_ROOT-A3", kind: "approve", quote: "The third one, yes.", how: "order" },
+      ],
+    });
+    const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
+    render(<AskSet group={{ persona: "Delivery Manager", items: [rec("ROOT-A1"), rec("ROOT-A2"), rec("ROOT-A3")] }} />);
+    say(NOTE);
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Yes, no, yes"));
+    expect(read).toHaveBeenCalledWith(NOTE, [expect.objectContaining({ id: "wj_ROOT-A1", code: "ROOT-A1", line: "Thing ROOT-A1" }), expect.anything(), expect.anything()]);
+    expect(calls.map(([id, i]) => [id, i.kind, i.asRow ?? false])).toEqual([
+      ["wj_ROOT-A1", "approve", true],
+      ["wj_ROOT-A2", "deny", false],
+      ["wj_ROOT-A3", "approve", true],
+    ]);
+    expect(calls[1][1].text).toBe("the second one, no, I don't want to raise the limit.");
+    const [text] = desk.mock.calls[0];
+    expect(text).toContain(NOTE);
+    expect(text).toContain("The card took these as his answers (pressed as its buttons): ROOT-A1 yes, ROOT-A2 no, ROOT-A3 yes.");
+  });
+  it("a part that is not plain is never pressed and never dropped: the desk asks him one open question", async () => {
+    const calls: string[] = [];
+    vi.spyOn(api, "respondToWaiting").mockImplementation(async (id) => (calls.push(id), { id: `jr_${id}` }) as never);
+    vi.spyOn(api, "readSpokenAnswers").mockResolvedValue({
+      reads: [
+        { id: "wj_ROOT-A1", kind: "approve", quote: "the first one, yes", how: "order" },
+        { id: "wj_ROOT-A2", kind: "unclear", quote: "the second one, maybe later", how: "order" },
+      ],
+    });
+    const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
+    render(<AskSet group={{ persona: "Advisor", items: [rec("ROOT-A1"), rec("ROOT-A2")] }} />);
+    say("the first one, yes, the second one, maybe later");
+    await waitFor(() => expect(screen.getByTestId("ask-set-said").textContent).toBe("Took 1 of 2 as your answers. The desk asks you about the rest."));
+    expect(calls).toEqual(["wj_ROOT-A1"]);
+    expect(desk.mock.calls[0][0]).toContain('Not plain which answer he gave on ROOT-A2 "Thing ROOT-A2": ask him one open question, never guess.');
+    // the answered row says so; the unclear one keeps its buttons
+    expect(screen.getAllByTestId("ask-set-done").map((d) => d.textContent)).toEqual(["✓ Accepted: it becomes a ready row"]);
+    expect(screen.getByTestId("ask-set").textContent).toContain("Yes to all 1");
+  });
+  it("words that answer nothing still reach the desk, and the card says the asks stay open", async () => {
+    const respond = vi.spyOn(api, "respondToWaiting");
+    vi.spyOn(api, "readSpokenAnswers").mockResolvedValue({ reads: [{ id: "wj_ROOT-A1", kind: "none" }, { id: "wj_ROOT-A2", kind: "none" }] });
+    const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
+    render(<AskSet group={{ persona: "Advisor", items: [rec("ROOT-A1"), rec("ROOT-A2")] }} />);
+    say("what does the second one cost?");
+    await waitFor(() => expect(screen.getByTestId("ask-set-said").textContent).toMatch(/stay open/));
+    expect(respond).not.toHaveBeenCalled();
+    expect(desk.mock.calls[0][0]).toMatch(/what does the second one cost\?$/);
+  });
 });
+

@@ -2,10 +2,11 @@ import { useState } from "react";
 import { SnoozeDropdown } from "@/components/waiting";
 import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
 import type { SnoozeChoice } from "@/api";
-import { CardFeedback } from "@/components/cardFeedback";
+import { CardFeedback, sendFeedback } from "@/components/cardFeedback";
+import { cardPage } from "@/voice/AnswerVoice";
 import { CARD_FRAME, CARD_META, CARD_TITLE } from "@/components/cardShell";
 import { Loader2 } from "lucide-react";
-import { api, type WaitingItem } from "@/api";
+import { api, type SpokenRead, type WaitingItem } from "@/api";
 import { invalidate, mutate } from "@/lib/data";
 import { relayOf, snoozeItem, unsnoozeItem } from "@/lib/snooze";
 import { showClosed } from "@/lib/afterClose";
@@ -127,6 +128,57 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
     for (const i of snoozable) void snoozeItem(i, c);
     showClosed({ said: "Snoozed", slot: setSlots(group), title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
   };
+  /**
+   * E948-S127 (vn_02c8f518, vn_7f478843): his words in the set's box answer its asks. The console reads which ask each part
+   * answers ("the first one, OK, the second one, no ... The third one, yes"), each clear answer is pressed through the same
+   * route as its button (so it is stored, written, woken and still answered after a reload), and his words go on to the
+   * Team desk saying what the card took. A part that is not plain is never dropped: the desk asks him one open question.
+   */
+  const title = `The ${group.persona}'s ${group.items.length} recommendations`;
+  const refName = group.items.map((i) => i.code ?? i.id).join(", ");
+  const [said, setSaid] = useState<string>();
+  const sendWords = async (words: string, files: string[], via: "text" | "voice") => {
+    const open = left;
+    setSaid(undefined);
+    let reads: SpokenRead[] = [];
+    try {
+      if (open.length) reads = (await api.readSpokenAnswers(words, open.map((i) => ({ id: i.id, line: setLine(i), ...(i.code ? { code: i.code } : {}) })))).reads;
+    } catch {
+      reads = []; // an older console without the reader: his words still reach the desk, as before
+    }
+    const took: string[] = [];
+    const failed: string[] = [];
+    for (const r of reads) {
+      const i = open.find((x) => x.id === r.id);
+      if (!i || (r.kind !== "approve" && r.kind !== "deny")) continue;
+      const name = i.code ?? setLine(i);
+      setBusy(i.id);
+      try {
+        await mutate(() => api.respondToWaiting(i.id, { kind: r.kind as "approve" | "deny", text: r.quote ?? "", milestoneId: i.milestoneId, wake: true, ...(r.kind === "approve" ? { asRow: true } : {}), ...relayOf(i) }));
+        setDone((d) => ({ ...d, [i.id]: { kind: r.kind as "approve" | "deny" } }));
+        took.push(`${name} ${r.kind === "approve" ? "yes" : "no"}`);
+      } catch (e) {
+        setDone((d) => ({ ...d, [i.id]: { kind: r.kind as "approve" | "deny", error: (e as Error).message } }));
+        failed.push(name);
+      } finally {
+        setBusy(undefined);
+      }
+    }
+    const unclear = reads.filter((r) => r.kind === "unclear").map((r) => open.find((x) => x.id === r.id)).filter((i): i is WaitingItem => !!i);
+    const lines = [
+      ...(took.length ? [`The card took these as his answers (pressed as its buttons): ${took.join(", ")}.`] : []),
+      ...(unclear.length ? [`Not plain which answer he gave on ${unclear.map((i) => `${i.code ?? ""} "${setLine(i)}"`.trim()).join("; ")}: ask him one open question, never guess.`] : []),
+    ];
+    await sendFeedback({ kind: "desk", page: cardPage(refName, title) }, lines.length ? `${words}\n\n${lines.join("\n")}` : words, files, via);
+    invalidate("inbox");
+    const rest = open.length - took.length;
+    if (took.length && !rest && !failed.length) {
+      const first = group.items.find((i) => i.source === "ask" && i.repo && i.path && i.code);
+      markSent(setSlots(group), { said: took.map((t) => t.split(" ").pop()).join(", ").replace(/^./, (c) => c.toUpperCase()), title, ...(first ? { card: { kind: "ask" as const, repo: first.repo!, path: first.path!, ref: first.code!, ...(first.milestoneId ? { milestoneId: first.milestoneId } : {}) } } : {}) });
+    } else if (took.length) setSaid(`Took ${took.length} of ${open.length} as your answers.${unclear.length ? " The desk asks you about the rest." : " Answer the rest with their buttons."}`);
+    else if (unclear.length) setSaid("Not sure which answer you gave: the desk asks you in Chat. Nothing was pressed.");
+    else setSaid("Your words reached the team. No answer was read from them, so the recommendations stay open.");
+  };
   const project = projectLabel(group.items[0]?.milestoneTitle);
   // one quiet card, then one decisions block: Accept all, Park, Snooze and the feedback block.
   return (
@@ -173,7 +225,12 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
       )}
       {/* E948-S60: the set takes feedback as a whole, to the Team desk with the set named; right under its buttons, nothing
           between (the owner 2026-11-15: the feedback is one of the buttons' options); who sent it is in the meta line. */}
-      <CardFeedback className="mt-2" origin={`set-feedback:${group.persona}:${group.items[0]?.id ?? ""}`} title={`The ${group.persona}'s ${group.items.length} recommendations`} refName={group.items.map((i) => i.code ?? i.id).join(", ")} />
+      <CardFeedback className="mt-2" origin={`set-feedback:${group.persona}:${group.items[0]?.id ?? ""}`} title={title} refName={refName} send={sendWords} />
+      {said && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="ask-set-said">
+          {said}
+        </p>
+      )}
     </section>
   );
 }

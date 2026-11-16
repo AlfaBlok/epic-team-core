@@ -944,7 +944,7 @@ function WaitingCardBody({
     deliver: async (reply) => {
       setAnswer("");
       const [as, kind] = voiceAs();
-      if (!(await respond(as, kind, reply))) throw new Error("the card did not take it, open the card to see why");
+      if (!(await answerOrFeedback(as, kind, reply))) throw new Error("the card did not take it, open the card to see why");
     },
     disabled: !!pending,
   });
@@ -1117,6 +1117,21 @@ function WaitingCardBody({
       off();
       settle(hold);
     }
+  };
+  /**
+   * E948-S127 (vn_02c8f518): his words on an approve card that plainly say yes or no ("Yes, go ahead.", "No.") are his
+   * answer, pressed as the Yes or No button; anything else (a yes with a change, a question) stays his feedback, as before.
+   */
+  const answerOrFeedback = async (action: string, kind: "approve" | "deny" | "answer" | "feedback", text = answer): Promise<boolean> => {
+    if (kind === "feedback" && !editing && !box && canDecide && item.source === "ask" && text.trim()) {
+      const read = await api
+        .readSpokenAnswers(text, [{ id: item.id, line: item.question || item.title, ...(item.code ? { code: item.code } : {}) }])
+        .then((x) => x.reads[0]?.kind)
+        .catch(() => undefined);
+      if (read === "approve") return respond("approve", "approve", text);
+      if (read === "deny" && canDeny) return respond("decline", "deny", text);
+    }
+    return respond(action, kind, text);
   };
   const supersede = async () => {
     const by = window.prompt("Superseded by which coded ask (e.g. poly-maker/E904-A1)? Leave empty for moot.", "");
@@ -1492,7 +1507,7 @@ function WaitingCardBody({
                   sending={working(wordsAnswer ? "answer" : "feedback")}
                   disabled={busy}
                   sendTestId={wordsAnswer ? "answer" : "card-feedback-send"}
-                  onSend={() => (wordsAnswer ? void respond("answer", "answer") : void respond("feedback", sendAs()[1]))}
+                  onSend={() => (wordsAnswer ? void respond("answer", "answer") : void answerOrFeedback("feedback", sendAs()[1]))}
                 />
               </div>
         ) : (

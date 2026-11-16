@@ -710,3 +710,23 @@ describe("quiet card: one plain line, the rest folded", () => {
     expect(screen.queryByTestId("ask-more")).toBeNull();
   });
 });
+
+describe("E948-S127: a plain spoken yes or no on an approve card is his answer", () => {
+  it("presses Yes or No for a plain answer; a yes with a change stays feedback", async () => {
+    const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_1", itemId: "wj_1", kind: "approve", text: "", delivery: "sent", createdAt: new Date().toISOString() });
+    const read = vi.spyOn(api, "readSpokenAnswers").mockResolvedValueOnce({ reads: [{ id: "wj_1", kind: "approve", quote: "Yes, go ahead.", how: "only" }] });
+    wrap(<WaitingCard item={item({ ask: "approve", question: "You approve: send the mail?", contextText: "" })} />);
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "Yes, go ahead." } });
+    fireEvent.click(screen.getByTestId("card-feedback-send"));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ kind: "approve", text: "Yes, go ahead." })));
+    expect(read).toHaveBeenCalledWith("Yes, go ahead.", [expect.objectContaining({ id: "wj_1" })]);
+    cleanup();
+    spy.mockClear();
+    vi.spyOn(api, "readSpokenAnswers").mockResolvedValueOnce({ reads: [{ id: "wj_9", kind: "none" }] });
+    wrap(<WaitingCard item={item({ id: "wj_9", ask: "approve", question: "You approve: send the mail?", contextText: "" })} />);
+    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "Yes, but shorter" } });
+    fireEvent.click(screen.getByTestId("card-feedback-send"));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_9", expect.objectContaining({ kind: "feedback", text: "Yes, but shorter" })));
+  });
+});
+

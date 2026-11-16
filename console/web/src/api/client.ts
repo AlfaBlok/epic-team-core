@@ -120,7 +120,7 @@ import type {
   ChatHistory,
   MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
 import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate, MarketingPlan, MarketingPlanWrite } from "./campaign-types";
-import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult } from "./inbox-types";
+import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult, SpokenRead } from "./inbox-types";
 
 /** GET /api/push. */
 /** a paid EpicTeam workspace's first objective (its root spine's goal and results), shown on top of its chat. */
@@ -269,6 +269,8 @@ export interface ApiClient {
   uploadChatAttachment(file: Blob, name: string, onProgress?: (sent: number, total: number) => void): Promise<{ attachment: ChatAttachment }>;
   /** the line of links of uploaded files, for a box whose own route takes only words (it goes after his words). */
   attachmentLine(ids: string[]): Promise<{ line: string }>;
+  /** E948-S127: what his words on a card answer, for each of its asks (read only; the card presses each answer). */
+  readSpokenAnswers(words: string, asks: { id: string; code?: string; line: string }[]): Promise<{ reads: SpokenRead[]; judgeError?: string }>;
   /** a milestone's Chat tab, a view on its own repo-desk T3 thread (launched on first open, reused across restarts). */
   getMilestoneChat(milestoneId: string, read?: ChatRead): Promise<DeskChat>;
   /** a world's team desk (the social skin's top-level Chat), one thread across its campaigns: same shape as the Team desk. */

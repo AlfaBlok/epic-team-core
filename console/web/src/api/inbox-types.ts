@@ -407,3 +407,11 @@ export interface InboxSearchResult {
   /** done items older than the Inbox's own list (up to 30 days), as one-line rows. */
   rows: WaitingItem[];
 }
+
+/** E948-S127: one ask's answer read from his words: approve, deny, unclear (he spoke about it, not plainly) or none. */
+export interface SpokenRead {
+  id: string;
+  kind: "approve" | "deny" | "unclear" | "none";
+  quote?: string;
+  how?: "order" | "name" | "all" | "only" | "model";
+}

@@ -541,6 +541,18 @@ const mockMail = () => ({
       mockFiles.set(a.id, a);
       return ok({ attachment: a });
     },
+    // E948-S127: the mock reads "the first one, yes" by order (the console's reader also reads codes and asks a model).
+    async readSpokenAnswers(words, asks) {
+      const order = ["first", "second", "third", "fourth", "fifth", "sixth"];
+      return ok({
+        reads: asks.map((a, i) => {
+          const m = new RegExp(`\\b(?:the )?${order[i]}(?: one)?\\b[ ,:]*(\\w+)`, "i").exec(words);
+          const w = m?.[1]?.toLowerCase() ?? "";
+          const kind = /^(yes|ok|okay|sure)$/.test(w) ? ("approve" as const) : /^(no|nope)$/.test(w) ? ("deny" as const) : ("none" as const);
+          return { id: a.id, kind, ...(kind !== "none" ? { quote: m![0], how: "order" as const } : {}) };
+        }),
+      });
+    },
     async attachmentLine(ids) {
       const files = ids.map((a) => mockFiles.get(a)).filter((a) => !!a);
       return ok({ line: `📎 Sam attached ${files.length === 1 ? "a file" : `${files.length} files`}, open ${files.length === 1 ? "it" : "each"} with your console headers: ${files.map((f) => f!.path).join(" ")}` });

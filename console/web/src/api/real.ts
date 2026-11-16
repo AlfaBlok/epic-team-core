@@ -269,6 +269,7 @@ export function createRealClient(): ApiClient {
       return onProgress && typeof XMLHttpRequest !== "undefined" ? uploadWithProgress("/chat/attachments", file, headers, onProgress) : call("POST", "/chat/attachments", file, { headers });
     },
     attachmentLine: (ids) => call("POST", "/chat/attachments/line", { ids }),
+    readSpokenAnswers: (words, asks) => call("POST", "/spoken-answers", { words, asks }),
     getMilestoneChat: (id, read) => call("GET", `/milestones/${encodeURIComponent(id)}/chat/messages${chatQs(read)}`),
     getWorldDeskChat: (t, read) => call("GET", `/tenants/${encodeURIComponent(t)}/desk/messages${chatQs(read)}`),
     getFirstObjective: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/first-objective`),

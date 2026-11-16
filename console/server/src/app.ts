@@ -106,6 +106,7 @@ import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
+import { anthropicSpokenJudge, mountSpokenAnswers } from "./inbox/spokenAnswers.js";
 import type { WaitingItem } from "./inbox/waiting.js";
 import { anthropicStoreFile, ANTHROPIC_TEXT_MODEL, textModelProvider } from "./textModel.js";
 import { anthropicQcJudge, mountQcJudge, type QcJudge } from "./review/qc.js";
@@ -1952,6 +1953,8 @@ export function createApp(
   const textProvider = textModelProvider();
   const openAiKey = async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile()));
   const textJudge: Judge = textProvider === "anthropic" ? anthropicJudge(anthropicKey) : openAiJudge(openAiKey);
+  // E948-S127: his words on a card answer its asks (read only; the card presses each answer through its own route).
+  mountSpokenAnswers(api, { ...(textProvider === "anthropic" && !process.env.VITEST ? { judge: anthropicSpokenJudge(anthropicKey) } : {}) });
   const textStructurer: Structurer = opts.voice?.structure ?? (textProvider === "anthropic" ? anthropicStructurer(anthropicKey) : openAiStructurer(openAiKey));
   // the owner edits a red line (typed or a voice note, reworded by the same text model) or deletes it, from its slim
   // row on top of Team home; docs/pursuits.json, the root Red line lines and an Decisions row, one commit.
