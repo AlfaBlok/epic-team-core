@@ -447,7 +447,7 @@ export function createVoice(d: VoiceDeps) {
   const worldKey = world === DEFAULT_TENANT ? undefined : `enabled:${world}`;
   const worldOn = () => !worldKey || setting(worldKey) === "on";
   const enabled = () => platformOn() && worldOn();
-  const offWhy = () => (platformOn() ? "Voice is not switched on for this world." : "Voice is switched off in the console.");
+  const offWhy = () => (platformOn() ? "Voice is not switched on for this workspace." : "Voice is switched off in the console.");
   const historyTokens = () => {
     const v = setting("history_tokens");
     return v === undefined || !Number.isFinite(Number(v)) ? HISTORY_TOKENS : Number(v);

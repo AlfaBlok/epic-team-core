@@ -387,6 +387,9 @@ export const T3_DOWN_MESSAGE = {
 export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the next message: read both, then answer once.";
 /** under a send the console stored while T3 was down. */
 export const QUEUED_NOTE = "queued, sends when T3 is back";
+/** the same quiet lines in a customer's workspace, which never names our T3. */
+export const CUSTOMER_T3_DOWN_MESSAGE = { restarting: "The chat is reconnecting…", maintenance: "The chat is down for planned maintenance, reconnecting…" } as const;
+export const CUSTOMER_QUEUED_NOTE = "queued, sends when the chat is back";
 
 /**
  * a message he sent that the transcript does not show yet. It shows at once ("sending…"), the console's reply
@@ -552,8 +555,9 @@ export function ChatView({
   }, [load]);
 
   useEffect(() => {
-    onThread?.({ threadId: chat?.threadId, environmentId: chat?.environmentId });
-  }, [chat?.threadId, chat?.environmentId, onThread]);
+    // a customer's workspace shows no way into our T3 (no Open in T3)
+    onThread?.(chat?.customer ? {} : { threadId: chat?.threadId, environmentId: chat?.environmentId });
+  }, [chat?.threadId, chat?.environmentId, chat?.customer, onThread]);
 
   // the owner has this chat open, so what it shows is read: mark it on the first read, on every new or finished line,
   // and when the tab comes back into view; then the pills refresh.
@@ -852,7 +856,7 @@ export function ChatView({
           {chat.t3 && !chat.unreachable && (
             // T3 is restarting (or stopped for maintenance): the last good transcript stays, one quiet line ('s tone)
             <div role="status" className="mb-2 shrink-0 text-xs text-muted-foreground" data-testid="chat-t3-down">
-              {T3_DOWN_MESSAGE[chat.t3]}
+              {(chat.customer ? CUSTOMER_T3_DOWN_MESSAGE : T3_DOWN_MESSAGE)[chat.t3]}
             </div>
           )}
           {top && (
@@ -877,7 +881,7 @@ export function ChatView({
               {olderError && <span className="block text-destructive">Could not load them: {olderError}</span>}
             </p>
           ) : (
-            hasEarlier && <p className="mb-2 text-center text-xs text-muted-foreground">Older messages are in the {short}'s T3 thread.</p>
+            hasEarlier && <p className="mb-2 text-center text-xs text-muted-foreground">{chat.customer ? "Older messages are not shown here." : `Older messages are in the ${short}'s T3 thread.`}</p>
           )}
           <ol className="grid min-w-0 gap-3 pb-4" aria-label={`Chat with the ${who}`} data-testid="chat-transcript">
             {!shown.length && !chat.working && !outbox.length && !chat.queued?.length && (
@@ -887,7 +891,7 @@ export function ChatView({
               </li>
             )}
             {shown.map((m) => (
-              <Bubble key={m.id} m={m} threadUrl={threadUrl} />
+              <Bubble key={m.id} m={m} threadUrl={threadUrl} customer={chat.customer} />
             ))}
             {chat.queued?.map((q) => (
               <li key={q.id} className="flex justify-end" data-testid="chat-queued">
@@ -895,7 +899,7 @@ export function ChatView({
                   {q.page && <p className="mb-1 text-[11px] opacity-80 [overflow-wrap:anywhere]">about: {q.page}</p>}
                   <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{splitAttachments(q.text).text}</p>
                   <SentFiles files={splitAttachments(q.text).files} />
-                  <p className="mt-1 text-[11px] opacity-80">{QUEUED_NOTE}</p>
+                  <p className="mt-1 text-[11px] opacity-80">{chat.customer ? CUSTOMER_QUEUED_NOTE : QUEUED_NOTE}</p>
                 </div>
               </li>
             ))}
@@ -947,7 +951,7 @@ export function ChatView({
             <SpeakingBar />
             {chat.sending > 0 && !posting && !outbox.length && (
               <p className="mb-2 text-xs text-amber-700 dark:text-amber-400" role="status" data-testid="chat-sending">
-                {chat.sending} message{chat.sending > 1 ? "s" : ""} waiting for T3 (the {short} is busy or compacting; retrying).
+                {chat.sending} message{chat.sending > 1 ? "s" : ""} waiting {chat.customer ? "to send" : "for T3"} (the {short} is busy or compacting; retrying).
               </p>
             )}
             {(sendFailed || (chat.sendError && !outbox.some((o) => o.crid === chat.sendError!.clientRequestId))) && (
@@ -1046,7 +1050,7 @@ function PostingBubble({ p }: { p: PostingNote }) {
   );
 }
 
-function Bubble({ m, threadUrl }: { m: DeskMessage; threadUrl: (id: string) => string }) {
+function Bubble({ m, threadUrl, customer }: { m: DeskMessage; threadUrl: (id: string) => string; customer?: boolean }) {
   if (m.kind === "seed")
     return (
       <li className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="chat-divider">
@@ -1064,7 +1068,7 @@ function Bubble({ m, threadUrl }: { m: DeskMessage; threadUrl: (id: string) => s
     return (
       <>
         <PassedBubble p={passedOn.p} at={m.at} />
-        {passedOn.rest && <Bubble m={{ ...m, text: passedOn.rest }} threadUrl={threadUrl} />}
+        {passedOn.rest && <Bubble m={{ ...m, text: passedOn.rest }} threadUrl={threadUrl} customer={customer} />}
       </>
     );
   const mine = m.role === "user";
@@ -1093,7 +1097,7 @@ function Bubble({ m, threadUrl }: { m: DeskMessage; threadUrl: (id: string) => s
         <p className={cn("mt-1 text-[11px]", mine ? "opacity-80" : "text-muted-foreground")}>
           {m.status !== "completed" && "writing… "}
           <RelTime iso={m.at} />
-          {m.truncated && " · cut short, full text in T3"}
+          {m.truncated && (customer ? " · cut short" : " · cut short, full text in T3")}
         </p>
         {!mine && m.status === "completed" && m.text.trim() && <ReplyPlay id={m.id} text={call?.rest ?? m.text} />}
       </div>

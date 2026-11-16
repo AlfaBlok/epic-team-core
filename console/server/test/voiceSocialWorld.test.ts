@@ -70,10 +70,10 @@ describe("T78-S15: voice in the social world", () => {
     const w = worlds();
     const st = await w.req("GET", v(w.mZ.id, "/state"), { cookie: w.zJordi });
     expect(st.status).toBe(200);
-    expect(st.json).toMatchObject({ enabled: false, available: false, worldOff: true, reason: "Voice is not switched on for this world." });
+    expect(st.json).toMatchObject({ enabled: false, available: false, worldOff: true, reason: "Voice is not switched on for this workspace." });
     const start = await w.req("POST", v(w.mZ.id, "/notes"), { cookie: w.zJordi, body: { page: "product slide 7" } });
     expect(start.status).toBe(409);
-    expect(start.json.error.message).toMatch(/not switched on for this world/);
+    expect(start.json.error.message).toMatch(/not switched on for this workspace/);
     // The box no longer asks the Team desk's route (that one is the home world's: world_scope), and the home world's own voice is unchanged.
     expect((await w.req("GET", "/api/voice/state", { cookie: w.zJordi })).json.error.code).toBe("world_scope");
     expect((await w.req("GET", "/api/voice/state", { cookie: w.sam })).json).toMatchObject({ enabled: true });

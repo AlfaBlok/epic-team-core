@@ -104,6 +104,17 @@ describe("T18-S2 Chat page", () => {
     expect((await screen.findByTestId("chat-divider")).textContent).toContain("New session");
   });
 
+  it("a customer's workspace chat shows no Open in T3 and never names T3", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(
+      chat({ customer: true, environmentId: undefined, hasEarlier: true, sending: 1, messages: [msg({ id: "a1", role: "assistant", text: "Hello Dana", truncated: true })] }),
+    );
+    renderChat();
+    const t = await screen.findByTestId("chat-transcript");
+    expect(within(t).getByText(/cut short/).textContent).not.toContain("T3");
+    expect(screen.queryByRole("link", { name: /Open in T3/ })).toBeNull();
+    expect(screen.getByTestId("chat-page").textContent).not.toMatch(/\bT3\b/);
+  });
+
   it("links to the desk thread (t3code:// with the environment) and opens t3code / t3-thread links from replies", async () => {
     vi.spyOn(api, "getDeskChat").mockResolvedValue(
       chat({ messages: [msg({ id: "a1", role: "assistant", text: "Ticket: [S3](t3-thread://v1/thread:abc) and [run](t3code://threads/env_1/th_9)" })] }),
