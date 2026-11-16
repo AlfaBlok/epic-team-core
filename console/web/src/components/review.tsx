@@ -865,7 +865,8 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {/* vn_7c5aa36e: how long it has waited on him, from when it reached his inbox, as on every ask card */}
         <IssuedAge iso={item.inboxSince ?? item.createdAt} what="reached your inbox" />
-        {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}
+        {/* on a phone the long objective tag wraps inside the card, never past its edge */}
+        {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
       </div>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}

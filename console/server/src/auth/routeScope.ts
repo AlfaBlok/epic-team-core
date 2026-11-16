@@ -255,6 +255,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // refresh hint that stores nothing. routeJudge.test.ts (both directions)
   ["GET|POST", /^\/api\/review-items$/],
   ["GET", /^\/api\/red-line$/], // the world's own red line (its milestones' checkouts only)
+  // his briefing: a campaign is found in the request-scoped store only (another world's id is a 404); an objective is the
+  // home world's alone (the route refuses any other world). briefing.test.ts
+  ["POST", /^\/api\/briefing\/answer$/],
   // the feed's goal headers, read from the same request-scoped store's spines as the cards.
   ["GET", /^\/api\/review-goals(\/closed)?$/],
   // Q3: Reopen finds the goal among the caller's world's closed goals only (another world's key is a 404)

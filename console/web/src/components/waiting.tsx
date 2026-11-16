@@ -1212,7 +1212,7 @@ function WaitingCardBody({
             ))}
           <IssuedAge iso={item.since} />
           {/* the owner's level from the Prioritizer, a grey word ("red line" when it is one); a tap shows why. */}
-          <OwnerPriorityTag p={item.ownerPriority} />
+          <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
           {item.source === "needs_jordi" && <span>persona request</span>}
           {item.improvement && <span data-testid="improvement-tag">improvement request</span>}
         </div>
@@ -2087,7 +2087,7 @@ export function StatusItemRow({ item, milestone }: { item: PendingItem; mileston
       <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"}>
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <IssuedAge iso={item.since} />
-        <OwnerPriorityTag p={item.ownerPriority} />
+        <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
       <div className={CARD_TITLE}>{item.title}</div>
       {/* every Blocked card gives its info (what waits on the owner), not only the ready stamp. */}
