@@ -663,7 +663,10 @@ export function createReview(db: DB, o: ReviewOptions) {
     const chose = pick.choice ? decisionWords(pick.choice) : undefined;
     const planFirst = !!chose && /^[^:]*:\s*plan\b/i.test(chose);
     const picks: FollowupPick[] = sug.map((s, i) => ({ title: planFirst && start.has(i) && !/^plan\b/i.test(s.title) ? `Plan: ${s.title}` : s.title, ...(s.why ? { why: s.why } : {}), start: start.has(i) }));
-    if (chose && pick.plan && !sug.length) picks.push({ title: decisionWords(pick.plan), why: `you chose ${chose}`, start: true });
+    // a choice that keeps or closes what is live ("Yes: keep it", "Yes: close it") has no next step, so it starts no row
+    // (a row "Do: Is this …? (you chose Yes: keep it)" had nothing to build)
+    const keeps = !!chose && /:\s*(keep|close)\b/i.test(chose);
+    if (chose && pick.plan && !sug.length && !keeps) picks.push({ title: decisionWords(pick.plan), why: `you chose ${chose}`, start: true });
     const by = who();
     let made: FollowupRow[] = [];
     const closesGoal = r.tag === "goal" || r.tag === "ask";

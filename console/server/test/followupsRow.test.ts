@@ -289,4 +289,14 @@ describe("E948-S69 a decision button writes his pick", () => {
     expect(repo.rowLine(EPIC, "E959-S5")).toContain(`done (approved by Sam ${today()}, chose Yes: plan it now x)`);
     expect(woke).toHaveLength(1);
   });
+
+  it("a choice that keeps or closes what is live makes no row (16 Nov: 'Do: Is this …? (you chose Yes: keep it)')", async () => {
+    const { review, woke } = setup();
+    const s5 = await byRef(review, "E959-S5");
+    const r = await review.complete(s5.id, { choice: "Yes: keep it", plan: "Do: Is this the stop you wanted" });
+    if ("error" in r) throw new Error(r.message);
+    expect(r.item.followupRows ?? []).toEqual([]);
+    expect(repo.rowLine(EPIC, "E959-S5")).toContain(`chose Yes: keep it)`);
+    expect(woke).toEqual([]);
+  });
 });
