@@ -33,7 +33,7 @@ import {
 } from "@/lib/scorecards";
 import { cn } from "@/lib/utils";
 import { lazyPage } from "@/lib/lazyPage";
-import { useStoredFlag } from "@/lib/storedFlag";
+import { useFold } from "@/lib/storedFlag";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { ObjectivePlanTab } from "@/pages/social/PlanTab";
 import { TotemTab, productOfObjective, totemTabs, useTotemMaps } from "@/components/totemTabs";
@@ -842,9 +842,10 @@ export function SidebarGoalSetsOf({
 }) {
   const { countFor, rows } = useSetInbox(data);
   const { pathname } = useLocation();
-  const [open, setOpen] = useStoredFlag(MORE_OBJECTIVES_STORE);
   const activeId = pathname.startsWith(`/${SCORECARDS_PATH}/`) ? decodeURIComponent(pathname.slice(SCORECARDS_PATH.length + 2).split("/")[0]) : undefined;
   const top = topObjectives(data?.nodes);
+  // the fold opens by itself while one of its objectives is the page shown; a press always opens or folds it.
+  const [shown, toggleMore] = useFold(MORE_OBJECTIVES_STORE, !!more?.active || top.some((n) => n.unpinned && n.id === activeId));
   if (!top.length) return null;
   const pinned = top.filter((n) => !n.unpinned);
   const unpinned = top.filter((n) => n.unpinned);
@@ -852,8 +853,6 @@ export function SidebarGoalSetsOf({
   const reviews = rows.length - asks;
   const krs = top.flatMap(keyResultsOf);
   const moreCount = unpinned.length + (more?.count ?? 0);
-  // the fold opens by itself while one of its objectives is the page shown.
-  const shown = open || !!more?.active || unpinned.some((n) => n.id === activeId);
   const foldAsk = unpinned.reduce((t, n) => t + countFor(n.id).ask, more?.ask ?? 0);
   const foldReview = unpinned.reduce((t, n) => t + countFor(n.id).review, more?.review ?? 0);
   return (
@@ -884,7 +883,7 @@ export function SidebarGoalSetsOf({
           className="mt-1 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           aria-expanded={shown}
           data-testid="more-objectives-toggle"
-          onClick={() => setOpen(!shown)}
+          onClick={toggleMore}
         >
           {shown ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           {MORE_OBJECTIVES}

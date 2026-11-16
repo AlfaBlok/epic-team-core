@@ -11,7 +11,7 @@ import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
 import { GOAL_INBOX_TAB, GoalPills, SetWheel, SidebarGoalSetsOf, topObjectives, useGoalSets } from "@/components/goalSets";
-import { isVoiceNotesPin, useStoredFlag } from "@/lib/storedFlag";
+import { isVoiceNotesPin, useFold, useStoredFlag } from "@/lib/storedFlag";
 import { objectiveOf } from "@/lib/scorecards";
 import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
@@ -307,8 +307,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // ---- the console skin's sidebar as the owner approved it ("Yes: build it" on the mock-up):
   // Inbox and Chat, his objectives (pinned in his order, then one folded More objectives), Tools folded, Settings
   // folded, Worlds last. Nothing is removed: every page keeps its entry, inside a fold.
-  const [toolsOpen, setToolsOpen] = useStoredFlag(TOOLS_STORE);
-  const [settingsOpen, setSettingsOpen] = useStoredFlag(SETTINGS_STORE);
   const { pathname } = useLocation();
   const hasObjectives = shows("goalSets") && topObjectives(sets.data?.nodes).length > 0;
   const addGoal = (
@@ -347,8 +345,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     ...operatorPages.map((p) => ({ to: p.to, label: p.label, icon: SETTING_ICONS[p.testId] ?? Settings, testId: `nav-${p.testId}` })),
   ];
   const here = (list: ToolEntry[]) => list.some((t) => !t.external && (pathname === t.to || pathname.startsWith(`${t.to}/`)));
-  const toolsShown = toolsOpen || here(tools);
-  const settingsShown = settingsOpen || here(settings);
+  // each fold opens by itself on one of its own pages, and a press always opens or folds it.
+  const [toolsShown, toggleTools] = useFold(TOOLS_STORE, here(tools));
+  const [settingsShown, toggleSettings] = useFold(SETTINGS_STORE, here(settings));
   const consoleMenu = (
     <>
       {hasObjectives ? (
@@ -375,8 +374,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           {addGoal}
         </div>
       )}
-      <SidebarFold label="Tools" items={tools} open={toolsShown} onToggle={() => setToolsOpen(!toolsShown)} onNavigate={onNavigate} testId="nav-pages" className="border-t" />
-      <SidebarFold label="Settings" items={settings} open={settingsShown} onToggle={() => setSettingsOpen(!settingsShown)} onNavigate={onNavigate} testId="nav-settings">
+      <SidebarFold label="Tools" items={tools} open={toolsShown} onToggle={toggleTools} onNavigate={onNavigate} testId="nav-pages" className="border-t" />
+      <SidebarFold label="Settings" items={settings} open={settingsShown} onToggle={toggleSettings} onNavigate={onNavigate} testId="nav-settings">
         {shows("setup") && <SetupLink onNavigate={onNavigate} />}
         <button
           type="button"
