@@ -15,7 +15,7 @@
  * the phone reloaded offers the note again: Resume or Send, nothing lost.
  */
 import { stickyWakeLock } from "./keepAwake";
-import { held, newCid, recount, type OutboxStore, type OutNote } from "./outbox";
+import { backoffMs, held, newCid, recount, settle, type OutboxStore, type OutNote } from "./outbox";
 
 
 export interface NoteStartInfo {
@@ -171,11 +171,15 @@ export const NO_ANSWER_TEXT = "The console has not answered yet. Recording goes 
 export const RECOVERED_TEXT = "A voice note you were recording was kept when the page closed. Tap Resume to go on, or Send. If you do neither, it is sent by itself in a few minutes.";
 /** what a note says while its parts are kept on this phone and not yet confirmed by the console. */
 export const KEPT_TEXT = "Saved on this phone, sending…";
-export const KEPT_FAILED_TEXT = "Saved on this phone. It is sent by itself as soon as the console answers; nothing is lost.";
+export const KEPT_FAILED_TEXT = "It goes by itself as soon as the connection is back, trying for days. Nothing is lost.";
+/** the note's line while the console has not confirmed it (said plainly). */
+export const WAITING_TEXT = "Waiting to send · saved on this phone";
 /** a reloaded note that is neither resumed nor sent goes by itself after this long. */
 export const RECOVER_SEND_MS = 3 * 60_000;
-/** a kept note that did not go tries again this often. */
+/** a kept note that did not go tries again after this long, doubling each try (at most 30 minutes), for days if need be. */
 export const RETRY_MS = 20_000;
+/** the part being recorded is saved on the device this often (a closed tab or a crash loses at most this much). */
+export const CHECKPOINT_MS = 3000;
 /** A kept note older than this is not offered again (its parts stay on the console). */
 export const KEEP_MS = 24 * 3600_000;
 /** On hiding, the part being recorded is closed only if it has at least this much in it (a near-empty part has no words). */
@@ -247,6 +251,8 @@ export class NoteEngine {
   private stopBeat?: () => void;
   private recoverTimer?: ReturnType<typeof setTimeout>;
   private retryTimer?: ReturnType<typeof setTimeout>;
+  /** failed sends of this note in a row (the retry waits longer each time). */
+  private retries = 0;
 
   constructor(
     private api: NotesApi,
@@ -263,13 +269,16 @@ export class NoteEngine {
   /** a note that did not go (the console restarting, no connection) tries again by itself, kept here meanwhile. */
   private retryLater() {
     if (!this.out || this.retryTimer) return;
+    this.retries++;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       if (this.v.phase === "failed" && this.v.info === KEPT_FAILED_TEXT) void this.finish();
-    }, RETRY_MS);
+    }, Math.max(RETRY_MS, backoffMs(this.retries)));
   }
   /** the browser is back online: a kept note that did not go tries now. */
   online() {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     if (this.v.phase === "failed" && this.v.info === KEPT_FAILED_TEXT) void this.finish();
   }
 
@@ -300,14 +309,17 @@ export class NoteEngine {
       )
       .catch(() => undefined);
   }
-  /** the console confirmed the note (posted, written out, or nothing heard): it leaves the outbox. */
-  private outDone() {
+  /**
+   * the console confirmed the note (posted, written out, or nothing heard): it leaves the outbox, its audio kept on this
+   * device as one of the last few (`keep`); a note thrown away or refused (`keep: false`) just leaves.
+   */
+  private outDone(keep = false) {
     const cid = this.cid;
     this.cid = undefined;
     this.stopBeat?.();
     this.stopBeat = undefined;
     if (cid) held.delete(cid);
-    if (this.out && cid) void this.out.store.delNote(cid).then(() => recount(this.out!.store));
+    if (this.out && cid) void settle(this.out.store, cid, keep, this.clock.now()).then(() => recount(this.out!.store));
   }
   /** this engine lets the note go (failed and closed): the outbox sends it by itself, nothing is thrown away. */
   private outRelease() {
@@ -536,8 +548,15 @@ export class NoteEngine {
     const noteP = this.noteP;
     let done!: () => void;
     const stopped = new Promise<void>((ok) => (done = ok));
+    let savedAt = began;
     rec.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
+      // the part being recorded is saved on this device every few seconds, so a closed tab or a crash loses almost nothing.
+      if (rec === this.rec && chunks.length && this.out && this.cid && noteP === this.noteP && this.clock.now() - savedAt >= CHECKPOINT_MS) {
+        savedAt = this.clock.now();
+        const seconds = (savedAt - began) / 1000;
+        if (seconds >= MIN_AUDIO_S) void this.out.store.putPart({ cid: this.cid, n, blob: new Blob(chunks, { type: rec.mimeType || chunks[0]?.type || "audio/webm" }), seconds });
+      }
       // The recorder's own one-second events keep the clock going where a background tab slows timers.
       if (rec === this.rec) this.tick();
     };
@@ -602,7 +621,7 @@ export class NoteEngine {
           const r = await (sm ? this.api.segment(id, n, blob, seconds, sm) : this.api.segment(id, n, blob, seconds));
           this.failed.delete(n);
           this.done.add(n);
-          if (this.out && this.cid) void this.out.store.delPart(this.cid, n);
+          // its audio stays on this device until the note is confirmed (then it is kept as one of the last few).
           this.keep();
           this.set({ uploaded: this.v.uploaded + 1, costUsd: r.note.costUsd });
           return;
@@ -612,7 +631,6 @@ export class NoteEngine {
           if (i === UPLOAD_TRIES - 1 && (e as { code?: string }).code === "transcribe_failed") {
             this.failed.delete(n);
             this.done.add(n);
-            if (this.out && this.cid) void this.out.store.delPart(this.cid, n);
             this.keep();
             this.set({ uploaded: this.v.uploaded + 1, error: `Part ${n + 1} is saved on the console but was not turned into words yet; the note names it with its audio.` });
             return;
@@ -786,7 +804,8 @@ export class NoteEngine {
       const skip = [...Array(this.segN).keys()].filter((n) => !this.done.has(n));
       const r = await (skip.length ? this.api.finish(id, this.segN, this.page, skip) : this.api.finish(id, this.segN, this.page));
       this.store.clear();
-      this.outDone();
+      this.retries = 0;
+      this.outDone(true);
       this.set({ phase: "sent", note: r.audio ? { ...r.note, audio: r.audio } : r.note, costUsd: r.note.costUsd, info: r.note.state === "empty" ? "Nothing was heard in that note, so nothing was posted." : this.stopWhy });
     } catch (e) {
       this.set({ phase: "failed", error: `Not sent: ${(e as Error).message}`, ...(this.out ? { info: KEPT_FAILED_TEXT } : {}) }), void this.retryLater();
@@ -847,6 +866,7 @@ export class NoteEngine {
     clearTimeout(this.recoverTimer);
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
+    this.retries = 0;
     this.stopBeat?.();
     this.stopBeat = undefined;
     this.cid = undefined;

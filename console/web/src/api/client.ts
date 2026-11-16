@@ -399,6 +399,8 @@ export interface ApiClient {
   redLine(): Promise<{ redLine: RedLine | null; redLines?: RedLine[] }>;
   /** his words (typed, or a voice note's) change one red line; `note` is the voice note's vn_ id. */
   editRedLine(input: { name: string; words: string; note?: string }): Promise<{ ok: true; line: RedLine; sha?: string }>;
+  /** his briefing: what he said on one objective (or campaign), filed on it: his words file and a Decisions line. */
+  briefingAnswer(input: { kind: "objective" | "campaign"; id: string; name?: string; words: string; note?: string }): Promise<{ ok: true; filed: string[]; sha?: string }>;
   /** delete one red line (after his confirm tap); `undoRedLine` brings it back to its place. */
   deleteRedLine(input: { name: string }): Promise<{ ok: true; sha?: string }>;
   undoRedLine(input: { name: string }): Promise<{ ok: true; sha?: string }>;

@@ -758,12 +758,14 @@
 
   // a note kept on this device (the connection dropped, the page closed mid-send) goes by itself, filed on its step
   var drainTimer;
-  function drainKept() {
+  function drainKept(ev) {
     if (!canRecord()) return;
     keepReady().then(function (K) {
       if (!K) return;
       K.drain({
         base: vbase,
+        // back online: every kept note tries now, whatever its wait
+        force: !!(ev && ev.type === "online"),
         start: function (rec) {
           return vapi("/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ page: rec.page, clientId: rec.cid }) }).then(function (j) {
             return j.note.id;

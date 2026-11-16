@@ -412,6 +412,7 @@ export function createRealClient(): ApiClient {
     listTesters: () => call("GET", "/testers"),
     redLine: () => call("GET", "/red-line"),
     editRedLine: (input) => call("POST", "/red-line/edit", input),
+    briefingAnswer: (input) => call("POST", "/briefing/answer", input),
     deleteRedLine: (input) => call("POST", "/red-line/delete", input),
     undoRedLine: (input) => call("POST", "/red-line/undo", input),
     laptop: () => call("GET", "/laptop"),

@@ -9,6 +9,9 @@
  * parts, skip, rec) -> answer, then o.after(answer, rec) (filing it) before the note is dropped. It answers how many went.
  */
 export const KEEP_ABANDON_MS = 3 * 60_000;
+/** after a failed try a kept note waits 20 s, doubling each try, at most 30 minutes; never given up. */
+export const KEEP_RETRY_FIRST_MS = 20_000;
+export const KEEP_RETRY_MAX_MS = 30 * 60_000;
 
 export const KEEP_JS = String.raw`
 window.KEEP = (() => {
@@ -44,6 +47,7 @@ window.KEEP = (() => {
       try {
         for (const r0 of await K.waiting(o.base)) {
           if (!r0.send && Date.now() - r0.at < ${KEEP_ABANDON_MS}) continue;
+          if (!o.force && r0.nextAt && r0.nextAt > Date.now()) continue;
           let r = r0;
           try {
             const parts = await K.parts(r.cid);
@@ -65,7 +69,9 @@ window.KEEP = (() => {
           } catch (e) {
             // Already closed on the console (sent from elsewhere, or cancelled there): nothing more to send.
             if (e.status === 409 && /already sent|is (posted|transcribed|discarded|empty)/.test(e.message || "")) { await K.drop(r.cid); continue; }
-            await K.put(Object.assign({}, r, { tries: (r.tries || 0) + 1, error: String(e.message || e) }));
+            const tries = (r.tries || 0) + 1;
+            const wait = Math.min(${KEEP_RETRY_MAX_MS}, ${KEEP_RETRY_FIRST_MS} * Math.pow(2, tries - 1));
+            await K.put(Object.assign({}, r, { tries, nextAt: Date.now() + wait, error: String(e.message || e) }));
           }
         }
       } finally { K.running = false; }

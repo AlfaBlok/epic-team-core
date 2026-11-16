@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import { api, type Milestone } from "@/api";
 import type { CampaignCard } from "@/api/campaign-types";
 import type { ScorecardNode, ScorecardRow, ScorecardRowState } from "@/api/pursuit-types";
+import { BriefingSlot } from "@/components/briefing";
 import { AnswerBox, STATE_FILL, TabStrip, WheelsTable, keyResultsOf, lightOf } from "@/components/goalSets";
 import { CountPill, PILL_TITLES } from "@/components/homeSection";
 import { INBOX_PATH } from "@/components/inboxLine";
@@ -185,6 +186,7 @@ export function CampaignsHome() {
       <AnswerBox light={lightOf(krs)} title={pinned ? "Your campaigns" : "Every campaign"} testId="campaigns-answer" answer={loading ? "Reading your campaigns…" : nodes.length ? campaignAnswer(nodes, cardOf, waits) : "No campaign runs yet."} />
       {error && <div className="text-sm text-destructive">Could not read the campaigns: {error.message}</div>}
       <TabStrip tabs={HOME_TABS} tab="table" links={{ inbox: { label: "Inbox", to: `/${INBOX_PATH}`, count: waits } }} label="Home pages" />
+      {!loading && <BriefingSlot nodes={nodes} kind="campaign" />}
       {nodes.length > 0 && (
         <WheelsTable nodes={nodes} countFor={countFor} hrefOf={(n) => `/milestones/${n.id}`} lead={(n) => <CampaignRing metric={cardOf(n.id)?.goal?.metric} size={34} />} />
       )}

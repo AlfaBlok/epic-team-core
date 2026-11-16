@@ -4,7 +4,7 @@ import type { VoiceNoteItem, VoiceNotesBody } from "@/api/pages-types";
 import { PageHeader } from "@/components/common";
 import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
-import { VOICE_NOTES_PATH } from "@/lib/routePaths";
+import { ON_DEVICE_PATH, VOICE_NOTES_PATH } from "@/lib/routePaths";
 export { VOICE_NOTES_PATH };
 
 /**
@@ -77,6 +77,11 @@ export function VoiceNotesPage() {
       <PageHeader
         title="Voice notes"
         description="Everything you said in the last two days, from chat, cards and your phone, with what the team made of it."
+        actions={
+          <Link to={`/${ON_DEVICE_PATH}`} className="text-sm underline underline-offset-2" data-testid="voice-notes-on-device">
+            On this device
+          </Link>
+        }
       />
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="Product">
         {filters.map((f) => (

@@ -34,6 +34,8 @@ export interface OutNote {
   seconds: number;
   tries?: number;
   error?: string;
+  /** No try before this time (ms): the wait doubles after each failed try, up to RETRY_MAX_MS, and never gives up. */
+  nextAt?: number;
 }
 export interface OutPart {
   cid: string;
@@ -41,6 +43,19 @@ export interface OutPart {
   blob: Blob;
   seconds: number;
 }
+
+/** A note the console confirmed, kept on this device afterwards (the last KEEP_SENT), its parts' audio in order. */
+export interface SentRec {
+  cid: string;
+  to?: string;
+  page?: string;
+  startedAt: number;
+  sentAt: number;
+  seconds: number;
+  parts: { n: number; blob: Blob; seconds: number }[];
+}
+/** How many sent recordings stay on the device after the console confirmed them. */
+export const KEEP_SENT = 5;
 
 export interface OutboxStore {
   putNote(n: OutNote): Promise<void>;
@@ -50,11 +65,16 @@ export interface OutboxStore {
   putPart(p: OutPart): Promise<void>;
   parts(cid: string): Promise<OutPart[]>;
   delPart(cid: string, n: number): Promise<void>;
+  /** the last sent recordings (newest first) */
+  sent(): Promise<SentRec[]>;
+  putSent(r: SentRec): Promise<void>;
+  delSent(cid: string): Promise<void>;
 }
 
 const DB = "epicteam-voice-outbox";
 const NOTES = "notes";
 const PARTS = "parts";
+const SENT = "sent";
 
 /** IndexedDB, where the browser has it; undefined in tests and in browsers that keep none (the memory store takes over). */
 export function idbOutbox(idb: IDBFactory | undefined = typeof indexedDB === "undefined" ? undefined : indexedDB): OutboxStore | undefined {
@@ -62,9 +82,10 @@ export function idbOutbox(idb: IDBFactory | undefined = typeof indexedDB === "un
   let dbP: Promise<IDBDatabase> | undefined;
   const open = () =>
     (dbP ??= new Promise<IDBDatabase>((ok, no) => {
-      const r = idb.open(DB, 1);
+      const r = idb.open(DB, 2);
       r.onupgradeneeded = () => {
         const db = r.result;
+        if (!db.objectStoreNames.contains(SENT)) db.createObjectStore(SENT, { keyPath: "cid" });
         if (!db.objectStoreNames.contains(NOTES)) db.createObjectStore(NOTES, { keyPath: "cid" });
         if (!db.objectStoreNames.contains(PARTS)) db.createObjectStore(PARTS, { keyPath: ["cid", "n"] }).createIndex("cid", "cid");
       };
@@ -101,6 +122,9 @@ export function idbOutbox(idb: IDBFactory | undefined = typeof indexedDB === "un
     putPart: (p) => run(PARTS, "readwrite", (s) => void s.put(p)),
     parts: (cid) => run<OutPart[]>(PARTS, "readonly", (s) => s.index("cid").getAll(cid)),
     delPart: (cid, n) => run(PARTS, "readwrite", (s) => void s.delete([cid, n])),
+    sent: async () => (await run<SentRec[]>(SENT, "readonly", (s) => s.getAll())).sort((a, b) => b.sentAt - a.sentAt),
+    putSent: (x) => run(SENT, "readwrite", (s) => void s.put(x)),
+    delSent: (cid) => run(SENT, "readwrite", (s) => void s.delete(cid)),
   };
 }
 
@@ -108,6 +132,7 @@ export function idbOutbox(idb: IDBFactory | undefined = typeof indexedDB === "un
 export function memoryOutbox(): OutboxStore {
   const notes = new Map<string, OutNote>();
   const parts = new Map<string, OutPart>();
+  const sent = new Map<string, SentRec>();
   const k = (cid: string, n: number) => `${cid}:${n}`;
   return {
     putNote: async (n) => void notes.set(n.cid, { ...n, done: [...n.done] }),
@@ -123,6 +148,9 @@ export function memoryOutbox(): OutboxStore {
     putPart: async (p) => void parts.set(k(p.cid, p.n), p),
     parts: async (cid) => [...parts.values()].filter((p) => p.cid === cid).sort((a, b) => a.n - b.n),
     delPart: async (cid, n) => void parts.delete(k(cid, n)),
+    sent: async () => [...sent.values()].sort((a, b) => b.sentAt - a.sentAt),
+    putSent: async (x) => void sent.set(x.cid, x),
+    delSent: async (cid) => void sent.delete(cid),
   };
 }
 
@@ -146,7 +174,48 @@ function safe(s: OutboxStore): OutboxStore {
     putPart: wrap(s.putPart, undefined),
     parts: wrap(s.parts, []),
     delPart: wrap(s.delPart, undefined),
+    sent: wrap(s.sent, []),
+    putSent: wrap(s.putSent, undefined),
+    delSent: wrap(s.delSent, undefined),
   };
+}
+
+/**
+ * The console confirmed the note: its audio moves from the waiting list to the last KEEP_SENT kept on this device (older ones
+ * leave), and the note leaves the outbox. `keep: false` (thrown away, nothing recorded): it just leaves.
+ */
+export async function settle(store: OutboxStore, cid: string, keep = true, now = Date.now()): Promise<void> {
+  if (keep) {
+    const n = await store.getNote(cid);
+    const parts = (await store.parts(cid)).filter((p) => p.blob && p.blob.size > 0);
+    if (parts.length) {
+      await store.putSent({
+        cid,
+        ...(n?.to ? { to: n.to } : {}),
+        ...(n?.page ? { page: n.page } : {}),
+        startedAt: n?.startedAt ?? now,
+        sentAt: now,
+        seconds: n?.seconds || parts.reduce((t, p) => t + p.seconds, 0),
+        parts: parts.map((p) => ({ n: p.n, blob: p.blob, seconds: p.seconds })),
+      });
+      for (const old of (await store.sent()).slice(KEEP_SENT)) await store.delSent(old.cid);
+    }
+  }
+  await store.delNote(cid);
+  sentChanged();
+}
+
+/* the last sent recordings: the list on the voice notes page follows them */
+const sentSubs = new Set<() => void>();
+let sentVer = 0;
+function sentChanged() {
+  sentVer++;
+  for (const f of sentSubs) f();
+}
+export const sentVersion = () => sentVer;
+export function subscribeSent(f: () => void) {
+  sentSubs.add(f);
+  return () => void sentSubs.delete(f);
 }
 
 let shared: OutboxStore | undefined;
@@ -154,6 +223,8 @@ let shared: OutboxStore | undefined;
 export function outbox(): OutboxStore {
   return (shared ??= safe(idbOutbox() ?? memoryOutbox()));
 }
+/** Send now (the waiting list's button): every waiting note tries at once. */
+export const sendNow = () => drain(undefined, undefined, undefined, { force: true });
 /** Tests: a fresh outbox. */
 export function setOutbox(s: OutboxStore | undefined) {
   shared = s ? safe(s) : undefined;
@@ -177,6 +248,8 @@ export interface OutboxState {
   sentAt?: number;
   sent: number;
   error?: string;
+  /** the next try of a waiting note (ms), when it is in the future. */
+  nextAt?: number;
 }
 let state: OutboxState = { waiting: 0, sent: 0 };
 const subs = new Set<() => void>();
@@ -194,9 +267,11 @@ function setState(p: Partial<OutboxState>) {
 }
 /** Recount what waits (after any engine or `drain` change). Only notes no engine holds count: those are the "kept here" ones. */
 export async function recount(store = outbox()): Promise<number> {
-  const all = await store.notes();
-  const waiting = all.filter((n) => !held.has(n.cid)).length;
-  if (waiting !== state.waiting) setState({ waiting });
+  const all = (await store.notes()).filter((n) => !held.has(n.cid));
+  const waiting = all.length;
+  const next = all.map((n) => n.nextAt ?? 0).filter((t) => t > Date.now());
+  const nextAt = waiting && next.length === waiting ? Math.min(...next) : undefined;
+  if (waiting !== state.waiting || nextAt !== state.nextAt) setState({ waiting, nextAt });
   return waiting;
 }
 
@@ -209,8 +284,12 @@ export interface DrainApi {
 }
 /** A note no tab touched for this long, and not held here, is sent as it is (its page was closed or reloaded mid-note). */
 export const ABANDON_MS = 3 * 60_000;
-/** While anything waits, `drain` runs this often. */
+/** While anything waits, `drain` looks this often (each note itself waits its own backoff, `nextAt`). */
 export const DRAIN_EVERY_MS = 20_000;
+/** The wait after a failed try: 20 s, doubling each try, at most 30 minutes; a note is never given up, for days if need be. */
+export const RETRY_FIRST_MS = 20_000;
+export const RETRY_MAX_MS = 30 * 60_000;
+export const backoffMs = (tries: number) => Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** Math.max(0, tries - 1));
 const status = (e: unknown) => (e as { status?: number })?.status;
 /** The console's answer for a note it already closed (409 note_closed: posted, transcribed, empty or thrown away; 404: gone). */
 export const closed = (e: unknown) => (status(e) === 404 && /^no voice note/.test((e as Error).message ?? "")) || (status(e) === 409 && /\bis (posted|transcribed|discarded|empty)\b/.test((e as Error).message ?? ""));
@@ -220,7 +299,7 @@ let running: Promise<number> | undefined;
  * Send every kept note no engine holds: open it (once per cid), upload each kept part (the console takes a part once), post it
  * (once). Confirmed notes leave the outbox. Returns how many were confirmed. Never two drains at once in a tab.
  */
-export function drain(api: DrainApi = fetchDrainApi(), store = outbox(), now = Date.now): Promise<number> {
+export function drain(api: DrainApi = fetchDrainApi(), store = outbox(), now = Date.now, o: { force?: boolean } = {}): Promise<number> {
   if (running) return running;
   running = (async () => {
     let sent = 0;
@@ -228,17 +307,20 @@ export function drain(api: DrainApi = fetchDrainApi(), store = outbox(), now = D
       for (const n of await store.notes()) {
         if (held.has(n.cid)) continue;
         if (!n.send && now() - n.at < ABANDON_MS) continue;
+        // backing off after a failed try (back online, a page opened, Send now: `force` tries at once).
+        if (!o.force && n.nextAt && n.nextAt > now()) continue;
         try {
-          if (await sendOne(n, api, store)) sent++;
+          if (await sendOne(n, api, store, now)) sent++;
         } catch (e) {
           // The console closed the note already (posted from another tab, or thrown away there): nothing more to send.
           if (closed(e)) {
-            await store.delNote(n.cid);
+            await settle(store, n.cid, true, now());
             continue;
           }
           // Anything else (offline, a restart, a 5xx, a part not in yet) waits for the next try, the note kept here.
           const kept = (await store.getNote(n.cid)) ?? n;
-          await store.putNote({ ...kept, tries: (kept.tries ?? 0) + 1, error: (e as Error).message });
+          const tries = (kept.tries ?? 0) + 1;
+          await store.putNote({ ...kept, tries, nextAt: now() + backoffMs(tries), error: (e as Error).message });
           setState({ error: (e as Error).message });
         }
       }
@@ -253,7 +335,7 @@ export function drain(api: DrainApi = fetchDrainApi(), store = outbox(), now = D
 }
 
 /** One kept note to the console. True: the console confirmed it (posted, or nothing was heard); it left the outbox. */
-async function sendOne(n: OutNote, api: DrainApi, store: OutboxStore): Promise<boolean> {
+async function sendOne(n: OutNote, api: DrainApi, store: OutboxStore, now = Date.now): Promise<boolean> {
   const parts = await store.parts(n.cid);
   if (!n.id) {
     if (!parts.length && !n.done.length) {
@@ -269,18 +351,19 @@ async function sendOne(n: OutNote, api: DrainApi, store: OutboxStore): Promise<b
     if (!done.has(p.n)) {
       await api.segment(n.base, n.id!, p.n, p.blob, p.seconds);
       done.add(p.n);
-      await store.putNote({ ...n, done: [...done] });
+      n = { ...n, done: [...done] };
+      await store.putNote(n);
     }
-    await store.delPart(n.cid, p.n);
+    // the part's audio stays here until the note is confirmed (then it is one of the last ones kept on this device).
   }
-  const segments = Math.max(n.parts, ...[...done].map((x) => x + 1), 0);
+  const segments = Math.max(n.parts, ...[...done].map((x) => x + 1), ...parts.map((p) => p.n + 1), 0);
   if (!segments) {
     await store.delNote(n.cid);
     return false;
   }
   const skip = [...Array(segments).keys()].filter((x) => !done.has(x));
   await api.finish(n.base, n.id!, segments, n.page, skip);
-  await store.delNote(n.cid);
+  await settle(store, n.cid, true, now());
   return true;
 }
 
@@ -307,16 +390,20 @@ export function startOutbox(win: Window | undefined = typeof window === "undefin
   if (started || !win) return () => undefined;
   started = true;
   const go = () => void drain().catch(() => undefined);
+  // back online, or the page shown again: every waiting note tries now, whatever its backoff.
+  const now = () => void drain(undefined, undefined, undefined, { force: true }).catch(() => undefined);
   const t = setInterval(() => {
     if (state.waiting) go();
   }, DRAIN_EVERY_MS);
-  win.addEventListener("online", go);
-  win.addEventListener("pageshow", go);
-  void recount().then(go);
+  win.addEventListener("online", now);
+  win.addEventListener("pageshow", now);
+  // ask the browser to keep this site's storage (the audio waiting here) even when the device runs low on space.
+  void (win.navigator as Navigator | undefined)?.storage?.persist?.().catch(() => undefined);
+  void recount().then(now);
   return () => {
     started = false;
     clearInterval(t);
-    win.removeEventListener("online", go);
-    win.removeEventListener("pageshow", go);
+    win.removeEventListener("online", now);
+    win.removeEventListener("pageshow", now);
   };
 }

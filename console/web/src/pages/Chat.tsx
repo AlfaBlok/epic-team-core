@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useInRouterContext, useNavigate, useSearchParams } from "react-router-dom";
+import { briefingHref, isBriefMe } from "@/lib/briefing";
 import { ArrowDown, ExternalLink, Mic, Phone, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
 import { cn } from "@/lib/utils";
@@ -350,6 +351,13 @@ export function landed(o: OutboxItem, messages: DeskMessage[], queued: { text: s
  * the chat itself (transcript, working…, sending, composer), shared by the Team desk page and every milestone's Chat tab:
  * a view on one T3 thread read back through `load`, sent to through `sendMessage`.
  */
+/** where "brief me" goes: the router's navigate, or a page load where the chat has no router (an embed, a test). */
+function useBriefingDoor(): (to: string) => void {
+  const inRouter = useInRouterContext();
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- inRouter never changes for a mounted chat
+  return inRouter ? useNavigate() : (to: string) => window.location.assign(to);
+}
+
 export function ChatView({
   who,
   load: fetchChat,
@@ -619,6 +627,7 @@ export function ChatView({
     toBottom();
   };
 
+  const navigate = useBriefingDoor();
   const files = useChatAttach({ enabled: attach });
   const patchOut = (crid: string, p: Partial<OutboxItem>) => setOutbox((xs) => xs.map((o) => (o.crid === crid ? { ...o, ...p } : o)));
   /** post one outbox message (behind his earlier ones); the transcript read after it shows it in place. */
@@ -640,6 +649,12 @@ export function ChatView({
     const body = text.trim();
     const ids = files.ids;
     if ((!body && !ids.length) || !files.ready) return;
+    // "brief me" opens his briefing: the Team desk walks him through his objectives one by one.
+    if (!ids.length && isBriefMe(body)) {
+      setText("");
+      navigate(briefingHref());
+      return;
+    }
     // His own send always brings him to the newest line (the effect scrolls once "sending…" renders).
     stuck.current = true;
     setAway(false);

@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import { outbox, outboxState, startOutbox, subscribeOutbox } from "./outbox";
+import { ON_DEVICE_PATH } from "@/lib/routePaths";
 import { deskFallback } from "./deskFallback";
-import { browserNoteMedia, fetchNotesApi, KEPT_FAILED_TEXT, KEPT_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
+import { browserNoteMedia, fetchNotesApi, KEPT_FAILED_TEXT, WAITING_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
 
 /**
  * Like a call (
@@ -440,7 +441,7 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
               ? v.error === MIC_BUSY_TEXT
                 ? v.error
                 : v.info === KEPT_FAILED_TEXT
-                  ? KEPT_TEXT
+                  ? WAITING_TEXT
                   : v.error?.startsWith("Not sent")
                     ? v.error
                     : `Not sent: ${v.error ?? ""}`
@@ -549,6 +550,9 @@ export function useKeptLine(): ReactNode {
   }, [fresh, st.sentAt]);
   if (!st.waiting && !fresh) return null;
   const many = (n: number) => (n === 1 ? "1 voice note" : `${n} voice notes`);
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const next = st.nextAt ? Math.max(1, Math.round((st.nextAt - Date.now()) / 60_000)) : 0;
+  const why = offline ? "no connection" : next ? `next try in ${next} min` : "sending now";
   return (
     <div
       role="status"
@@ -557,7 +561,12 @@ export function useKeptLine(): ReactNode {
       className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur max-sm:rounded-2xl"
     >
       <span className={cn("relative inline-flex size-2.5 shrink-0 rounded-full", st.waiting ? "bg-amber-500" : "bg-emerald-600")} aria-hidden />
-      <span className="min-w-0 truncate">{st.waiting ? `${many(st.waiting)} saved on this phone, sending…` : `✓ Sent: ${many(st.sent)} confirmed by the console`}</span>
+      <span className="min-w-0 truncate">{st.waiting ? `Waiting to send: ${many(st.waiting)} · ${why}` : `✓ Sent: ${many(st.sent)} confirmed by the console`}</span>
+      {st.waiting > 0 && (
+        <Link to={`/${ON_DEVICE_PATH}`} data-testid="note-kept-see" className="shrink-0 text-sm font-medium underline underline-offset-2">
+          See
+        </Link>
+      )}
     </div>
   );
 }

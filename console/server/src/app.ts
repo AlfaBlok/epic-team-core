@@ -64,6 +64,7 @@ import { mountChatScope } from "./desk/scope.js";
 import { claimsFor, claimsSection, mountChatDispatch, rowClaimRefusal, rowOf } from "./desk/dispatch.js";
 import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, hasStandingDuty, noteAck } from "./wakePrompt.js";
 import { mountInbox } from "./inbox/routes.js";
+import { mountBriefing } from "./briefing.js";
 import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } from "./inbox/redLineEdit.js";
 import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
@@ -1955,6 +1956,8 @@ export function createApp(
     who: () => ownerName(),
     wrote: dropSpines,
   });
+  // his briefing: what he says on each objective (or campaign) is filed on it, his words file and a Decisions line.
+  mountBriefing(api, { writer: spine, reposRoot: read.reposRoot, milestone: (id) => store.getMilestone(id), who: () => ownerName(), wrote: dropSpines });
   // which provider the two text calls use, and one probe call of either on TEST text (and of the
   // cross-world check, the voice spill check and the memory service ask wording) (writes nothing, files
   // nothing, one call per 20 s): the proof that a call goes through the credit account, and a check after a rollback.

@@ -1602,6 +1602,9 @@ const mockMail = () => ({
     async redLine() {
       return ok({ redLine: null, redLines: [] });
     },
+    async briefingAnswer() {
+      return { ok: true as const, filed: ["docs/his-words.json"] };
+    },
     async editRedLine() {
       throw new Error("the mock console does not change red lines");
     },

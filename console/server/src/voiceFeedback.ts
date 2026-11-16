@@ -837,9 +837,10 @@ const PAGE_JS = String.raw`
   const kept = (why) => { KEEP.held.delete(cid); reset(); say(KEPT + (why ? " (" + why + ")" : "")); later(); };
   let timer;
   const later = () => { if (!timer) timer = setInterval(sendKept, 20000); };
-  async function sendKept() {
+  async function sendKept(force) {
     const n = await KEEP.drain({
       base,
+      force: force === true,
       start: async (r) => (await api("/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId: r.cid }) })).note.id,
       segment: (id, p) => api("/notes/" + id + "/parts/" + p.n, { method: "POST", headers: { "content-type": p.blob.type || "audio/webm", "x-seconds": String(p.seconds) }, body: p.blob }),
       finish: (id, n, sk) => api("/notes/" + id + "/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ parts: n, skip: sk }) }),
@@ -863,7 +864,7 @@ const PAGE_JS = String.raw`
   $("again").addEventListener("click", () => { $("done").style.display = "none"; document.querySelector(".card").style.display = "block"; time.textContent = "0:00"; say("Up to __MAX__ minutes. Tap again to send."); });
   // A locked phone may pause the page: cut the part on hide so what was said is uploaded at once.
   document.addEventListener("visibilitychange", () => { if (document.hidden) roll(); });
-  window.addEventListener("online", () => void sendKept());
+  window.addEventListener("online", () => void sendKept(true));
   void sendKept();
 })();
 `;

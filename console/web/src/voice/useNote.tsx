@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView, SentNote } from "./noteEngine";
-import { DEFAULT_MAX_MIN, KEPT_FAILED_TEXT, KEPT_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
+import { DEFAULT_MAX_MIN, KEPT_FAILED_TEXT, WAITING_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
 import { useDeskVoiceBase } from "./deskBase";
 import { CancelNote, clockOf, LevelMeter, LiveDot, noteOn, outText, useNoteTab, type HeldNote } from "./NoteProvider";
 
@@ -293,7 +293,7 @@ export function useNote(props: {
         // a microphone a call holds is no fault: said calmly, the button stays ready for when the call ends.
         <span className={v.error === MIC_BUSY_TEXT || v.info === KEPT_FAILED_TEXT ? "text-amber-700 dark:text-amber-400" : "text-destructive"} data-testid={`${tid}-error`}>
           {/* not confirmed yet is not lost: kept on this device and sent by itself. */}
-          {v.info === KEPT_FAILED_TEXT ? KEPT_TEXT : v.error}
+          {v.info === KEPT_FAILED_TEXT ? WAITING_TEXT : v.error}
         </span>
       )}
       {((v.phase === "failed" && v.error?.startsWith("Not sent")) || (out?.state === "failed" && out.note)) && (

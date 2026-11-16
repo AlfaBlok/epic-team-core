@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KEPT_FAILED_TEXT, KEPT_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotesApi, type RecorderLike } from "./noteEngine";
-import { ABANDON_MS, drain, held, memoryOutbox, outboxState, recount, setOutbox, type DrainApi, type OutboxStore } from "./outbox";
+import { ABANDON_MS, backoffMs, drain, held, KEEP_SENT, memoryOutbox, outboxState, recount, RETRY_MAX_MS, setOutbox, settle, type DrainApi, type OutboxStore } from "./outbox";
 
 // every part is
 // kept in the browser's outbox until the console confirms it; a failure, a reload or a restart resends it with the same
@@ -131,7 +131,8 @@ describe("T42-S51 a voice note is kept in the browser until the console confirms
     expect(held.has(cid)).toBe(true);
     await f.advance(121); // part 0 closes and uploads
     expect((await box.getNote(cid))?.done).toEqual([0]);
-    expect(await box.parts(cid)).toEqual([]);
+    // its audio stays on the device until the whole note is confirmed.
+    expect((await box.parts(cid)).map((p) => p.n)).toEqual([0]);
     const seen: (string | undefined)[] = [];
     e.subscribe((v) => v.phase === "sending" && seen.push(v.info));
     await e.finish();
@@ -141,6 +142,11 @@ describe("T42-S51 a voice note is kept in the browser until the console confirms
     expect(k.s.posts).toHaveLength(1);
     expect(await box.notes()).toEqual([]);
     expect(held.has(cid)).toBe(false);
+    // once confirmed it is one of the last few kept on the device, its audio whole.
+    const kept = await box.sent();
+    expect(kept.map((r) => r.cid)).toEqual([cid]);
+    expect(await Promise.all(kept[0].parts.map((p) => p.blob.text()))).toEqual(["words0", "words1"]);
+    expect(kept[0].to).toBe("Chat");
   });
 
   it("the console restarts mid-upload: the note says it is saved here, Close never throws it away, and it arrives once when the console is back", async () => {
@@ -167,9 +173,9 @@ describe("T42-S51 a voice note is kept in the browser until the console confirms
     // Still down: drain keeps it.
     expect(await drain(k.drainApi)).toBe(0);
     expect(await box.parts(cid)).toHaveLength(1);
-    // Back: it arrives, once.
+    // Back: it arrives, once (back online tries at once, whatever the wait).
     k.s.down = false;
-    expect(await drain(k.drainApi)).toBe(1);
+    expect(await drain(k.drainApi, box, Date.now, { force: true })).toBe(1);
     expect(k.s.posts).toEqual([{ id: "vn_1", words: "words0" }]);
     expect(await box.notes()).toEqual([]);
     expect(outboxState().waiting).toBe(0);
@@ -188,7 +194,7 @@ describe("T42-S51 a voice note is kept in the browser until the console confirms
     k.s.down = true;
     await e.pageVisible(false); // phone hides the page: part 1 closes, its upload fails (restart)
     await flush();
-    expect((await box.parts(cid)).map((p) => p.n)).toEqual([1]);
+    expect((await box.parts(cid)).map((p) => p.n)).toEqual([0, 1]);
     // The page is thrown away: a new load has no engine holding the note.
     held.clear();
     k.s.down = false;
@@ -243,5 +249,86 @@ describe("T42-S51 a voice note is kept in the browser until the console confirms
     expect(k.s.posts).toEqual([]);
     await e.finish();
     expect(k.s.posts).toHaveLength(1);
+  });
+});
+
+describe("T42-S113 a voice note is never lost: kept until confirmed, retried for days, the last 5 kept after", () => {
+  it("a waiting note backs off after each failed try (20 s doubling to 30 min) and never gives up", async () => {
+    expect([1, 2, 3, 4].map(backoffMs)).toEqual([20_000, 40_000, 80_000, 160_000]);
+    expect(backoffMs(30)).toBe(RETRY_MAX_MS);
+    const k = fakeConsole();
+    k.s.down = true;
+    let t = Date.UTC(2026, 10, 16, 8, 0, 0);
+    const now = () => t;
+    await box.putNote({ cid: "c1", base: "/api/voice", parts: 1, done: [], send: true, at: t, startedAt: t, seconds: 5 });
+    await box.putPart({ cid: "c1", n: 0, blob: new Blob(["hello"]), seconds: 5 });
+    // three days of a dead connection: it tries less and less often, and is still there.
+    let tries = 0;
+    for (const end = t + 3 * 24 * 3600_000; t < end; t += 60_000) {
+      const before = (await box.getNote("c1"))?.tries ?? 0;
+      await drain(k.drainApi, box, now);
+      if (((await box.getNote("c1"))?.tries ?? 0) > before) tries++;
+    }
+    expect(tries).toBeGreaterThan(140); // about every 30 min at the most
+    expect(tries).toBeLessThan(160);
+    expect((await box.getNote("c1"))?.nextAt).toBeGreaterThan(t);
+    expect(outboxState().nextAt).toBeGreaterThan(Date.now() - 1);
+    // the connection is back: Send now (or the browser's online event) sends it at once.
+    k.s.down = false;
+    expect(await drain(k.drainApi, box, now)).toBe(0); // still waiting its turn…
+    expect(await drain(k.drainApi, box, now, { force: true })).toBe(1); // …but forced it goes
+    expect(k.s.posts).toEqual([{ id: "vn_1", words: "hello" }]);
+    expect(await box.notes()).toEqual([]);
+  });
+
+  it("the last 5 sent recordings stay on the device, older ones leave", async () => {
+    for (let i = 0; i < 7; i++) {
+      await box.putNote({ cid: `n${i}`, base: "/api/voice", parts: 1, done: [0], at: i, startedAt: i, seconds: 3, to: "Chat" });
+      await box.putPart({ cid: `n${i}`, n: 0, blob: new Blob([`note ${i}`]), seconds: 3 });
+      await settle(box, `n${i}`, true, 1000 + i);
+    }
+    const kept = await box.sent();
+    expect(kept).toHaveLength(KEEP_SENT);
+    expect(kept.map((r) => r.cid)).toEqual(["n6", "n5", "n4", "n3", "n2"]);
+    expect(await box.notes()).toEqual([]);
+    expect(await box.parts("n6")).toEqual([]);
+  });
+
+  it("the part being recorded is saved on the device every few seconds, so a closed tab loses almost nothing", async () => {
+    const f = fakes();
+    // a recorder that hands its audio over every second, like the browser's (start(1000)).
+    const recs: any[] = [];
+    f.media.recorder = () => {
+      const r: any = { mimeType: "audio/webm", ondataavailable: null, onstop: null, start: () => undefined, stop: () => queueMicrotask(() => r.onstop?.()) };
+      recs.push(r);
+      return r;
+    };
+    const k = fakeConsole();
+    const e = engineOn(k.api, f);
+    await e.start();
+    const cid = e.clientId()!;
+    for (let s = 0; s < 10; s++) {
+      await f.advance(1);
+      recs[0].ondataavailable({ data: new Blob([`s${s} `]) });
+    }
+    await flush();
+    const parts = await box.parts(cid);
+    expect(parts.map((p) => p.n)).toEqual([0]);
+    expect(await parts[0].blob.text()).toMatch(/^s0 s1 s2 .*s8 /); // up to the last 3 s or less
+    // the tab is closed now (no stop, no upload): the next load sends what was kept.
+    held.clear();
+    expect(await drain(k.drainApi, box, () => f.clock.t + ABANDON_MS + 1)).toBe(1);
+    expect(k.s.posts[0].words).toMatch(/^s0 s1 s2/);
+  });
+
+  it("Cancel keeps nothing on the device, not even in the last 5", async () => {
+    const f = fakes();
+    const k = fakeConsole();
+    const e = engineOn(k.api, f);
+    await e.start();
+    await f.advance(10);
+    await e.discard();
+    await flush();
+    expect(await box.sent()).toEqual([]);
   });
 });
