@@ -873,8 +873,9 @@ export function SidebarGoalSetsOf({
         </span>
       </NavLink>
       <ul className="grid min-w-0 gap-1" data-testid="sidebar-pinned-objectives">
-        {pinned.map((n) => (
-          <SidebarObjective key={n.id} n={n} nr={top.indexOf(n) + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+        {/* numbered 1, 2, 3 down the pinned list, with no gap where an unpinned one sits in his order */}
+        {pinned.map((n, i) => (
+          <SidebarObjective key={n.id} n={n} nr={i + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
       {moreCount > 0 && (
@@ -895,7 +896,7 @@ export function SidebarGoalSetsOf({
         <div className="grid min-w-0 gap-1 pl-3" data-testid="sidebar-more-objectives">
           <ul className="grid min-w-0 gap-1">
             {unpinned.map((n) => (
-              <SidebarObjective key={n.id} n={n} nr={top.indexOf(n) + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+              <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
             ))}
           </ul>
           {more?.links}
