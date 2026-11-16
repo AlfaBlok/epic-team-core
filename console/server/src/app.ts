@@ -40,6 +40,7 @@ import { followUp } from "./cycle/followUp.js";
 import { childEpicsFor } from "./cycle/children.js";
 import { textHash } from "./cycle/skipUnchanged.js";
 import { listTemplates } from "./personaTemplates.js";
+import { templateForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
 import { mountUnblockerStats } from "./cycle/unblockerStats.js";
 import { mountWakeStats } from "./cycle/wakeStats.js";
 import { commentHash, evidenceHash, mountAskMemory, readAskMemory, rememberChecks, withCarriedChecks } from "./cycle/askMemory.js";
@@ -3288,9 +3289,14 @@ export function createApp(
     publicUrl: process.env.CONSOLE_PUBLIC_URL || cycle.publicUrl,
     hasTenant: (id) => !!store.getTenant(id),
     makeWorld: testerWorlds?.makeWorld,
+    setUpTeam: testerWorlds?.setUpTeamWorld,
     notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
   });
-  api.get("/persona-templates", (c) => c.json(listTemplates())); // templates for the New persona picker
+  // templates for the New persona picker; a customer workspace reads them with its owner's name (tenancy/workspaceText.ts)
+  api.get("/persona-templates", (c) => {
+    const owner = workspaceOwner(db, store.tenant);
+    return c.json(listTemplates().map((t) => templateForWorkspace(t, owner)));
+  });
   api.get("/personas/:id", (c) => c.json(found(store.getPersona(c.req.param("id")), "persona", c.req.param("id"))));
   // the persona's file in the team repo first (recordFirst), then console.db.
   api.post("/personas", async (c) => {

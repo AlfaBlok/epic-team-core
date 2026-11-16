@@ -46,6 +46,8 @@ export interface HostedContext {
   hasTenant: (id: string) => boolean;
   /** Make a tester's world (the tester flow owns it). */
   makeWorld?: (signup: Record<string, any>, payment: "stripe") => Promise<any>;
+  /** a paid customer workspace's team (checkout, first project from the buyer's words, personas off). */
+  setUpTeam?: (world: string, words?: string) => Promise<{ step: string; state: string }[]>;
 }
 
 export interface HostedPlug {
@@ -223,6 +225,7 @@ export interface TesterWorldsArea {
   makeSignupWorld: (i: { email: string; name: string; product: "team" | "social"; provider: string; host: string; visitSource?: string }) => Promise<{ world: string }>;
   makeWorld: (signup: Record<string, any>, payment: "stripe") => Promise<any>;
   onSitesChanged: (world: string) => void;
+  setUpTeamWorld: (world: string, words?: string) => Promise<{ step: string; state: string }[]>;
 }
 
 /** Many worlds as core uses them (each made and mounted where app.ts did it). Opaque values (the social source,

@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { api, type Milestone } from "@/api";
-import type { MarketingPlan, MarketingPlanSection } from "@/api/campaign-types";
+import type { MarketingPlan, MarketingPlanSection, MarketingPlanWrite } from "@/api/campaign-types";
 import { ErrorBox, Loading } from "@/components/common";
+import { Button } from "@/components/ui/button";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { inline } from "@/lib/chatMarkdown";
-import { useQuery } from "@/lib/data";
+import { mutate, useQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
 import { cn } from "@/lib/utils";
 
@@ -14,9 +18,78 @@ import { cn } from "@/lib/utils";
  */
 export function PlanTab({ m }: { m: Milestone }) {
   const { data, error, loading } = useQuery(async () => api.getCampaignPlan(await worldId(), m.id), [m.id]);
+  // the plan is the owner's to write (the Strategist still writes it when it wakes).
+  const [editing, setEditing] = useState(false);
   if (error) return <ErrorBox error={error} />;
   if (loading || !data) return <Loading />;
-  return <PlanView plan={data} />;
+  if (editing) return <PlanEditor plan={data} onSave={async (w) => api.saveCampaignPlan(await worldId(), m.id, w)} onDone={() => setEditing(false)} />;
+  return <PlanView plan={data} onEdit={() => setEditing(true)} />;
+}
+
+/** what each section holds, in the owner's words, with the line shape the Plan tab draws (docs/campaign-plan.md). */
+const SECTION_HELP: Record<MarketingPlanSection["key"], string> = {
+  goal: "One sentence, then the funnel as a table: | Step | Today | Goal | and one row per step, e.g. | Sign-ups | 0 | 5 |",
+  who: "One line per group of people: - First: founders who post on LinkedIn every week",
+  messages: "One line per message: - Message 1: what you say · 10 posts, 2 videos",
+  channels: "One line per channel: - LinkedIn: 3 posts a week",
+  offer: "What a reader gets, in one sentence.",
+  test: "What you try this week, and what would show it works.",
+  budget: "One line per cost: - Ads: €0 a month",
+  measure: "What you count, when, and what you change when it does not move.",
+};
+
+/**
+ * the Plan tab's editor. The plan's line and its eight fixed sections, each prefilled with what is written;
+ * Save writes them into the campaign spine's `## Plan` (one commit) and the tab shows the result.
+ */
+export function PlanEditor({ plan, onSave, onDone }: { plan: MarketingPlan; onSave: (w: MarketingPlanWrite) => Promise<unknown>; onDone: () => void }) {
+  const [line, setLine] = useState(plan.line && !/^approved:/i.test(plan.line) ? plan.line : "");
+  const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(plan.sections.map((s) => [s.key, s.raw ?? ""])));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<Error>();
+  const save = async () => {
+    setBusy(true);
+    setErr(undefined);
+    try {
+      await mutate(() => onSave({ line: line.trim(), sections: Object.fromEntries(plan.sections.map((s) => [s.key, text[s.key] ?? ""])) }));
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="grid max-w-4xl gap-4" data-testid="plan-editor">
+      <div className="grid gap-1">
+        <h2 className="text-lg font-semibold">Write your plan</h2>
+        <p className="text-sm text-muted-foreground">Eight parts, in this order. Leave a part empty if you do not know it yet.</p>
+      </div>
+      {err && <ErrorBox error={err} />}
+      <div className="grid gap-1">
+        <Label htmlFor="plan-line">The plan in one line</Label>
+        <Input id="plan-line" value={line} onChange={(e) => setLine(e.target.value)} placeholder="Fifty founders hear about us on LinkedIn this month" data-testid="plan-edit-line" />
+      </div>
+      {plan.sections.map((s, i) => (
+        <div key={s.key} className="grid gap-1 border-t pt-3">
+          <Label htmlFor={`plan-edit-${s.key}`} className="flex items-baseline gap-2">
+            <span className="text-xs font-normal tabular-nums text-muted-foreground">{i + 1}</span>
+            {s.title}
+          </Label>
+          <Textarea id={`plan-edit-${s.key}`} rows={s.key === "goal" || s.key === "messages" ? 5 : 3} value={text[s.key] ?? ""} onChange={(e) => setText({ ...text, [s.key]: e.target.value })} data-testid={`plan-edit-${s.key}`} />
+          <span className="text-xs text-muted-foreground">{SECTION_HELP[s.key]}</span>
+        </div>
+      ))}
+      <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-background py-3">
+        <Button variant="outline" onClick={onDone} disabled={busy}>
+          Cancel
+        </Button>
+        <Button onClick={save} pending={busy} pendingLabel="Saving…" data-testid="plan-save">
+          Save plan
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 /** an objective's Plan tab: the same eight sections, from the campaign spine the objective names (GET /api/pursuits/:id/plan). */
@@ -134,9 +207,11 @@ function Section({ s, n }: { s: MarketingPlanSection; n: number }) {
   );
 }
 
-export function PlanView({ plan }: { plan: MarketingPlan }) {
+export function PlanView({ plan, onEdit }: { plan: MarketingPlan; onEdit?: () => void }) {
   const where =
-    plan.source === "spine"
+    onEdit && plan.source === "none"
+      ? "Not written yet. Write it with Edit plan; the Strategist adds to it when it wakes."
+      : plan.source === "spine"
       ? `From ${plan.repo} · ${plan.path}, section Plan.`
       : plan.source === "copy"
         ? `The team's copy (${plan.path}) until the campaign's own spine has its Plan section.`
@@ -144,7 +219,14 @@ export function PlanView({ plan }: { plan: MarketingPlan }) {
   return (
     <div className="grid max-w-4xl gap-4" data-testid="plan-tab">
       <div className="grid gap-1">
-        {plan.line && <p className="text-lg font-semibold leading-snug">{inline(plan.line)}</p>}
+        <div className="flex items-start gap-3">
+          {plan.line ? <p className="min-w-0 flex-1 text-lg font-semibold leading-snug">{inline(plan.line)}</p> : <span className="flex-1" />}
+          {onEdit && (
+            <Button size="sm" variant={plan.source === "none" ? "default" : "outline"} onClick={onEdit} data-testid="plan-edit">
+              Edit plan
+            </Button>
+          )}
+        </div>
         {/* the eight fixed sections as one line of steps: the plan's shape before its words. */}
         <ol className="flex flex-wrap gap-1.5 text-xs" aria-label="The plan's sections">
           {plan.sections.map((s, i) => (

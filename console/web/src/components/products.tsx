@@ -1,4 +1,5 @@
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ObjectiveName } from "@/components/objectiveName";
 import { api } from "@/api";
 import type { ProductView, ProductsBody, PursuitKitBody } from "@/api/pursuit-types";
 import { STATE_FILL, TabStrip, titleOf, useGoalSets } from "@/components/goalSets";
@@ -44,7 +45,7 @@ function Wheels({ p }: { p: ProductView }) {
         <li key={w.id}>
           <Link to={scorecardHref(w.id)} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2 hover:bg-accent/40" data-testid="product-wheel">
             <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: STATE_FILL[w.state] ?? STATE_FILL.unknown }} aria-hidden="true" />
-            <span className="min-w-0 flex-1 text-sm text-foreground [overflow-wrap:anywhere]">{named.get(w.id) ?? w.name}</span>
+            <ObjectiveName name={named.get(w.id) ?? w.name} className="min-w-0 flex-1 text-sm text-foreground" />
             <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
               {w.greens} of {w.total} green
             </span>

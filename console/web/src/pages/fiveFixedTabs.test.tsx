@@ -102,6 +102,18 @@ describe("E964-S14 five fixed tabs", () => {
     expect(within(tab).getAllByTestId("plan-not-written")).toHaveLength(6);
   });
 
+  it("the owner writes the plan: Edit plan opens the eight parts with what is written, Save sends them and the tab shows the result", async () => {
+    const save = vi.spyOn(api, "saveCampaignPlan").mockResolvedValue(PLAN);
+    page("/milestones/ms-memo?tab=plan");
+    fireEvent.click(await screen.findByTestId("plan-edit"));
+    const ed = await screen.findByTestId("plan-editor");
+    expect((within(ed).getByTestId("plan-edit-line") as HTMLInputElement).value).toBe("Bring your context home.");
+    fireEvent.change(within(ed).getByTestId("plan-edit-who"), { target: { value: "- First: founders who post weekly" } });
+    fireEvent.click(within(ed).getByTestId("plan-save"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith("social", "ms-memo", expect.objectContaining({ line: "Bring your context home.", sections: expect.objectContaining({ who: "- First: founders who post weekly", budget: "" }) })));
+    expect(await screen.findByTestId("plan-tab")).toBeTruthy();
+  });
+
   it("the console skin's campaign has the Plan tab too", async () => {
     page("/milestones/ms-memo?tab=plan", SKINS.console);
     expect(await screen.findByTestId("plan-tab")).toBeTruthy();

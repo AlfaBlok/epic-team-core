@@ -1,4 +1,5 @@
 import { useEffect, useState, type DragEvent } from "react";
+import { ObjectiveName } from "@/components/objectiveName";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, GripVertical } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/api";
@@ -211,7 +212,7 @@ function MapRow({
           {!p.parked && editable && <GripVertical className="mt-0.5 hidden h-4 w-4 shrink-0 cursor-grab text-muted-foreground md:block" aria-hidden />}
           <RankBadge p={p} />
           <Link to={`/pursuits/${encodeURIComponent(p.id)}`} className="min-w-0 flex-1 text-sm font-semibold underline decoration-transparent underline-offset-4 hover:decoration-current [overflow-wrap:anywhere]" data-testid="pursuit-map-open">
-            {pursuitTitle(p)}
+            <ObjectiveName name={pursuitTitle(p)} />
           </Link>
           <span className="shrink-0 text-xs text-muted-foreground">
             {p.greens}/{p.total}
@@ -347,7 +348,7 @@ export function PursuitBackBar({ repo, code }: { repo: string; code: string }) {
       </Link>
       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
       <Link to={`/pursuits/${encodeURIComponent(p.id)}`} className="min-w-0 underline underline-offset-2 [overflow-wrap:anywhere]" data-testid="deck-pursuit-open">
-        {pursuitTitle(p)}
+        <ObjectiveName name={pursuitTitle(p)} layout="inline" />
       </Link>
       <RankBadge p={p} />
       <span className="text-xs text-muted-foreground">

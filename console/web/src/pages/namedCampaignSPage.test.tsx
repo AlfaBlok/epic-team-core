@@ -164,8 +164,11 @@ describe("lists with several campaigns in one repo", () => {
 });
 
 describe("New campaign in a repo that runs campaigns", () => {
-  it("makes a named campaign: name kept as written, the plan parts given, the roles that work it; then opens its Brief", async () => {
-    vi.spyOn(api, "listCampaignRepos").mockResolvedValue([{ name: "social", remote: "acme-ai/social", hasPack: true, campaign: true }]);
+  it("makes a named campaign: name kept as written, the plan parts given, the roles that work it; then opens the campaign (its Plan)", async () => {
+    vi.spyOn(api, "listCampaignRepos").mockResolvedValue([
+      { name: "social", remote: "acme-ai/social", hasPack: true, campaign: true },
+      { name: "other", remote: "acme-ai/other", hasPack: false, campaign: false },
+    ]);
     const create = vi.spyOn(api, "createNamedCampaign").mockResolvedValue({ milestoneId: "ms-new" } as never);
     render(
       <SkinProvider skin={SKINS.social}>
@@ -198,6 +201,31 @@ describe("New campaign in a repo that runs campaigns", () => {
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith("social", { repo: "social", name: "Reddit awareness week 37", plan: { platform: "Reddit", format: "text only", cadence: "Reddit: 1 thread a day", readerAction: "answer the question", frame: "(to fill in: the one idea every post serves)", keyMessages: ["Memory you own", "Open source"] }, roles: ["Writer", "Responder"], template: true }),
     );
+    expect(await screen.findByText("campaign page")).toBeTruthy();
+  });
+});
+
+describe("a customer's workspace (one campaign repo)", () => {
+  it("Add campaign opens straight on the new campaign: no repo to pick, no repo name shown", async () => {
+    vi.spyOn(api, "listCampaignRepos").mockResolvedValue([{ name: "es-acme-1f2e", hasPack: true, campaign: true }]);
+    vi.spyOn(api, "campaignTemplate").mockResolvedValue({ source: { name: "The template", url: "https://x" }, parts: [], plan: {} } as never);
+    const create = vi.spyOn(api, "createNamedCampaign").mockResolvedValue({ milestoneId: "ms-new" } as never);
+    render(
+      <SkinProvider skin={SKINS.social}>
+        <MemoryRouter initialEntries={["/campaigns/new"]}>
+          <Routes>
+            <Route path="/campaigns/new" element={<NewCampaignPage />} />
+            <Route path="/milestones/:id" element={<div>campaign page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </SkinProvider>,
+    );
+    const form = await screen.findByTestId("named-campaign-form");
+    expect(within(form).getByText("Your new campaign")).toBeTruthy();
+    expect(screen.queryByText(/es-acme-1f2e/)).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "LinkedIn founders" } });
+    fireEvent.click(within(form).getByTestId("named-campaign-create"));
+    await waitFor(() => expect(create).toHaveBeenCalledWith("social", expect.objectContaining({ repo: "es-acme-1f2e", name: "LinkedIn founders" })));
     expect(await screen.findByText("campaign page")).toBeTruthy();
   });
 });

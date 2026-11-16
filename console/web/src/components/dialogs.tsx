@@ -13,10 +13,10 @@ import { DocPicker, RepoPicker, type PathChoice } from "@/components/pickers";
 import { mutate, useQuery } from "@/lib/data";
 import { WEEKDAY_SHORT, formatCadence } from "@/lib/format";
 import { cap, DEFAULT_SKIN, useSkin, useWords } from "@/lib/skin";
-import { worldId } from "@/lib/useSocial";
+import { knownWorld, worldId } from "@/lib/useSocial";
 import { repoCards } from "@/lib/campaign";
 import { cn } from "@/lib/utils";
-import { opsRepo, ownerName } from "@/lib/identity";
+import { homeWorld, opsRepo, ownerName } from "@/lib/identity";
 import { mainHost, workerHost } from "../lib/identity";
 
 interface DialogProps {
@@ -68,6 +68,8 @@ type MilestoneDialogProps = DialogProps & {
   onCampaign?: () => void;
   /** the social skin's "Add job" (a one-off piece of work with an end): the same dialog, named for a job. */
   job?: boolean;
+  /** a customer workspace (console skin): Add project is this form in the workspace's own repo (no agent launch). */
+  project?: boolean;
 };
 
 /**
@@ -77,14 +79,22 @@ type MilestoneDialogProps = DialogProps & {
  */
 export function MilestoneDialog(props: MilestoneDialogProps) {
   const campaigns = !!useSkin().campaigns;
+  // in a customer workspace the console's Create a new epic (an agent on a checkout) is the home world's
+  // only, so Add project writes the project's spine in the workspace's own repo through the same jobs route.
+  const { data: world } = useQuery(() => (props.open && !campaigns ? worldId() : Promise.resolve(undefined)), [props.open, campaigns]);
+  const w = world ?? knownWorld();
+  const customer = !campaigns && !!w && w !== homeWorld();
+  if (customer && props.focusAt == null) return <JobDialog {...props} project />;
   return campaigns && (props.job || props.offerCampaign) && props.focusAt == null ? <JobDialog {...props} /> : <MilestoneFormDialog {...props} />;
 }
 
 /** what should be done, Done means, which repo and persona; Add and start or Add as draft. */
-function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }: MilestoneDialogProps) {
-  const { data: camps } = useQuery(async () => (open ? api.listCampaigns(await worldId()) : undefined), [open]);
+function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign, project }: MilestoneDialogProps) {
+  const { data: camps } = useQuery(async () => (open ? (project ? { tenantId: await worldId(), campaigns: [] } : api.listCampaigns(await worldId())) : undefined), [open, project]);
   const { data: personas = [] } = useQuery(() => (open ? api.listPersonas() : Promise.resolve([] as Persona[])), [open]);
-  const repos = repoCards(camps?.campaigns).map((c) => ({ value: c.repo, label: c.remote ?? c.repo }));
+  // a workspace's project goes in one of its own repos (GET /api/repos lists only the caller's)
+  const { data: ownRepos = [] } = useQuery(() => (open && project ? api.listRepos() : Promise.resolve([] as Repo[])), [open, project]);
+  const repos = project ? ownRepos.map((r) => ({ value: r.name, label: r.remote ?? r.name })) : repoCards(camps?.campaigns).map((c) => ({ value: c.repo, label: c.remote ?? c.repo }));
   const [title, setTitle] = useState("");
   const [done, setDone] = useState("");
   const [repo, setRepo] = useState("");
@@ -108,7 +118,8 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }:
       const r = await mutate(async () => {
         const out = await api.addJob(camps!.tenantId, { repo: repoValue, title: title.trim(), doneMeans, ...(persona ? { personaId: persona } : {}), ...(draft ? { draft } : {}) });
         // Add and start: the persona wakes now (L-37: his ask is his ready stamp), not at its next 09:00.
-        if (!draft && out.assignmentId) await api.runAssignmentNow(out.assignmentId, `New job: ${title.trim()} (${ownerName()} pressed Add and start).`);
+        // a workspace's personas wait for its own sealed box: its project is added, nobody is woken
+        if (!draft && !project && out.assignmentId) await api.runAssignmentNow(out.assignmentId, `New job: ${title.trim()} (${ownerName()} pressed Add and start).`);
         return out;
       });
       onOpenChange(false);
@@ -124,8 +135,12 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }:
       <DialogContent className="max-w-2xl">
         <div className="grid gap-4" data-testid="job-dialog">
           <DialogHeader>
-            <DialogTitle>{offerCampaign ? "Add campaign or job" : "Add job"}</DialogTitle>
-            <DialogDescription>A job is one piece of work with a beginning and an end (research, a launch post, a one-time video). It shows on Home under its project until it is done.</DialogDescription>
+            <DialogTitle>{project ? "Add project" : offerCampaign ? "Add campaign or job" : "Add job"}</DialogTitle>
+            <DialogDescription>
+              {project
+                ? "A project is one goal for your team, with what done means. It is saved in your workspace and shows on Home."
+                : "A job is one piece of work with a beginning and an end (research, a launch post, a one-time video). It shows on Home under its project until it is done."}
+            </DialogDescription>
           </DialogHeader>
           {offerCampaign && (
             <div role="radiogroup" aria-label="Campaign or job" className="grid gap-2 sm:grid-cols-2" data-testid="campaign-or-job">
@@ -172,15 +187,15 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }:
             </div>
           )}
           <Field label="What should be done?">
-            <Input aria-label="What should be done?" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. find 10 subreddits that allow tool posts" />
+            <Input aria-label="What should be done?" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={project ? "e.g. launch the new pricing page" : "e.g. find 10 subreddits that allow tool posts"} />
           </Field>
           <Field label="Done means…" hint="One line each">
             <Textarea aria-label="Done means" rows={3} value={done} onChange={(e) => setDone(e.target.value)} placeholder="e.g. the list is in the brief with each sub's rules" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="In" hint="This world's repo">
+            <Field label="In" hint={project ? "Your workspace's repo" : "This world's repo"}>
               <NativeSelect aria-label="Repo" value={repoValue} onChange={(e) => setRepo(e.target.value)}>
-                {repos.length === 0 && <option value="">No repo yet: start a campaign first</option>}
+                {repos.length === 0 && <option value="">{project ? "No repo yet: it is made when your plan is paid" : "No repo yet: start a campaign first"}</option>}
                 {repos.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
@@ -188,7 +203,7 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }:
                 ))}
               </NativeSelect>
             </Field>
-            <Field label="Persona" hint="Who works it (wakes daily until done)">
+            <Field label="Persona" hint={project ? "Who works it once your team starts" : "Who works it (wakes daily until done)"}>
               <NativeSelect aria-label="Persona" value={persona} onChange={(e) => setPersona(e.target.value)}>
                 <option value="">Nobody yet</option>
                 {personas.map((p) => (
@@ -204,12 +219,20 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign }:
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" variant="outline" disabled={!!busy || !repoValue} pending={busy === "draft"} pendingLabel="Adding…" onClick={() => submit(true)}>
-              Add as draft
-            </Button>
-            <Button type="button" disabled={!!busy || !repoValue} pending={busy === "start"} pendingLabel="Adding and starting…" onClick={() => submit(false)} data-testid="job-start">
-              Add and start
-            </Button>
+            {project ? (
+              <Button type="button" disabled={!!busy || !repoValue} pending={busy === "start"} pendingLabel="Adding…" onClick={() => submit(false)} data-testid="project-add">
+                Add project
+              </Button>
+            ) : (
+              <>
+                <Button type="button" variant="outline" disabled={!!busy || !repoValue} pending={busy === "draft"} pendingLabel="Adding…" onClick={() => submit(true)}>
+                  Add as draft
+                </Button>
+                <Button type="button" disabled={!!busy || !repoValue} pending={busy === "start"} pendingLabel="Adding and starting…" onClick={() => submit(false)} data-testid="job-start">
+                  Add and start
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </div>
       </DialogContent>

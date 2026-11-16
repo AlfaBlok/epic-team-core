@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ObjectiveName } from "@/components/objectiveName";
 import { api } from "@/api";
 import type { Experiment, ExperimentKeyResult, WorldCampaign, WorldInbox } from "@/api/company-types";
 import { pursuitTitle, type Pursuit } from "@/api/pursuit-types";
@@ -253,7 +254,7 @@ function PursuitLine({ p }: { p: Pursuit }) {
     <li data-testid="pursuit-goal" data-name={p.name}>
       <Link to={`/pursuits/${encodeURIComponent(p.id)}`} data-line="" className="grid gap-1 rounded-md bg-card px-3 py-2.5 hover:bg-muted/60">
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]" data-testid="pursuit-goal-name">{pursuitTitle(p)}</span>
+          <span className="min-w-0 text-sm font-semibold [overflow-wrap:anywhere]" data-testid="pursuit-goal-name"><ObjectiveName name={pursuitTitle(p)} /></span>
           {!p.goal && (
             <span className="ml-auto text-base font-semibold tabular-nums">
               {p.greens} of {p.total}

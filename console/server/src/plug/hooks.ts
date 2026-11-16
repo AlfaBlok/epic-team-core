@@ -2,6 +2,7 @@ import type { HostedPlug } from "./hosted.js";
 import type { DB } from "../db.js";
 import type { Vps3Target } from "../t3/remoteHost.js";
 import type { SecretPut, SecretPutInput, SecretStoreResult } from "./keys.js";
+import { ownerName } from "../identity.js";
 
 /**
  * The hosted layer's hooks: what core modules deep in the console ask of the hosted layer,
@@ -75,6 +76,11 @@ export interface HostedHooks {
   /** The hosts we run consoles on (hosted: devCopy.ts, staging.ts, stagingCopy.ts, box.ts, the hosted second-host module, status/hostDisk.ts, siteKpis.ts). */
   host: HostHooks;
   campaignSpines(repoDir: string): { code: string; name: string; path: string; platform: string | null; deck?: string | null }[];
+  /**
+   * Shared persona text as a customer workspace reads it: its own owner's name, none of the home team's references
+   * (hosted: tenancy/workspaceText.ts). The core's default only swaps the home owner's name for the workspace owner's.
+   */
+  workspaceText(text: string, owner: string): string;
 }
 
 /** One live count on a band: the number (null when never read), where it came from, when it was read. */
@@ -172,6 +178,10 @@ const ONE_TEAM: HostedHooks = {
     referrers: null,
   },
   heldDraft: { approve: () => undefined, isHeld: () => false },
+  workspaceText: (text, owner) => {
+    const home = ownerName().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return home ? text.replace(new RegExp(`\\b${home}\\b`, "g"), owner) : text;
+  },
 };
 
 /** The hooks in force (one-team defaults until the hosted layer registers). */

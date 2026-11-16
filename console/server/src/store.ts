@@ -8,6 +8,7 @@ import { EVER_ON_SQL, TOGGLE_KIND } from "./assignmentToggle.js";
 import { parseWakeParts, type WakeParts } from "./cycle/wakeWhy.js";
 import type { HostRunRow } from "./runHostRow.js";
 import { guardMilestoneRepo, repoScopeOf, worldClaims } from "./tenancy/repoScope.js";
+import { personaForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
 import { type HostId, mainHost, ownerName, workerHost } from "./identity.js";
 
 export interface Milestone {
@@ -524,9 +525,11 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
     const r = db.prepare(`SELECT * FROM milestones WHERE id = @id AND ${own()}`).get({ id, t: tenant }) as Row | undefined;
     return r && guardedMilestones([r])[0];
   };
+  /** a store scoped to a customer workspace reads its personas with its owner's name, never the home team's references (tenancy/workspaceText.ts). */
+  const asRead = (p: Persona): Persona => (tenant === null ? p : personaForWorkspace(p, workspaceOwner(raw, tenant)));
   const getPersona = (id: string) => {
     const r = db.prepare(`SELECT * FROM personas WHERE id = @id AND ${own()}`).get({ id, t: tenant }) as Row | undefined;
-    return r && toPersona(r);
+    return r && asRead(toPersona(r));
   };
   // kept like the list reads (memoRead): the ever-on subquery reads the assignment's runs, and the record
   // writer and the wake brief ask for the same assignment many times a minute (~0.6 s a minute on the main server)
@@ -635,7 +638,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
 
     // Personas
     listPersonas: () =>
-      memoRead(raw, `personas\0${tenant}`, () => (db.prepare(`SELECT * FROM personas WHERE ${own()} ORDER BY created_at, id`).all({ t: tenant }) as Row[]).map(toPersona)),
+      memoRead(raw, `personas\0${tenant}`, () => (db.prepare(`SELECT * FROM personas WHERE ${own()} ORDER BY created_at, id`).all({ t: tenant }) as Row[]).map((r) => asRead(toPersona(r)))),
     getPersona,
     /** `id` / `createdAt` given when the team repo's persona file already carries it. */
     createPersona(input: { name: string; remit: string; skills: string[]; model: string; mayWrite: boolean; host?: HostId; freshThreadEachWake?: boolean; skipUnchanged?: boolean; id?: string; createdAt?: string }): Persona {

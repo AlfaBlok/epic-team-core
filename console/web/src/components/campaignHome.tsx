@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import { useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import { api, type Milestone } from "@/api";
@@ -152,6 +153,11 @@ export function SidebarCampaigns({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </ul>
+      {/* a customer adds a campaign right under their campaigns (the wizard), not only from More. */}
+      <NavLink to="/campaigns/new" onClick={onNavigate} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground" data-testid="sidebar-add-campaign">
+        <Plus className="h-4 w-4" />
+        Add campaign
+      </NavLink>
     </div>
   );
 }

@@ -1383,6 +1383,10 @@ const mockMail = () => ({
     async getCampaignPlan() {
       return ok(unwrittenPlan());
     },
+    async saveCampaignPlan(_t: string, _m: string, input: { line?: string; sections: Record<string, string | undefined> }) {
+      const p = unwrittenPlan();
+      return ok({ ...p, source: "spine" as const, line: input.line ?? null, missing: [], sections: p.sections.map((s) => (input.sections[s.key]?.trim() ? { ...s, written: true, lead: input.sections[s.key]!.trim(), raw: input.sections[s.key]!.trim() } : s)) });
+    },
     /** customer zero today ('s path, 2 of 6). */
     async getOnboarding(tenantId: string) {
       return ok(mockOnboarding(tenantId));

@@ -199,6 +199,13 @@ export interface MarketingPlanSection {
   boxes: MarketingPlanBox[];
   table: { head: string[]; rows: string[][] } | null;
   quotes: string[];
+  /** the section's text as written (the owner edits it on the Plan tab). */
+  raw?: string;
+}
+/** the Plan tab's Save (POST .../campaigns/:mid/plan/sections). */
+export interface MarketingPlanWrite {
+  line?: string;
+  sections: Partial<Record<MarketingPlanSection["key"], string>>;
 }
 export interface MarketingPlan {
   source: "spine" | "copy" | "none";

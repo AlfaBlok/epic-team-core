@@ -230,4 +230,23 @@ describe("Add job (social skin)", () => {
     expect(screen.queryByTestId("job-dialog")).toBeNull();
     await act(async () => {});
   });
+
+  it("in a customer's EpicTeam workspace Add project writes the project in its own repo and wakes nobody", async () => {
+    vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue({ mode: "on", identity: { kind: "session" }, tenant: { id: "et-dana" }, worlds: [] } as never);
+    vi.spyOn(api, "listRepos").mockResolvedValue([{ name: "et-dana", path: "/repos/et-dana" } as never]);
+    vi.spyOn(api, "listPersonas").mockResolvedValue([{ id: "pe_dm", name: "Delivery Manager", remit: "" } as Persona]);
+    const add = vi.spyOn(api, "addJob").mockResolvedValue({ tenantId: "et-dana", repo: "et-dana", milestoneId: "ms_p", path: "docs/spines/job-x.md", status: "ready", commit: "c", push: { state: "pushed" }, assignmentId: "as_p" });
+    const run = vi.spyOn(api, "runAssignmentNow").mockResolvedValue({ id: "run_1" } as never);
+    page("/", SKINS.console);
+    fireEvent.click(await screen.findByRole("button", { name: "Add project" }));
+    const dlg = await screen.findByTestId("job-dialog");
+    expect(within(dlg).getByRole("heading", { name: "Add project" })).toBeTruthy();
+    fireEvent.change(within(dlg).getByLabelText("What should be done?"), { target: { value: "Launch the pricing page" } });
+    fireEvent.change(within(dlg).getByLabelText("Done means"), { target: { value: "the page is live" } });
+    await within(dlg).findByRole("option", { name: "et-dana" });
+    fireEvent.change(within(dlg).getByLabelText("Persona"), { target: { value: "pe_dm" } });
+    fireEvent.click(within(dlg).getByTestId("project-add"));
+    await waitFor(() => expect(add).toHaveBeenCalledWith("et-dana", { repo: "et-dana", title: "Launch the pricing page", doneMeans: ["the page is live"], personaId: "pe_dm" }));
+    expect(run).not.toHaveBeenCalled();
+  });
 });

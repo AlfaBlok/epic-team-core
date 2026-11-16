@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { ObjectiveName } from "@/components/objectiveName";
 import { ChevronRight } from "lucide-react";
 import { Link, NavLink, Navigate, useLocation, useParams } from "react-router-dom";
 import { api } from "@/api";
@@ -167,10 +168,10 @@ export function PursuitPanel({ p, linkName = false }: { p: Pursuit; linkName?: b
             <h2 className="text-[15px] font-semibold text-foreground [overflow-wrap:anywhere]">
               {linkName ? (
                 <Link to={pursuitHref(p.id)} className="underline decoration-border underline-offset-4 hover:decoration-foreground" data-testid="pursuit-open">
-                  {pursuitTitle(p)}
+                  <ObjectiveName name={pursuitTitle(p)} />
                 </Link>
               ) : (
-                pursuitTitle(p)
+                <ObjectiveName name={pursuitTitle(p)} />
               )}
             </h2>
             <StateWord state={p.state} />
@@ -259,10 +260,10 @@ function Crumbs({ p, tab }: { p?: Pursuit; tab?: string }) {
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           {tab ? (
             <Link to={pursuitHref(p.id)} className={link}>
-              {pursuitTitle(p)}
+              <ObjectiveName name={pursuitTitle(p)} layout="inline" />
             </Link>
           ) : (
-            <span className="text-foreground">{pursuitTitle(p)}</span>
+            <ObjectiveName name={pursuitTitle(p)} layout="inline" className="text-foreground" />
           )}
         </>
       )}
@@ -318,7 +319,7 @@ export function PursuitPage() {
       )}
       {p && (
         <>
-          <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-2xl">{pursuitTitle(p)}</h1>
+          <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-2xl"><ObjectiveName name={pursuitTitle(p)} /></h1>
           <nav className="flex gap-5 border-b" aria-label="Pursuit pages" data-testid="pursuit-tabs">
             <NavLink to={pursuitHref(p.id)} end className={tabClass} data-testid="pursuit-tab-scorecard">
               Scorecard
@@ -369,7 +370,7 @@ export function SidebarPursuits({ onNavigate }: { onNavigate?: () => void }) {
           <span className="grid min-w-0 flex-1 gap-0.5">
             <span className="line-clamp-2 min-w-0 break-words text-[13px] font-medium text-foreground">
               {typeof p.rank === "number" && <span className="mr-1 text-muted-foreground" data-testid="sidebar-pursuit-rank">{p.rank}.</span>}
-              {pursuitTitle(p)}
+              <ObjectiveName name={pursuitTitle(p)} layout="inline" />
             </span>
             {p.parked ? <span className="text-xs text-muted-foreground">parked</span> : <MotionWord p={p} />}
           </span>

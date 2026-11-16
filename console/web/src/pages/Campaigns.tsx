@@ -247,6 +247,15 @@ export function NewCampaignPage() {
   const tplHint = (k: string) => tpl.data?.parts.find((p) => p.key === k);
   const [plan, setPlan] = useState<CampaignPlan>();
   const [result, setResult] = useState<CampaignResult>();
+  // a workspace with one campaign repo (every customer's) skips Pick the repo: straight to the new campaign.
+  const only = repos.data?.repos.length === 1 && repos.data.repos[0].campaign && repos.data.repos[0].hasPack ? repos.data.repos[0] : undefined;
+  useEffect(() => {
+    if (only && step === "repo" && !initialRepo) {
+      setRepo(only.name);
+      setStep("named");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [only?.name]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<Error>();
 
@@ -323,7 +332,7 @@ export function NewCampaignPage() {
             </CardContent>
           </Card>
         ))}
-      {step === "named" && picked && <NamedCampaignForm tenantId={repos.data!.id} repo={picked.name} where={picked.remote ?? picked.name} onBack={() => setStep("repo")} />}
+      {step === "named" && picked && <NamedCampaignForm tenantId={repos.data!.id} repo={picked.name} where={only ? undefined : (picked.remote ?? picked.name)} onBack={only ? () => navigate(-1) : () => setStep("repo")} />}
       {step === "brief" && (
         <Card>
           <CardContent className="grid gap-3 p-4">
@@ -413,7 +422,7 @@ export function NewCampaignPage() {
  * plan (the owner edits it after, on the campaign's Brief tab) and the pack roles that work it. Create writes the campaign's
  * spine as the owner, adds it pinned and moves the picked roles onto it on their cadence.
  */
-function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string; repo: string; where: string; onBack: () => void }) {
+function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string; repo: string; where?: string; onBack: () => void }) {
   const navigate = useNavigate();
   const [f, setF] = useState({ name: "", platform: "", period: "", keyMessages: "", voice: "", format: "", postingStyle: "", replyStyle: "", cadence: "", readerAction: "", targets: "", personas: "", frame: "", who: "", offer: "", goals: "", eveningCount: "" });
   // every new campaign opens prefilled from the campaign template (the plan the owner approved as the model).
@@ -442,7 +451,7 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
       const keyMessages = f.keyMessages.split("\n").map((l) => l.replace(/^\s*[-*]\s*/, "").trim()).filter(Boolean);
       const plan = Object.fromEntries(Object.entries({ ...f, keyMessages: undefined, name: undefined }).filter(([, v]) => typeof v === "string" && v.trim()));
       const r = await mutate(() => api.createNamedCampaign(tenantId, { repo, name: f.name.trim(), plan: { ...plan, ...(keyMessages.length ? { keyMessages } : {}) }, ...(roles.length ? { roles } : {}), ...(tpl.data ? { template: true } : {}) }));
-      navigate(`/milestones/${encodeURIComponent(r.milestoneId)}?tab=brief`);
+      navigate(`/milestones/${encodeURIComponent(r.milestoneId)}`); // its Plan tab first, where the owner writes the plan
     } catch (e) {
       setErr(e instanceof Error ? e : new Error(String(e)));
     } finally {
@@ -463,7 +472,7 @@ function NamedCampaignForm({ tenantId, repo, where, onBack }: { tenantId: string
   return (
     <Card>
       <CardContent className="grid gap-3 p-4" data-testid="named-campaign-form">
-        <div className="text-sm font-medium">2. The campaign in {where}</div>
+        <div className="text-sm font-medium">{where ? `2. The campaign in ${where}` : "Your new campaign"}</div>
         {err && <ErrorBox error={err} />}
         {field("name", "Name", 0, "e.g. Reddit awareness week 37")}
         {tpl.data && (

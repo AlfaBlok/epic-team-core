@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { ObjectiveName } from "@/components/objectiveName";
 import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -776,7 +777,7 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
       >
         <span className="flex min-w-0 items-start gap-2">
           <SetWheel rows={krs} size={20} testId="sidebar-set-wheel" />
-          <span className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]">{titleOf(n)}</span>
+          <ObjectiveName name={titleOf(n)} className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground" />
           <span className="flex shrink-0 items-center gap-1">
             <IdlePill n={n} testId="sidebar-set-idle" />
             <GoalPills c={c} to={scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
@@ -992,7 +993,7 @@ function Crumbs({ ix, node }: { ix: ScorecardIndex; node: ScorecardNode }) {
         <span key={n.id} className="flex min-w-0 items-center gap-1">
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <Link to={scorecardHref(n.id)} className={cn(link, "[overflow-wrap:anywhere]")}>
-            {titleOf(n)}
+            <ObjectiveName name={titleOf(n)} layout="inline" />
           </Link>
         </span>
       ))}
@@ -1258,10 +1259,7 @@ export function GoalSetPage() {
           <GoalHeader
             rows={krs}
             title={
-              <>
-                {titleOf(node)}
-                {node.objectiveStatus === "proposed" && <ProposedMark />}
-              </>
+              <ObjectiveName name={titleOf(node)} after={node.objectiveStatus === "proposed" && <ProposedMark />} />
             }
             answer={krAnswer(krs)}
           >
@@ -1374,9 +1372,10 @@ export function WheelsTable({
                     <TrafficLight light={light} testId="wheel-light" />
                     <span className="grid min-w-0 gap-1">
                       <span className="text-[15px] font-medium text-foreground [overflow-wrap:anywhere]" data-testid="wheel-name">
-                        <span className="text-muted-foreground">{i + 1}. </span>
-                        {titleOf(n)}
-                        {n.objectiveStatus === "proposed" && <ProposedMark />}
+                        <span className="flex min-w-0 items-baseline gap-1">
+                          <span className="text-muted-foreground">{i + 1}.</span>
+                          <ObjectiveName name={titleOf(n)} after={n.objectiveStatus === "proposed" && <ProposedMark />} />
+                        </span>
                       </span>
                       {/* lean rows (the owner 13 Nov 21:46Z: "only the colors and pills is enough, the small gray stuff you can remove"): name, colour bar, pills. */}
                       <KrStrip rows={krs} />
