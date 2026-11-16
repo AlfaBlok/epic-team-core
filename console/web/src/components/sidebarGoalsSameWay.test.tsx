@@ -131,4 +131,28 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
     // and the tab lists the card the green pill counted
     expect(await within(screen.getByTestId("goal-inbox")).findByText(/Pick the house/)).toBeTruthy();
   });
+
+  it("a milestone he retired leaves the list; its page still opens by its link", async () => {
+    const house = await api.createMilestone({ title: "Travel plans", repo: "Acme/abnb-agent", path: "EPIC.md", owner: "Sam", bigRoot: 1 });
+    const bots = await api.createMilestone({ title: "Market bots", repo: "Acme/market-bots", path: "docs/spines/root.md", owner: "Sam", bigRoot: 2 });
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...objective("ms_none"), retired: [bots.id] });
+    vi.spyOn(api, "listStatus").mockResolvedValue({ milestones: [], items: [], needsYou: 0, at: "2026-11-16T05:00:00Z" } as never);
+    vi.spyOn(api, "listReviewItems").mockResolvedValue([] as never);
+    vi.spyOn(api, "listPursuits").mockResolvedValue({ staleDays: 3, pursuits: [] } as never);
+    render(
+      <MemoryRouter initialEntries={[`/milestones/${bots.id}`]}>
+        <SidebarNav />
+        <Routes>
+          <Route path="/milestones/:id" element={<MilestonePage />} />
+          <Route path="*" element={null} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const list = await screen.findByTestId("sidebar-milestones");
+    await waitFor(() => expect(within(list).getByText("Travel plans")).toBeTruthy());
+    expect(within(list).queryByText("Market bots")).toBeNull();
+    expect(house.id).not.toBe(bots.id);
+    // its old link still opens its own page
+    expect(await screen.findByTestId("set-answer-box")).toBeTruthy();
+  });
 });

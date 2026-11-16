@@ -54,10 +54,16 @@ export function withMilestones(
   body: PursuitsBody,
   store: Pick<Store, "listMilestones" | "listAssignments" | "getPersona">,
   effortOf?: (m: Milestone) => { parked: boolean; wakeFactor: number; minWakeMinutes?: number } | null,
-): PursuitsBody & { pursuits: (PursuitsBody["pursuits"][number] & { milestones: PursuitMilestone[] })[] } {
+): PursuitsBody & { pursuits: (PursuitsBody["pursuits"][number] & { milestones: PursuitMilestone[] })[]; retiredMilestones?: string[] } {
   const all = store.listMilestones().filter((m) => !m.settledAt);
+  // a retired milestone is the one whose own spine the file names (never a repo's root fallback).
+  const retiredMilestones = (body.retired ?? []).flatMap((r) => {
+    const m = store.listMilestones().find((x) => !x.settledAt && sameRepo(x.repo, r.repo) && plain(x.path) === plain(r.path));
+    return m ? [m.id] : [];
+  });
   return {
     ...body,
+    ...(retiredMilestones.length ? { retiredMilestones } : {}),
     pursuits: body.pursuits.map((p) => {
       const seen = new Map<string, PursuitMilestone>();
       const epics = p.epics.map((e) => {

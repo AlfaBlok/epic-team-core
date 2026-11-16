@@ -114,6 +114,8 @@ export interface PursuitsBody {
   staleDays: number;
   said?: { source: string; words: string };
   boardAt?: string | null;
+  /** the milestones he retired (`retired.milestones` in the file): out of his list of goals, their pages kept. */
+  retired?: { repo: string; path: string }[];
 }
 
 /** The part of the launch board this reads: each product's lights. */
@@ -167,6 +169,7 @@ export interface PursuitsDoc {
   said?: { source: string; words: string };
   pursuits: Declared[];
   checks: Record<string, Check>;
+  retired?: { repo: string; path: string }[];
 }
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -226,6 +229,12 @@ export function parsePursuits(text: string): PursuitsDoc {
     return [{ id, name, greenWhen, watch, lines, totems, ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
   });
   const said = obj(doc.said);
+  // retired milestones: each by its repo and spine, as the epics name theirs.
+  const retired = (Array.isArray(obj(doc.retired).milestones) ? (obj(doc.retired).milestones as unknown[]) : []).flatMap((e) => {
+    const r = str(obj(e).repo);
+    const sp = str(obj(e).spine);
+    return r && sp && /^[\w./-]+\.md$/.test(sp) && !sp.includes("..") && !sp.startsWith("/") ? [{ repo: r, path: sp }] : [];
+  });
   const checks: Record<string, Check> = {};
   for (const [k, v] of Object.entries(obj(doc.checks))) checks[k] = obj(v) as Check;
   return {
@@ -234,6 +243,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     ...(str(said.source) && str(said.words) ? { said: { source: str(said.source)!, words: str(said.words)! } } : {}),
     pursuits,
     checks,
+    ...(retired.length ? { retired } : {}),
   };
 }
 
@@ -524,7 +534,7 @@ export async function buildPursuits(
   }
   // parked pursuits sit after the ranked ones, in file order.
   pursuits.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
-  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null };
+  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null, ...(doc.retired?.length ? { retired: doc.retired } : {}) };
 }
 
 /** Reads the home repo's file and every spine it names; kept a few minutes (git log per watched repo). */

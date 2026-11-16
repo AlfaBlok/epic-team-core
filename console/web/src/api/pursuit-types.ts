@@ -206,6 +206,8 @@ export interface ScorecardsBody {
   spineInfo: Record<string, ScorecardSpineInfo>;
   /** rows turned green today and this week (UTC, the week from Monday), per set and in all; counted since `since`. */
   progress?: { since: string; today: number; week: number; sets: Record<string, { today: number; week: number }> };
+  /** milestones he retired: left out of the sidebar's goals; their pages still open by link. */
+  retired?: string[];
 }
 
 /** a pursuit's name as the owner reads it: with its goal's number when it has one ("5 testers using SocialApp · 0 of 5"). */

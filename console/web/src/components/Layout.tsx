@@ -228,7 +228,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // the objectives, read once for their own list and to leave out every milestone an objective holds: that
   // milestone IS the objective, listed above with its wheel, so it never shows twice nor opens a second way.
   const sets = useGoalSets();
-  const held = (id: string) => !campaignSkin && !!objectiveOf(sets.data?.nodes, id);
+  // a milestone he retired leaves the list too; its page still opens by its link.
+  const held = (id: string) => !campaignSkin && (!!objectiveOf(sets.data?.nodes, id) || !!sets.data?.retired?.includes(id));
   const listed = allMilestones && (project.current && !byProject ? allMilestones.filter((m) => project.keep(m.id)) : allMilestones);
   const milestones = !listed || campaignSkin || sets.error ? listed : sets.data ? listed.filter((m) => !held(m.id)) : undefined;
   // the dots and the Team badge read the server's status batch (same object as the milestone header).

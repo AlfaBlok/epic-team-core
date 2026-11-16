@@ -185,6 +185,8 @@ export interface ScorecardNode {
 export interface ScorecardsBody {
   nodes: ScorecardNode[];
   spineInfo: Record<string, SpineInfo>;
+  /** milestones he retired: out of the sidebar's goals, their pages still open by their link. */
+  retired?: string[];
 }
 
 const MAX_SPINES = 400;
@@ -294,7 +296,7 @@ export function parseScorecardFile(text: string): ScorecardFile | null {
 
 type PursuitIn = PursuitsBody["pursuits"][number] & { milestones?: { id: string; teams?: ScorecardTeam[] }[] };
 export function buildScorecards(
-  body: Omit<PursuitsBody, "pursuits"> & { pursuits: PursuitIn[] },
+  body: Omit<PursuitsBody, "pursuits"> & { pursuits: PursuitIn[]; retiredMilestones?: string[] },
   read: (repo: string, rel: string) => string | undefined,
   o: { file?: (pursuitId: string) => string | undefined; work?: (repo: string, code: string) => WorkLink; homeRepo?: string } = {},
 ): ScorecardsBody {
@@ -436,7 +438,7 @@ export function buildScorecards(
       ...withTurner(pursuitRows(p, children)),
     };
   });
-  return { nodes, spineInfo };
+  return { nodes, spineInfo, ...(body.retiredMilestones?.length ? { retired: body.retiredMilestones } : {}) };
 
   /** a wheel without a persona does not turn: the pursuit's milestone has no Delivery Manager on. */
   function withTurner<T extends { teams?: ScorecardTeam[] }>(r: T): T & { noPersona?: "none" | "off" } {
