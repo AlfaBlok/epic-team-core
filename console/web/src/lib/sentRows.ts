@@ -62,6 +62,13 @@ export function unmarkSent(slots: string | string[]) {
 const live = (e: SentEntry | undefined, now = Date.now()) => (e && now - e.at < SENT_KEEP_MS ? e : undefined);
 
 export const sentOf = (slot: string) => live(sent.get(slot));
+/**
+ * (the owner 16 Nov, "why showing one, none left???"): an item he answered here (its card or status row is a green
+ * Sent row now) is no longer open for him, so no red count holds it, even while the server's status batch still lists it.
+ */
+export const answeredHere = (id: string) => !!(live(sent.get(`ask:${id}`)) || live(sent.get(`status:${id}`)));
+/** Re-render on every Sent mark (the counts read `answeredHere`). */
+export const useSentVersion = () => useSyncExternalStore(subscribe, () => sent);
 export function useSent(slot: string | undefined): SentEntry | undefined {
   const e = useSyncExternalStore(subscribe, () => (slot ? sent.get(slot) : undefined));
   return live(e);

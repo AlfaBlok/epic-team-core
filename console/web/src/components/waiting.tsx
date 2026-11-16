@@ -37,7 +37,7 @@ import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
 import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
 import { showClosed } from "@/lib/afterClose";
-import { markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
+import { answeredHere, markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
 import { SentRow } from "@/components/sentRow";
 import { DEFAULT_SKIN, useWords } from "@/lib/skin";
 import { AskSet, askSets } from "@/components/askSet";
@@ -1745,7 +1745,8 @@ export function WaitingOnYou({
   // a spine line naming the owner with no coded ask is no question for him: no card here, never counted (the
   // header lists it for the Delivery Manager, the Tree shows it amber). Only future gates of such lines show, under Coming up.
   const coming = items.filter((i) => !isStructured(i) && i.gate === "future");
-  const count = blocked ? blocked.length : blocking.length + open.length;
+  // a green Sent row counts nothing: the red number is what he still has to act on, 0 when none.
+  const count = blocked ? blocked.length : [...blocking, ...open].filter((i) => !answeredHere(i.id)).length;
   // the milestone a status row belongs to, by name (only where the list spans milestones)
   const { data: milestones } = useQuery(() => (!milestoneId && !spine ? api.listMilestones() : Promise.resolve([])), [milestoneId, spine?.repo]);
   const names = new Map((milestones ?? []).map((m) => [m.id, milestoneName(m)]));

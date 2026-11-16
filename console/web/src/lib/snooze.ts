@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api, type ReviewItem, type SnoozeChoice, type SnoozeDays, type WaitingItem } from "@/api";
 import { mutate } from "@/lib/data";
-import { unmarkSent } from "@/lib/sentRows";
+import { unmarkSent, useSentVersion } from "@/lib/sentRows";
 
 // a snooze refreshes only the inbox queries (tag "inbox": waiting lists and status batches); refetching every
 // list after a write queued the next tap's POST behind ~15 slow GETs (the browser's 6 connections per host).
@@ -130,6 +130,8 @@ export function withSnoozes(items: WaitingItem[] | undefined, m: Map<string, Ent
 /** Re-render on every change; returns the snoozes in flight / just written and the errors per item id. */
 export function useSnoozes() {
   useSyncExternalStore(subscribe, () => version);
+  // every count reads snoozes through here: a Sent mark (blockedItems leaves it out) re-renders them too
+  useSentVersion();
   return { entries, errors, back };
 }
 

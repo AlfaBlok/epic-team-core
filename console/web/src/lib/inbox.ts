@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, type MilestoneStatusView, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
 import { useSharedQuery } from "@/lib/data";
 import { useSnoozes } from "@/lib/snooze";
+import { answeredHere } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
 
 /**
@@ -22,15 +23,17 @@ const all: Keep = () => true;
 /** The open items the owner must act on, each once, in the batch's order: what the red pill counts and Blocked lists. */
 export function blockedItems(
   status: { items?: PendingItem[] } | undefined,
-  o: { keep?: Keep; nodeKey?: string; snoozing?: { has: (id: string) => boolean } } = {},
+  o: { keep?: Keep; nodeKey?: string; snoozing?: { has: (id: string) => boolean }; answered?: (id: string) => boolean } = {},
 ): PendingItem[] {
   const keep = o.keep ?? all;
+  // a green Sent row counts nothing: what he answered here is out of every red count at once
+  const answered = o.answered ?? answeredHere;
   const seen = new Set<string>();
   const out: PendingItem[] = [];
   for (const i of status?.items ?? []) {
     if (i.state !== "open" || seen.has(i.id)) continue;
     if (o.nodeKey && i.nodeKey !== o.nodeKey && !i.nodeKey?.startsWith(o.nodeKey + "/")) continue;
-    if (!keep(i.milestoneId) || o.snoozing?.has(i.id)) continue;
+    if (!keep(i.milestoneId) || o.snoozing?.has(i.id) || answered(i.id)) continue;
     seen.add(i.id);
     out.push(i);
   }
