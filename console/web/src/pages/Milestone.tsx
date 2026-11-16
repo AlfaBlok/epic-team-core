@@ -25,7 +25,7 @@ import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
 import { FIVE_LABELS, FIVE_TABS, fiveTabFromParams, type FiveTab } from "@/lib/totems";
-import { BriefTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
+import { ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
 import { CampaignGoalBlock } from "@/components/CampaignGoal";
@@ -453,7 +453,7 @@ function MilestoneScreen() {
       {card?.channels?.length ? <CampaignChannels card={card} /> : null}
       {five && scope ? (
         <>
-          <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "deck" ? {} : { tab: t }, { replace: true })} />
+          <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "plan" ? {} : { tab: t }, { replace: true })} />
         </>
       ) : (
       <Tabs value={tab} onValueChange={(v) => setParams(tabSearch(v as Tab, node, undefined, home), { replace: true })}>
@@ -606,7 +606,6 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         ))}
       </TabsList>
       <div className="mt-4 min-w-0">
-        {tab === "deck" && <BriefTab m={m} />}
         {tab === "plan" && <PlanTab m={m} />}
         {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
@@ -627,7 +626,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {tab === "settings" && (
           <div className="grid gap-6" data-testid="settings-view">
             <Link to="?" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-4 w-4" /> Back to the deck
+              <ArrowLeft className="h-4 w-4" /> Back to the plan
             </Link>
             <section className="grid gap-2">
               <h2 className="text-lg font-semibold">Personas</h2>

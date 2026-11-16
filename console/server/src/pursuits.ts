@@ -150,6 +150,8 @@ interface Declared {
   goal?: PursuitGoal;
   /** its owner persona: the one the idle watch wakes; default the Delivery Manager of the world holding it. */
   owner: string;
+  /** the campaign spine that carries its plan (often another world's repo): the Plan tab reads it there, never a copy. */
+  plan?: { repo: string; path: string };
 }
 export interface PursuitKitRef {
   /** Repo-relative folder: kit.json, previews/*.webp; the fonts sit in its parent's fonts/. */
@@ -226,7 +228,10 @@ export function parsePursuits(text: string): PursuitsDoc {
     const g = obj(o.goal);
     const goal = typeof g.now === "number" && typeof g.target === "number" && g.target > 0 ? { now: g.now, target: g.target, ...(str(g.by) ? { by: str(g.by) } : {}) } : undefined;
     const product = str(o.product);
-    return [{ id, name, greenWhen, watch, lines, totems, ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
+    const pr = str(obj(o.plan).repo);
+    const pp = str(obj(o.plan).path);
+    const plan = pr && pp && /^[\w./-]+\.md$/.test(pp) && !pp.includes("..") && !pp.startsWith("/") ? { repo: pr, path: pp } : undefined;
+    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
   });
   const said = obj(doc.said);
   // retired milestones: each by its repo and spine, as the epics name theirs.

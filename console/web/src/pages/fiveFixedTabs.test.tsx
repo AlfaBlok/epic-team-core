@@ -83,11 +83,12 @@ const page = (path: string, skin: Skin = SKINS.social) =>
   );
 
 describe("E964-S14 five fixed tabs", () => {
-  it("opens on Deck; E978-S1 round 2: Deck, Product, Waiting on me, Pipeline, Tasks, Observations, History, Chat; Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
+  it("opens on Plan (it took the Deck's place); Plan, Product, Waiting on me, Pipeline, Tasks, Observations, History, Chat; Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Deck", "Plan", "Product", "Waiting on me", "Pipeline", "Tasks", "Observations", "History", "Chat"]);
-    expect(await screen.findByTestId("brief-tab")).toBeTruthy();
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Plan", "Product", "Waiting on me", "Pipeline", "Tasks", "Observations", "History", "Chat"]);
+    expect(await screen.findByTestId("plan-tab")).toBeTruthy();
+    expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Personas", "Settings", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
     expect(screen.getByTestId("settings-and-personas").getAttribute("href")).toBe("/milestones/ms-memo?tab=settings");
   });
@@ -109,7 +110,8 @@ describe("E964-S14 five fixed tabs", () => {
 
   it("old links land on the tab that holds what they showed", () => {
     const t = (s: string) => fiveTabFromParams(new URLSearchParams(s));
-    expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["deck", "deck", "deck", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "settings", "history", "work"]);
+    expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["plan", "plan", "plan", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "settings", "history", "work"]);
+    expect(t("tab=deck")).toBe("plan");
   });
 
   it("the console skin keeps its tabs on the same campaign", async () => {
@@ -117,71 +119,6 @@ describe("E964-S14 five fixed tabs", () => {
     expect(await screen.findByRole("tab", { name: "Pipeline" })).toBeTruthy();
     expect(screen.queryByTestId("five-tabs")).toBeNull();
   });
-
-  it("Brief: a deck you page through (slide 1 has the old Summary's facts), full screen with the feedback chat, Esc leaves", async () => {
-    page("/milestones/ms-memo");
-    expect((await screen.findByTestId("slide-title")).textContent).toBe("Where we are");
-    expect(screen.getByTestId("slide-facts").textContent).toContain("1 thread out, 4 replies answered");
-    expect(screen.getByTestId("slide-count").textContent).toBe("1 / 4");
-    fireEvent.click(screen.getByTestId("deck-next"));
-    await waitFor(() => expect(screen.getByTestId("slide-title").textContent).toBe("Why this campaign"));
-    expect(screen.getByTestId("slide-draft").textContent).toContain("waits for your Approve");
-    fireEvent.click(screen.getByTestId("brief-full"));
-    expect(await screen.findByTestId("deck-full")).toBeTruthy();
-    expect(screen.getByTestId("feedback-scope").textContent).toBe("This slide (2)Whole campaign");
-    fireEvent.keyDown(window, { key: "ArrowRight" });
-    await waitFor(() => expect(screen.getByTestId("slide-title").textContent).toBe("Voice"));
-    fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("deck-full")).toBeNull());
-    expect(screen.getByTestId("where").textContent).toBe("?slide=3");
-  });
-
-  it("round 2: no heading block on Brief; every slide has the same fixed height and scrolls inside; feedback sits below the slide, not beside it", async () => {
-    totems.slides[1].body = Array.from({ length: 60 }, (_, k) => `- line ${k}`).join("\n");
-    page("/milestones/ms-memo");
-    const tab = await screen.findByTestId("brief-tab");
-    await screen.findByTestId("slide-title");
-    expect(within(tab).queryByRole("heading", { name: "Brief" })).toBeNull();
-    expect(tab.textContent).not.toContain("Every persona reads all of it when it wakes");
-    const heightOf = () => [...screen.getByTestId("slide").classList].filter((c) => /(^|:)h-\[/.test(c)).join(" ");
-    const first = heightOf();
-    expect(first).toMatch(/h-\[/);
-    expect(screen.getByTestId("slide-scroll").className).toContain("overflow-y-auto");
-    fireEvent.click(screen.getByTestId("deck-next"));
-    await waitFor(() => expect(screen.getByTestId("slide-count").textContent).toBe("2 / 4"));
-    expect(heightOf()).toBe(first);
-    // order: bar, slide, nav, then the note box (Node.DOCUMENT_POSITION_FOLLOWING = 4)
-    const after = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & 4);
-    expect(after(screen.getByTestId("brief-bar"), screen.getByTestId("slide"))).toBe(true);
-    expect(after(screen.getByTestId("slide"), screen.getByTestId("deck-nav"))).toBe(true);
-    expect(after(screen.getByTestId("deck-nav"), screen.getByTestId("slide-note"))).toBe(true);
-    expect(screen.getByTestId("slide-note").closest("[data-testid=slide-feedback]")?.contains(screen.getByTestId("slide"))).toBe(false);
-    // full screen: one column, slide, nav, then the chat
-    fireEvent.click(screen.getByTestId("brief-full"));
-    const full = await screen.findByTestId("deck-full");
-    expect(full.className).not.toMatch(/lg:flex-row/);
-    expect(heightOf()).not.toBe(first);
-    expect(after(screen.getByTestId("deck-nav"), screen.getByTestId("feedback-chat"))).toBe(true);
-  });
-
-  it("a note on a slide goes to the campaign chat with the slide's ref; the rebuild shows Keep and Undo; Undo calls the spine writer", async () => {
-    const undo = vi.spyOn(api, "undoSlide").mockResolvedValue({ commit: "abc" });
-    page("/milestones/ms-memo?slide=3");
-    expect((await screen.findByTestId("slide-title")).textContent).toBe("Voice");
-    fireEvent.change(screen.getByLabelText("What should change on this slide"), { target: { value: "Too technical. Open on what the builder lost." } });
-    fireEvent.click(screen.getByTestId("slide-note-send"));
-    await waitFor(() => expect(sent).toEqual(["[slide 3: Voice · file docs/spines/campaign-reddit-awareness-week-37.md · ref ## Campaign plan > ### Voice] Too technical. Open on what the builder lost."]));
-    expect(await screen.findByTestId("rebuild-waiting")).toBeTruthy();
-    // the campaign chat's rebuild lands in the spine
-    totems = mockTotems();
-    totems.slides[2].body = "- Open on what the builder lost.\n- Me, first person, casual.";
-    totems.rebuilds = [{ ref: "## Campaign plan > ### Voice", state: "rebuilt", date: "2026-11-03", note: "Too technical. Open on what the builder lost.", changes: [{ date: "2026-11-03", text: 'Slide rebuilt: "Voice" by the campaign chat' }] }];
-    await waitFor(() => expect(screen.getByTestId("rebuild-banner")).toBeTruthy(), { timeout: 7000 });
-    expect(screen.getByTestId("slide-body").querySelectorAll("[data-new]").length).toBe(1);
-    expect(screen.getByTestId("slide-changes-count").textContent).toBe("1");
-    fireEvent.click(screen.getByTestId("rebuild-undo"));
-    await waitFor(() => expect(undo).toHaveBeenCalledWith("social", "ms-memo", { file: "docs/spines/campaign-reddit-awareness-week-37.md", ref: "## Campaign plan > ### Voice" }));
-  }, 15000);
 
   it("Tasks: the goal path, Add task (a row through the tree writer), then the task groups (Waiting on me and Pipeline are tabs of their own)", async () => {
     const add = vi.spyOn(api, "addToTree").mockResolvedValue({ kind: "row", path: "x", id: "E911-S7", ready: true } as never);
@@ -231,40 +168,6 @@ describe("E964-S14 five fixed tabs", () => {
 });
 
 describe("E964-S14 helpers", () => {
-  it("E971-S2 iteration 2: the benefits slide lists what it does with what you get under it; picking a row shows its real screen; a coming-soon line says so", async () => {
-    totems.slides.splice(1, 0, {
-      n: 2,
-      ref: "## Benefits",
-      file: "data/brief.md",
-      title: "What it does for you",
-      source: "data/brief.md · Benefits",
-      body: "- **Writes posts from your rough ideas.** You show up every day without sitting down to write.",
-      benefits: [
-        { id: "1", does: "Writes posts from your rough ideas.", benefit: "You show up every day without sitting down to write.", status: "works today", soon: false, screen: { label: "Your ideas and the posts", path: "data/assets/benefits/s1.webp", url: "/api/tenants/social/social/file?repo=pod-campaign&path=data%2Fassets%2Fbenefits%2Fs1.webp" } },
-        { id: "2", does: "Holds every post for your yes.", benefit: "Nothing goes out in your name that you didn't want.", status: "works today", soon: false, screen: { label: "The switch", path: "data/assets/benefits/s2.webp", url: "/f/s2.webp" } },
-        { id: "5", does: "Checks what worked and changes the next posts.", benefit: "Your posts get better without you reading the numbers.", status: "half built", soon: true },
-      ],
-    });
-    totems.slides.forEach((x, k) => (x.n = k + 1));
-    page("/milestones/ms-memo?slide=2");
-    expect((await screen.findByTestId("slide-title")).textContent).toBe("What it does for you");
-    const rows = screen.getAllByTestId("benefit-row");
-    expect(rows.map((r) => within(r).getByTestId("benefit-does").textContent)).toEqual(["Writes posts from your rough ideas.", "Holds every post for your yes.", "Checks what worked and changes the next posts.Coming soon"]);
-    expect(within(rows[0]).getByTestId("benefit-gives").textContent).toBe("You show up every day without sitting down to write.");
-    expect(rows[0].getAttribute("aria-pressed")).toBe("true");
-    const side = screen.getByTestId("benefit-screen-side");
-    expect(side.querySelector("img")!.getAttribute("src")).toContain("social/file?repo=pod-campaign");
-    expect(side.textContent).toContain("Your ideas and the posts");
-    expect(screen.queryByTestId("benefit-screen-row")).toBeNull(); // on a phone the list shows first
-    fireEvent.click(rows[1]);
-    expect(rows[1].getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("benefit-screen-side").querySelector("img")!.getAttribute("src")).toBe("/f/s2.webp");
-    expect(screen.getByTestId("benefit-screen-row").querySelector("img")!.getAttribute("src")).toBe("/f/s2.webp");
-    fireEvent.click(rows[2]);
-    expect(rows[2].hasAttribute("data-soon")).toBe(true);
-    expect(screen.getByTestId("benefit-screen-side").textContent).toContain("Being built");
-  });
-
   it("slideNote carries the slide's number, title, file and ref", () => {
     expect(slideNote({ n: 5, title: "Voice", file: "f.md", ref: "## A > ### Voice" }, " hi ")).toBe("[slide 5: Voice · file f.md · ref ## A > ### Voice] hi");
   });

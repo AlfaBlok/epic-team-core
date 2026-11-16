@@ -1363,10 +1363,11 @@ const mockMail = () => ({
       return ok(mockTotems());
     },
     /** a campaign with no plan written yet: every fixed section says so. */
+    async getObjectivePlan() {
+      return ok(unwrittenPlan());
+    },
     async getCampaignPlan() {
-      const titles = ["Goal and numbers", "Who", "Messages", "Channels", "Offer", "This week's test", "Budget", "How we measure and change"];
-      const keys = ["goal", "who", "messages", "channels", "offer", "test", "budget", "measure"] as const;
-      return ok({ source: "none" as const, path: "docs/spines/root.md", repo: "demo", line: null, missing: titles, sections: keys.map((key, i) => ({ key, title: titles[i], written: false, lead: null, boxes: [], table: null, quotes: [] })) });
+      return ok(unwrittenPlan());
     },
     /** customer zero today ('s path, 2 of 6). */
     async getOnboarding(tenantId: string) {
@@ -2243,3 +2244,10 @@ const SAMPLE_BUILDING: import("./building-types").BuildingList[] = [
   },
   { id: "flywheel", name: "The Flywheel", line: "Data products that run on their own.", repos: ["airbnb-observatory", "deal-funnels"], waits: { asks: 1, review: 5 }, repoWaits: { "airbnb-observatory": { asks: 0, review: 4 }, "deal-funnels": { asks: 1, review: 1 } }, campaigns: [] },
 ];
+
+/** a plan with nothing written: every one of the eight sections, "not written yet". */
+function unwrittenPlan() {
+  const titles = ["Goal and numbers", "Who", "Messages", "Channels", "Offer", "This week's test", "Budget", "How we measure and change"];
+  const keys = ["goal", "who", "messages", "channels", "offer", "test", "budget", "measure"] as const;
+  return { source: "none" as const, path: "docs/spines/root.md", repo: "demo", line: null, missing: titles, sections: keys.map((key, i) => ({ key, title: titles[i], written: false, lead: null, boxes: [], table: null, quotes: [] })) };
+}

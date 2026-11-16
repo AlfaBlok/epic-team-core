@@ -3,11 +3,10 @@ import { forgetWorld } from "@/lib/useSocial";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { api, type Assignment, type Milestone, type Run, type WaitingItem } from "@/api";
+import { api, type Assignment, type Run, type WaitingItem } from "@/api";
 import { SendToDialog, WaitingCard } from "@/components/waiting";
 import { RunNowDialog, SteerDialog } from "@/components/dialogs";
 import { readClipboard } from "@/components/ChatAttach";
-import { SlideNoteBox } from "@/pages/social/Totems";
 import { LiveFeedback, type BoardSource } from "@/pages/social/Pipeline";
 import { FeedbackBox } from "@/pages/social/parts";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
@@ -238,21 +237,6 @@ describe("T18-S12: every other box that takes his words is the one box", () => {
     fireEvent.change(within(box).getByLabelText("Instructions for this run"), { target: { value: "fix this first" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(runNow).toHaveBeenCalledWith("as_1", `fix this first ${LINE}`, expect.any(String)));
-  });
-
-  it("a slide's note: the screenshot goes to the campaign chat as a file", async () => {
-    uploads();
-    const chat = vi.spyOn(api, "sendMilestoneChatMessage").mockResolvedValue({ threadId: "th", pending: false });
-    render(
-      <MemoryRouter>
-        <SlideNoteBox m={{ id: "ms_9" } as Milestone} sent={(t) => `slide 2: ${t}`} />
-      </MemoryRouter>,
-    );
-    const box = await screen.findByTestId("slide-note-box");
-    pasteItem(within(box).getByLabelText("What should change on this slide"));
-    await attached(box);
-    fireEvent.click(screen.getByTestId("slide-note-send"));
-    await waitFor(() => expect(chat).toHaveBeenCalledWith("ms_9", "slide 2: ", undefined, undefined, ["att_1"]));
   });
 
   it("feedback on a live post and a post's note: the link follows his words", async () => {

@@ -19,6 +19,14 @@ export function PlanTab({ m }: { m: Milestone }) {
   return <PlanView plan={data} />;
 }
 
+/** an objective's Plan tab: the same eight sections, from the campaign spine the objective names (GET /api/pursuits/:id/plan). */
+export function ObjectivePlanTab({ id }: { id: string }) {
+  const { data, error, loading } = useQuery(() => api.getObjectivePlan(id), [id]);
+  if (error) return <ErrorBox error={error} />;
+  if (loading || !data) return <Loading />;
+  return <PlanView plan={data} />;
+}
+
 const num = (s: string | undefined) => {
   const n = Number((s ?? "").replace(/[^\d.]/g, ""));
   return s && /\d/.test(s) && Number.isFinite(n) ? n : null;

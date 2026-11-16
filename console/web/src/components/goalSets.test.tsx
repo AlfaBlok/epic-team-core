@@ -160,6 +160,21 @@ describe("goal sets: the screens", () => {
     expect(screen.queryByTestId("sidebar-inside-chat")).toBeNull();
   });
 
+  it("its Plan tab: the same eight sections as a campaign's, read for this objective", async () => {
+    const plan = vi.spyOn(api, "getObjectivePlan");
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=plan"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const tab = await screen.findByTestId("plan-tab");
+    expect(plan).toHaveBeenCalledWith("launch");
+    expect(within(tab).getAllByRole("heading", { level: 3 })).toHaveLength(8);
+    expect(screen.getByTestId("set-tab-plan").getAttribute("aria-current")).toBe("page");
+  });
+
   it("one set opens on its one-line answer, the spine line, and its key results as the mock-up drew them; a key result opens its coloured work", async () => {
     render(
       <MemoryRouter initialEntries={["/sets/launch"]}>
@@ -213,7 +228,7 @@ describe("goal sets: the screens", () => {
     // progress: rows turned green today and this week, for this set
     expect(screen.getByTestId("set-progress-today").textContent).toContain("1");
     expect(screen.getByTestId("set-progress-week").textContent).toContain("3");
-    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Board", "Inbox", "Chat desk", "Context", "Personas", "Pages"]);
+    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Board", "Inbox", "Chat desk", "Context", "Personas", "Pages"]);
   });
 
   it("the kanban shows ready, running, waiting and review for the set and the sets inside it", async () => {

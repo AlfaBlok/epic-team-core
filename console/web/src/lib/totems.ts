@@ -4,15 +4,14 @@ import { ownerName, socialWorld } from "@/lib/identity";
 
 /**
  * a campaign page in the social skin has fixed
- * tabs, each a part of its epic file. Deck (the campaign's epic deck, once called Brief), Product (what this
- * campaign pushes), Waiting on me, Pipeline (its posts), Tasks, Observations, History, Chat. Settings and personas sit
+ * tabs, each a part of its epic file. Plan (its marketing plan, eight fixed sections; it took the Deck's place, the owner:
+ * "shall we just keep the marketing plan and just have a normal web page"), Product (what this campaign pushes), Waiting on me, Pipeline (its posts), Tasks, Observations, History, Chat. Settings and personas sit
  * behind one header button. Old links land on the tab that now holds what they showed.
  */
-export const FIVE_TABS = ["deck", "plan", "product", "waiting", "pipeline", "work", "observations", "history", "chat"] as const;
+export const FIVE_TABS = ["plan", "product", "waiting", "pipeline", "work", "observations", "history", "chat"] as const;
 export type FiveTab = (typeof FIVE_TABS)[number] | "settings";
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
 export const FIVE_LABELS: Record<(typeof FIVE_TABS)[number] | "settings", string> = {
-  deck: "Deck",
   plan: "Plan",
   product: "Product",
   waiting: "Waiting on me",
@@ -25,9 +24,10 @@ export const FIVE_LABELS: Record<(typeof FIVE_TABS)[number] | "settings", string
 };
 
 const OLD: Record<string, FiveTab> = {
-  brief: "deck",
-  summary: "deck",
-  definitions: "deck",
+  deck: "plan",
+  brief: "plan",
+  summary: "plan",
+  definitions: "plan",
   approvals: "waiting",
   tree: "work",
   backlog: "work",
@@ -36,12 +36,12 @@ const OLD: Record<string, FiveTab> = {
   settings: "settings",
 };
 
-/** ?tab= → one of the tabs (or the Settings and personas view); no tab = Deck. An old Work › Posts link opens Pipeline. */
+/** ?tab= → one of the tabs (or the Settings and personas view); no tab = Plan. An old Work › Posts link opens Pipeline. */
 export function fiveTabFromParams(params: URLSearchParams): FiveTab {
   const t = params.get("tab") ?? "";
   if (t === "work" && params.get("view") === "posts") return "pipeline";
   if ((FIVE_TABS as readonly string[]).includes(t)) return t as FiveTab;
-  return OLD[t] ?? (params.get("node") ? "work" : "deck");
+  return OLD[t] ?? (params.get("node") ? "work" : "plan");
 }
 
 /** The note a slide's "This slide" box sends to the campaign chat: the prefix the Repo desk acts on (seed v11). */

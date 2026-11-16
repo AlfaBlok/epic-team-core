@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { lazyPage } from "@/lib/lazyPage";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
+import { ObjectivePlanTab } from "@/pages/social/PlanTab";
 import { pagesOfObjective } from "@/lib/wheelPages";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
@@ -882,6 +883,8 @@ export function SlimInbox({ rows, showSet = true, loading, sortKey }: { rows: In
 
 const TABS = [
   { id: "table", label: "Key results" },
+  // its plan (the owner: "where we have a wheel, we should have a plan like this attached to it"): the campaign's eight sections.
+  { id: "plan", label: "Plan" },
   { id: "kanban", label: "Board" },
   { id: "inbox", label: "Inbox" },
   { id: "chat", label: "Chat desk" },
@@ -1295,6 +1298,7 @@ export function GoalSetPage() {
           {tab === "chat" && <SetChat node={node} />}
           {tab === "context" && <Context node={node} pursuit={pursuit} />}
           {tab === "personas" && <Personas node={node} />}
+          {tab === "plan" && <ObjectivePlanTab id={pursuit.id} />}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
           {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
         </>
