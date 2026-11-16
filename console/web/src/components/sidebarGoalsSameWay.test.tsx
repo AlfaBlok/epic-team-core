@@ -82,6 +82,11 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
     expect(within(tab).getByTestId("tab-inbox-review").textContent).toBe(side.review);
     expect(within(tab).getByTestId("tab-inbox-asks").getAttribute("data-tone")).toBe("needs-you");
     expect(within(tab).getByTestId("tab-inbox-review").getAttribute("data-tone")).toBe("review");
+    // the tab's two pills are the rows its list draws, red for the asks and green for the rest; read as one text the
+    // tab says "11" (a check once read "2" and "3" as 23), so each pill is read by its own id.
+    const rows = await within(screen.getByTestId("slim-inbox")).findAllByTestId("slim-inbox-row");
+    expect(rows.filter((r) => r.getAttribute("data-kind") === "ask").length).toBe(Number(side.ask));
+    expect(rows.filter((r) => r.getAttribute("data-kind") !== "ask").length).toBe(Number(side.review));
   });
 
   it("a milestone an objective holds is not listed again; one no objective holds is a goal row whose pills equal its Inbox tab's", async () => {
