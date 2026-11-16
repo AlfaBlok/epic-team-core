@@ -27,10 +27,21 @@ const word = (cell: string | undefined) => (/^[a-z]+/i.exec(cell ?? "")?.[0] ?? 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
+ * The status word of an older version of the row: its cell at `col`; only when the table had another number of columns
+ * then (`width` is today's), the nearest cell (up to three away) that starts with `want`.
+ */
+function statusWord(c: string[], col: number, want: string, width?: number): string {
+  const at = word(c[col]);
+  if (at === want || width === undefined || c.length === width) return at;
+  for (let d = 1; d <= 3; d++) for (const i of [col - d, col + d]) if (i > 0 && word(c[i]) === want && /^[a-z]+(\b|$)/i.test(c[i] ?? "")) return want;
+  return at;
+}
+
+/**
  * The newest commit in `log` (`git log --format=C %ct -p -U0` output, newest first) that added the row's line with
  * the status word `want` while the line it replaced (if any) had another word. ISO time, or undefined.
  */
-export function entryFromLog(log: string, rowId: string, statusCol: number, want: string): string | undefined {
+export function entryFromLog(log: string, rowId: string, statusCol: number, want: string, width?: number): string | undefined {
   const rowStart = new RegExp(`^[-+]\\|\\s*${escapeRe(rowId)}\\s*\\|`);
   let at: string | undefined;
   let added = false;
@@ -46,7 +57,7 @@ export function entryFromLog(log: string, rowId: string, statusCol: number, want
       continue;
     }
     if (!rowStart.test(line)) continue;
-    const w = word(cells(line.slice(1))[statusCol]);
+    const w = statusWord(cells(line.slice(1)), statusCol, want, width);
     if (line[0] === "+" && w === want) added = true;
     if (line[0] === "-" && w === want) removedHad = true;
   }
@@ -56,12 +67,12 @@ export function entryFromLog(log: string, rowId: string, statusCol: number, want
 type Hit = { line: string; at: Promise<string | undefined> };
 const cache = new Map<string, Hit>();
 
-function lookup(repoDir: string, rel: string, rowId: string, statusCol: number, want: string): Promise<string | undefined> {
+function lookup(repoDir: string, rel: string, rowId: string, statusCol: number, want: string, width: number): Promise<string | undefined> {
   return new Promise((resolve) => {
     // extended regex: `\|` is the pipe itself (a bare `|` matched every commit)
     const re = `^\\|[[:space:]]*${escapeRe(rowId)}[[:space:]]*\\|`;
     execFile("git", ["-C", repoDir, "log", "--no-merges", "-E", "--format=C %ct", "-p", "-U0", "-G", re, "--", rel], { timeout: 10_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? undefined : entryFromLog(stdout, rowId, statusCol, want));
+      resolve(err ? undefined : entryFromLog(stdout, rowId, statusCol, want, width));
     });
   });
 }
@@ -97,7 +108,7 @@ export function inboxSince(repoDir: string, rel: string, rowId: string, status: 
   const key = `${repoDir}\0${rel}\0${rowId}`;
   const hit = cache.get(key);
   if (hit && hit.line === now.line) return hit.at;
-  const at = lookup(repoDir, rel, rowId, now.col, want);
+  const at = lookup(repoDir, rel, rowId, now.col, want, cells(now.line).length);
   cache.set(key, { line: now.line, at });
   return at;
 }

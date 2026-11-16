@@ -500,4 +500,21 @@ describe("a review card shows how long it has waited", () => {
       vi.useRealTimers();
     }
   });
+  it("a held post shows it too, beside waiting for you", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+    try {
+      const post = (id: string, o: Partial<ReviewItem>): ReviewItem => ({
+        id, kind: "post", title: "A post", liveUrl: "/posts/social/P-1", ref: id, state: "review", createdAt: "2026-11-15T00:00:00Z", milestoneId: "ms_c", verdict: { kind: "card" },
+        post: { tenantId: "social", repo: "social", id, kind: "post", platform: "Reddit", community: "r/x", slot: "2099-11-04 09:00", title: "A post", text: "Words.", images: [], project: { name: "Memo on social media", url: "https://social.example.com/" }, campaign: "Week 1", pageUrl: "/posts/social/P-1" },
+        ...o,
+      });
+      list([post("post~social~P-1", { inboxSince: "2026-11-16T11:48:00Z" }), post("post~social~P-2", {})]);
+      mount();
+      const ages = (await screen.findAllByTestId("review-crumb")).map((c) => within(c).getByTestId("issued-age").textContent);
+      expect(ages).toEqual(["12 min ago", "1 day ago"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

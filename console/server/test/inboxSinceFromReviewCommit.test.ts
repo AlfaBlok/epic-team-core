@@ -71,4 +71,10 @@ describe("entryFromLog", () => {
     expect(entryFromLog(log, "A-1", 4, "review")).toBe(new Date(1760000000 * 1000).toISOString());
     expect(entryFromLog(log, "A-2", 4, "review")).toBeUndefined();
   });
+  it("an older line from before the table gained a column still reads its status; an adjacent title never does", () => {
+    const grown = ["C 1760000000", "-| A-1 | o | t | active | e |", "+| A-1 | o | t | held | e |"].join("\n");
+    expect(entryFromLog(grown, "A-1", 5, "held", 7)).toBe(new Date(1760000000 * 1000).toISOString());
+    const title = ["C 1761000000", "+| A-1 | o | l | Review inbox cards | active | e | d |"].join("\n");
+    expect(entryFromLog(title, "A-1", 4, "review", 7)).toBeUndefined();
+  });
 });

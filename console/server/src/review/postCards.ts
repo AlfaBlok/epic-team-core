@@ -46,6 +46,8 @@ export interface PostCard {
   status: string;
   state: "review" | "approved" | "relaunched" | "denied";
   createdAt: string;
+  /** when the post reached the owner's inbox (ISO): the commit that made its ledger row held; absent until git answers. */
+  inboxSince?: string;
   links: { url: string; title: string }[];
   closes: { row: string; epic: string; openRows: string[]; openAsks: string[] };
   verdict: { kind: "card" };

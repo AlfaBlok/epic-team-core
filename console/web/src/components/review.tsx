@@ -1256,6 +1256,8 @@ export function PostReviewCard(card: CardProps) {
         {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>}
         {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>}
         <span>waiting for you</span>
+        {/* how long: from the commit that made it held; an old server's day-only date reads in days */}
+        <IssuedAge iso={item.inboxSince ?? item.createdAt?.replace(/T00:00:00(?:\.000)?Z$/, "")} what="reached your inbox" />
       </CardMeta>
       <section>
         <h3 className={CARD_TITLE} data-testid="review-title">
