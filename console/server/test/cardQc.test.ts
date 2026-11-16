@@ -184,7 +184,7 @@ describe("E948-S62 judge fix: the model answers breaches as a list", () => {
   it("the card judge and the ask dry run both answer what is asked and the most ambiguous part", () => {
     expect(QC_JUDGE_SCHEMA.required).toContain("reader");
     expect(QC_JUDGE_SCHEMA.properties.reader.required).toEqual(["asked", "ambiguous", "changesAnswer"]);
-    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem"]);
+    expect(JUDGE_SCHEMAS.dryrun.required).toEqual(["steps", "asked", "ambiguous", "verdict", "firstProblem", "changed", "notStated", "answeredBy", "changesAnswer"]);
     expect(JUDGE_SCHEMAS.dryrun.properties.ambiguous.type).toBe("string");
   });
 });
