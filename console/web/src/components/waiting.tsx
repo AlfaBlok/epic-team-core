@@ -36,6 +36,7 @@ import { blockedItems, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
 import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
+import { ConnectCards, useConnects } from "@/components/connectCards";
 import { showClosed } from "@/lib/afterClose";
 import { answeredHere, markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
 import { SentRow } from "@/components/sentRow";
@@ -1586,24 +1587,6 @@ export const isPinnedPriority = (i: WaitingItem) => !!i.putFirst && i.state === 
  * above every section and every pressing item, until he answers it (Yes puts X first in his objectives, No closes it).
  * The same card as everywhere (L-2): no new colour, no new box.
  */
-export function PinnedPriorityAsks() {
-  const { data } = useWaitingList();
-  const project = useProject();
-  const { entries: snoozes } = useSnoozes();
-  const list = (withSnoozes(data, snoozes) ?? []).filter((i) => isPinnedPriority(i) && (!project.current || project.keep(i.milestoneId)));
-  const qualify = new Set(list.map((i) => i.repo).filter(Boolean)).size > 1;
-  if (!list.length) return null;
-  return (
-    <div className="mb-4 grid gap-3" data-testid="pinned-priority">
-      {list.map((i) => (
-        <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective}>
-          <WaitingCard item={i} showMilestone qualify={qualify} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function WaitingOnYou({
   milestoneId,
   nodeKey,
@@ -1614,7 +1597,10 @@ export function WaitingOnYou({
   laptop = false,
   part = "all",
   only,
+  connects = false,
 }: {
+  /** the Inbox's accounts to connect lead this section (before, loose cards above every section). */
+  connects?: boolean;
   /** a goal set lists its own asks only. */
   only?: (i: WaitingItem) => boolean;
   milestoneId?: string;
@@ -1691,7 +1677,13 @@ export function WaitingOnYou({
   const [snoozedLimit, setSnoozedLimit] = useListLimit("snoozed");
   const [fyiLimit, setFyiLimit] = useListLimit("decided-for-you");
   const [fyiOpen, setFyiOpen] = useSectionOpen("decided-for-you", false);
-  const [sectionOpen, setSectionOpen] = useSectionOpen(fold);
+  // (the owner: "It should just be at the top on blocked waiting for me"): an open priority ask ("Put X first in
+  // your objectives?", vn_cdcf1208) and an account to connect lead this section, never loose above every section;
+  // while a priority ask is here the section opens by itself (an account to connect waits folded, as before).
+  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? (data ?? []).filter(isPinnedPriority) : [];
+  const connectList = useConnects("inbox", connects && part !== "rest");
+  const connectFirst = connects && part !== "rest" ? connectList : [];
+  const [sectionOpen, setSectionOpen] = useSectionOpen(fold, true, pinnedFirst.length > 0);
   // on the Team home (fold set) the section's own sort, remembered; it orders each group (blocking now,
   // status rows, asks, decided for you) by the asks' age, the groups keep their place. Elsewhere the server's order.
   const [sort, setSort] = useSectionSort(fold);
@@ -1713,8 +1705,7 @@ export function WaitingOnYou({
   // the open items are `blockedItems`, the function the red pills count with: one row per item, a card when this
   // list has one for it, else its status row, so the count and the rows are the same list (before, an item with a list
   // entry but no card, a guessed line, was counted and shown nowhere).
-  // an open priority ask ("Put X first in your objectives?") is pinned above every section of the Inbox
-  // (PinnedPriorityAsks), so the world-wide list leaves it out instead of showing it twice.
+  // an open priority ask ("Put X first in your objectives?") leads this section (pinnedFirst), so the rows below leave it out.
   const pinned = !milestoneId && !spine ? new Set((data ?? []).filter(isPinnedPriority).map((i) => i.id)) : new Set<string>();
   const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && !pinned.has(st.id) && (!hits || hits.has(st.id))) : undefined;
   const blockedIds = blocked && new Set(blocked.map((i) => i.id));
@@ -1746,7 +1737,7 @@ export function WaitingOnYou({
   // header lists it for the Delivery Manager, the Tree shows it amber). Only future gates of such lines show, under Coming up.
   const coming = items.filter((i) => !isStructured(i) && i.gate === "future");
   // a green Sent row counts nothing: the red number is what he still has to act on, 0 when none.
-  const count = blocked ? blocked.length : [...blocking, ...open].filter((i) => !answeredHere(i.id)).length;
+  const count = (blocked ? blocked.length : [...blocking, ...open].filter((i) => !answeredHere(i.id)).length) + pinnedFirst.length;
   // the milestone a status row belongs to, by name (only where the list spans milestones)
   const { data: milestones } = useQuery(() => (!milestoneId && !spine ? api.listMilestones() : Promise.resolve([])), [milestoneId, spine?.repo]);
   const names = new Map((milestones ?? []).map((m) => [m.id, milestoneName(m)]));
@@ -1828,6 +1819,17 @@ export function WaitingOnYou({
         {/* the owner ("inbox is inbox, filters on top of expanders nothing between"): the laptop switch opens the
             Blocked section, inside it, never a box between the filters and the sections. */}
         {laptopShown && <LaptopSwitch view={shownView} mac={mac} listUrl={macListUrl()} askCard={askCard} keyBox={keyBox} />}
+        {/* what leads, at the top: the priority asks, then the accounts to connect. */}
+        {pinnedFirst.length > 0 && (
+          <div className="mb-3 grid gap-3" data-testid="pinned-priority">
+            {pinnedFirst.map((i) => (
+              <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective}>
+                <WaitingCard item={i} showMilestone qualify={qualify} />
+              </div>
+            ))}
+          </div>
+        )}
+        {connectFirst.length > 0 && <ConnectCards where="inbox" />}
         <SnoozingLines items={snoozed} qualify={qualify} />
         {error && <ErrorBox error={error} />}
         {loading && !data && <SkeletonCards count={knownCount} testId="waiting-on-you-loading" />}
@@ -1836,7 +1838,7 @@ export function WaitingOnYou({
             Nothing blocked matches “{search.q}”.
           </p>
         )}
-        {data && count === 0 && !searching && (
+        {data && count === 0 && !searching && !connectFirst.length && (
           <EmptyState
             title={`Nothing waiting on you${milestoneId ? " here" : ""}`}
             detail={`You're clear${status?.asOf ? `, checked ${formatRelative(status.asOf)}` : ""}. A new ask from the team lands here first.`}

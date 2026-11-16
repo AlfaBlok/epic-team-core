@@ -15,7 +15,9 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
-import { CARD_WORD, DECIDE_QUESTION, hasDeadline, isDecisionCard, isReady } from "@/lib/cardKind";
+import { CARD_WORD, DECIDE_QUESTION, isDecisionCard, leadsFirst, leadsSection } from "@/lib/cardKind";
+import { LeadLines } from "@/components/readyFirst";
+import { useMinuteClock } from "@/components/deadlineFirst";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
@@ -86,8 +88,13 @@ export function WaitingForReview({
   // the selected project's review cards only.
   const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
   const fetchedSnoozed = fetchedSnoozedAll?.filter((i) => project.keep(i.milestoneId) && (!only || snoozedList === "all" || only(i)));
+  // (the owner 20:27Z: "It should just be at the top on blocked waiting for me or top done waiting for your
+  // review"): a card ready for him, or with a deadline, leads this section, never a section of its own; while one is
+  // here the section opens by itself (even where the Inbox lands folded).
+  const leads = !!cards?.some((i) => leadsSection(i.face));
+  const now = useMinuteClock(leads);
   // the Team home's section header folds like every section (L-39, remembered); the cards in it are never folded
-  const [open, setOpen] = useSectionOpen(fold);
+  const [open, setOpen] = useSectionOpen(fold, true, leads);
   const [snoozedOpen, setSnoozedOpen] = useState(false);
   // the owner 2026-11-12, "on the mobile, it's just a total mess": 21 open cards made
   // Home about 40 phone screens long. On a phone the first PHONE_FIRST show and one button shows the rest; every card
@@ -104,7 +111,7 @@ export function WaitingForReview({
   // 2026-11-12 "I want to be able to do sorting"): Highest priority keeps the server's order, the others by the date it came to review.
   const [sort, setSort] = useSectionSort(fold);
   const shown = hits ? (cards as Listed[] | undefined)?.filter((i) => hits.has(i.id)) : (cards as Listed[] | undefined);
-  const data = shown && sortSection(shown, sort, (i) => i.createdAt || undefined);
+  const data = shown && leadsFirst(sortSection(shown, sort, (i) => i.createdAt || undefined));
   const snoozedFrom = snoozedList === "all" ? fetchedAll?.filter((i) => project.keep(i.milestoneId)) : fetched;
   const snoozedAll = snoozedList === "none" ? [] : [
     ...(snoozedFrom ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
@@ -181,7 +188,13 @@ export function WaitingForReview({
                 style={leaving.has(i.id) ? { opacity: 0, transform: "translateX(-40px)" } : undefined}
                 data-testid="review-feed-item"
                 data-inbox-card={`review:${i.id}`}
+                data-lead={leadsSection(i.face) ? "yes" : undefined}
               >
+                {leadsSection(i.face) && (
+                  <div className="mb-2 grid min-w-0 gap-2" data-testid="lead-lines">
+                    <LeadLines face={i.face} now={now} />
+                  </div>
+                )}
                 {i.kind === "post" && i.post ? (
                   <PostReviewCard key={failed.get(i.id)} item={i} onDone={() => pressed(i.id)} onFailed={(why) => comeBack(i.id, why)} failed={failed.get(i.id)} />
                 ) : (
@@ -225,11 +238,11 @@ export function WaitingForReview({
 
 /** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
 export function InboxDecisions() {
-  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face) && !hasDeadline(i.face) && !isReady(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
 }
-/** E948-S103: Done, waiting for your review keeps only finished work he marks done (a card with a deadline leads the inbox instead, components/deadlineFirst.tsx). */
+/** E948-S103: Done, waiting for your review keeps only finished work he marks done (a ready or deadline card leads it,). */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face) && !hasDeadline(i.face) && !isReady(i.face)} snoozedList="all" />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="all" />;
 }
 
 /**

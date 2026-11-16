@@ -66,25 +66,26 @@ describe("a question on what comes first sits first in his inbox", () => {
     expect(isPinnedPriority({ ...PRIORITY, snoozedUntil: "2026-11-16" })).toBe(false);
   });
 
-  it("is the first thing on the Inbox, above the search, every section and the pressing items, and shown once", async () => {
+  // (the owner 16 Nov 20:27Z: "I don't want to add more sections!!! It should just be at the top on blocked
+  // waiting for me"): the question leads Blocked on you, never loose above every section, and Blocked opens by itself.
+  it("leads Blocked on you, above the pressing ask, shown once and counted there", async () => {
     inbox();
     const pinned = await screen.findByTestId("pinned-priority-ask");
     expect(pinned.getAttribute("data-priority")).toBe("team-browser");
     expect(pinned.textContent).toContain("Put Team browser first in your objectives?");
-    const sections = [...document.querySelectorAll("[data-fold-section]")];
-    await waitFor(() => expect(sections.length + document.querySelectorAll("[data-fold-section]").length).toBeGreaterThan(0));
-    for (const s of document.querySelectorAll("[data-fold-section]")) expect(before(pinned, s)).toBe(true);
-    const search = screen.queryByTestId("inbox-search");
-    if (search) expect(before(pinned, search)).toBe(true);
-    // not a second time in Blocked, whose count leaves it out (the pressing ask stays there)
-    const blocked = await screen.findByTestId("waiting-on-you");
-    await waitFor(() => expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("1"));
-    expect(within(blocked).queryByText("Put Team browser first in your objectives?")).toBeNull();
+    const blocked = screen.getByTestId("waiting-on-you");
+    expect(blocked.contains(pinned)).toBe(true);
+    await waitFor(() => expect(within(blocked).getByText("Which mail address do testers write to?")).toBeTruthy());
+    expect(before(pinned, within(blocked).getByText("Which mail address do testers write to?"))).toBe(true);
+    expect(within(blocked).getAllByText("Put Team browser first in your objectives?")).toHaveLength(1);
+    await waitFor(() => expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("2"));
+    // nothing loose between the sections: the question sits inside one
+    expect(pinned.closest("[data-fold-section]")).toBe(blocked);
   });
 
-  it("leads the social skin's inbox too", async () => {
+  it("leads Blocked on you in the social skin's inbox too", async () => {
     inbox(SKINS.social);
     const pinned = await screen.findByTestId("pinned-priority-ask");
-    for (const s of document.querySelectorAll("[data-fold-section]")) expect(before(pinned, s)).toBe(true);
+    expect(pinned.closest("[data-fold-section]")?.getAttribute("data-testid")).toBe("waiting-on-you");
   });
 });

@@ -12,10 +12,7 @@ import { CardFeedback } from "@/components/cardFeedback";
  * The inbox shows the ones not connected yet; the Connections page shows all (server auth/connects.ts).
  */
 export function ConnectCards({ where }: { where: "inbox" | "connections" }) {
-  const { data } = useQuery(() => api.listConnects(), []);
-  // E948-S78: in the Inbox the search box filters this block too: a card stays when its words hold the searched text.
-  const needle = useSearchNeedle();
-  const list = (data?.connects ?? []).filter((c) => (where === "inbox" ? c.inbox && !c.connected && saysNeedle(needle, c.title, c.what, c.account, c.channel?.name, c.channel?.handle, ...c.gives) : true));
+  const list = useConnects(where);
   if (!list.length) return null;
   return (
     <div className="mb-4 space-y-3" data-testid={`connect-cards-${where}`}>
@@ -24,6 +21,16 @@ export function ConnectCards({ where }: { where: "inbox" | "connections" }) {
       ))}
     </div>
   );
+}
+
+/**
+ * the accounts to connect: in the Inbox the ones not connected yet (they lead Blocked on you,), on the
+ * Connections page all. E948-S78: in the Inbox the search box filters them too.
+ */
+export function useConnects(where: "inbox" | "connections", on = true): ConnectItem[] {
+  const { data } = useQuery(() => (on ? api.listConnects() : Promise.resolve(undefined)), [on]);
+  const needle = useSearchNeedle();
+  return (data?.connects ?? []).filter((c) => (where === "inbox" ? c.inbox && !c.connected && saysNeedle(needle, c.title, c.what, c.account, c.channel?.name, c.channel?.handle, ...c.gives) : true));
 }
 
 /**

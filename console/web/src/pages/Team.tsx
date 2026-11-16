@@ -4,7 +4,6 @@ import { Slot, SlotStack } from "@/components/slot";
 import { RedLineBand } from "@/components/ownerPriority";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { InboxLine } from "@/components/inboxLine";
-import { ConnectCards } from "@/components/connectCards";
 import { ArrowDown, ArrowUp, ChevronDown, Clock, ExternalLink, MessageSquare, MessagesSquare, Phone, Pin, PinOff, Plus, Workflow } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
@@ -22,9 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
-import { PinnedPriorityAsks, WaitingOnYou } from "@/components/waiting";
-import { DeadlineFirst } from "@/components/deadlineFirst";
-import { ReadyFirst } from "@/components/readyFirst";
+import { WaitingOnYou } from "@/components/waiting";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
@@ -411,12 +408,9 @@ export function TeamPage({
           {/* the social product world's own asks and cards, then blocked, then finished work to review, and only then the
               inbox's history (Mac agent, snoozed, decided for you, coming up, answered), as on the console's Inbox. */}
           {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
-          {/* (vn_cdcf1208): a question on what comes first sits first, above every section and pressing item. */}
-          {/* (vn_c95c40ad): a card with a deadline leads the whole inbox, its time left counting down. */}
-          {/* ("came in too subtly"): what he was waiting on, now ready, leads above everything, deadlines included. */}
-          {only !== "goals" && keeps.review && <ReadyFirst />}
-          {only !== "goals" && keeps.review && <DeadlineFirst />}
-          {only !== "goals" && <PinnedPriorityAsks />}
+          {/* (the owner 16 Nov 20:27Z: "I don't want to add more sections!!! It should just be at the top on blocked
+              waiting for me or top done waiting for your review"): a ready or deadline card leads its own section, a
+              question on what comes first leads Blocked on you; no section of their own, every section folds alike. */}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
           {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
           {only !== "goals" && <LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
@@ -484,20 +478,15 @@ export function TeamPage({
           <InboxSearchProvider>
           {/* the owner ("land with everything collapsed, and then I expand where I want to look at"). */}
           <LandFolded.Provider value>
-          {/* (vn_cdcf1208): "if the question reaches me 10 notifications deep ... we've defeated the purpose":
-              a question on what comes first (Put X first in your objectives?) sits first, above every section and pressing item. */}
-          {/* (vn_c95c40ad): "something that was time sensitive ... how come that this is not the first thing on
-              my inbox?": a card with a deadline leads the whole inbox, above every section, its time left counting down. */}
-          {/* (the owner 16 Nov 08:04Z: "came in too subtly"): what he was waiting on, now ready, leads above everything. */}
-          {keeps.review && <ReadyFirst />}
-          {keeps.review && <DeadlineFirst />}
-          <PinnedPriorityAsks />
+          {/* (the owner 16 Nov 20:27Z: "I don't want to add more sections!!! ... Inbox should have single pattern
+              please - sections you can expand, all look the same"): what he waits on leads the section it belongs to
+              (vn_cdcf1208 a question on what comes first and an account to connect lead Blocked on you; vn_c95c40ad a
+              deadline and "came in too subtly" a ready card lead Decisions or Done, waiting for your review), and that
+              section opens by itself. No section of their own, nothing loose between the sections. */}
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
           <InboxSearchBox />
           {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}
           <InboxShowFilter show={show} onChange={setShow} />
-          {/* an account the team needs, connected with one tap (Google's own page, the account named). */}
-          {keeps.blocked && <ConnectCards where="inbox" />}
           <SlotStack name="inbox">
             {/* E948-S103 (vn_a8293638): cards that wait on his choice sit in their own bucket, above finished work */}
             {reviewFirst && keeps.review && (
@@ -512,7 +501,7 @@ export function TeamPage({
             )}
             {keeps.blocked && (
               <Slot name="blocked" fallback={420}>
-                <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" />
+                <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" connects />
               </Slot>
             )}
             {/* the owner: "either I'm reviewing something or I am unblocking something". Goals to set is

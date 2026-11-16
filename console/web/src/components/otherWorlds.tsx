@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { api } from "@/api";
 import type { WorldInbox, WorldItem } from "@/api/company-types";
 import { useQuery } from "@/lib/data";
+import { FoldSection, useSectionOpen } from "@/components/homeSection";
 
 /**
  * the owner's social product team lives in its own world (its asks and cards are answered in its own app), so the
@@ -82,21 +83,25 @@ function WorldBand({ w }: { w: WorldInbox }) {
   const [all, setAll] = useState(false);
   const items = orderWorldItems(w.items);
   const shown = all ? items : items.slice(0, OTHER_WORLDS_SHOWN);
+  // (the owner: "Inbox should have single pattern please - sections you can expand, all look the same"): the
+  // other world is one more fold section like every other (chevron, title, count), no violet panel; it opens by
+  // itself while something there waits on him.
+  const [open, setOpen] = useSectionOpen(`other-world-${w.tenantId}`, true, items.length > 0);
   return (
-    <section className="mb-6 rounded-lg border border-violet-300 bg-violet-50/60 p-4 dark:border-violet-800 dark:bg-violet-950/30" data-testid="other-world" data-world={w.tenantId}>
-      <div className="mb-1 flex flex-wrap items-baseline gap-x-2">
-        <h2 className="text-base font-semibold">
-          {w.app} waits on you
-          {items.length > 0 && (
-            <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 text-xs font-semibold text-white" data-testid="other-world-count">
-              {items.length}
-            </span>
-          )}
-        </h2>
+    <FoldSection
+      title={`${w.app} waits on you`}
+      count={items.length}
+      hideZero
+      tone="needs-you"
+      testId="other-world"
+      open={open}
+      onToggle={setOpen}
+      meta={
         <a href={w.appUrl} target="_blank" rel="noreferrer" className="ml-auto inline-flex min-h-10 items-center gap-1 text-xs font-medium underline-offset-2 hover:underline sm:min-h-0">
           Open {w.app} <ExternalLink className="h-3 w-3" />
         </a>
-      </div>
+      }
+    >
       {w.error ? (
         <p className="text-sm text-muted-foreground" data-testid="other-world-error">
           {w.app} could not be read just now, so its items are missing here, not zero. Open it to see them.
@@ -106,10 +111,10 @@ function WorldBand({ w }: { w: WorldInbox }) {
           <p className="mb-2 text-sm text-muted-foreground" data-testid="other-world-summary">
             {worldSummary(items)} in your {w.app} team. Each opens there, where you answer it.
           </p>
-          <ul className="grid gap-1.5">
+          <ul className="grid gap-1.5" data-world={w.tenantId}>
             {shown.map((i) => (
               <li key={i.key} data-testid="other-world-item" data-kind={i.kind}>
-                <a href={i.openUrl} target="_blank" rel="noreferrer" className="flex min-h-11 min-w-0 items-baseline gap-2 rounded-md bg-background/70 px-3 py-2 text-sm hover:bg-background">
+                <a href={i.openUrl} target="_blank" rel="noreferrer" className="flex min-h-11 min-w-0 items-baseline gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted">
                   <span className="shrink-0 text-xs font-semibold">{i.kind === "ask" ? "Decide" : "Review"}</span>
                   {/* the phone Home: two lines on a phone, never cut mid-word, and no leading row code. */}
                   <span className="line-clamp-2 min-w-0 flex-1 [overflow-wrap:anywhere]" title={i.title}>
@@ -127,6 +132,6 @@ function WorldBand({ w }: { w: WorldInbox }) {
           )}
         </>
       )}
-    </section>
+    </FoldSection>
   );
 }

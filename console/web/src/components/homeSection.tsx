@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,10 +18,20 @@ function storedOpen(key: string): boolean | undefined {
  * for this visit only, so the next visit lands folded again.
  */
 export const LandFolded = createContext(false);
-export function useSectionOpen(key: string | undefined, byDefault = true): [boolean, (open: boolean) => void] {
+/**
+ * `lead` (the owner 2026-11-16: "It should just be at the top on blocked waiting for me or top done waiting
+ * for your review"): while a section holds something ready for him (a ready or deadline card, a priority ask) at its
+ * top, it opens by itself, even where the Inbox lands folded, until he folds it himself.
+ */
+export function useSectionOpen(key: string | undefined, byDefault = true, lead = false): [boolean, (open: boolean) => void] {
   const landFolded = useContext(LandFolded);
-  const [open, setOpen] = useState(() => (landFolded ? false : key ? (storedOpen(key) ?? byDefault) : byDefault));
+  const [open, setOpen] = useState(() => lead || (landFolded ? false : key ? (storedOpen(key) ?? byDefault) : byDefault));
+  const touched = useRef(false);
+  useEffect(() => {
+    if (lead && !touched.current) setOpen(true);
+  }, [lead]);
   const set = (o: boolean) => {
+    touched.current = true;
     setOpen(o);
     if (!key || landFolded) return;
     try {

@@ -1,7 +1,8 @@
 /**
  * (the owner, Team desk 2026-11-16 08:04Z: "problem is email showed in the drafts but i was hping for an email
  * or somethingi nmy epicteam inbox notifying - came in too subtly"): a card for something he is waiting on is "ready for
- * you". It leads his inbox, set apart, with the one action and where the thing is (web components/readyFirst.tsx), and
+ * you". It leads the inbox section it belongs to, never a section of its own, with the one action and where the thing is
+ * (web components/readyFirst.tsx), and
  * the console tells him once per ready event by WhatsApp, or by mail when WhatsApp cannot (hosted notify/readyNotice.ts).
  *
  * He is waiting on it when:

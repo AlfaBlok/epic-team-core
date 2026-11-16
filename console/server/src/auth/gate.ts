@@ -109,6 +109,17 @@ export const throughDoor = (door: DoorKey | undefined, env: NodeJS.ProcessEnv = 
 export const platformBlocked = (host: string | undefined, tenant: string | undefined, env: NodeJS.ProcessEnv = process.env, door?: DoorKey): boolean =>
   tenant === platformWorld(env) && !!host && customerHosts(env).has(host) && !throughDoor(door, env);
 /**
+ * both side by side (the owner keeps the private console while he tries the customer site): `CONSOLE_DOOR_OWNER=1`
+ * lets a door login on a customer site open the home world as its owner, the same plain workspace the platform switch gives
+ * (its membership role, the door's routes, no platform powers), while the private console stays exactly as it is (switch
+ * off, the same login is the platform there). Unset: the door as before (a member). Undo: drop the line and restart.
+ */
+export const doorOwner = (env: NodeJS.ProcessEnv = process.env): boolean => env.CONSOLE_DOOR_OWNER?.trim() === "1";
+/** a door session on a customer site: the owner's plain workspace (doorOwner) or, off, the door's member view. */
+export function doorSessionOf<T extends Identity & { kind: "session" }>(i: T, env: NodeJS.ProcessEnv = process.env): T {
+  return doorOwner(env) ? { ...i, plain: true } : { ...i, role: "member", door: true };
+}
+/**
  * A machine credential (an agent token, the host owner token, legacy trust) of the platform world or of the home
  * world is no credential on a customer site, switch on or off: the home world's machines keep the platform's reach.
  */
@@ -188,11 +199,11 @@ export function mountAuth(
   const resolve = (c: Context): Identity => {
     const i = auth.resolve({ header: (n) => c.req.header(n), cookie: getCookie(c, SESSION_COOKIE), peer: peerOf(c) });
     // the home world credential on a customer site is no credential (its open pages still answer, the rest is 401).
-    // a door login keeps its session, marked as the door (a customer world's rules, no owner powers).
+    // a door login keeps its session, marked as the door (a customer world's rules, no owner powers; doorOwner: its owner role, plain).
     if (i.kind === "session") {
       const host = hostOfReq(c);
       if (platformBlocked(host, i.tenant, process.env, { email: i.email })) return { kind: "none", peer: peerOf(c) };
-      return platformBlocked(host, i.tenant) ? { ...i, role: "member", door: true } : platformSession(i);
+      return platformBlocked(host, i.tenant) ? doorSessionOf(i) : platformSession(i);
     }
     return "tenant" in i && machineBlocked(hostOfReq(c), i.tenant) ? { kind: "none", peer: peerOf(c) } : i;
   };
