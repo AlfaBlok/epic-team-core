@@ -187,12 +187,15 @@ export interface Sites {
   mainSsh: string;
   /** the epic that owns the daily press test: its spine in the home repo, its code and the row that runs the test */
   pressTest: { spine: string; epic: string; row: string };
+  /** the first-party page counter the sign-in page tells its sign-up steps to (a `…/api/public/pv` address, no cookie); none by default */
+  pageCounter: string;
 }
 
 export const NEUTRAL_SITES: Sites = {
   teamUrl: "https://team.example.com",
   socialUrl: "https://social.example.com",
   customerHosts: "",
+  pageCounter: "",
   socialMovedTo: "",
   customerLogins: "",
   tailnetNames: {},

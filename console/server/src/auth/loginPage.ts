@@ -120,6 +120,18 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   const okNext = (v) => !!v && v[0] === "/" && v[1] !== "/" && ![...v].some((ch) => ch.charCodeAt(0) <= 32 || ch.charCodeAt(0) === 92 || ch.charCodeAt(0) === 127);
   const next = okNext(q.get("next")) ? q.get("next") : "/";
   const $ = (id) => document.getElementById(id);
+  // the sign-up steps, told to the first-party page counter when one is set (sites().pageCounter): the step's name and
+  // this site's host only, no cookie, nothing about the visitor; ?s=TEST marks a test (kept apart, never counted).
+  const PC = ${JSON.stringify(sites().pageCounter)};
+  const step = (k) => {
+    if (!PC) return;
+    let r = "";
+    try { r = document.referrer ? new URL(document.referrer).hostname.replace(/^www\./, "") : ""; } catch (e) {}
+    const i = new Image(1, 1);
+    i.referrerPolicy = "no-referrer";
+    i.src = PC + "?e=step&k=" + k + "&h=" + encodeURIComponent(location.hostname) + (q.get("s") ? "&s=" + encodeURIComponent(q.get("s").slice(0, 40)) : "") + (r && r !== location.hostname ? "&r=" + encodeURIComponent(r) : "");
+  };
+  step("signin_open");
   const post = async (url, body) => {
     const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
@@ -158,6 +170,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
       a.className = "oauth";
       a.href = "/api/access/oauth/" + p.id + "/start?next=" + encodeURIComponent(next) + (q.get("s") === "TEST" ? "&s=TEST" : "");
       a.innerHTML = ICONS[p.id] || "";
+      a.addEventListener("click", () => step("oauth_" + p.id));
       a.append(document.createTextNode("Continue with " + p.name));
       $("oauthButtons").append(a);
     }
@@ -230,7 +243,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
     $("emailLinks").hidden = false;
     if (!j.signup) $("toSignup").hidden = true;
     $("toForgot").onclick = (e) => { e.preventDefault(); show("forgot"); $("fgEmail").value = $("email").value; $("fgEmail").focus(); };
-    $("toSignup").onclick = (e) => { e.preventDefault(); show("signup"); $("suEmail").value = $("email").value; $("suEmail").focus(); };
+    $("toSignup").onclick = (e) => { e.preventDefault(); step("signup_open"); show("signup"); $("suEmail").value = $("email").value; $("suEmail").focus(); };
     if (q.get("signup") === "email") show("signup");
   }).catch(() => {});
   $("signup").onsubmit = async (e) => {
@@ -239,7 +252,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
     try {
       const j = await post("/api/access/email/signup", { email: $("suEmail").value, name: $("suName").value, password: $("suPw").value, next, ...(q.get("s") === "TEST" ? { s: "TEST" } : {}) });
       $("okSu").textContent = "Check your inbox: we sent a confirm link to " + $("suEmail").value + ". It works once, for 60 minutes.";
-      $("okSu").hidden = false; $("suPw").value = "";
+      $("okSu").hidden = false; $("suPw").value = ""; step("signup_sent");
     } catch (err) { $("errSu").textContent = err.message; }
     $("suGo").disabled = false;
   };
