@@ -208,6 +208,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // the five tabs read the campaign's epic file (totems) and write a slide (the campaign chat's rebuild), Keep,
   // Undo and a proposal's Add to the brief / Not now, through the same campaignMilestone (path world only). totemsRead.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/totems$`)],
+  // the campaign's Plan tab reads its marketing plan (the spine's Plan section) through the same campaignMilestone.
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/plan$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/(slide|slide/keep|slide/undo|observation|product-note)$`)], // product-note, a Product tab slide note
   // a one-off job (Add job): a new spine in one of the path world's own repos (social/campaigns.ts `world` +
   // worldRepos), its milestone and persona assignment in that world's store; another world's id is a 404. socialFavicon.test.ts
