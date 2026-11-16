@@ -29,3 +29,10 @@ export function splitDecisions<T extends { face?: Pick<CardFace, "decision" | "o
   for (const c of cards ?? []) (isDecisionCard(c.face) ? decisions : review).push(c);
   return { decisions, review };
 }
+
+/**
+ * (the owner 2026-11-16, vn_c95c40ad: "something that was time sensitive ... how come that this is not the first
+ * thing on my inbox?"): a card with a deadline leads the whole inbox (components/deadlineFirst.tsx), so the sections
+ * below leave it out (it is still counted where its kind belongs).
+ */
+export const hasDeadline = (face: Pick<CardFace, "deadline"> | undefined | null) => !!face?.deadline?.at && Number.isFinite(Date.parse(face.deadline.at));

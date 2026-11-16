@@ -483,3 +483,21 @@ describe("Home on a phone: the first cards, then one button for the rest", () =>
     expect(screen.queryByTestId("review-phone-more")).toBeNull();
   });
 });
+
+// (vn_7c5aa36e: "how old is the card in minutes, hours, days, weeks"): the age counts from when the card
+// reached his inbox, never from the row's restamped Last verified day.
+describe("a review card shows how long it has waited", () => {
+  it("reads the inbox time to the minute, the restamp day only when git has not answered", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+    try {
+      list([card({ id: "a", createdAt: "2026-11-16", inboxSince: "2026-11-16T09:00:00Z" }), card({ id: "b", ref: "T1-S2", createdAt: "2026-11-16", inboxSince: "2026-11-02T12:00:00Z" }), card({ id: "c", ref: "T1-S3", createdAt: "2026-11-15" })]);
+      mount();
+      const ages = (await screen.findAllByTestId("review-crumb")).map((c) => within(c).getByTestId("issued-age"));
+      expect(ages.map((a) => a.textContent)).toEqual(["3 h ago", "2 weeks ago", "1 day ago"]);
+      expect(ages[0].getAttribute("title")).toMatch(/^reached your inbox /);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

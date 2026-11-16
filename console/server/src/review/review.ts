@@ -13,6 +13,7 @@ import { SNOOZE_UNTIL, snoozedNow, snoozeMinute } from "../inbox/asks.js";
 import { byMilestonePriority, storeRanks } from "../inbox/priority.js";
 import type { PriorityLookup } from "../inbox/jordiPriority.js";
 import { resolveRepo } from "../adapters/repos.js";
+import { inboxSince, inboxSinceOf } from "./inboxSince.js";
 import type { SpineWrite, SpineWriter } from "../inbox/spineWrite.js";
 import { serverTimingOf, timeWrites } from "../inbox/spineWrite.js";
 import type { ReadModelHost } from "../readModel/host.js";
@@ -98,6 +99,11 @@ export interface ReviewItem {
   liveError?: string;
   /** The row's Last Verified date (sort key "most recent"); "" when the row has none. */
   createdAt: string;
+  /**
+   * when the card reached the owner's inbox (ISO, to the minute): the commit that turned the row's status
+   * into `review` (or `done` unmarked); a restamp never moves it. Absent until git has answered (the card shows createdAt).
+   */
+  inboxSince?: string;
   links: ReviewLink[];
   snoozedUntil?: string;
   /** the row was in review before the list read the spine and never reached the owner: the folded backlog list only. */
@@ -353,6 +359,9 @@ export interface ReviewOptions {
    * milestone chat's Repo desk), not to a persona's wake.
    */
   chatRelaunch?: (milestoneId: string, text: string) => Promise<unknown>;
+  /** when a row reached the owner's inbox (tests stub git), and how long a list waits for it (ms). */
+  inboxSince?: typeof inboxSince;
+  inboxSinceBudgetMs?: number;
   /** list test goals' rows as cards (staging only, REVIEW_SHOW_TEST_CARDS=1); production never does. */
   showTest?: boolean;
   /** held posts as cards (late-bound: the social writer mounts after the review API). */
@@ -544,6 +553,16 @@ export function createReview(db: DB, o: ReviewOptions) {
     if (f.wait) await check;
     else void check;
     const items = rs.map(toItem);
+    // each card's age counts from when it reached his inbox, never from a later restamp
+    const since = await inboxSinceOf(
+      rs.filter((r) => r.verdict.kind === "card").map((r) => ({ id: r.id, repoDir: repoDir(r), path: r.path, ref: r.ref, status: r.status })),
+      o.inboxSinceBudgetMs,
+      o.inboxSince,
+    );
+    for (const i of items) {
+      const at = since.get(i.id);
+      if (at) i.inboxSince = at;
+    }
     const q = f.state ?? "review";
     if (q === "all") return [...items, ...(await postCards())];
     if (q === "test") return items.filter((i) => i.test);

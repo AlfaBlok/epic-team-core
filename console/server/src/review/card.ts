@@ -119,6 +119,31 @@ export interface CardFields {
   options?: string[];
   /** `objective:` read and kept, never shown: a card no longer opens with an objective (the owner 2026-11-14, vn_e751eeeb). */
   objective?: string;
+  /**
+   * (the owner 2026-11-16, vn_c95c40ad: "something that was time sensitive ... how come that this is not the
+   * first thing on my inbox?"): `deadline: <ISO time> — <where it comes from>`, taken from his words or the source (an
+   * Airbnb mail's 72 hours), never guessed. A card with one leads the whole inbox with its time left.
+   */
+  deadline?: CardDeadline;
+}
+
+export interface CardDeadline {
+  /** ISO UTC time (`2026-11-17T01:47:00.000Z`). */
+  at: string;
+  /** where the deadline comes from, in plain words (his words or the source), shown beside the time left. */
+  why?: string;
+}
+
+/** `2026-11-17T01:47Z — Your words: "22 hours"` → the time (UTC unless it names a zone) and its why; a value with no clear time is dropped. */
+export function parseDeadline(v: string): CardDeadline | undefined {
+  const m = /^\s*(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?)\s*(Z|UTC|[+-]\d{2}:?\d{2})?\s*(?:(?:—|--|–|:)\s*(.*))?$/i.exec(v);
+  if (!m) return undefined;
+  const zone = !m[2] || /^(z|utc)$/i.test(m[2]) ? "Z" : m[2].replace(/^([+-]\d{2})(\d{2})$/, "$1:$2");
+  const time = m[1].includes(":") ? m[1].replace(" ", "T") : `${m[1]}T00:00`;
+  const t = Date.parse(`${time}${zone}`);
+  if (!Number.isFinite(t)) return undefined;
+  const why = m[3] ? unquote(m[3]) : "";
+  return { at: new Date(t).toISOString(), ...(why ? { why } : {}) };
 }
 
 const KEYS: [RegExp, keyof CardFields | "skip"][] = [
@@ -140,6 +165,7 @@ const KEYS: [RegExp, keyof CardFields | "skip"][] = [
   [/^(decision|the decision|you decide|your decision|decide|the ask for you|your call)$/, "decision"],
   [/^(options|choices|buttons|decision options)$/, "options"],
   [/^(objective|objectives|serves|serves objective)$/, "objective"],
+  [/^(deadline|due|due by|reply by|answer by)$/, "deadline"],
 ];
 /** the `from` fields (the persona that sends the card). */
 const FROM_KEYS: [RegExp, keyof CardFrom][] = [
@@ -290,6 +316,11 @@ export function parseCard(text: string): CardFields | undefined {
     if (key === "confirm") {
       const c = /^(yes|no|true|false)\b\s*(?:(?:—|--|–|:)\s*)?(.*)$/i.exec(v);
       if (c) out.confirm = { yes: /^(yes|true)$/i.test(c[1]), ...(c[2].trim() ? { why: c[2].trim() } : {}) };
+      continue;
+    }
+    if (key === "deadline") {
+      const d = parseDeadline(v);
+      if (d) out.deadline = d;
       continue;
     }
     if (key === "completes") {

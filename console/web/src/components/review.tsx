@@ -15,13 +15,13 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
-import { CARD_WORD, DECIDE_QUESTION, isDecisionCard } from "@/lib/cardKind";
+import { CARD_WORD, DECIDE_QUESTION, hasDeadline, isDecisionCard } from "@/lib/cardKind";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Empty, ErrorBox, PHONE_TAP, RelTime } from "@/components/common";
+import { Empty, ErrorBox, IssuedAge, PHONE_TAP, RelTime } from "@/components/common";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach } from "@/components/ChatAttach";
@@ -225,11 +225,11 @@ export function WaitingForReview({
 
 /** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
 export function InboxDecisions() {
-  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face) && !hasDeadline(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
 }
-/** E948-S103: Done, waiting for your review keeps only finished work he marks done. */
+/** E948-S103: Done, waiting for your review keeps only finished work he marks done (a card with a deadline leads the inbox instead, components/deadlineFirst.tsx). */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="all" />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face) && !hasDeadline(i.face)} snoozedList="all" />;
 }
 
 /**
@@ -863,7 +863,8 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
           {isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review}
         </span>
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
-        {item.createdAt && <RelTime iso={item.createdAt} />}
+        {/* vn_7c5aa36e: how long it has waited on him, from when it reached his inbox, as on every ask card */}
+        <IssuedAge iso={item.inboxSince ?? item.createdAt} what="reached your inbox" />
         {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} />}
       </div>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
@@ -1182,7 +1183,7 @@ function OldCard({ item }: { item: Listed }) {
     <CardShell as="article" kind="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
       <CardMeta kind="Review">
         {milestoneLabel(item.milestoneTitle) && <span>{milestoneLabel(item.milestoneTitle)}</span>}
-        {item.createdAt && <RelTime iso={item.createdAt} />}
+        <IssuedAge iso={item.inboxSince ?? item.createdAt} what="reached your inbox" />
       </CardMeta>
       <div className={CARD_TITLE}>
         <CardText text={item.title} item={item} />

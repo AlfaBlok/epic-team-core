@@ -701,6 +701,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
                   return notes.length ? { pageNotes: notes.map(({ refs: _r, ...n }) => n) } : {};
                 })(),
                 ...(card.options?.length ? { options: card.options } : {}),
+                ...(card.deadline ? { deadline: card.deadline } : {}),
                 openInGoal: siblings
                   .filter((x) => x.ref !== r.id && !CLOSED_STATUS.test(stripInline(x.status)))
                   .map((x) => ({ ref: x.ref, ...(plainName(x.name) ? { name: plainName(x.name) } : {}) })),

@@ -87,12 +87,12 @@ export function RelTime({ iso, now, className }: { iso?: string | null; now?: nu
  * how long ago a card's item was issued ("5 min ago", "3 days ago", "1 year ago"), for the card header next
  * to its chip or code; the full date and time on hover. A date-only value (an old ask line) reads in days ("today").
  */
-export function IssuedAge({ iso, className }: { iso?: string | null; className?: string }) {
+export function IssuedAge({ iso, className, what = "issued" }: { iso?: string | null; className?: string; what?: string }) {
   if (!iso) return null;
   return (
     <time
       dateTime={iso}
-      title={/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `issued ${iso} (day only)` : `issued ${formatDateTime(iso)}`}
+      title={/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${what} ${iso} (day only)` : `${what} ${formatDateTime(iso)}`}
       className={cn("whitespace-nowrap text-xs text-muted-foreground", className)}
       data-testid="issued-age"
     >

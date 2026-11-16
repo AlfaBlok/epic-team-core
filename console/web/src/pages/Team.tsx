@@ -23,6 +23,7 @@ import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { PinnedPriorityAsks, WaitingOnYou } from "@/components/waiting";
+import { DeadlineFirst } from "@/components/deadlineFirst";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
@@ -410,6 +411,8 @@ export function TeamPage({
               inbox's history (Mac agent, snoozed, decided for you, coming up, answered), as on the console's Inbox. */}
           {/* Home ("goals") leaves the lists to the Inbox page, one tap away in the top bar. */}
           {/* (vn_cdcf1208): a question on what comes first sits first, above every section and pressing item. */}
+          {/* (vn_c95c40ad): a card with a deadline leads the whole inbox, its time left counting down. */}
+          {only !== "goals" && keeps.review && <DeadlineFirst />}
           {only !== "goals" && <PinnedPriorityAsks />}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
           {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
@@ -480,6 +483,9 @@ export function TeamPage({
           <LandFolded.Provider value>
           {/* (vn_cdcf1208): "if the question reaches me 10 notifications deep ... we've defeated the purpose":
               a question on what comes first (Put X first in your objectives?) sits first, above every section and pressing item. */}
+          {/* (vn_c95c40ad): "something that was time sensitive ... how come that this is not the first thing on
+              my inbox?": a card with a deadline leads the whole inbox, above every section, its time left counting down. */}
+          {keeps.review && <DeadlineFirst />}
           <PinnedPriorityAsks />
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
           <InboxSearchBox />

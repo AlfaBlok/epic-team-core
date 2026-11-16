@@ -4,7 +4,7 @@ import type { CardQc } from "./qc.js";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { field, stripInline } from "../adapters/markdown.js";
-import { parseCard, plainProblem, type CardFields, type CardFrom, type DeliveredLine, type NextStep } from "./card.js";
+import { parseCard, plainProblem, type CardDeadline, type CardFields, type CardFrom, type DeliveredLine, type NextStep } from "./card.js";
 
 /**
  * what the card face shows, read from the repo only (L-45): the card file's fields, the project name (root spine,
@@ -51,6 +51,8 @@ export interface CardFace {
   pageNotes?: Omit<PageNote, "refs">[];
   /** E948-S69 a decision card's own buttons, `<label>: <what happens next>` (the card's `options:`). */
   options?: string[];
+  /** the card's `deadline:`: it leads the whole inbox with its time left (overdue in red, still first). */
+  deadline?: CardDeadline;
 }
 
 /** a goal a follow-up names (`in:` or a spine file), found in the repo's docs/spines. */

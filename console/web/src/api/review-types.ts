@@ -126,6 +126,8 @@ export interface ReviewItem {
   liveStatus?: number;
   liveError?: string;
   createdAt: string;
+  /** when the card reached the owner's inbox (ISO, to the minute); a restamp never moves it. */
+  inboxSince?: string;
   decidedAt?: string;
   feedback?: string;
   relaunchRunId?: string;
@@ -248,6 +250,8 @@ export interface CardFace {
   pageNotes?: CardPageNote[];
   /** E948-S69 a decision card's own buttons, `<label>: <what happens next>` (the card's `options:`). */
   options?: string[];
+  /** the card's deadline (ISO UTC) and where it comes from: the card leads the whole inbox with its time left. */
+  deadline?: { at: string; why?: string };
 }
 
 /** a note left inside a page's own feedback box: date (YYYY-MM-DD), time (HH:MM UTC) when kept, his words, the page. */
