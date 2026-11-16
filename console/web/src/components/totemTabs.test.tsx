@@ -25,3 +25,12 @@ describe("totem tabs", () => {
     expect(totemTabs(productOfObjective(maps, "house"), ["table"])).toEqual([]);
   });
 });
+
+describe("a totem reads plainly (vn_15aa4467)", () => {
+  it("leaves the file's HTML comments out and opens a light table on its answer", async () => {
+    const { readable, tableAnswer } = await import("@/components/totemTabs");
+    expect(readable("<!--\nnote for agents\n-->\n# Acme\nText")).toBe("# Acme\nText");
+    expect(tableAnswer([["Site up", "green", ""], ["Payment", "red", "Sam pays"]], ["Light", "State", "What turns it green"])).toEqual({ green: 1, total: 2, red: ["Payment"] });
+    expect(tableAnswer([["a", "b"]], ["x", "y"])).toBeNull();
+  });
+});

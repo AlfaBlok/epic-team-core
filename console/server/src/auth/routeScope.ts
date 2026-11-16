@@ -216,6 +216,11 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // a one-off job (Add job): a new spine in one of the path world's own repos (social/campaigns.ts `world` +
   // worldRepos), its milestone and persona assignment in that world's store; another world's id is a 404. socialFavicon.test.ts
   ["POST", new RegExp(`^/api/tenants/${ID}/jobs$`)],
+  // a paid EpicTeam workspace's first objective (its root spine's goal and results): its Home reads it, its chat
+  // writes it and turns results green, through the same `world` + worldRepos as jobs (another world's id is a 404).
+  // (hosted first-objective test)
+  ["GET|PUT", new RegExp(`^/api/tenants/${ID}/first-objective$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/first-objective/green$`)],
   // revise (Change it) and restore (Don't post's Undo) ride the same handle → target as approve and drop.
   // approve (with or without feedback) and the Approve every post switch (`approval`) go through the same
   // social/write.ts `handle` → `target` (worldRepos + forTenant of the path's world); the Publisher / Writer they wake is one

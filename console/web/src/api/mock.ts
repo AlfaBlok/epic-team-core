@@ -563,6 +563,9 @@ const mockMail = () => ({
     async getWorldDeskChat(_t, read?: ChatRead): Promise<DeskChat> {
       return ok(pageOf({ available: true, threadId: "world-desk-thread", environmentId: "env-mock", session: 1, status: "idle", working: false, sending: 0, messages: desk, hasEarlier: false }, read));
     },
+    async getFirstObjective(t) {
+      return Promise.reject(new Error(`${t} has no first objective`)); // only a paid workspace has one
+    },
     async sendWorldDeskMessage(_t, text, page, crid, attachments) {
       return this.sendDeskMessage(text, page, crid, attachments);
     },

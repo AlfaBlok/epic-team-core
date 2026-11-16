@@ -83,10 +83,10 @@ const page = (path: string, skin: Skin = SKINS.social) =>
   );
 
 describe("E964-S14 five fixed tabs", () => {
-  it("opens on Plan (it took the Deck's place); Plan, Product, Waiting on me, Pipeline, Tasks, Observations, History, Chat; Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
+  it("opens on Plan (it took the Deck's place); Plan, Product, Inbox, Chat, Pipeline, Tasks, Observations, History (EpicTeam's order, vn_15aa4467); Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Plan", "Product", "Waiting on me", "Pipeline", "Tasks", "Observations", "History", "Chat"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Plan", "Product", "Inbox", "Chat", "Pipeline", "Tasks", "Observations", "History"]);
     expect(await screen.findByTestId("plan-tab")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Personas", "Settings", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();

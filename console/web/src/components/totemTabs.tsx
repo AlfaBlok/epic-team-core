@@ -26,10 +26,26 @@ export function totemTabs(p: ProductMap | undefined, existing: readonly string[]
   return p.totems.filter((t) => !existing.includes(t.tab)).map((t) => ({ id: t.tab, label: t.name, totem: t }));
 }
 
+/** a totem's markdown as he reads it: the file's HTML comments (notes for agents) left out. */
+export const readable = (md: string) => md.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s+/, "");
+
+/**
+ * a table totem with a green or red per row (the launch board) opens on its answer: how many are green and which are
+ * red, then what it is for (vn_15aa4467: "launch port, it's not clear").
+ */
+export function tableAnswer(rows: string[][] | undefined, headers: string[] | undefined): { green: number; total: number; red: string[] } | null {
+  if (!rows?.length) return null;
+  const col = rows[0].findIndex((_, j) => rows.every((r) => /^(green|red|amber)$/.test(r[j] ?? "")));
+  if (col < 0) return null;
+  const name = Math.max(0, (headers ?? []).findIndex((h, j) => j !== col && h));
+  return { green: rows.filter((r) => r[col] === "green").length, total: rows.length, red: rows.filter((r) => r[col] !== "green").map((r) => r[name]) };
+}
+
 export function TotemTab({ product, totem }: { product: string; totem: Totem }) {
   const { data, error, loading } = useQuery(() => api.getTotem(product, totem.id), [product, totem.id]);
   if (error) return <ErrorBox error={error} />;
   if (loading || !data) return <Loading />;
+  const answer = data.rows ? tableAnswer(data.rows, data.headers) : null;
   return (
     <section className="grid min-w-0 gap-3" data-testid="totem-tab" data-totem={totem.id} data-empty={data.empty ? "yes" : "no"}>
       <header className="flex flex-wrap items-baseline justify-between gap-2 border-b pb-2">
@@ -38,13 +54,22 @@ export function TotemTab({ product, totem }: { product: string; totem: Totem }) 
           A totem: always here. {data.live ? <a className="underline" href={data.live} target="_blank" rel="noreferrer">Open it live</a> : null}
         </span>
       </header>
+      {answer && (
+        <div className="grid gap-1 rounded-xl border border-l-[6px] bg-card p-3" style={{ borderLeftColor: answer.red.length ? "hsl(0 72% 51%)" : "hsl(142 72% 29%)" }} data-testid="totem-answer">
+          <p className="text-[15px] font-semibold text-foreground">
+            {answer.green} of {answer.total} green.{" "}
+            {answer.red.length ? `Still red: ${answer.red.join(", ")}.` : "Nothing is red."}
+          </p>
+          {totem.read && <p className="text-sm text-muted-foreground">What it is: {totem.read}.</p>}
+        </div>
+      )}
       {data.empty ? (
         <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground" data-testid="totem-empty">
           Nothing written here yet. It lives in {data.where}. Its personas fill it.
         </div>
       ) : data.markdown ? (
         <div className="min-w-0 text-sm leading-relaxed">
-          <ChatMarkdown text={data.markdown} />
+          <ChatMarkdown text={readable(data.markdown)} />
         </div>
       ) : data.rows ? (
         <div className="min-w-0 overflow-x-auto">

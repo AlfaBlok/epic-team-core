@@ -271,6 +271,7 @@ export function createRealClient(): ApiClient {
     attachmentLine: (ids) => call("POST", "/chat/attachments/line", { ids }),
     getMilestoneChat: (id, read) => call("GET", `/milestones/${encodeURIComponent(id)}/chat/messages${chatQs(read)}`),
     getWorldDeskChat: (t, read) => call("GET", `/tenants/${encodeURIComponent(t)}/desk/messages${chatQs(read)}`),
+    getFirstObjective: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/first-objective`),
     sendWorldDeskMessage: (t, text, page, clientRequestId, attachments) =>
       call("POST", `/tenants/${encodeURIComponent(t)}/desk/messages`, { text, page, clientRequestId, ...(attachments?.length ? { attachments } : {}) }),
     sendMilestoneChatMessage: (id, text, page, clientRequestId, attachments) =>

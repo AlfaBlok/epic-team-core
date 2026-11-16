@@ -123,6 +123,16 @@ import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignR
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult } from "./inbox-types";
 
 /** GET /api/push. */
+/** a paid EpicTeam workspace's first objective (its root spine's goal and results), shown on top of its chat. */
+export interface FirstObjective {
+  milestoneId: string;
+  goal: string;
+  results: { id: string; text: string; green: boolean }[];
+  starter: boolean;
+  green: number;
+  total: number;
+}
+
 export interface PushInfo {
   configured: boolean;
   publicKey?: string;
@@ -264,6 +274,8 @@ export interface ApiClient {
   /** a world's team desk (the social skin's top-level Chat), one thread across its campaigns: same shape as the Team desk. */
   getWorldDeskChat(tenantId: string, read?: ChatRead): Promise<DeskChat>;
   sendWorldDeskMessage(tenantId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean }>;
+  /** a paid EpicTeam workspace's first objective; 404 no_first_objective elsewhere. */
+  getFirstObjective(tenantId: string): Promise<FirstObjective>;
   /** send the owner's message to the milestone's repo desk. */
   sendMilestoneChatMessage(milestoneId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean; queued?: boolean }>;
 

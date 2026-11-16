@@ -149,6 +149,7 @@ export function relayLine(id: string, from: DeskSide, to: DeskSide, about: strin
     `${CROSS_HEAD} ${from.product} desk (${id}): ${stop(about)}.`,
     `${ownerName()} said this to his ${from.product} desk (${from.url}); that desk decided this part belongs to you, the ${to.product} desk, and passed it. The rest stayed there.`,
     `Act on it as on his own words in this chat (his ask is ready), then reply in one line with what you did, links first. Never pass it back and never drop a desk note for it: it already crossed.`,
+    `The first line is that desk's summary; his words below decide. Each part is for the product his words name, never one the summary or his top objective adds: a part whose words name no product ("it needs …") gets one open question on his inbox card (root L-66) before it goes to any product.`,
     "",
     `His words: "${wholeWords(quote, id)}"`,
   ].join("\n");

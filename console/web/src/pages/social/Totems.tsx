@@ -150,7 +150,7 @@ export function WorkTab({ m }: { m: Milestone }) {
 export function WaitingTab({ m }: { m: Milestone }) {
   return (
     <div data-testid="waiting-tab">
-      <TabHead title="Waiting on me">The asks and reviews of this campaign that need your answer. Answer here or on the Team page, where the asks of every campaign wait together.</TabHead>
+      <TabHead title="Inbox">The asks and reviews of this campaign that need your answer. Answer here or on the Team page, where the asks of every campaign wait together.</TabHead>
       <WaitingOnYou milestoneId={m.id} fold="campaign-work-waiting" />
     </div>
   );

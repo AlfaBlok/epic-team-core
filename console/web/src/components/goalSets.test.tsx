@@ -192,8 +192,8 @@ describe("goal sets: the screens", () => {
     expect(within(krs[0]).getByTestId("kr-things").textContent).toBe("2 things under it");
     // each key result: its target and its status now, side by side (the owner 17:57Z: "what is the target? what is the status?")
     expect(within(krs[0]).getByTestId("kr-target").textContent).toBe("5 by 17 Nov");
-    expect(within(krs[0]).getByTestId("kr-now").textContent).toBe("0 of 5 · read 13 Novnothing measures this yet"); // no stamp in this fixture
-    expect(within(krs[0]).getByTestId("kr-target-status-phone").textContent).toBe("Target 5 by 17 NovNow 0 of 5 · read 13 Novnothing measures this yet");
+    expect(within(krs[0]).getByTestId("kr-now").textContent).toBe("Behind: 0 of 5 · read 13 Novnothing measures this yet"); // the status in a word first (vn_15aa4467); no stamp in this fixture
+    expect(within(krs[0]).getByTestId("kr-target-status-phone").textContent).toBe("Target 5 by 17 NovNow Behind: 0 of 5 · read 13 Novnothing measures this yet");
     // no target in the file: "no target yet", in grey
     expect(within(krs[1]).getByTestId("kr-target").textContent).toBe("no target yet");
     expect(screen.getByTestId("kr-sheet-head").textContent).toBe("Key resultTargetStatus now");
@@ -206,13 +206,14 @@ describe("goal sets: the screens", () => {
     const short = within(within(krs[0]).getByTestId("kr-now")).getByTestId("kr-now-short");
     expect(short.className).toContain("line-clamp-2");
     expect(short.getAttribute("title")).toBe("0 of 5 · read 13 Nov");
-    expect(within(within(krs[0]).getByTestId("kr-target")).getByTestId("kr-target-text").className).toContain("line-clamp-2");
-    expect(within(krs[0]).getByTestId("kr-row").className).toContain("sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto]");
+    // the target is never cut (vn_15aa4467: "the target ... I want to see it fully in this view")
+    expect(within(within(krs[0]).getByTestId("kr-target")).getByTestId("kr-target-text").className).not.toContain("line-clamp");
+    expect(within(krs[0]).getByTestId("kr-row").className).toContain("sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]");
     fireEvent.click(within(krs[0]).getByTestId("kr-row"));
     // ...and a tap opens the whole status and target, uncut, above its work
     const whole = within(screen.getAllByTestId("kr-item")[0]).getByTestId("kr-detail-status");
     expect(within(whole).getByTestId("kr-now-full").className).not.toContain("line-clamp");
-    expect(whole.textContent).toBe("Status now0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 Nov");
+    expect(whole.textContent).toBe("Status nowBehind: 0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 Nov");
     const items = within(screen.getAllByTestId("kr-item")[0]).getAllByTestId("kr-work-item");
     expect(items.map((x) => [x.textContent, x.dataset.state])).toEqual([
       ["E901-S1Build the pageready", "amber"],
@@ -228,7 +229,7 @@ describe("goal sets: the screens", () => {
     // progress: rows turned green today and this week, for this set
     expect(screen.getByTestId("set-progress-today").textContent).toContain("1");
     expect(screen.getByTestId("set-progress-week").textContent).toContain("3");
-    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Board", "Inbox", "Chat desk", "Context", "Personas", "Pages"]);
+    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages"]);
   });
 
   it("the kanban shows ready, running, waiting and review for the set and the sets inside it", async () => {
@@ -522,5 +523,25 @@ describe("the key-result table of every wheel", () => {
     );
     fireEvent.click(screen.getAllByTestId("wheel-toggle")[0]);
     expect((await screen.findByTestId("wheel-effort")).textContent).toBe("Effort, place 1: Top. Wakes twice as often, up to 10 workers, nudged after 1 h idle.");
+  });
+});
+
+describe("the owner's notes on the objective screen (vn_15aa4467)", () => {
+  it("reads key dates from the key results' targets, soonest first", async () => {
+    const { keyDatesOf } = await import("@/components/goalSets");
+    expect(
+      keyDatesOf([
+        { label: "5 testers", target: "5 testers by 8 Dec" },
+        { label: "Applications", target: "5 applications by Friday 20 November" },
+        { label: "Posts", target: "7 a week, one a day" },
+      ]),
+    ).toEqual([
+      { day: "20 Nov", label: "Applications" },
+      { day: "8 Dec", label: "5 testers" },
+    ]);
+  });
+  it("says a key result's status in a word", async () => {
+    const { STATUS_SAYS } = await import("@/components/goalSets");
+    expect(STATUS_SAYS).toEqual({ green: "At target", amber: "On its way", red: "Behind", unknown: "Not measured" });
   });
 });

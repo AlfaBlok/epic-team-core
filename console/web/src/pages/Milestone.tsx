@@ -377,6 +377,38 @@ function MilestoneScreen() {
   const nodeSpine = node && treeQuery.data ? spineOf(treeQuery.data.root, node) : undefined;
   const deckEpic = params.get("epic") || (nodeSpine?.path && nodeSpine.path !== m.path ? deckCodeOf(nodeSpine.code ?? nodeSpine.id, nodeSpine.path) : undefined);
 
+  // the quiet lines about the campaign (its marks, repo, owner, product, auto-approve, freshness). In the social skin they
+  // sit under the tabs, so the tabs come early as on the objective screen (vn_15aa4467: "the tabs are like very early on on the page").
+  const meta = (
+          <span className="flex flex-wrap items-center gap-2">
+            <HeaderMarks m={m} status={status} treeHref={five ? "?tab=work" : tabHref("tree", node)} />
+            {m.settledAt && (
+              <Badge variant="gray" title={`Settled ${formatRelative(m.settledAt)}: hidden from the sidebar and Team home; the status is unchanged.`} data-testid="settled-badge">
+                Settled
+              </Badge>
+            )}
+            {/* repo, file and owner on one quiet line of their own. */}
+            <span className="flex basis-full flex-wrap items-baseline gap-x-3.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="header-meta">
+              <span className="font-mono text-xs">
+                {m.repo} · <MilestonePath path={m.path} />
+              </span>
+              <span>Owner: {m.owner}</span>
+              {/* the product this campaign is for, its words written once on the product page. */}
+              {card?.product && !five && (
+                <Link to={productHref(card.product.id)} className="underline decoration-border underline-offset-4 hover:text-foreground" data-testid="campaign-product-name">
+                  Product: {card.product.name}
+                </Link>
+              )}
+              {/* the campaign's Auto-approve toggle, in this quiet line, one click away. */}
+              {five && scope && (
+                <CampaignProvider scope={scope}>
+                  <CampaignForceReview />
+                </CampaignProvider>
+              )}
+            </span>
+            <FreshnessLine milestoneId={m.id} />
+          </span>
+  );
   return (
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
       {/* a named campaign's page does not lead with its repo's own level in the social skin. */}
@@ -415,45 +447,24 @@ function MilestoneScreen() {
             </Button>
           </span>
         }
-        description={
-          <span className="flex flex-wrap items-center gap-2">
-            <HeaderMarks m={m} status={status} treeHref={five ? "?tab=work" : tabHref("tree", node)} />
-            {m.settledAt && (
-              <Badge variant="gray" title={`Settled ${formatRelative(m.settledAt)}: hidden from the sidebar and Team home; the status is unchanged.`} data-testid="settled-badge">
-                Settled
-              </Badge>
-            )}
-            {/* repo, file and owner on one quiet line of their own. */}
-            <span className="flex basis-full flex-wrap items-baseline gap-x-3.5 gap-y-0.5 text-xs text-muted-foreground" data-testid="header-meta">
-              <span className="font-mono text-xs">
-                {m.repo} · <MilestonePath path={m.path} />
-              </span>
-              <span>Owner: {m.owner}</span>
-              {/* the product this campaign is for, its words written once on the product page. */}
-              {card?.product && (
-                <Link to={five ? "?tab=product" : productHref(card.product.id)} className="underline decoration-border underline-offset-4 hover:text-foreground" data-testid="campaign-product-name">
-                  Product: {card.product.name}
-                </Link>
-              )}
-              {/* the campaign's Auto-approve toggle, in this quiet line, one click away. */}
-              {five && scope && (
-                <CampaignProvider scope={scope}>
-                  <CampaignForceReview />
-                </CampaignProvider>
-              )}
-            </span>
-            <FreshnessLine milestoneId={m.id} />
-          </span>
-        }
+        description={five ? undefined : meta}
       />
-      <MilestoneStrip status={status} waitingHref={five ? "?tab=waiting" : tabHref("waiting", node)} />
+      {!five && <MilestoneStrip status={status} waitingHref={tabHref("waiting", node)} />}
       {/* a campaign is tracked by its name and its one goal: the goal, the number toward it, what waits on the owner. */}
       {card?.goal && <CampaignGoalBlock card={card} />}
       {/* per channel the account, its sign-in, cadence, objective, metric and the summed counts with the trend. */}
-      {card?.channels?.length ? <CampaignChannels card={card} /> : null}
+      {!five && card?.channels?.length ? <CampaignChannels card={card} /> : null}
       {five && scope ? (
         <>
           <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "plan" ? {} : { tab: t }, { replace: true })} />
+          {/* under the plan: where the campaign runs now, its channels, then its quiet lines. */}
+          {ftab === "plan" && (
+            <section className="mt-8 grid gap-4 border-t pt-6" data-testid="campaign-under-plan">
+              <MilestoneStrip status={status} waitingHref="?tab=waiting" />
+              {card?.channels?.length ? <CampaignChannels card={card} /> : null}
+              {meta}
+            </section>
+          )}
         </>
       ) : (
       <Tabs value={tab} onValueChange={(v) => setParams(tabSearch(v as Tab, node, undefined, home), { replace: true })}>

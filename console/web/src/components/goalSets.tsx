@@ -99,6 +99,9 @@ export const STATE_FILL: Record<ScorecardRowState, string> = {
   unknown: "hsl(var(--border))",
 };
 const STATE_WORD: Record<ScorecardRowState, string> = { green: "green", amber: "amber", red: "red", unknown: "no data yet" };
+/** a key result's status said in words, before its value (the legend's own words). */
+export const STATUS_SAYS: Record<ScorecardRowState, string> = { green: "At target", amber: "On its way", red: "Behind", unknown: "Not measured" };
+const STATUS_INK: Record<ScorecardRowState, string> = { green: "hsl(142 72% 26%)", amber: "hsl(30 90% 35%)", red: "hsl(0 72% 42%)", unknown: "hsl(var(--muted-foreground))" };
 
 /** the set as a wheel: one segment per row, in its colour, reds then ambers then greens (a wheel is a circle); greens of rows inside. */
 export function SetWheel({ rows: given, size = 40, testId = "set-wheel" }: { rows: Pick<ScorecardRow, "state">[]; size?: number; testId?: string }) {
@@ -458,9 +461,10 @@ export function TrafficLight({ light, size = "md", testId = "traffic-light" }: {
 }
 
 /** a key result's target in plain words, or "no target yet" in grey (the owner, 17:57Z: "what is the target?"). */
-function KrTarget({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
+function KrTarget({ r, label }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
   return r.target ? (
-    <span className={cn("text-foreground [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : r.target} data-testid="kr-target-text">
+    // the whole target, never cut (vn_15aa4467: "the target ... I want to see it fully in this view ... if not, we make it wider, taller").
+    <span className="text-foreground [overflow-wrap:anywhere]" data-testid="kr-target-text">
       {label && <span className="text-muted-foreground">Target </span>}
       {r.target}
     </span>
@@ -495,7 +499,14 @@ function KrNow({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: bo
       <span className="grid min-w-0">
         <span className={cn("min-w-0 [overflow-wrap:anywhere]", !full && "line-clamp-2")} title={full ? undefined : [r.value, r.note].filter(Boolean).join(" · ")} data-testid={full ? "kr-now-full" : "kr-now-short"}>
           {label && <span className="text-muted-foreground">Now </span>}
-          <span className="font-semibold tabular-nums text-foreground">{r.value}</span>
+          {/* the status in a word first, in its colour (vn_15aa4467: "the status needs to be extremely clear"). */}
+          {r.kind === "key-result" && (
+            <span className="font-semibold" style={{ color: STATUS_INK[r.state] }} data-testid="kr-status-word">
+              {STATUS_SAYS[r.state]}
+              {r.state !== "unknown" ? ": " : ""}
+            </span>
+          )}
+          {(r.kind !== "key-result" || r.state !== "unknown") && <span className="font-semibold tabular-nums text-foreground">{r.value}</span>}
           {r.note && <span className="text-muted-foreground"> · {r.note}</span>}
         </span>
         {r.kind === "key-result" && <KrWhen r={r} />}
@@ -531,7 +542,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
         <span>tap a key result for the work under it</span>
       </p>
       <ul className="overflow-hidden rounded-xl border bg-card" data-testid="kr-sheet">
-        <li aria-hidden="true" className="hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid" data-testid="kr-sheet-head">
+        <li aria-hidden="true" className="hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid" data-testid="kr-sheet-head">
           <i />
           <span className="py-2">Key result</span>
           <span className="py-2">Target</span>
@@ -544,7 +555,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
           const toggle = () => onOpen?.(isOpen ? null : r.label);
           return (
             <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className={cn("border-b last:border-b-0", krMeasured(r).stale && "opacity-55 grayscale")} data-testid="kr-item" data-state={r.state} data-stale={krMeasured(r).stale ? "1" : "0"}>
-              <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,9rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
+              <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
                 <i className="block self-stretch" style={{ background: STATE_FILL[r.state] }} aria-hidden="true" />
                 <span className="grid min-w-0 gap-0.5 py-3">
                   <span className="text-[15px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="kr-name">
@@ -761,7 +772,7 @@ export const topObjectives = (nodes: ScorecardNode[] | undefined) => (nodes ?? [
  * "Too much info on sidebar - we only need name, inbox and circle"); the strip and the child epics live on its page. The open one adds
  * nothing under its name: its Board, Inbox, Chat desk and Social kit are the tabs on its page (card check 2026-11-13).
  */
-function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardNode; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
+function SidebarObjective({ n, nr, countFor, onNavigate, activeId }: { n: ScorecardNode; nr?: number; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
   const c = countFor(n.id);
   const krs = keyResultsOf(n);
   const active = activeId === n.id;
@@ -776,6 +787,12 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
         data-testid="sidebar-set-link"
       >
         <span className="flex min-w-0 items-start gap-2">
+          {/* his order, numbered (vn_15aa4467: "number these guys, 1, 2, 3 ... an ordered list"). */}
+          {nr ? (
+            <span className="w-4 shrink-0 pt-px text-right text-xs tabular-nums text-muted-foreground" data-testid="sidebar-set-nr">
+              {nr}
+            </span>
+          ) : null}
           <SetWheel rows={krs} size={20} testId="sidebar-set-wheel" />
           <ObjectiveName name={titleOf(n)} className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground" />
           <span className="flex shrink-0 items-center gap-1">
@@ -820,8 +837,8 @@ export function SidebarGoalSetsOf({ data, onNavigate }: { data: ScorecardsBody |
       </NavLink>
       <div className="px-2.5 pb-0.5 pt-2 text-xs font-medium text-muted-foreground">{SET_NAME.many} · by priority</div>
       <ul className="grid min-w-0 gap-1">
-        {top.map((n) => (
-          <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+        {top.map((n, i) => (
+          <SidebarObjective key={n.id} n={n} nr={i + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
       {/* each product defined once; its objectives and its social kit read it there. */}
@@ -883,19 +900,27 @@ export function SlimInbox({ rows, showSet = true, loading, sortKey }: { rows: In
 
 // ---------- tabs ----------
 
+/** the Product tab's id: the product deck totem's own tab id, so its old links still open it. */
+export const PRODUCT_TAB = "product";
+/** totems shown inside the Product tab rather than as tabs of their own ("pricing is inside the product"). */
+export const IN_PRODUCT_TOTEMS = ["product", "pricing"];
+// the order the owner gave (vn_15aa4467, 2026-11-16 06:26Z): "key results, and then we should have like product, then
+// plan, inbox, chat, personas, social kit. For me, pricing is inside the product"; the rest after them.
 const TABS = [
   { id: "table", label: "Key results" },
+  // the objective's product: its page, its pricing and its product deck in one tab (it left the header, vn_15aa4467).
+  { id: PRODUCT_TAB, label: "Product" },
   // its plan (the owner: "where we have a wheel, we should have a plan like this attached to it"): the campaign's eight sections.
   { id: "plan", label: "Plan" },
-  { id: "kanban", label: "Board" },
   { id: "inbox", label: "Inbox" },
-  { id: "chat", label: "Chat desk" },
-  { id: "context", label: "Context" },
+  { id: "chat", label: "Chat" },
   { id: "personas", label: "Personas" },
-  // the pages made for it (vn_dad96778): pages live inside the wheel they belong to; the Pages list still shows all.
-  { id: "pages", label: "Pages" },
   // the set's social kit (only on a set that has one): the owner reaches "these totems" from the set.
   { id: SET_KIT_TAB, label: "Social kit" },
+  { id: "kanban", label: "Board" },
+  { id: "context", label: "Context" },
+  // the pages made for it (vn_dad96778): pages live inside the wheel they belong to; the Pages list still shows all.
+  { id: "pages", label: "Pages" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 /**
@@ -904,6 +929,7 @@ type Tab = (typeof TABS)[number]["id"];
  * and Settings (pause) are Personas. A link carrying an old tab opens the tab that does its job now.
  */
 export const OLD_TAB_TO_OBJECTIVE: Record<string, Tab> = {
+  pricing: PRODUCT_TAB,
   summary: "table",
   waiting: "inbox",
   tree: "kanban",
@@ -934,6 +960,32 @@ const tabTo = (id: string, keep?: Record<string, string | undefined>) => {
   return `?${q}`;
 };
 
+/** a tab's count as a quiet grey pill: a number that changes, never part of the tab's name (vn_15aa4467: "make the 29
+ * look distinctly a different thing. It can stay gray ... make it clear that it's a variable, it's not a label"). */
+export function TabCount({ n }: { n: number }) {
+  return (
+    <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums leading-5 text-muted-foreground" data-testid="tab-count">
+      {n}
+    </span>
+  );
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/**
+ * the dates his key results are due by, read from their targets ("5 testers by 8 Dec"), soonest first: the key dates
+ * he asked for on the objective (vn_15aa4467: "something like urgency or deadline, or timeline, or key dates").
+ */
+export function keyDatesOf(krs: Pick<ScorecardRow, "label" | "target">[]): { day: string; label: string }[] {
+  const out: { day: string; label: string; at: number }[] = [];
+  for (const r of krs) {
+    const m = /\bby (?:[A-Z][a-z]+day )?(\d{1,2}) ([A-Za-z]{3})[a-z]*\b/.exec(r.target ?? "");
+    const mon = m ? MONTHS.indexOf(m[2].toLowerCase()) : -1;
+    if (!m || mon < 0) continue;
+    out.push({ day: `${Number(m[1])} ${m[2][0].toUpperCase()}${m[2].slice(1, 3).toLowerCase()}`, label: r.label, at: mon * 32 + Number(m[1]) });
+  }
+  return out.sort((a, b) => a.at - b.at).map(({ day, label }) => ({ day, label }));
+}
+
 /** `links`: tabs that open another page (the social skin's Home: Inbox), drawn after the page's own tabs. */
 export function TabStrip({ tabs, tab, counts, pills, links, keep, label = `${SET_NAME.one} pages` }: { tabs: readonly { id: string; label: string }[]; tab: string; counts?: Partial<Record<string, number>>; pills?: Partial<Record<string, { ask: number; review: number }>>; keep?: Record<string, string | undefined>; links?: Record<string, { label: string; to: string; count?: number }>; label?: string }) {
   const ref = useRef<HTMLElement>(null);
@@ -963,7 +1015,7 @@ export function TabStrip({ tabs, tab, counts, pills, links, keep, label = `${SET
           data-testid={`set-tab-${t.id}`}
         >
           {t.label}
-          {counts?.[t.id] ? <span className="text-xs text-muted-foreground">{counts[t.id]}</span> : null}
+          {counts?.[t.id] ? <TabCount n={counts[t.id]!} /> : null}
           {/* the same red and green pills as the goal's sidebar entry (GoalPills), here on the tab they open. */}
           {pills?.[t.id] ? <GoalPills c={pills[t.id]!} ids={{ ask: `tab-${t.id}-asks`, review: `tab-${t.id}-review` }} /> : null}
         </Link>
@@ -971,7 +1023,7 @@ export function TabStrip({ tabs, tab, counts, pills, links, keep, label = `${SET
       {Object.entries(links ?? {}).map(([id, l]) => (
         <Link key={id} to={l.to} className="-mb-px flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 text-sm text-muted-foreground hover:text-foreground sm:min-h-10 sm:px-1" data-testid={`set-tab-${id}`}>
           {l.label}
-          {l.count ? <span className="text-xs text-muted-foreground">{l.count}</span> : null}
+          {l.count ? <TabCount n={l.count} /> : null}
         </Link>
       ))}
     </nav>
@@ -1235,8 +1287,14 @@ export function GoalSetPage() {
   const pursuitP = pursuit ? pursuitsBody?.pursuits.find((x) => x.id === pursuit.id) : undefined;
   // root L-77: the objective's product map gives each hardwired totem a tab (Pricing, Launch board, ...); empty ones show empty.
   const productMap = productOfObjective(totemMaps.data, pursuit?.id, pursuitP?.product?.id);
-  const extraTabs = totemTabs(productMap, TABS.map((t) => t.id));
-  const tabs = [...(kitId ? TABS : TABS.filter((t) => t.id !== SET_KIT_TAB)), ...extraTabs.map(({ id, label }) => ({ id, label }))];
+  // pricing and the product deck sit inside the Product tab ("for me, pricing is inside the product", vn_15aa4467).
+  const extraTabs = totemTabs(productMap, [...TABS.map((t) => t.id), ...IN_PRODUCT_TOTEMS]);
+  const inProduct = productMap?.totems.filter((t) => IN_PRODUCT_TOTEMS.includes(t.tab)) ?? [];
+  const hasProduct = !!pursuitP?.product || inProduct.length > 0;
+  const tabs = [...TABS.filter((t) => (t.id !== SET_KIT_TAB || kitId) && (t.id !== PRODUCT_TAB || hasProduct)), ...extraTabs.map(({ id, label }) => ({ id, label }))];
+  // his order, numbered (vn_15aa4467: "I could say priority 5, priority 10"): the same number as the sidebar's.
+  const priority = node && node.kind === "pursuit" ? topObjectives(data?.nodes).findIndex((n) => n.id === node.id) + 1 : 0;
+  const dates = keyDatesOf(krs);
   const totemOn = extraTabs.find((t) => t.id === params.get("tab"));
   const tab: string = totemOn ? totemOn.id : baseTab;
   const pagesList = useWheelPages();
@@ -1263,10 +1321,25 @@ export function GoalSetPage() {
             }
             answer={krAnswer(krs)}
           >
-            {pursuitP?.product && (
-              <Link to={productHref(pursuitP.product.id)} className="w-fit text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground" data-testid="set-product">
-                Product: {pursuitP.product.name}
-              </Link>
+            {(priority > 0 || dates.length > 0) && (
+              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted-foreground" data-testid="set-priority-dates">
+                {priority > 0 && (
+                  <span data-testid="set-priority">
+                    Priority <span className="font-semibold tabular-nums text-foreground">{priority}</span>
+                  </span>
+                )}
+                {dates.length > 0 && (
+                  <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="set-key-dates">
+                    Key dates:{" "}
+                    {dates.map((d, i) => (
+                      <span key={d.label}>
+                        {i > 0 && " · "}
+                        <span className="font-semibold text-foreground">{d.day}</span> {d.label}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </p>
             )}
           </GoalHeader>
           <TabStrip tabs={tabs} tab={tab} pills={{ inbox: counts }} counts={{ kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
@@ -1305,6 +1378,16 @@ export function GoalSetPage() {
           {tab === "personas" && <Personas node={node} />}
           {tab === "plan" && <ObjectivePlanTab id={pursuit.id} />}
           {totemOn && productMap && <TotemTab product={productMap.product} totem={totemOn.totem} />}
+          {tab === PRODUCT_TAB && !totemOn && (
+            <div className="grid gap-6" data-testid="set-product-tab">
+              {pursuitP?.product && (
+                <Link to={productHref(pursuitP.product.id)} className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-foreground underline decoration-foreground/40 underline-offset-4 hover:decoration-foreground" data-testid="set-product">
+                  Open the {pursuitP.product.name} product page <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              )}
+              {productMap && [...inProduct].sort((a, b) => IN_PRODUCT_TOTEMS.indexOf(b.tab) - IN_PRODUCT_TOTEMS.indexOf(a.tab)).map((t) => <TotemTab key={t.id} product={productMap.product} totem={t} />)}
+            </div>
+          )}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
           {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
         </>

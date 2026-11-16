@@ -1,4 +1,5 @@
 import { leanJson } from "./leanJson.js";
+import { productsAdded } from "./voice/productNamed.js";
 import { phased } from "./timerPhase.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -1371,6 +1372,10 @@ export function createApp(
     const b = (await c.req.json().catch(() => undefined)) as { about?: unknown; quote?: unknown; clientRequestId?: unknown } | undefined;
     const quote = typeof b?.quote === "string" ? b.quote.trim() : "";
     if (!quote || quote.length > TRANSCRIPT_MAX) return c.json({ error: { code: "validation_error", message: `quote (${ownerName()}'s words, up to ${TRANSCRIPT_MAX} characters) is required; about (a few words) and clientRequestId are optional` } }, 400);
+    // the summary names only the product his words name (16 Nov: a summary named the memory product, his words named none).
+    const added = productsAdded(typeof b?.about === "string" ? b.about : "", quote);
+    if (added.length)
+      return c.json({ error: { code: "product_not_in_quote", message: `about names ${added.join(", ")} but ${ownerName()}'s quoted words do not. Name only the product his words name (or quote the sentence where he names it); when his words name none, pass nothing and ask him one open question on an inbox card (root L-66: "Tell me how you think about <it>.")` } }, 422);
     const r = await deskCross?.pass({
       world,
       quote,

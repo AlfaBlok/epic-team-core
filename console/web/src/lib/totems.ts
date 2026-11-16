@@ -8,13 +8,15 @@ import { ownerName, socialWorld } from "@/lib/identity";
  * "shall we just keep the marketing plan and just have a normal web page"), Product (what this campaign pushes), Waiting on me, Pipeline (its posts), Tasks, Observations, History, Chat. Settings and personas sit
  * behind one header button. Old links land on the tab that now holds what they showed.
  */
-export const FIVE_TABS = ["plan", "product", "waiting", "pipeline", "work", "observations", "history", "chat"] as const;
+// the same order as EpicTeam's objective (vn_15aa4467: "a very similar design to what we have in epic team"): plan,
+// product, inbox, chat first, then the campaign's own work.
+export const FIVE_TABS = ["plan", "product", "waiting", "chat", "pipeline", "work", "observations", "history"] as const;
 export type FiveTab = (typeof FIVE_TABS)[number] | "settings";
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
 export const FIVE_LABELS: Record<(typeof FIVE_TABS)[number] | "settings", string> = {
   plan: "Plan",
   product: "Product",
-  waiting: "Waiting on me",
+  waiting: "Inbox",
   pipeline: "Pipeline",
   work: "Tasks",
   observations: "Observations",
