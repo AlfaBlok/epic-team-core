@@ -214,8 +214,11 @@ export interface ScorecardsBody {
   retired?: string[];
 }
 
-/** a pursuit's name as the owner reads it: with its goal's number when it has one ("5 testers using SocialApp · 0 of 5"). */
-export const pursuitTitle = (p: Pick<Pursuit, "name" | "goal">) => (p.goal ? `${p.name} · ${p.goal.now} of ${p.goal.target}` : p.name);
+/**
+ * a pursuit's name as the owner reads it: its one name, never with its goal's number glued on (the owner: "If in
+ * one we say 5 testers, and then the other one we say 5 testers, 0 of 5, this just is ugly"); the number shows as a count.
+ */
+export const pursuitTitle = (p: Pick<Pursuit, "name" | "goal">) => p.name;
 
 /** a milestone or objective, in any world, with no Delivery Manager turning it (GET /api/persona-gaps). */
 export interface PersonaGap {

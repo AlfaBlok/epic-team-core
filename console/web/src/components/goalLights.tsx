@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * the owner ("I want to see a list of key results and traffic light for each"): the goal on top ("5 testers using
- * SocialApp · 0 of 5"), then each key result on one line, its number against its target and a traffic light; the rule
+ * SocialApp", its "0 of 5" at the right), then each key result on one line, its number against its target and a traffic light; the rule
  * in one small line under them. Read only, from the goal's one source (docs/goals/<name>.json via GET /api/goals).
  */
 
@@ -19,8 +19,8 @@ const shortDay = (iso: string) => {
 
 /** "0 of 10" ("? of 10" when it could not be read: never a fake zero). */
 export const goalCount = (l: Pick<GoalLine, "now" | "target">) => `${l.now === null ? "?" : l.now} of ${l.target}`;
-/** the goal's headline as the owner reads it everywhere: "5 testers using SocialApp · 0 of 5". */
-export const goalHeadline = (g: Goal) => `${g.name} · ${goalCount(g)}`;
+/** the goal's headline as the owner reads it everywhere: its name alone, its count beside it like a key result's. */
+export const goalHeadline = (g: Goal) => g.name;
 
 export const useGoals = () => useQuery(() => (api.listGoals ? api.listGoals() : Promise.resolve({ goals: [] as Goal[] })), [], { tag: "inbox" });
 
@@ -54,6 +54,9 @@ export function GoalBlock({ g, className }: { g: Goal; className?: string }) {
         <Dot light={g.light} big />
         <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="goal-headline">
           {goalHeadline(g)}
+        </span>
+        <span className="ml-auto shrink-0 text-[15px] font-semibold tabular-nums" data-testid="goal-count">
+          {goalCount(g)}
         </span>
         <span className="sr-only">: {WORD[g.light]}, {g.why}</span>
       </h2>

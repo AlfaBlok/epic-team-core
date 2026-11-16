@@ -111,10 +111,10 @@ describe("goal sets", () => {
     expect(set.rows.find((r) => r.label === "Site answers")).toBeUndefined();
   });
 
-  it("a pursuit with a goal number heads its set with its name and the number: 'App: 5 testers · 0 of 5'", () => {
+  it("a pursuit with a goal number heads its set with its name alone, never the number glued on", () => {
     const file = JSON.stringify({ objective: "5 testers using the app", objectiveStatus: "agreed", rows: [] });
     const [set] = buildScorecards({ pursuits: [{ ...pursuit({ name: "App: 5 testers" }), goal: { now: 0, target: 5 } }], staleDays: 3 }, read, { file: () => file }).nodes;
-    expect(set.headline).toBe("App: 5 testers · 0 of 5");
+    expect(set.headline).toBe("App: 5 testers");
     expect(set.objective).toBe("5 testers using the app");
   });
 

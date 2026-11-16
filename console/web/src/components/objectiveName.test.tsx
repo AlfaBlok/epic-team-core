@@ -37,7 +37,7 @@ describe("an objective's name in two parts", () => {
     const inks = { acme: "text-[#123456]", dataproducts: "text-[#654321]" };
     expect(productInk("Acme", inks)).toBe("text-[#123456]");
     expect(productInk("Data products", inks)).toBe("text-[#654321]");
-    expect(productInk("Gamma", inks)).toBe("text-muted-foreground");
+    expect(productInk("Gamma", inks)).toBe("text-muted-foreground bg-muted/70");
   });
 
   it("draws the label and the goal as two parts and still reads as the whole name", () => {
@@ -45,6 +45,8 @@ describe("an objective's name in two parts", () => {
     const label = screen.getByTestId("objective-product");
     expect(label.dataset.product).toBe("Acme");
     expect(label.className).toContain("text-[12px]");
+    // every label the same small chip on a very subtle soft background
+    expect(label.className).toMatch(/rounded px-1.5/);
     expect(screen.getByTestId("objective-goal").textContent).toBe("5 testers");
     expect(screen.getByTestId("objective-name").textContent).toBe("Acme: 5 testers");
   });

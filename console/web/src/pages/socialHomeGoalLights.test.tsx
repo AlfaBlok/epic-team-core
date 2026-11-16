@@ -62,7 +62,8 @@ const home = () => {
 describe("the SocialApp Home: key results with a traffic light each", () => {
   it("opens on the goal and its number, then each key result on one line with its light, then the rule", async () => {
     home();
-    expect((await screen.findByTestId("goal-headline")).textContent).toBe("5 testers using SocialApp · 0 of 5");
+    expect((await screen.findByTestId("goal-headline")).textContent).toBe("5 testers using SocialApp");
+    expect(screen.getByTestId("goal-count").textContent).toBe("0 of 5");
     const krs = screen.getAllByTestId("goal-kr");
     expect(krs.map((k) => k.getAttribute("data-light"))).toEqual(["red", "amber", "green"]);
     expect(krs[1].querySelector('[data-testid="goal-kr-count"]')!.textContent).toBe("88 of 500by 22 Nov");
@@ -90,7 +91,7 @@ describe("the SocialApp Home: key results with a traffic light each", () => {
 
 describe("one wording everywhere", () => {
   it("the goal headline and the pursuit title read the same", () => {
-    expect(goalHeadline(GOAL)).toBe("5 testers using SocialApp · 0 of 5");
+    expect(goalHeadline(GOAL)).toBe("5 testers using SocialApp");
     expect(pursuitTitle({ name: "5 testers using SocialApp", goal: { now: 0, target: 5 } })).toBe(goalHeadline(GOAL));
     expect(pursuitTitle({ name: "Memory app commercially live" })).toBe("Memory app commercially live");
   });

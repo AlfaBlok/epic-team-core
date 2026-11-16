@@ -10,8 +10,13 @@ import { cn } from "@/lib/utils";
  * the objectives screen, an objective's page, its crumbs and the product pages all draw the name through it, both skins.
  */
 
-/** each product's own colour comes from the hosted layer (lib/hostedBrands.ts); a product it does not list reads muted. */
-const MUTED = "text-muted-foreground";
+/**
+ * each product's own colour (text and its soft background) comes from the hosted layer (lib/hostedBrands.ts); a product
+ * it does not list reads muted on the same soft grey. Every label is the same small chip with a very subtle soft
+ * background, never white on the dark sidebar (the owner: "not white ... maybe like a soft background to these labels.
+ * Very subtle, but to make it clear that it's different").
+ */
+const MUTED = "text-muted-foreground bg-muted/70";
 
 export const productInk = (product: string, inks: Record<string, string> = HOSTED_PRODUCT_INK) => inks[product.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? MUTED;
 
@@ -36,7 +41,7 @@ export function ObjectiveName({ name, layout = "stack", after, className }: { na
       </span>
     );
   const label = (
-    <span className={cn("text-[12px] font-semibold leading-tight", productInk(product))} data-testid="objective-product" data-product={product}>
+    <span className={cn("w-fit rounded px-1.5 py-px text-[12px] font-semibold leading-tight", productInk(product))} data-testid="objective-product" data-product={product}>
       {product}
       {/* the colon stays for screen readers and copy-paste: the name reads whole. */}
       <span className="sr-only">: </span>

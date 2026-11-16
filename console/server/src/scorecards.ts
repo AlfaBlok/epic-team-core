@@ -536,8 +536,9 @@ export function buildScorecards(
       rows,
       objective: doc?.objective ?? p.greenWhen,
       // the owner asked for short, clear names: what the sidebar, the screen and every wake lead with is the objective's one name in
-      // docs/pursuits.json, "Product: short goal"; the scorecard's sentence stays its longer objective.
-      headline: p.goal ? `${p.name} · ${p.goal.now} of ${p.goal.target}` : p.name,
+      // docs/pursuits.json, "Product: short goal"; the scorecard's sentence stays its longer objective. Never the goal's number
+      // glued on.
+      headline: p.name,
       ...(doc?.objective ? { objectiveStatus: doc.objectiveStatus ?? "proposed", objectiveWas: doc.objectiveWas ?? p.greenWhen } : {}),
       file: { path: rel, present: !!doc, ...(doc?.proposal ? { proposal: doc.proposal } : {}) },
       ...(teams ? { teams } : {}),
