@@ -103,7 +103,8 @@ export function routePreloads(): Plugin {
 
 export default defineConfig({
   root: __dirname, // also when run from the hosted tree (hosted/console/web/vite.config.ts re-exports this)
-  plugins: [react(), brotliCopies(), routePreloads()],
+  // E948-S129: our JSX goes through src/lib/linkjsx (every URL in rendered text is a link), libraries keep React's own
+  plugins: [react({ jsxImportSource: "@/lib/linkjsx" }), brotliCopies(), routePreloads()],
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   build: { outDir: "dist", emptyOutDir: true, rollupOptions: { output: { manualChunks: vendorChunk } } },
   server: {

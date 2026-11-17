@@ -1,6 +1,7 @@
 import { ownerName, ownerPattern, socialProduct } from "../identity.js";
 import { phantomRefProblem } from "./phantomRefs.js";
 import { decideButtonsProblem } from "./decideChoices.js";
+import { untappableProblem } from "./untappable.js";
 /**
  * the gate every ask to the owner passes, where it is
  * raised (POST /needs-owner) and where the console reads it from a spine (inbox/waiting.ts). An ask that fails is never
@@ -33,6 +34,8 @@ import { decideButtonsProblem } from "./decideChoices.js";
  *    or it says "on this card" / "by voice note" for the card's Record button); an `approve` or `decide` ask that sends
  *    him to read, open, look at, review or try something links that thing (a web address or a document path). A link to
  *    a spine on GitHub does not count: that is where the team writes, not where he acts (inbox/askGate.ts linkProblem).
+ * 12. (E948-S129, asks raised from 2026-11-17) Every address it shows is one he can tap: never localhost or a server's own
+ *    address, an IP or short name with a port and no http://, or a link cut by a space (inbox/untappable.ts).
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -64,6 +67,8 @@ export interface GateAsk {
 export const ASK_GATE_FROM = "2026-11-11";
 /** the day rule 7 started (the owner on E946-A31, 2026-11-13): older open decide asks stay, the sweep names them. */
 export const DECIDE_BUTTONS_FROM = "2026-11-13";
+/** the day rule 12 started (E948-S129, his note of 2026-11-17 17:27Z): older open lines stay, the console links what it can. */
+export const TAPPABLE_FROM = "2026-11-17";
 /** the day rule 5 started (the owner's voice note of 2026-11-12 02:01Z). */
 export const HANDS_WHY_FROM = "2026-11-12";
 /** A why that rests on his own machine or sign-in; it must then name the team's own browsers (rule 5). */
@@ -114,7 +119,14 @@ const text = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join("
 export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
   // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
-  return wordsOrButtonsProblem(a) ?? linkProblem(a);
+  return wordsOrButtonsProblem(a) ?? linkProblem(a) ?? tappableProblem(a);
+}
+
+/** 12. an address he cannot tap (E948-S129). */
+export function tappableProblem(a: GateAsk): string | undefined {
+  if (a.state && a.state !== "open") return undefined;
+  if (a.since !== undefined && (!a.since || a.since < TAPPABLE_FROM)) return undefined;
+  return untappableProblem("it", a.question, a.contextText, a.context, a.why, a.impact, a.risk, a.recommend, ...(a.options ?? []), a.steps, a.stepsLink);
 }
 
 /** A web address: a full link, or a bare site with a known ending (x.com, team.example.com/pages). */

@@ -1530,11 +1530,11 @@ export function askTarget(item: WaitingItem): FeedbackTarget {
 }
 
 /** the card's one green link: the page the ask opens with, its steps page, or its first link that is not a spine line. */
-function goLink(item: WaitingItem): { href: string; label: string } | undefined {
+export function goLink(item: WaitingItem): { href: string; label: string } | undefined {
   const lead = askLeadUrl(item);
   if (lead) return { href: lead, label: item.ask === "do" ? "Open the steps" : "Open" };
   if (item.stepsLink) return { href: item.stepsLink.url, label: "Open the steps" };
-  const l = item.contextLinks.find((x) => !x.threadId && !/github\.com\/.+\/blob\//.test(x.url));
+  const l = (item.contextLinks ?? []).find((x) => !x.threadId && !/github\.com\/.+\/blob\//.test(x.url));
   if (l) return { href: l.url, label: "Open" };
   // a link inside a short question (the heading is plain text): the first one is the card's green link
   const any = /https?:\/\/[^\s<>"')\]]+/.exec(item.question || "")?.[0]?.replace(/[.,;:]+$/, "");

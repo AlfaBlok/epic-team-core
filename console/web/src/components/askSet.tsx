@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SnoozeDropdown } from "@/components/waiting";
+import { goLink, SnoozeDropdown } from "@/components/waiting";
 import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
 import type { SnoozeChoice } from "@/api";
 import { CardFeedback, sendFeedback } from "@/components/cardFeedback";
@@ -256,6 +256,7 @@ function SetRow({
   const [box, setBox] = useState<"feedback" | "deny">();
   const [words, setWords] = useState("");
   const why = setWhy(i);
+  const go = goLink(i);
   const settled = done && !done.error;
   const working = busy === i.id || (busy === "all" && !done);
   const quiet = "h-auto p-0 text-xs font-normal text-muted-foreground underline decoration-foreground/25 underline-offset-[3px] hover:text-foreground";
@@ -263,6 +264,12 @@ function SetRow({
     <li className="py-1.5" data-testid="ask-set-row" data-code={i.code}>
       <div className="min-w-0">
         <p className="leading-relaxed text-foreground/85">{setLine(i)}</p>
+        {/* E948-S129: the page the ask opens with is a link he taps, as on its own card */}
+        {go && (
+          <a className="text-[13px] font-medium underline underline-offset-2" href={go.href} target="_blank" rel="noreferrer" data-testid="ask-set-open">
+            {go.label} ↗
+          </a>
+        )}
         {why && <p className="text-[13px] text-muted-foreground">Why: {why}</p>}
       </div>
       {settled ? (

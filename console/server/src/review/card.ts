@@ -1,4 +1,5 @@
 import { copyPasteInText } from "../steps/copyPaste.js";
+import { untappableProblem } from "../inbox/untappable.js";
 import { stripInline } from "../adapters/markdown.js";
 import { ownerName } from "../identity.js";
 import { hasPlaceLink } from "../inbox/askGate.js";
@@ -520,6 +521,8 @@ export function gateProblems(g: GateInput): string[] {
   // a card never hands the owner terminal lines to copy
   const lines = copyPasteInText([c.title, c.goal, ...c.delivered.map((d) => d.text), c.after ?? "", ...c.next.map((n) => n.title), c.source ?? "", c.decision ?? ""].join("\n"));
   if (lines.length) out.push(`it gives ${ownerName()} a terminal line to copy (${lines[0].line}): make it a Mac-agent ticket or do it yourself`);
+  // E948-S129: every address the card shows is one he can tap
+  add(untappableProblem("the card", c.title, c.goal, ...c.delivered.map((d) => d.text), c.after, ...c.next.map((n) => n.title), c.source, c.decision, c.evidence, c.evidenceUrl, ...(c.options ?? [])));
   if (!c.screenshot) out.push("the screenshot is missing");
   else if (g.screenshotFound === false) out.push(`the screenshot ${c.screenshot} is not in the repo`);
   return out;

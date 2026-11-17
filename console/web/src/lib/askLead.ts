@@ -77,7 +77,9 @@ export function askLead(item: {
   contextText?: string;
   recommendation?: string;
 }): Lead {
-  const text = (item.question || item.title || "").replace(/\s+/g, " ").trim();
+  const full = (item.question || item.title || "").replace(/\s+/g, " ").trim();
+  // E948-S129: the page link an ask opens with is the card's own link (askLeadUrl), never the start of its line
+  const text = full.replace(LEAD_URL, "").trim() || full;
   const own = OWN.exec(text);
   if (own) {
     const raw = own[1].toLowerCase();

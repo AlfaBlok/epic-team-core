@@ -205,8 +205,10 @@ describe("Epic Book page", () => {
     const lists = await screen.findAllByTestId("book-features");
     expect(lists.map((l) => l.id)).toEqual(["features", "features-social"]);
     expect(screen.getAllByTestId("book-features-link").map((a) => a.getAttribute("href"))).toEqual(["#features", "#features-social"]);
-    expect(within(lists[0]).getByText(/read by this page and epicspine.dev\/team\./)).toBeTruthy();
-    expect(within(lists[1]).getByText(/read by this page and epicspine.dev\/social\./)).toBeTruthy();
+    // E948-S129: the page it names is a link he taps
+    expect(lists[0].textContent).toMatch(/read by this page and epicspine.dev\/team\./);
+    expect(lists[1].textContent).toMatch(/read by this page and epicspine.dev\/social\./);
+    expect(within(lists[0]).getByRole("link", { name: "epicspine.dev/team" }).getAttribute("href")).toBe("https://epicspine.dev/team");
     expect(within(lists[1]).getByText("Social line")).toBeTruthy();
   });
 
