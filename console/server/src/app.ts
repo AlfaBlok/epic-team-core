@@ -2620,7 +2620,19 @@ export function createApp(
     }
     return [...reviews, ...asks];
   };
-  const voiceObjectives = async () => ((await ownerObjectivesNow?.().catch(() => undefined))?.line ?? "").split(" ; ").join("\n");
+  // his objectives for the call: the last read at once (a cold read takes about 2 s, the call waits at most 3 s for all its
+  // context together), refreshed behind it; read once at boot so the first call has them too.
+  let lastObjectives = "";
+  const readObjectives = async () => {
+    const line = (await ownerObjectivesNow?.().catch(() => undefined))?.line;
+    if (line) lastObjectives = line.split(" ; ").join("\n");
+    return lastObjectives;
+  };
+  const voiceObjectives = async () => {
+    const fresh = readObjectives();
+    return lastObjectives || fresh;
+  };
+  setTimeout(() => void readObjectives(), 5_000).unref?.();
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
   const voice = createVoice({
     db,

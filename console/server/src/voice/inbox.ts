@@ -92,7 +92,7 @@ export function inboxPack(cards: InboxCard[], objectives?: string): string {
   const lines = cards.slice(0, INBOX_PACK_MAX).map((c, i) => cardLine(c, i + 1));
   if (cards.length > INBOX_PACK_MAX) lines.push(`… and ${cards.length - INBOX_PACK_MAX} more (next_card and read_card reach them).`);
   const obj = (objectives ?? "").trim();
-  return [inboxRule(), "", head, ...lines, ...(obj ? ["", `His objectives, in his order (answer 'what are my objectives' and 'how is <objective> doing' from this):`, obj] : [])].join("\n");
+  return [inboxRule(), "", head, ...lines, ...(obj ? ["", `His objectives, in his order: when he asks about his objectives ('what are my objectives', 'how is <objective> doing'), answer from this list, never from the milestones or the root tree (those are milestones, not objectives):`, obj] : [])].join("\n");
 }
 
 /** Where the walk is: `pos` = the card he is on, 1-based (0 = not started). */

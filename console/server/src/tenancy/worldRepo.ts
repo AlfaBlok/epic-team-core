@@ -139,10 +139,13 @@ export interface ConnectDeps {
   now?: () => Date;
 }
 
-/** the H1 of a spine, without its `EPIC-n:` code; undefined when none. */
+/** a root spine's `Project name:` (a link's words), else its H1 without its `EPIC-n:` code; undefined when none. */
 export function spineTitle(text: string): string | undefined {
+  const named = /^Project name:\s*(.+)$/m.exec(text)?.[1]?.trim();
+  const name = named ? (/^\[([^\]]+)\]/.exec(named)?.[1] ?? named).trim() : "";
+  if (name) return name.slice(0, 120);
   const h = /^#\s+(.+)$/m.exec(text)?.[1]?.trim();
-  return h ? h.replace(/^EPIC-[\w-]+:\s*/i, "").slice(0, 120) : undefined;
+  return h ? h.replace(/^EPIC(-[\w-]+)?:\s*/i, "").slice(0, 120) || undefined : undefined;
 }
 
 export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: string, codeIn: string): Promise<WorldRepo & { project: { id: string; title: string; state: "done" | "exists" }; starterMovedTo?: string }> {
