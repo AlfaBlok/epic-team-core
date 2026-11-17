@@ -784,6 +784,19 @@ export function createVoice(d: VoiceDeps) {
     return d.quickStatus();
   }
 
+  /** the card his inbox walk is on, so "this one" in his words names a card the desk can find. */
+  function walkLine(id: string): string[] {
+    const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number } | undefined;
+    if (!r?.inbox || !r.inbox_pos) return [];
+    try {
+      const cards = JSON.parse(r.inbox) as InboxCard[];
+      const c = cards[r.inbox_pos - 1];
+      return c ? [`On his inbox walk he is on card ${r.inbox_pos} of ${cards.length}: ${c.kind === "ask" ? "the question" : "the review card"} ${c.code ? `${c.code} ` : ""}"${c.title}" (id ${c.id}).`] : [];
+    } catch {
+      return [];
+    }
+  }
+
   async function ask(id: string, request: string, confirmed = false, words?: string, kind?: "feedback"): Promise<{ askId: string; head: string; pending: boolean }> {
     open(id);
     const text = request.trim();
@@ -802,6 +815,7 @@ export function createVoice(d: VoiceDeps) {
       head,
       `${ownerName()}, live on a voice call${confirmed ? " (he said yes to the read-back)" : ""}: ${text.slice(0, 4000)}`,
       ...(his ? [`His words (call captions): "${his}"`] : []),
+      ...walkLine(id),
     ].join("\n");
     db.prepare("INSERT INTO voice_asks (id, call_id, n, request, head, sent_at) VALUES (?, ?, ?, ?, ?, ?)").run(askId, id, n, text.slice(0, 4000), head, iso());
     try {

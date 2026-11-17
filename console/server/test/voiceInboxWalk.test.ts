@@ -49,7 +49,7 @@ function setup(inbox: (() => Promise<InboxCard[]>) | null = async () => cards) {
     view: async () => ({ available: true, sending: 0, hasEarlier: false, messages: [], working: false }) as unknown as DeskView,
   };
   const voice = createVoice({ db, mint, desk, quickStatus: async () => ({ text: "", waiting: 0, stuck: 0, working: 0 }), ...(inbox ? { inbox, objectives: async () => "1. Notes: 5 testers (4 of 8 key results green)\n2. Notes: servers run themselves" } : {}) });
-  return { db, voice, minted };
+  return { db, voice, minted, desk };
 }
 
 describe("the inbox on the call", () => {
@@ -92,7 +92,7 @@ describe("the inbox on the call", () => {
   });
 
   it("a call starts with his inbox and objectives in its instructions, gets the two walk tools, and keeps his place", async () => {
-    const { voice, minted } = setup();
+    const { voice, minted, desk } = setup();
     const s = await voice.start();
     const sess = minted[0].session;
     expect(sess.instructions).toContain("His inbox now: 3 cards (2 to review, 1 questions).");
@@ -105,6 +105,8 @@ describe("the inbox on the call", () => {
     expect(voice.walkState(id)).toEqual({ pos: 2, total: 3 });
     expect(voice.tool(id, "read_card", { number: -1 }).card).toContain("A Notes logo");
     expect(() => voice.tool(id, "press_button")).toThrow(/no console tool/);
+    await voice.ask(id, "mark this one complete", true);
+    expect(String((desk.send as any).mock.calls.at(-1)[0])).toContain('On his inbox walk he is on card 1 of 3: the review card E907-S3 "A Notes logo');
     await voice.end(id, { reason: "hangup" });
     expect(() => voice.tool(id, "next_card")).toThrow(/has ended/);
   });
