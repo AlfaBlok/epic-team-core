@@ -10,6 +10,7 @@ const endIn = z.object({
   transcript: z.array(z.object({ who: z.string().max(10), text: z.string().max(4000), at: z.string().max(40).optional(), feedback: z.string().max(80).optional() })).max(600).optional(),
 });
 const askIn = z.object({ request: z.string().min(1).max(4000), confirmed: z.boolean().optional(), words: z.string().max(20000).optional(), kind: z.literal("feedback").optional() });
+const toolIn = z.object({ name: z.string().min(1).max(60), args: z.record(z.unknown()).optional() });
 const settingsIn = z.object({
   enabled: z.boolean().optional(),
   model: z.string().trim().min(3).max(80).optional(),
@@ -182,6 +183,15 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
       const p = askIn.safeParse(await body(c));
       if (!p.success) return bad(c, "request (string) is required");
       return c.json(await voice.ask(c.req.param("cid") ?? "", p.data.request, p.data.confirmed, p.data.words, p.data.kind), 202);
+    }),
+  );
+  // the tools the console answers itself (the inbox walk: next_card, read_card).
+  api.post(
+    `${prefix}/calls/:cid/tool`,
+    ownerOnly(async (c, voice) => {
+      const p = toolIn.safeParse(await body(c));
+      if (!p.success) return bad(c, "name (string) and args (object) are required");
+      return c.json(voice.tool(c.req.param("cid") ?? "", p.data.name, p.data.args ?? {}));
     }),
   );
   api.get(`${prefix}/calls/:cid/ask/:askId`, ownerOnly(async (c, voice) => c.json(await voice.askState(c.req.param("cid") ?? "", c.req.param("askId") ?? ""))));

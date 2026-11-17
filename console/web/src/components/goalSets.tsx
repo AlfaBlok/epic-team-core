@@ -74,7 +74,7 @@ export function useSetInbox(body: ScorecardsBody | undefined) {
     }
     for (const c of (cards ?? []) as ReviewItem[]) {
       const home = homeOf(ix, nodes, c);
-      out.push({ id: c.id, kind: "review", title: c.face?.title ?? c.title, code: c.ref, since: c.checkedAt || c.createdAt || undefined, priority: c.priority, pursuit: home?.pursuit, node: home?.node, item: c });
+      out.push({ id: c.id, kind: "review", title: c.face?.title ?? c.title, code: c.ref, since: c.inboxSince || c.createdAt || undefined, priority: c.priority, pursuit: home?.pursuit, node: home?.node, item: c });
     }
     return out;
   }, [blocked, cards, ix, body]);

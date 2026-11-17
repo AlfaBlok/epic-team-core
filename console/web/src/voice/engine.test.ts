@@ -28,6 +28,7 @@ function fakes(limits: Limits = { callMaxMin: 20, callWarnMin: 18, quietHangupS:
     status: vi.fn(async () => ({ text: "Waiting on Sam: 2." })),
     ask: vi.fn(async () => ({ askId: "call_1-q1" })),
     askState: vi.fn(async () => ({ state: "working" as const, waitedMs: 0, spokenWaitMs: 60_000 })),
+    tool: vi.fn(async (_id: string, _name: string, _args: Record<string, unknown>) => ({ place: "card 2 of 5", pos: 2, total: 5, card: "A card waiting for Sam's review: The inbox loads fast." })),
   } satisfies VoiceApi;
   // A manual clock: `run(ms)` moves time and fires due intervals in order.
   const timers: { fn: () => void; ms: number; next: number; on: boolean }[] = [];
@@ -122,6 +123,19 @@ describe("T42-S5 call engine", () => {
       { type: "conversation.item.create", item: { type: "function_call_output", call_id: "fc_1", output: "Waiting on Sam: 2." } },
       { type: "response.create" },
     ]);
+  });
+
+  it("the inbox walk: next_card and read_card answered by the console with his place, then one response", async () => {
+    const f = fakes();
+    await f.open();
+    await f.emit({ type: "response.created" });
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_9", name: "read_card", arguments: JSON.stringify({ number: 2 }) });
+    await f.emit({ type: "response.done", response: { id: "resp_9" } });
+    expect(f.api.tool).toHaveBeenCalledWith("call_1", "read_card", { number: 2 });
+    expect(f.sent[0]).toMatchObject({ type: "conversation.item.create", item: { type: "function_call_output", call_id: "fc_9" } });
+    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ place: "card 2 of 5" });
+    expect(f.sent[1]).toEqual({ type: "response.create" });
+    expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "read card: card 2 of 5")).toBe(true);
   });
 
   it("ask the desk: sent at once, no spoken updates while it works (T42-S31), the answer said at once (T42-S33)", async () => {

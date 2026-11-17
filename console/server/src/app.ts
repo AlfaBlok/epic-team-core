@@ -149,6 +149,7 @@ import { createUsageCollector, type UsageOptions } from "./usage/collector.js";
 import { createStatus, mountStatus, coverOfIn, statusRows } from "./status/routes.js";
 import { createAlertHandBack } from "./status/alertHandBack.js";
 import type { PendingItem } from "./status/compute.js";
+import type { InboxCard } from "./voice/inbox.js";
 import { createInboxSearch, SEARCH_MAX_CHARS } from "./inbox/search.js";
 import { mountAlertActions } from "./status/alertActions.js";
 import { mountMorningRead } from "./desk/morning.js";
@@ -187,7 +188,7 @@ import { socialHead, TEAM_HEAD } from "./brand.js";
 import { requestScopedStore } from "./auth/scopedStore.js";
 import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
-import { milestoneRanks } from "./inbox/priority.js";
+import { byMilestonePriority, milestoneRanks, storeRanks } from "./inbox/priority.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { mountReplyVoice } from "./voice/speak.js";
@@ -2541,6 +2542,46 @@ export function createApp(
     const e = m ? epicOf(b, m) : undefined;
     return briefing([treeBrief(worldTree(b, world)), e ? bookBrief(e, { level: "this milestone", ...(m?.titleSetAt ? { title: m.title } : {}) }) : null]);
   };
+  /**
+   * his inbox as the Team desk's call walks it, read when a call starts: the review cards in his review list's
+   * order (GET /review-items: his level, then milestone priority), then the open questions waiting on him (the status
+   * batch's open items of his world), test rows left out. Each card carries what its face shows him.
+   */
+  const voiceInbox = async (): Promise<InboxCard[]> => {
+    const ms = store.listMilestones({ includeSettled: true });
+    const titles = new Map(ms.map((m) => [m.id, m.title]));
+    const home = (id?: string) => !id || (store.worldOfMilestone?.(id) ?? DEFAULT_TENANT) === DEFAULT_TENANT;
+    const items = (await review.list({ state: "review" })).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.ref.localeCompare(b.ref));
+    const reviews: InboxCard[] = byMilestonePriority(items, storeRanks(store), worldPriorities(store, read.reposRoot))
+      .filter((i) => home(i.milestoneId) && !isTestItem({ repo: i.repo, code: i.ref, title: i.title }))
+      .map((i) => {
+        const f = i.face;
+        return {
+          kind: "review" as const,
+          id: i.id,
+          ...(i.ref ? { code: i.ref } : {}),
+          title: f?.title || i.title,
+          ...(i.milestoneId && titles.has(i.milestoneId) ? { where: titles.get(i.milestoneId) } : {}),
+          ...(f?.source ? { source: f.source } : {}),
+          ...(f?.taskGoal ? { goal: f.taskGoal } : {}),
+          ...(f?.delivered?.length ? { delivered: f.delivered.map((d) => `${d.ok === false ? "✗" : "✓"} ${d.text}`) } : {}),
+          ...(f?.evidence?.label ? { evidence: f.evidence.label } : i.liveUrl ? { evidence: i.liveUrl } : {}),
+          ...(f?.decision ? { decision: f.decision } : {}),
+          ...(f?.options?.length ? { options: f.options } : {}),
+        };
+      });
+    const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
+    const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
+    const seen = new Set<string>();
+    const asks: InboxCard[] = [];
+    for (const i of all.items as PendingItem[]) {
+      if (i.state !== "open" || seen.has(i.id) || !home(i.milestoneId) || isTestItem({ repo: i.repo, code: i.code, title: i.title })) continue;
+      seen.add(i.id);
+      asks.push({ kind: "ask", id: i.id, ...(i.code ? { code: i.code } : {}), title: i.title, ...(titles.has(i.milestoneId) ? { where: titles.get(i.milestoneId) } : {}), ...(i.question && i.question !== i.title ? { question: i.question } : {}) });
+    }
+    return [...reviews, ...asks];
+  };
+  const voiceObjectives = async () => ((await ownerObjectivesNow?.().catch(() => undefined))?.line ?? "").split(" ; ").join("\n");
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
   const voice = createVoice({
     db,
@@ -2551,6 +2592,8 @@ export function createApp(
     envModel: process.env.CONSOLE_VOICE_MODEL || undefined,
     ...(opts.voice?.now ? { now: opts.voice.now } : {}),
     brief: deskBrief,
+    inbox: voiceInbox,
+    objectives: voiceObjectives,
     quickStatus: async () => {
       const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
       const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();

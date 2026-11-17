@@ -6,6 +6,7 @@ import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
+import { INBOX_WALK_MAX, inboxPack, isInboxTool, walk, type InboxCard, type WalkStep } from "./inbox.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -189,6 +190,9 @@ export function ensureVoiceTables(db: DB): void {
   // the owner's own turns of a call with no stored transcript (JSON array of strings), kept the first time they are read
   // from its chat post (or back-filled from his the memory service), so a later resend never depends on reading an old desk session again.
   if (!cols.has("jordi_words")) db.exec("ALTER TABLE voice_calls ADD COLUMN jordi_words TEXT");
+  // the inbox the call started with (JSON, the walk's cards) and the card he is on (1-based, 0 = not started).
+  if (!cols.has("inbox")) db.exec("ALTER TABLE voice_calls ADD COLUMN inbox TEXT");
+  if (!cols.has("inbox_pos")) db.exec("ALTER TABLE voice_calls ADD COLUMN inbox_pos INTEGER NOT NULL DEFAULT 0");
 }
 
 export interface VoiceCall {
@@ -304,6 +308,10 @@ export interface VoiceDeps {
   now?: () => number;
   /** a call has ended (its transcript stored and posted when there is one): it goes to the owner's the memory service. */
   onEnded?: (id: string) => void;
+  /** his inbox (review cards, then open asks, in his inbox's order), loaded at each call's start for the walk. */
+  inbox?: () => Promise<InboxCard[]> | InboxCard[];
+  /** his objectives in his order, one per line, loaded with the inbox. */
+  objectives?: () => Promise<string> | string;
 }
 
 /**
@@ -335,6 +343,22 @@ export function voiceInstructions(): string {
     "The call has a 20-minute limit; when a system message says time is nearly up, tell him in a few words that he can call again.",
   ].join("\n");
 }
+
+/** the inbox walk's two tools (a call that has his inbox only); the console answers them (POST …/calls/:cid/tool). */
+export const INBOX_TOOLS = [
+  {
+    type: "function",
+    name: "next_card",
+    description: `Go to the next card in ${ownerName()}'s inbox and get it in full, with its place ('card 3 of 12'). The console keeps which card he is on. Use it for 'next', 'next card', 'let's go through my inbox', 'skip it'.`,
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "read_card",
+    description: `Read one card of ${ownerName()}'s inbox in full: the one he is on (no number), card N of the list (number: N), or back (number: -1 for the one before). It becomes the card he is on.`,
+    parameters: { type: "object", properties: { number: { type: "integer", description: "The card's number in his inbox list (1 = first), or -1 to go back one. Leave out for the card he is on." } }, additionalProperties: false },
+  },
+];
 
 export const VOICE_TOOLS = [
   {
@@ -609,15 +633,28 @@ export function createVoice(d: VoiceDeps) {
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
-    const [brief, recall] = await Promise.all([briefNow(), recallNow().catch(() => "")]);
-    const instructions = (d.instructions ?? voiceInstructions)() + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
-    const cfg = sessionConfig(mdl, instructions, d.tools?.() ?? VOICE_TOOLS, historyTokens());
+    const [brief, recall, cards, objectives] = await Promise.all([
+      briefNow(),
+      recallNow().catch(() => ""),
+      d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
+      d.objectives ? inTime("objectives", d.objectives, "") : "",
+    ]);
+    // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
+    const walkCards = cards?.slice(0, INBOX_WALK_MAX);
+    const pack = walkCards ? inboxPack(walkCards, objectives) : "";
+    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    const tools = d.tools?.() ?? VOICE_TOOLS;
+    const cfg = sessionConfig(mdl, instructions, walkCards ? ([...tools, ...INBOX_TOOLS] as unknown as typeof VOICE_TOOLS) : tools, historyTokens());
     const key = await d.mint(cfg);
     const id = `call_${crypto.randomBytes(4).toString("hex")}`;
     const t = iso();
     // A second Call pressed while the key was being minted: the first one wins.
     if (active()) throw new VoiceError(409, "one_call", "A call is already on (one call at a time). Hang it up first.");
     db.prepare("INSERT INTO voice_calls (id, started_at, last_beat_at, model, session_id, tenant_id, milestone_id, brief_tokens, recall_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, t, t, mdl, key.session?.id ?? null, world, ms, brief ? tokensOf(brief) : null, recall ? tokensOf(recall) : null);
+    if (walkCards) {
+      db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
+      console.log(`[voice] ${id} starts with his inbox: ${walkCards.length} cards (~${tokensOf(pack)} tokens with the objectives)`);
+    }
     if (recall) console.log(`[voice] ${id} starts with ${recall.split("\n").length - 1} lines of earlier conversation (~${tokensOf(recall)} tokens)`);
     return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting: greetingOf(instructions) };
   }
@@ -819,6 +856,38 @@ export function createVoice(d: VoiceDeps) {
     return { ...r, ...base };
   }
 
+  /**
+   * a tool the console answers itself (the inbox walk). The call's inbox is the one it started with; the card he
+   * is on is kept on the call row, so the voice never has to count.
+   */
+  function tool(id: string, name: string, args: Record<string, unknown> = {}): WalkStep {
+    open(id);
+    if (!isInboxTool(name)) throw new VoiceError(404, "unknown_tool", `no console tool ${name}`);
+    const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number };
+    if (!r.inbox) throw new VoiceError(409, "no_inbox", "this call started without his inbox");
+    let cards: InboxCard[];
+    try {
+      cards = JSON.parse(r.inbox);
+    } catch {
+      throw new VoiceError(409, "no_inbox", "this call's inbox could not be read");
+    }
+    const step = walk(cards, r.inbox_pos ?? 0, name, args);
+    db.prepare("UPDATE voice_calls SET inbox_pos = ? WHERE id = ?").run(step.pos, id);
+    return step;
+  }
+
+  /** where the walk is (for the page and the tests): the card he is on and how many. */
+  function walkState(id: string): { pos: number; total: number } | undefined {
+    must(id);
+    const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number };
+    if (!r.inbox) return undefined;
+    try {
+      return { pos: r.inbox_pos ?? 0, total: (JSON.parse(r.inbox) as unknown[]).length };
+    } catch {
+      return undefined;
+    }
+  }
+
   function list(limit = 50): VoiceCall[] {
     closeLost();
     return (db.prepare(`SELECT * FROM voice_calls WHERE ${inScope} ORDER BY started_at DESC LIMIT @n`).all({ ...sc, n: Math.min(500, Math.max(1, limit)) }) as any[]).map(rowTo);
@@ -834,6 +903,8 @@ export function createVoice(d: VoiceDeps) {
     status,
     ask,
     askState,
+    tool,
+    walkState,
     list,
     get,
     model,

@@ -85,6 +85,8 @@ export interface VoiceApi {
   askState(id: string, askId: string): Promise<{ state: "queued" | "working" | "answered" | "failed"; answer?: string; partial?: string; waitedMs: number; spokenWaitMs: number }>;
   /** hang up the world's call this page does not hold (`id`: the state's activeCall). */
   endActive?(id: string): Promise<{ ended: boolean }>;
+  /** a tool the console answers itself (the inbox walk: next_card, read_card). */
+  tool?(id: string, name: string, args: Record<string, unknown>): Promise<unknown>;
 }
 
 /** The media and WebRTC pieces (the browser's by default; tests fake them). */
@@ -168,6 +170,8 @@ export const BYE_MAX_MS = 8_000;
 
 /** listen mode (call_bfdb5e0f): the tool the voice calls when he wants to give feedback, and every word it says in it. */
 export const LISTEN_TOOL = "listen_for_feedback";
+/** the tools the console answers itself (POST …/calls/:cid/tool): the inbox walk. */
+export const CONSOLE_TOOLS = new Set(["next_card", "read_card"]);
 export const LISTEN_START_LINE = "I'm listening. Take your time, and say done when you're finished.";
 /**
  * a few very
@@ -622,6 +626,12 @@ export class CallEngine {
         } else if (c.name === LISTEN_TOOL) {
           listening = this.startListening();
           output = { status: "listening", note: "Listen mode is on: the console holds his words and sends them in one go when he says done. Say nothing else now." };
+        } else if (CONSOLE_TOOLS.has(c.name) && this.api.tool) {
+          // the inbox walk; the console keeps which card he is on.
+          const args = JSON.parse(c.arguments || "{}") as Record<string, unknown>;
+          const r = (await this.api.tool(id, c.name, args)) as { place?: string };
+          this.line("tool", `${c.name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
+          output = r;
         } else output = { error: `unknown tool ${c.name}` };
       } catch (e) {
         output = { error: `the console did not answer: ${(e as Error).message}` };
@@ -992,6 +1002,7 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
     ask: (id, request, confirmed, words, kind) => call("POST", `/calls/${id}/ask`, { request, confirmed, ...(words ? { words } : {}), ...(kind ? { kind } : {}) }),
     askState: (id, askId) => call("GET", `/calls/${id}/ask/${askId}`),
     endActive: (id) => call("POST", "/active/end", { id }),
+    tool: (id, name, args) => call("POST", `/calls/${id}/tool`, { name, args }),
   };
 }
 
