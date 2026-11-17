@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type R
 import { Check, Loader2, MessageSquarePlus, Undo2, X } from "lucide-react";
 import { invalidate } from "@/lib/data";
 import { GAP, scrollerOf, visibleTop } from "@/lib/keepPlace";
-import { dismissSent, sentMounted, unmarkSent, useSent, type SentEntry } from "@/lib/sentRows";
+import { dismissSent, sentMounted, shownSent, unmarkSent, useSent, type SentEntry } from "@/lib/sentRows";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
@@ -25,7 +25,8 @@ import { CardFeedback } from "@/components/cardFeedback";
  * E948-S145 (vn_a95bfbab): he swipes the row away on the phone or closes it with its x on a laptop.
  */
 export function SentRow({ slot, entry, className }: { slot: string; entry: SentEntry; className?: string }) {
-  return entry.gone ? null : <ShownSentRow slot={slot} entry={entry} className={className} />;
+  // the one newest answer in the whole inbox, whichever section or list draws it (iteration 2: four showed at once)
+  return shownSent(entry) ? <ShownSentRow slot={slot} entry={entry} className={className} /> : null;
 }
 
 /** a swipe sideways past this many px (or a third of the row) takes the row away */

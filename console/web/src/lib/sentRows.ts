@@ -52,12 +52,31 @@ const storage = (): Storage | undefined => {
     return undefined;
   }
 };
+/** the newer of two answers: the later press, then the higher id (two tabs can number alike) */
+const newer = (a: SentEntry, b: SentEntry) => a.at > b.at || (a.at === b.at && a.id > b.id);
+const same = (a: SentEntry, b: SentEntry) => a.at === b.at && a.id === b.id;
+/**
+ * the one answer whose green row may show in the whole inbox: the newest one not swiped away. The owner 17 Nov 23:22Z
+ * (E948-S140 iteration 2, four rows on his phone an hour after the release): "Can we only have the last one and then the
+ * other ones vanish? ... I've asked you five times." Answers stored before the rule shipped (an older build in his open
+ * app, or another tab) carried no `gone`, so every one of them showed; now only this one can.
+ */
+function newestShown(m: Map<string, SentEntry>, now = Date.now()): SentEntry | undefined {
+  let best: SentEntry | undefined;
+  for (const e of m.values()) if (!e.gone && now - e.at < SENT_KEEP_MS && (!best || newer(e, best))) best = e;
+  return best;
+}
+/** every answer but the newest is marked gone (its card stays answered, its row off the page) */
+function onlyNewest(m: Map<string, SentEntry>): Map<string, SentEntry> {
+  const keep = newestShown(m);
+  return new Map([...m].map(([k, v]) => [k, v.gone || (keep && same(v, keep)) ? v : { ...v, gone: true }]));
+}
 function loadSent(): Map<string, SentEntry> {
   try {
     const raw = storage()?.getItem(STORE);
     const list = raw ? (JSON.parse(raw) as [string, SentEntry][]) : [];
     const now = Date.now();
-    return new Map(list.filter(([k, e]) => typeof k === "string" && e && typeof e.at === "number" && now - e.at < SENT_KEEP_MS));
+    return onlyNewest(new Map(list.filter(([k, e]) => typeof k === "string" && e && typeof e.at === "number" && now - e.at < SENT_KEEP_MS)));
   } catch {
     return new Map();
   }
@@ -77,6 +96,20 @@ const mounted = new Map<string, number>();
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f));
+// another tab or window of the inbox answered a card: its newer answer is the one row here too
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (ev) => {
+    if (ev.key !== STORE) return;
+    const theirs = loadSent();
+    const next = new Map(sent);
+    for (const [k, v] of theirs) {
+      const mine = next.get(k);
+      if (!mine || newer(v, mine) || (same(v, mine) && v.gone)) next.set(k, v);
+    }
+    sent = onlyNewest(next);
+    seq = Math.max(seq, ...[...sent.values()].map((e) => e.id));
+    emit();
+  });
 
 /** Mark one card (or several cards closed by one press: a set) as sent; returns the entry. */
 export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at" | "gone">): SentEntry {
@@ -103,7 +136,10 @@ export function unmarkSent(slots: string | string[]) {
 
 const live = (e: SentEntry | undefined, now = Date.now()) => (e && now - e.at < SENT_KEEP_MS ? e : undefined);
 /** E948-S140: an answered card whose green row still shows (the newest answer, not swiped away). */
-export const shownSent = (e: SentEntry | undefined) => (live(e) && !e!.gone ? e : undefined);
+export const shownSent = (e: SentEntry | undefined) => {
+  const top = newestShown(sent);
+  return live(e) && !e!.gone && top && same(e!, top) ? e : undefined;
+};
 
 /** E948-S145: he swiped the Sent row away (phone) or closed it with its x (desktop): the card stays answered, the row goes. */
 export function dismissSent(slot: string) {
@@ -195,7 +231,7 @@ export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: stri
     if (e && seen.has(e.id)) continue;
     if (e) seen.add(e.id);
     if (!r.item && !e) continue;
-    if (e?.gone) continue; // E948-S140: answered earlier, or swiped away: neither the card nor its row shows
+    if (e && !shownSent(e)) continue; // E948-S140: answered earlier, or swiped away: neither the card nor its row shows
     out.push(e ? { ...r, sent: e } : r);
   }
   return out;
