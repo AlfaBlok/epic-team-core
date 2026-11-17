@@ -221,6 +221,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // (hosted first-objective test)
   ["GET", new RegExp(`^/api/tenants/${ID}/first-objective$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/first-objective/green$`)],
+  // a workspace points at a repo that already holds a workspace (tenancy/worldRepo.ts; the POST owner only, below)
+  ["GET", new RegExp(`^/api/tenants/${ID}/repo$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)],
   // revise (Change it) and restore (Don't post's Undo) ride the same handle → target as approve and drop.
   // approve (with or without feedback) and the Approve every post switch (`approval`) go through the same
   // social/write.ts `handle` → `target` (worldRepos + forTenant of the path's world); the Publisher / Writer they wake is one
@@ -417,6 +420,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/credits/grant$`)],
   ["PUT", new RegExp(`^/api/tenants/${ID}/credits/gate$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // money: an owner login, never an agent token
+  ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
   ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only
   ["PUT", new RegExp(`^/api/tenants/${ID}/provider$`)],
   ["POST", /^\/api\/team-skills(\/preview)?$/],
@@ -442,6 +446,19 @@ const OWNER_WORLD_READS: [string, RegExp][] = [
   ["GET", /^\/api\/products$/],
   ["GET", new RegExp(`^/api/products/${ID}(/kit(/(previews|fonts)/[\\w.-]+)?)?$`)],
 ];
+/**
+ * a workspace connected to a repo that holds a workspace reads that repo's own objectives and key results
+ * (app.ts serves them from the workspace's checkout, never the home world's).
+ */
+const CONNECTED_READS: [string, RegExp][] = [["GET", /^\/api\/(scorecards|pursuits)$/]];
+const isConnectedWorld = (db: DB, identity: Identity): boolean => {
+  if ((identity.kind !== "session" && identity.kind !== "token") || identity.tenant === DEFAULT_TENANT || (identity.kind === "session" && identity.door)) return false;
+  try {
+    return !!db.prepare("SELECT 1 FROM world_repos WHERE world = ?").get(identity.tenant);
+  } catch {
+    return false;
+  }
+};
 const isOwnersOwnWorld = (db: DB, identity: Identity): boolean => {
   if (identity.kind !== "session" || identity.role !== "owner" || identity.door) return false;
   try {
@@ -513,7 +530,8 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
     (identity.tenant !== DEFAULT_TENANT || door) &&
     path.startsWith("/api/") &&
     !isTenantSafe(method, path) &&
-    !(matches(OWNER_WORLD_READS, method === "HEAD" ? "GET" : method, path) && isOwnersOwnWorld(db, identity))
+    !(matches(OWNER_WORLD_READS, method === "HEAD" ? "GET" : method, path) && isOwnersOwnWorld(db, identity)) &&
+    !(matches(CONNECTED_READS, method === "HEAD" ? "GET" : method, path) && isConnectedWorld(db, identity))
   )
     return { allow: false, status: 403, reason: "world_scope", message: "this part of the console is not available in this world yet" };
   // owner powers need an owner login or the host owner token; never bare legacy trust or an agent token.

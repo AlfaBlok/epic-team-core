@@ -547,11 +547,12 @@ export async function buildPursuits(
 }
 
 /** Reads the home repo's file and every spine it names; kept a few minutes (git log per watched repo). */
-export function createPursuits(o: { reposRoot: string; board: () => BoardView | null; git: GitOut; ttlMs?: number; home?: string }) {
+export function createPursuits(o: { reposRoot: string; board: () => BoardView | null; git: GitOut; ttlMs?: number; home?: string; repoDir?: (name: string) => string | undefined }) {
   const ttl = o.ttlMs ?? 5 * 60_000;
   let cached: { at: number; body: PursuitsBody } | null = null;
   let docCache: { file: string; mtime: number; doc: PursuitsDoc } | null = null;
-  const repoDir = (name: string) => resolveRepo(o.reposRoot, name)?.path;
+  // a connected workspace reads its own checkout only (tenancy/worldRepo.ts worldRepoDir)
+  const repoDir = o.repoDir ?? ((name: string) => resolveRepo(o.reposRoot, name)?.path);
   const spineText = (repo: string, file: string) => {
     const dir = repoDir(repo);
     if (!dir || file.includes("..")) return undefined;

@@ -209,10 +209,8 @@ main .border-amber-500\/40, main .border-amber-500\/60 { border-color: hsl(38 85
 @media (pointer: coarse) and (min-width: 768px) {
   [data-testid="topbar"] .md\:hidden { display: none !important; }
 }
-@media (pointer: coarse) and (max-width: 480px) {
-  /* on a phone a line with a priority word has no room for the age too: the age goes, the card's own page keeps it */
-  main [data-card-meta]:has(> button) > time { display: none; }
-}
+/* the card's age stays on a phone too (the owner 17 Nov, vn_c2d7cc29, on a review card: "Why can I not see how old this
+   card is?"): it never shrinks, the objective tag beside it gives way and ends in … (its whole line in its tooltip). */
 
 /* a card with a ticket code takes a long-press (priority mode): the phone's own callout and text selection
    would cover it. Touch screens only, so text on a laptop still selects. */

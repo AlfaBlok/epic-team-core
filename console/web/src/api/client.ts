@@ -127,6 +127,13 @@ import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor,
  * a paid EpicTeam workspace's one first objective, Get set up, and its key results with their lights,
  * shown on its Home above its chat.
  */
+export interface WorldRepoState {
+  connected: boolean;
+  repo?: string;
+  connectedAt?: string;
+  project?: { id: string; title: string };
+}
+
 export interface FirstObjective {
   milestoneId: string;
   name: string;
@@ -284,6 +291,9 @@ export interface ApiClient {
   sendWorldDeskMessage(tenantId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean }>;
   /** a paid EpicTeam workspace's one first objective, Get set up, with its key results; 404 no_first_objective elsewhere. */
   getFirstObjective(tenantId: string): Promise<FirstObjective>;
+  /** the repo an EpicTeam workspace points at (one that already holds a workspace), and pointing it there. */
+  getWorldRepo?(tenantId: string): Promise<WorldRepoState>;
+  connectWorldRepo?(tenantId: string, repo: string, code: string): Promise<WorldRepoState>;
   /** send the owner's message to the milestone's repo desk. */
   sendMilestoneChatMessage(milestoneId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean; queued?: boolean }>;
 

@@ -56,9 +56,10 @@ function RankWords({ p, label }: { p: OwnerPriority; label: string }) {
   const tail = name ? `: ${name}` : "";
   if (!name || !label.endsWith(tail)) return <>{label}</>;
   return (
-    <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
-      <span>{`${label.slice(0, -tail.length)}: `}</span>
-      <ObjectiveName name={name} layout="inline" />
+    <span>
+      {`${label.slice(0, -tail.length)}: `}
+      {/* flow: it runs as one line of text, so on a phone the tag's one row ends in … like any other word */}
+      <ObjectiveName name={name} layout="flow" />
     </span>
   );
 }

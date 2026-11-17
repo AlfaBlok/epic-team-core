@@ -4,6 +4,7 @@ import type { FirstObjective } from "@/api/client";
 import { useShows, useSkin } from "@/lib/skin";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { HomeBuyLine } from "@/components/buyPlan";
+import { HomeRepoLine } from "@/components/worldRepo";
 import { CampaignsHome, useCampaignHome } from "@/components/campaignHome";
 import { lazyPage } from "@/lib/lazyPage";
 import { useState } from "react";
@@ -36,6 +37,7 @@ export function HomePage() {
   return (
     <>
       <HomeBuyLine />
+      <HomeRepoLine />
       {/* the same page in both skins (L-62): the console skin's All objectives with its objectives, the social skin's with his
           pinned campaigns as the objectives (the owner 13 Nov: "look at what we did in epicteam"). */}
       {campaigns ? <CampaignsHomeOr fallback={fallback} /> : <ChatHomeOr fallback={shows("goalSets") ? <GoalsHome fallback={fallback} /> : fallback} />}

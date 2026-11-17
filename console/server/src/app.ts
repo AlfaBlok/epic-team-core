@@ -164,6 +164,7 @@ import { mountUsage, runLiveUsageLookup, runUsageLookup } from "./usage/routes.j
 import { mountFreshness, type FreshnessMount } from "./routes/freshness.js";
 import { createNewAskWaker, defaultCadenceFor, gitAuthorRun, type NewAskWaker } from "./cycle/newAskWake.js";
 import { gitOut } from "./freshness.js";
+import { connectedRepo, mountWorldRepo, worldRepoDir } from "./tenancy/worldRepo.js";
 import { createBook, bookStore, followBook, BOOK_TTL_MS } from "./book/service.js";
 import { indexerLimitsFromEnv, launchIndexer, type IndexerHandle, type IndexerLaunchMode } from "./indexer/launch.js";
 import { ensureIndexerTables, indexerBeat, kvAt, kvSet, sendToIndexer } from "./indexer/queue.js";
@@ -1744,7 +1745,41 @@ export function createApp(
   });
   mountAskLog(api, () => askLog);
   if (!opts.passive && teamWrites && !process.env.VITEST) askLog.start(Number(process.env.CONSOLE_ASK_LOG_MS ?? 600_000));
-  api.get("/pursuits", async (c) => c.json(withMilestones(await pursuits.get(), store, pursuitEffort)));
+  // a workspace connected to a repo that holds a workspace reads that repo's own objectives and key results
+  // (its checkout's docs/pursuits.json and scorecards), never the home world's (routeScope: connected worlds only).
+  const worldGoals = new Map<string, { pursuits: ReturnType<typeof createPursuits>; at: number }>();
+  const connectedWorld = () => {
+    const w = credentialWorld();
+    return w && w !== DEFAULT_TENANT && connectedRepo(db, w) ? w : undefined;
+  };
+  const worldPursuits = (w: string) => {
+    let e = worldGoals.get(w);
+    if (!e || Date.now() - e.at > 30 * 60_000) {
+      e = { pursuits: createPursuits({ reposRoot: read.reposRoot, board: () => null, git: gitOut(20_000), home: w, repoDir: worldRepoDir(read.reposRoot, db, w) }), at: Date.now() };
+      worldGoals.set(w, e);
+    }
+    return e.pursuits;
+  };
+  const worldScorecards = async (w: string) => {
+    const dirOf = worldRepoDir(read.reposRoot, db, w);
+    const spine = createSpineFileReader(dirOf);
+    const file = (id: string) => {
+      const dir = dirOf(w);
+      if (!dir || !/^[\w-]{1,80}$/.test(id)) return undefined;
+      try {
+        return fs.readFileSync(path.join(dir, SCORECARD_DIR, `${id}.json`), "utf8");
+      } catch {
+        return undefined;
+      }
+    };
+    return buildScorecards(withMilestones(await worldPursuits(w).get(), forTenant(db, w)), spine, { file, work: createWorkFinder(dirOf, spine), homeRepo: w });
+  };
+  mountWorldRepo(api, { db, reposRoot: read.reposRoot, worldOf: credentialWorld });
+  api.get("/pursuits", async (c) => {
+    const w = connectedWorld();
+    if (w) return c.json(withMilestones(await worldPursuits(w).get(), forTenant(db, w)));
+    return c.json(withMilestones(await pursuits.get(), store, pursuitEffort));
+  });
   // goal sets: every pursuit a scorecard, its epics scorecards inside it, each with its queue and the codes its inbox matches.
   const scorecardSpine = createSpineFileReader((name) => resolveRepo(read.reposRoot, name)?.path);
   // one file per goal set: docs/scorecards/<pursuit id>.json in the home repo (its Objective and declared rows).
@@ -1778,7 +1813,11 @@ export function createApp(
   });
   objectivesOf = (m) => idleWatch.forMilestone(m.id);
   idleWatch.mount(api);
-  api.get("/scorecards", async (c) => c.json(greenHistory(await idleWatch.decorate(await scorecardsNow()))));
+  api.get("/scorecards", async (c) => {
+    const w = connectedWorld();
+    if (w) return c.json(await worldScorecards(w));
+    return c.json(greenHistory(await idleWatch.decorate(await scorecardsNow())));
+  });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.
   let objectivesMemo: { at: number; v: { block: string; line: string } } | undefined;
