@@ -273,6 +273,7 @@ export function createRealClient(): ApiClient {
     getMilestoneChat: (id, read) => call("GET", `/milestones/${encodeURIComponent(id)}/chat/messages${chatQs(read)}`),
     getWorldDeskChat: (t, read) => call("GET", `/tenants/${encodeURIComponent(t)}/desk/messages${chatQs(read)}`),
     getFirstObjective: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/first-objective`),
+    newWorkspace: (t, name) => call("POST", `/tenants/${encodeURIComponent(t)}/workspaces`, { name }),
     getWorldRepo: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/repo`),
     connectWorldRepo: (t, repo, code) => call("POST", `/tenants/${encodeURIComponent(t)}/repo/connect`, { repo, code }),
     sendWorldDeskMessage: (t, text, page, clientRequestId, attachments) =>

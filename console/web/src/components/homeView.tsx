@@ -1,6 +1,7 @@
 import { GoalHeader, GoalSetsPage, KeyResultSheet, useGoalSets } from "@/components/goalSets";
 import type { ScorecardRow } from "@/api/pursuit-types";
-import type { FirstObjective } from "@/api/client";
+import { isCleanWorkspace, type CleanWorkspace, type FirstObjective } from "@/api/client";
+import { Button } from "@/components/ui/button";
 import { useShows, useSkin } from "@/lib/skin";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { HomeBuyLine } from "@/components/buyPlan";
@@ -17,6 +18,7 @@ import { Loading } from "@/components/common";
 // The Inbox page (and Home in a world with no goal sets) loads its script when shown.
 const TeamPage = lazyPage(() => import("@/pages/Team"), "TeamPage");
 const GettingGoingChat = lazyPage(() => import("@/pages/Chat"), "GettingGoingChat");
+const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
 
 export { INBOX_PATH };
 
@@ -62,11 +64,54 @@ function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
   if (!customer) return world.loading && w === undefined ? <Loading /> : fallback;
   if (objective.loading && !objective.data) return <Loading />;
   if (!objective.data) return fallback;
+  // the owner 17 Nov (vn_c149df3a): a new workspace of an account that already has one has no Get set
+  // up: Home shows the workspace, the objectives its owner added (none at first) and its chat
+  if (isCleanWorkspace(objective.data))
+    return (
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-5" data-testid="clean-workspace-home">
+        <CleanWorkspaceHome workspace={objective.data} />
+        <GettingGoingChat world={w} fresh={!objective.data.objectives.length} clean />
+      </div>
+    );
   return (
     <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-5" data-testid="get-set-up-home">
       <GetSetUp objective={objective.data} />
       <GettingGoingChat world={w} fresh={objective.data.green <= 1} />
     </div>
+  );
+}
+
+/** a clean workspace's Home: its name, its objectives each with its results green of total, and Add objective. */
+export function CleanWorkspaceHome({ workspace: o }: { workspace: CleanWorkspace }) {
+  const [adding, setAdding] = useState(false);
+  const none = !o.objectives.length;
+  return (
+    <section className="grid min-w-0 content-start gap-4" data-testid="clean-workspace" aria-label={`${o.workspace}: ${o.objectives.length} objectives`}>
+      <div className="grid min-w-0 gap-1">
+        <h1 className="text-xl font-semibold leading-tight tracking-tight [overflow-wrap:anywhere] sm:text-3xl">{o.workspace}</h1>
+        <p className="text-sm text-muted-foreground" data-testid="clean-workspace-answer">
+          {none ? "A new workspace, with no objective yet. Add the first one, or tell the chat what this workspace is for." : `${o.objectives.length} objective${o.objectives.length === 1 ? "" : "s"} in this workspace.`}
+        </p>
+      </div>
+      {!none && (
+        <ul className="grid min-w-0 divide-y rounded-md border" data-testid="clean-workspace-objectives">
+          {o.objectives.map((x) => (
+            <li key={x.milestoneId}>
+              <a href={`/milestones/${encodeURIComponent(x.milestoneId)}`} className="flex min-w-0 items-center gap-3 px-3 py-2.5 text-sm hover:bg-accent/60">
+                <span className="min-w-0 flex-1 truncate text-foreground">{x.title}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">{x.total ? `${x.green} of ${x.total} green` : "no results yet"}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div>
+        <Button size="sm" onClick={() => setAdding(true)} data-testid="clean-workspace-add">
+          {none ? "Add the first objective" : "Add an objective"}
+        </Button>
+      </div>
+      {adding && <MilestoneDialog open={adding} onOpenChange={setAdding} />}
+    </section>
   );
 }
 

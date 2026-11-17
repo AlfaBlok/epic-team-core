@@ -223,7 +223,7 @@ function WorldDesk({ world }: { world: string }) {
  * a paid EpicTeam workspace's chat on its Home, under its one first objective, Get set up (homeView.tsx; the owner 17 Nov:
  * "one objective and several key results"): the workspace's team desk, which works each key result to green.
  */
-export function GettingGoingChat({ world, fresh }: { world: string; fresh: boolean }) {
+export function GettingGoingChat({ world, fresh, clean }: { world: string; fresh: boolean; /** a new workspace with no Get set up */ clean?: boolean }) {
   const load = useCallback((read?: ChatRead) => api.getWorldDeskChat(world, read), [world]);
   const send = useCallback((text: string, page?: string, id?: string, files?: string[]) => (files?.length ? api.sendWorldDeskMessage(world, text, page ?? "home", id, files) : api.sendWorldDeskMessage(world, text, page ?? "home", id)), [world]);
   const [params, setParams] = useSearchParams();
@@ -231,14 +231,14 @@ export function GettingGoingChat({ world, fresh }: { world: string; fresh: boole
   return (
     <DeskPage
       title="Chat with your team"
-      description="Your team works here to turn each key result green."
+      description={clean ? "Tell your team what this workspace is for and its first objective." : "Your team works here to turn each key result green."}
       who="Team desk"
       callBase={deskVoiceBase(world)}
       load={load}
       sendMessage={send}
       hint={hint}
       clearHint={() => setParams({}, { replace: true })}
-      placeholder={fresh ? "Say hello, or what you want your team to get done first…" : "Ask the team, or say what is next…"}
+      placeholder={fresh ? (clean ? "What is this workspace for?" : "Say hello, or what you want your team to get done first…") : "Ask the team, or say what is next…"}
     />
   );
 }

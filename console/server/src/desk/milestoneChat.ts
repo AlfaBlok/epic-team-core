@@ -229,6 +229,10 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
     chatFor: get,
     view: (id: string) => get(id).view(),
     send: async (id: string, text: string, page?: string, clientRequestId?: string) => {
+      // a customer workspace's project chat never starts an agent on our shared servers and seats (the shared-host
+      // gate, as its Team desk: hosted desk/worldDesk.ts); it opens when its chat runs on the workspace's own servers.
+      if (hooks.worldWakeGate()(milestoneWorld(d.db, id)))
+        throw new DeskError(503, "world_needs_box", "Your team's chat starts when it runs on your workspace's own servers. Your projects and your team's jobs keep working.");
       const chat = get(id);
       return chat.send(text, page, clientRequestId, await sinceFor(id, chat));
     },

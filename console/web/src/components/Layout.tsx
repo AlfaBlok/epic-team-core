@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard, KeyRound, Sparkles, Coins, Globe } from "lucide-react";
@@ -30,7 +30,7 @@ import { SETTINGS_PATH, useOperatorPages, useToolPages } from "@/lib/settingsPat
 import { useCompanyView } from "@/lib/companyView";
 import { useGapFinder } from "@/lib/gapFinder";
 import { reachSites, setupConnections } from "@/pages/Setup";
-import { worldId } from "@/lib/useSocial";
+import { knownDoor, worldId } from "@/lib/useSocial";
 import { campaignMilestones, useCampaigns } from "@/lib/campaign";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import { PERFORMANCE_PATH, PRODUCT_PATH } from "@/pages/social/nav";
@@ -922,8 +922,28 @@ export function WorldSwitcher() {
   const { data } = useQuery(() => (api.getWorldCounts ? api.getWorldCounts() : Promise.resolve(undefined)), [], { tag: "counts" });
   const [busy, setBusy] = useState<string>();
   const [err, setErr] = useState<string>();
+  // the owner 17 Nov (vn_c149df3a): in a customer EpicTeam workspace the account can make a new
+  // workspace (it opens clean, no Get set up), so its workspaces show here even while it has one
+  const campaigns = !!useSkin().campaigns;
+  const here = useQuery(() => worldId(), []).data ?? knownWorld();
+  const customer = !campaigns && !!here && here !== homeWorld() && !knownDoor() && !!api.newWorkspace;
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
   const worlds = data?.worlds ?? [];
-  if (worlds.length < 2) return null;
+  if (worlds.length < 2 && !customer) return null;
+  const make = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy("new");
+    setErr(undefined);
+    try {
+      const w = await api.newWorkspace!(here!, name.trim());
+      const r = await api.switchWorld!(w.tenantId);
+      window.location.assign(r?.handoff || "/");
+    } catch (x) {
+      setErr((x as Error).message);
+      setBusy(undefined);
+    }
+  };
   const go = async (w: WorldCounts) => {
     setBusy(w.tenantId);
     setErr(undefined);
@@ -939,11 +959,12 @@ export function WorldSwitcher() {
   return (
     // not pinned; the last section of the menu (desktop sidebar and phone menu), under the account block.
     <div className="grid min-w-0 gap-1 border-t pt-3" data-testid="world-switcher">
-      <div className="px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Your worlds</div>
+      <div className="px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{customer ? "Your workspaces" : "Your worlds"}</div>
       <p className="px-2.5 pb-0.5 text-xs text-muted-foreground" data-testid="world-switcher-hint">
-        Each world is a separate home with its own team.{hasProjects ? " Projects at the top switch inside this one." : ""}
+        {customer ? "Each workspace is a separate home with its own team." : "Each world is a separate home with its own team."}
+        {hasProjects ? " Projects at the top switch inside this one." : ""}
       </p>
-      <ul className="grid min-w-0 gap-0.5" aria-label="Your worlds">
+      <ul className="grid min-w-0 gap-0.5" aria-label={customer ? "Your workspaces" : "Your worlds"}>
         {worlds.map((w) => (
           <li key={w.tenantId}>
             <button
@@ -967,6 +988,35 @@ export function WorldSwitcher() {
           </li>
         ))}
       </ul>
+      {customer &&
+        (naming ? (
+          <form onSubmit={make} className="grid min-w-0 gap-1.5 px-2.5 pt-1" data-testid="new-workspace-form">
+            <input
+              className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm"
+              placeholder="Its name, e.g. Side project"
+              aria-label="New workspace name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              autoFocus
+              data-testid="new-workspace-name"
+            />
+            <p className="text-xs text-muted-foreground">It starts empty, with no Get set up, and has its own plan.</p>
+            <div className="flex gap-2">
+              <Button size="sm" type="submit" disabled={!!busy || !name.trim()} data-testid="new-workspace-make">
+                {busy === "new" ? "Making…" : "Make it"}
+              </Button>
+              <Button size="sm" type="button" variant="ghost" onClick={() => setNaming(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <button type="button" className="flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground" onClick={() => setNaming(true)} data-testid="new-workspace">
+            <Plus className="h-4 w-4 shrink-0" aria-hidden />
+            New workspace
+          </button>
+        ))}
       {err && (
         <p className="px-2.5 text-xs text-destructive" role="alert">
           {err}

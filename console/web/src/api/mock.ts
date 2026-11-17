@@ -578,6 +578,9 @@ const mockMail = () => ({
     async getFirstObjective(t) {
       return Promise.reject(new Error(`${t} has no first objective`)); // only a paid workspace has one
     },
+    async newWorkspace(_t, name) {
+      return ok({ tenantId: "et-mock-new", name: name || "New workspace", made: true }); //
+    },
     async sendWorldDeskMessage(_t, text, page, crid, attachments) {
       return this.sendDeskMessage(text, page, crid, attachments);
     },

@@ -146,6 +146,19 @@ export interface FirstObjective {
   measuredAt?: string;
 }
 
+/**
+ * the owner 17 Nov (vn_c149df3a): a new workspace made by an account that already has one has no first objective;
+ * its Home shows the workspace and the objectives its owner added (none at first).
+ */
+export interface CleanWorkspace {
+  firstObjective: false;
+  workspace: string;
+  milestoneId?: string;
+  objectives: { milestoneId: string; title: string; green: number; total: number }[];
+  measuredAt?: string;
+}
+export const isCleanWorkspace = (x: FirstObjective | CleanWorkspace | undefined): x is CleanWorkspace => !!x && (x as CleanWorkspace).firstObjective === false;
+
 export interface PushInfo {
   configured: boolean;
   publicKey?: string;
@@ -290,7 +303,9 @@ export interface ApiClient {
   getWorldDeskChat(tenantId: string, read?: ChatRead): Promise<DeskChat>;
   sendWorldDeskMessage(tenantId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean }>;
   /** a paid EpicTeam workspace's one first objective, Get set up, with its key results; 404 no_first_objective elsewhere. */
-  getFirstObjective(tenantId: string): Promise<FirstObjective>;
+  getFirstObjective(tenantId: string): Promise<FirstObjective | CleanWorkspace>;
+  /** New workspace the owner of `tenantId` makes a second workspace in their own name, waiting for its payment. */
+  newWorkspace?(tenantId: string, name: string): Promise<{ tenantId: string; name: string; made: boolean }>;
   /** the repo an EpicTeam workspace points at (one that already holds a workspace), and pointing it there. */
   getWorldRepo?(tenantId: string): Promise<WorldRepoState>;
   connectWorldRepo?(tenantId: string, repo: string, code: string): Promise<WorldRepoState>;

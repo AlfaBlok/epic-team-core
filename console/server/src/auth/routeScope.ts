@@ -161,6 +161,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/credits$`)], // the world's own balance + ledger (writes stay platform-only)
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // a world buys its own €49 Epic Team plan (owner login only, below)
   ["GET", new RegExp(`^/api/tenants/${ID}/plan$`)], // may the world buy the paid plan, has it paid (the Buy button)
+  ["GET|PUT", new RegExp(`^/api/tenants/${ID}/ai$`)], // the workspace's own AI (hosted cycle/worldAi.ts; the PUT is the owner's login only, below)
   // the world's own lists by path (app.ts: a store for the path's tenant in every auth mode, rule 3 404s another
   // world) and its provider default (one tenants row, the path's; the PUT stays the platform's). routeList4.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs|provider)$`)],
@@ -224,6 +225,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // a workspace points at a repo that already holds a workspace (tenancy/worldRepo.ts; the POST owner only, below)
   ["GET", new RegExp(`^/api/tenants/${ID}/repo$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)],
+  // New workspace: the owner of the path workspace (its session, owner only below) makes a second one in their own name
+  // (hosted testerWorld.ts makeAccountWorkspace; another world's id is a 404).
+  ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)],
   // revise (Change it) and restore (Don't post's Undo) ride the same handle → target as approve and drop.
   // approve (with or without feedback) and the Approve every post switch (`approval`) go through the same
   // social/write.ts `handle` → `target` (worldRepos + forTenant of the path's world); the Publisher / Writer they wake is one
@@ -420,6 +424,8 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/credits/grant$`)],
   ["PUT", new RegExp(`^/api/tenants/${ID}/credits/gate$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // money: an owner login, never an agent token
+  ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)], // New workspace: an owner login makes one in their own name
+  ["PUT", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into the workspace's vault: the owner's login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
   ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only
   ["PUT", new RegExp(`^/api/tenants/${ID}/provider$`)],

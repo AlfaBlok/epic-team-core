@@ -71,6 +71,33 @@ describe("Home opens on the chat in a paid team workspace", () => {
     await waitFor(() => expect(desk).toHaveBeenCalledWith("et-dana", { limit: 20 }));
   });
 
+  // the owner 17 Nov (vn_c149df3a): a new workspace made by an account that already has one has no Get set up, and still shows
+  it("an existing account's new workspace shows its name, no Get set up, Add the first objective and the chat", async () => {
+    vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-dana-side"));
+    vi.spyOn(api, "getFirstObjective").mockResolvedValue({ firstObjective: false, workspace: "Side project", objectives: [] });
+    const desk = vi.spyOn(api, "getWorldDeskChat").mockResolvedValue(chat);
+    home();
+    await waitFor(() => expect(screen.getByTestId("clean-workspace")).toBeTruthy());
+    expect(screen.queryByTestId("get-set-up")).toBeNull();
+    expect(screen.queryByText(/Get set up/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Side project" })).toBeTruthy();
+    expect(screen.getByTestId("clean-workspace-answer").textContent).toMatch(/no objective yet/);
+    expect(screen.getByTestId("clean-workspace-add").textContent).toBe("Add the first objective");
+    expect(await screen.findByText("Tell your team what this workspace is for and its first objective.")).toBeTruthy();
+    await waitFor(() => expect(desk).toHaveBeenCalledWith("et-dana-side", { limit: 20 }));
+  });
+
+  it("its objectives show with their results once added", async () => {
+    vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-dana-side"));
+    vi.spyOn(api, "getFirstObjective").mockResolvedValue({ firstObjective: false, workspace: "Side project", objectives: [{ milestoneId: "ms_9", title: "Ship the side project", green: 1, total: 2 }] });
+    vi.spyOn(api, "getWorldDeskChat").mockResolvedValue(chat);
+    home();
+    const list = await screen.findByTestId("clean-workspace-objectives");
+    expect(list.textContent).toContain("Ship the side project");
+    expect(list.textContent).toContain("1 of 2 green");
+    expect(screen.getByTestId("clean-workspace-add").textContent).toBe("Add an objective");
+  });
+
   it("a workspace with no first objective (unpaid, social skin) keeps its Home", async () => {
     vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-free"));
     const fo = vi.spyOn(api, "getFirstObjective").mockRejectedValue(new Error("no_first_objective"));

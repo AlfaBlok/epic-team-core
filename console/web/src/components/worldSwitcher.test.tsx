@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api as client, type ApiClient } from "@/api";
 import { WorldSwitcher } from "./Layout";
+import { forgetWorld } from "@/lib/useSocial";
 
 /** The optional methods the switcher calls, as required ones (vi.spyOn needs them present). */
 const api = client as Required<ApiClient>;
@@ -116,5 +117,30 @@ describe("T77-S3 menu order", () => {
     const account = await screen.findByTestId("account-block");
     expect(account.compareDocumentPosition(worlds) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(worlds.nextElementSibling).toBeNull();
+  });
+
+  // the owner 17 Nov (vn_c149df3a): an EpicTeam customer account makes a new workspace from the menu
+  it("a customer workspace shows Your workspaces even with one, and New workspace makes one and opens it", async () => {
+    forgetWorld();
+    vi.spyOn(api, "getMe").mockResolvedValue({ mode: "on", identity: { kind: "user" }, tenant: { id: "et-dana", name: "Dana's team", skin: "console" }, worlds: [] } as never);
+    vi.spyOn(api, "getWorldCounts").mockResolvedValue({ worlds: [{ tenantId: "et-dana", tenantName: "Dana's team", role: "owner", current: true, needsYou: 0, review: 0 }] });
+    const nw = vi.spyOn(api, "newWorkspace").mockResolvedValue({ tenantId: "et-dana-side", name: "Side project", made: true });
+    const sw = vi.spyOn(api, "switchWorld").mockResolvedValue(undefined as never);
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    render(
+      <MemoryRouter>
+        <WorldSwitcher />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByTestId("new-workspace"));
+    expect(screen.getByTestId("world-switcher").textContent).toContain("Your workspaces");
+    expect(screen.getByTestId("world-switcher").textContent).not.toMatch(/world/i);
+    fireEvent.change(screen.getByTestId("new-workspace-name"), { target: { value: "Side project" } });
+    fireEvent.click(screen.getByTestId("new-workspace-make"));
+    await waitFor(() => expect(nw).toHaveBeenCalledWith("et-dana", "Side project"));
+    await waitFor(() => expect(sw).toHaveBeenCalledWith("et-dana-side"));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"));
+    vi.unstubAllGlobals();
   });
 });

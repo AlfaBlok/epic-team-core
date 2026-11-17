@@ -38,6 +38,8 @@ export type ScreenId =
   | "setup"
   /** balance, 30-day burn, ledger (both skins; the platform also tops up and sets the gate here). */
   | "credits"
+  /** the workspace's own AI, in its own team vault (console skin; hosted pages/YourAi.tsx). */
+  | "yourAi"
   /** My ideas & priorities (social only). */
   | "ideas"
   /** social screens (social nav; in the console skin reachable from the repo's Spines card, no nav link). */
@@ -137,7 +139,7 @@ const CONSOLE_WORDS: Words = {
 };
 
 // Social-only screens are left out of the console skin.
-const ALL_SCREENS: ScreenId[] = ["goalSets", "team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits"];
+const ALL_SCREENS: ScreenId[] = ["goalSets", "team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits", "yourAi"];
 
 /**
  * the social skin is the console with a violet theme and favicon, one

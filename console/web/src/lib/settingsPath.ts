@@ -1,3 +1,6 @@
+import { api } from "@/api";
+import { useQuery } from "@/lib/data";
+import { homeWorld } from "@/lib/identity";
 import { type ScreenId, useShows, useWords } from "@/lib/skin";
 
 /** the Settings page's path, beside the menu's operator pages. */
@@ -37,10 +40,14 @@ function usePages(input: boolean): Page[] {
     // the owner looks for "who applied", so the entry says Applications.
     { screen: "testers", to: "/testers", label: "Applications", what: "tester applications", testId: "op-applications", input: false },
     { screen: "testers", to: "/feedback", label: "Voice feedback", what: "voice notes from testers and customers", testId: "op-feedback", input: false },
+    { screen: "yourAi", to: "/your-ai", label: "Your AI", what: "the AI your team runs on", testId: "op-your-ai", input: true },
     { screen: "credits", to: "/credits", label: "Credits", what: "top up your credits", testId: "op-credits", input: true },
     { screen: "browserAuth", to: "/auth", label: w.browserAuth, what: "sign the team browser in or out", testId: "op-browser-auth", input: true },
     { screen: "settings", to: `/${DASHBOARD_PATH}`, label: "Dashboard", what: "project cards, personas and activity", testId: "op-dashboard", input: false },
   ];
-  return all.filter((p) => p.input === input && shows(p.screen)).map(({ to, label, what, testId }) => ({ to, label, what, testId }));
+  // Your AI is a customer workspace's: the home world's team still runs on the platform's seats.
+  const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
+  const customer = !!me?.tenant?.id && me.tenant.id !== homeWorld();
+  return all.filter((p) => p.input === input && shows(p.screen) && (p.screen !== "yourAi" || customer)).map(({ to, label, what, testId }) => ({ to, label, what, testId }));
 }
 
