@@ -27,7 +27,7 @@ export interface CardType {
   /**
    * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "understand the different types of cards that we have ... and have clarity
    * over the buttons"): what the card asks of him. A `decision` card's buttons are its options, each named by what happens
-   * next, plus Give feedback: never Mark complete, never a lone Send my pick (cardInventory.test.tsx holds it).
+   * next, plus Voice and Text: never Mark complete, never a lone Send my pick (cardInventory.test.tsx holds it).
    */
   kind: CardKind;
   /** the buttons it shows, in his words: the one table (the inventory page and docs/review-cards.md). */
@@ -195,21 +195,21 @@ export const sampleConnect = (): ConnectItem => ({
 });
 
 export const CARD_TYPES: CardType[] = [
-  { id: "decide-options", kind: "decision", buttons: "One button per option, its own words, the recommended one filled. Park. Snooze. Give feedback.", name: "Decide: pick one of several options (E946-A29)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleA29()} showMilestone /> },
-  { id: "decide-listed-semicolons", kind: "decision", buttons: "One button per listed option, the team's pick filled. Park. Snooze. Give feedback.", name: "Decide: options written with semicolons (E946-A31)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["yes as it stands", "yes with changes said in the page's feedback box", "no"], recommendation: "yes as it stands" })} /> },
-  { id: "decide-no-options", kind: "decision", buttons: "Yes, <the action> · No, built from the question, the team's pick filled. Park. Snooze. Give feedback.", name: "Decide: an ask that lists no options", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31_bare", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["Yes, agree this plan for the testers", "No"], optionsDerived: true, recommendation: "Yes, agree this plan for the testers" } as Partial<WaitingItem>)} /> },
-  { id: "decide-yes-no", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Decide: a yes or no question", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_yesno", ask: "decide", question: "Should the team post twice a day this week?" })} /> },
+  { id: "decide-options", kind: "decision", buttons: "One button per option, its own words, the recommended one filled. Park. Snooze. Voice · Text.", name: "Decide: pick one of several options (E946-A29)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleA29()} showMilestone /> },
+  { id: "decide-listed-semicolons", kind: "decision", buttons: "One button per listed option, the team's pick filled. Park. Snooze. Voice · Text.", name: "Decide: options written with semicolons (E946-A31)", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["yes as it stands", "yes with changes said in the page's feedback box", "no"], recommendation: "yes as it stands" })} /> },
+  { id: "decide-no-options", kind: "decision", buttons: "Yes, <the action> · No, built from the question, the team's pick filled. Park. Snooze. Voice · Text.", name: "Decide: an ask that lists no options", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_a31_bare", ask: "decide", question: "Agree this plan for the testers and start the three-day experiment tomorrow, Friday 13 Nov? The team recommends yes.", options: ["Yes, agree this plan for the testers", "No"], optionsDerived: true, recommendation: "Yes, agree this plan for the testers" } as Partial<WaitingItem>)} /> },
+  { id: "decide-yes-no", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Voice · Text.", name: "Decide: a yes or no question", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_yesno", ask: "decide", question: "Should the team post twice a day this week?" })} /> },
   { id: "answer", kind: "answer", buttons: "Park. Snooze. His words are the answer. Send in the feedback box.", name: "Answer: words, a key place or a screenshot", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk()} /> },
-  { id: "approve", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Approve: a recommendation the team wants your yes on", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_approve", ask: "approve", decidable: true, question: "Approve sending the week's report to the testers?", recommendation: "Approve" })} /> },
-  { id: "do", kind: "do", buttons: "Done · Stuck. Park. Snooze. Give feedback.", name: "Do: steps only you can do, then Done or Stuck", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_do", ask: "do", question: "Turn on two-step sign-in for the X account.", steps: "1. Open X settings · 2. Turn on two-step sign-in", stepsLink: { label: "steps", url: "https://example.com/steps/two-step" } } as Partial<WaitingItem>)} /> },
+  { id: "approve", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Voice · Text.", name: "Approve: a recommendation the team wants your yes on", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_approve", ask: "approve", decidable: true, question: "Approve sending the week's report to the testers?", recommendation: "Approve" })} /> },
+  { id: "do", kind: "do", buttons: "Done · Stuck. Park. Snooze. Voice · Text.", name: "Do: steps only you can do, then Done or Stuck", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_do", ask: "do", question: "Turn on two-step sign-in for the X account.", steps: "1. Open X settings · 2. Turn on two-step sign-in", stepsLink: { label: "steps", url: "https://example.com/steps/two-step" } } as Partial<WaitingItem>)} /> },
   { id: "key", kind: "key", buttons: "The private box and Save key. Park. Snooze.", name: "Key: paste a secret into its private box", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_key", question: "Paste the Mailgun sending key.", secret: { app: "socialapp", name: "MAILGUN_KEY" } } as Partial<WaitingItem>)} /> },
-  { id: "persona-request", kind: "decision", buttons: "One button per option, a bare Yes or No gets its next step. Give feedback.", name: "Persona request: a persona asks you directly", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_nj", source: "needs_jordi", needsJordiId: "nj_sample", ask: "decide", question: "Can the Writer use your photo on the about page?", options: ["Yes", "No, use the logo"] } as Partial<WaitingItem>)} /> },
-  { id: "improvement", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Give feedback.", name: "Improvement request from another world", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_impr", ask: "approve", decidable: true, question: "SocialApp asks for a bulk schedule button.", improvement: { to: "EpicTeam", doneMeans: "Testers schedule ten posts at once." } } as Partial<WaitingItem>)} /> },
-  { id: "answered", kind: "news", buttons: "None: it shows his answer being written. Give feedback.", name: "Answered: your answer is being written", where: "Inbox, Answered", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_answered", state: "answered", answer: "hello@example.com" })} /> },
-  { id: "fyi", kind: "news", buttons: "Reverse. Give feedback.", name: "Decided for you: the team decided, you can reverse it", where: "Inbox, Decided for you", component: "FyiCard", render: () => <FyiCard item={sampleAsk({ id: "sample_fyi", decidedBy: "Delivery Manager", question: "Posts go out at 14:00 UTC.", answer: "Chosen because most replies came then." })} /> },
-  { id: "status-ready", kind: "do", buttons: "Mark ready for delivery. Give feedback.", name: "Do: stamp a task ready", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("mark_ready")} /> },
-  { id: "status-review", kind: "news", buttons: "None: the line opens its task. Give feedback.", name: "Review: a status line that needs a look", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("stalled")} /> },
-  { id: "monitor-alert", kind: "news", buttons: "None: it opens the check. Give feedback.", name: "Alert: a check stopped or is late", where: "Inbox, top", component: "MonitorAlertCard", render: () => <MonitorAlertCard item={sampleAlert()} /> },
+  { id: "persona-request", kind: "decision", buttons: "One button per option, a bare Yes or No gets its next step. Voice · Text.", name: "Persona request: a persona asks you directly", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_nj", source: "needs_jordi", needsJordiId: "nj_sample", ask: "decide", question: "Can the Writer use your photo on the about page?", options: ["Yes", "No, use the logo"] } as Partial<WaitingItem>)} /> },
+  { id: "improvement", kind: "decision", buttons: "Yes: go ahead · No: drop it. Park. Snooze. Voice · Text.", name: "Improvement request from another world", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_impr", ask: "approve", decidable: true, question: "SocialApp asks for a bulk schedule button.", improvement: { to: "EpicTeam", doneMeans: "Testers schedule ten posts at once." } } as Partial<WaitingItem>)} /> },
+  { id: "answered", kind: "news", buttons: "None: it shows his answer being written. Voice · Text.", name: "Answered: your answer is being written", where: "Inbox, Answered", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_answered", state: "answered", answer: "hello@example.com" })} /> },
+  { id: "fyi", kind: "news", buttons: "Reverse. Voice · Text.", name: "Decided for you: the team decided, you can reverse it", where: "Inbox, Decided for you", component: "FyiCard", render: () => <FyiCard item={sampleAsk({ id: "sample_fyi", decidedBy: "Delivery Manager", question: "Posts go out at 14:00 UTC.", answer: "Chosen because most replies came then." })} /> },
+  { id: "status-ready", kind: "do", buttons: "Mark ready for delivery. Voice · Text.", name: "Do: stamp a task ready", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("mark_ready")} /> },
+  { id: "status-review", kind: "news", buttons: "None: the line opens its task. Voice · Text.", name: "Review: a status line that needs a look", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("stalled")} /> },
+  { id: "monitor-alert", kind: "news", buttons: "None: it opens the check. Voice · Text.", name: "Alert: a check stopped or is late", where: "Inbox, top", component: "MonitorAlertCard", render: () => <MonitorAlertCard item={sampleAlert()} /> },
   {
     id: "ask-set",
     kind: "decision",
@@ -229,12 +229,12 @@ export const CARD_TYPES: CardType[] = [
       />
     ),
   },
-  { id: "review", kind: "review", buttons: "Mark complete · Park · Snooze · Give feedback.", name: "Review: a finished task to accept or send back", where: "Inbox, Waiting for your review", component: "ReviewCard", render: () => <ReviewCard item={sampleReview()} /> },
+  { id: "review", kind: "review", buttons: "Mark complete · Park · Snooze · Voice · Text.", name: "Review: a finished task to accept or send back", where: "Inbox, Waiting for your review", component: "ReviewCard", render: () => <ReviewCard item={sampleReview()} /> },
   // E948-S53 (the owner, vn_ebf81fab: "Mark complete, close the goal"): the last open part of a goal says on its own button that it closes the goal; no live card may be one tonight, so the sample shows it
   {
     id: "review-last-part",
     kind: "review",
-    buttons: "Mark complete, close the goal · Park · Snooze · Give feedback.",
+    buttons: "Mark complete, close the goal · Park · Snooze · Voice · Text.",
     name: "Review: the last open part of a goal (Mark complete, close the goal)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -261,7 +261,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-switches",
     kind: "review",
-    buttons: "Start N, counting the switches that are on (Close, start nothing when all are off) · Park · Snooze · Give feedback.",
+    buttons: "Start N, counting the switches that are on (Close, start nothing when all are off) · Park · Snooze · Voice · Text.",
     name: "Review: a persona's follow-ups, each switched on or off (Start N)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -288,7 +288,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-next-steps",
     kind: "review",
-    buttons: "Start N, counting the steps set to Start now (Close, start nothing when all are parked) · Park · Snooze · Give feedback.",
+    buttons: "Start N, counting the steps set to Start now (Close, start nothing when all are parked) · Park · Snooze · Voice · Text.",
     name: "Review: a finished task with next steps, each Start now or Park (Start N)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -318,7 +318,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-decision",
     kind: "decision",
-    buttons: "Yes: plan it · No: park it, the team's pick filled. Park. Snooze. Give feedback. Never Mark complete.",
+    buttons: "Yes: plan it · No: park it, the team's pick filled. Park. Snooze. Voice · Text. Never Mark complete.",
     name: "Decide: a finished piece that asks a decision (the used-car lookup)",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -346,7 +346,7 @@ export const CARD_TYPES: CardType[] = [
   {
     id: "review-decision-options",
     kind: "decision",
-    buttons: "The card's own options, each Answer: next step. Park. Snooze. Give feedback. Never Mark complete.",
+    buttons: "The card's own options, each Answer: next step. Park. Snooze. Voice · Text. Never Mark complete.",
     name: "Decide: a finished piece with its own options",
     where: "Inbox, Waiting for your review",
     component: "ReviewCard",
@@ -365,17 +365,17 @@ export const CARD_TYPES: CardType[] = [
       />
     ),
   },
-  { id: "review-old", kind: "review", buttons: "Open it. Park. Give feedback.", name: "Review from an older release (no card face)", where: "Inbox, Waiting for your review", component: "OldCard", render: () => <ReviewCard item={sampleReview({ id: "sample_old", face: undefined })} /> },
+  { id: "review-old", kind: "review", buttons: "Open it. Park. Voice · Text.", name: "Review from an older release (no card face)", where: "Inbox, Waiting for your review", component: "OldCard", render: () => <ReviewCard item={sampleReview({ id: "sample_old", face: undefined })} /> },
   { id: "held-post", kind: "review", buttons: "Schedule · Changes wanted · Decline.", name: "SocialApp: a held post waiting for you", where: "Inbox, Waiting for your review (both skins)", component: "PostReviewCard", render: () => <PostReviewCard item={samplePost()} /> },
   { id: "held-reply", kind: "review", buttons: "Schedule this reply · Changes wanted · Decline.", name: "SocialApp: a reply in a thread waiting for you", where: "Inbox, Waiting for your review (both skins)", component: "PostReviewCard", render: () => <PostReviewCard item={samplePost("outreach")} /> },
   { id: "mac-ticket", kind: "do", buttons: "Copy the text · Done · Stuck or changes wanted.", name: "Mac: a ticket Claude on your Mac does", where: "Inbox, Needs Mac agent", component: "LaptopCard", render: () => <LaptopCard row={macRow(true)} n={1} /> },
-  { id: "mac-no-page", kind: "do", buttons: "Copy the text. Give feedback.", name: "Mac: a ticket whose page is not written yet", where: "Inbox, Needs Mac agent", component: "MacCards", render: () => <MacCards rows={[macRow(false)]} /> },
-  { id: "team-digest", kind: "news", buttons: "Seen. Give feedback.", name: "Digest: a scorecard greener or redder, and why", where: "Inbox, Scorecard digests", component: "TeamDigestCard", render: () => <TeamDigestCard card={sampleDigest()} /> },
-  { id: "team-idea", kind: "decision", buttons: "Go ahead. Park. Give feedback.", name: "Idea: a way to reach a goal faster, the gain, our recommendation", where: "Inbox, Ideas", component: "TeamIdeaCard", render: () => <TeamIdeaCard card={sampleIdea()} /> },
-  { id: "team-advisor", kind: "decision", buttons: "Accept all on top, then Accept · Decline per suggestion. Give feedback on each.", name: "Senior advisor: the week's suggestions as one set", where: "Inbox, From the Senior advisor", component: "AdvisorSetCard", render: () => <AdvisorSetCard card={sampleAdvisor()} /> },
-  { id: "connect", kind: "do", buttons: "Connect with Google, in this browser. Give feedback.", name: "Connect: one tap to let the team use a Google account", where: "Inbox, top (and the Connections page)", component: "ConnectCard", render: () => <ConnectCard c={sampleConnect()} /> },
-  { id: "team-goal", kind: "decision", buttons: "One button per goal, the recommended one marked. Park. Give feedback.", name: "Goal: a goal that is not set, two or three to pick from", where: "Inbox, Goals to set", component: "GoalTalkCard", render: () => <GoalTalkCard card={sampleGoal()} /> },
-  { id: "campaign-goal", kind: "answer", buttons: "Open the campaign. Give feedback: his number in words or by voice.", name: "Goal: a campaign with no goal number of his yet", where: "Inbox, Goals to set", component: "CampaignGoalCard", render: () => <CampaignGoalCard t={{ name: "Testers campaign", app: "social", openUrl: "https://social.example/campaigns/testers", text: "It has no number yet. What number would tell you it worked?" }} /> },
+  { id: "mac-no-page", kind: "do", buttons: "Copy the text. Voice · Text.", name: "Mac: a ticket whose page is not written yet", where: "Inbox, Needs Mac agent", component: "MacCards", render: () => <MacCards rows={[macRow(false)]} /> },
+  { id: "team-digest", kind: "news", buttons: "Seen. Voice · Text.", name: "Digest: a scorecard greener or redder, and why", where: "Inbox, Scorecard digests", component: "TeamDigestCard", render: () => <TeamDigestCard card={sampleDigest()} /> },
+  { id: "team-idea", kind: "decision", buttons: "Go ahead. Park. Voice · Text.", name: "Idea: a way to reach a goal faster, the gain, our recommendation", where: "Inbox, Ideas", component: "TeamIdeaCard", render: () => <TeamIdeaCard card={sampleIdea()} /> },
+  { id: "team-advisor", kind: "decision", buttons: "Accept all on top, then Accept · Decline per suggestion. Voice · Text on each.", name: "Senior advisor: the week's suggestions as one set", where: "Inbox, From the Senior advisor", component: "AdvisorSetCard", render: () => <AdvisorSetCard card={sampleAdvisor()} /> },
+  { id: "connect", kind: "do", buttons: "Connect with Google, in this browser. Voice · Text.", name: "Connect: one tap to let the team use a Google account", where: "Inbox, top (and the Connections page)", component: "ConnectCard", render: () => <ConnectCard c={sampleConnect()} /> },
+  { id: "team-goal", kind: "decision", buttons: "One button per goal, the recommended one marked. Park. Voice · Text.", name: "Goal: a goal that is not set, two or three to pick from", where: "Inbox, Goals to set", component: "GoalTalkCard", render: () => <GoalTalkCard card={sampleGoal()} /> },
+  { id: "campaign-goal", kind: "answer", buttons: "Open the campaign. Voice · Text: his number in words or by voice.", name: "Goal: a campaign with no goal number of his yet", where: "Inbox, Goals to set", component: "CampaignGoalCard", render: () => <CampaignGoalCard t={{ name: "Testers campaign", app: "social", openUrl: "https://social.example/campaigns/testers", text: "It has no number yet. What number would tell you it worked?" }} /> },
 ];
 
 /**
@@ -459,7 +459,7 @@ export function CardInventoryPage() {
       <header className="grid gap-2">
         <h1 className="text-xl font-semibold">Every card type the team can send you: {CARD_TYPES.length}, each ending with the feedback block.</h1>
         <div className="rounded-lg border p-3 text-sm">
-          A decision card answers with its options, each named by what happens next, never Mark complete. Every card that waits on you has Park: not now, nothing decided, back in a month or whenever you bring it back. Every card ends the same way: a text box, a screenshot (paste or the paperclip), a big Speak button, and Send. Samples only: pressing here sends nothing.
+          A decision card answers with its options, each named by what happens next, never Mark complete. Every card that waits on you has Park: not now, nothing decided, back in a month or whenever you bring it back. Every card ends the same way: its buttons in one row, then Voice (one tap records, the next sends) and Text (opens the box with a screenshot and Send). Samples only: pressing here sends nothing.
           {/* E948-S69: the one table of card types and their buttons. On a phone each row stacks as a block (no squeezed columns, nothing cut); a table from sm up. */}
           <table className="mt-2 block w-full border-collapse text-left sm:table" data-testid="card-button-table">
             <thead className="hidden sm:table-header-group">

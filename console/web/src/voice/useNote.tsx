@@ -226,8 +226,9 @@ export function useNote(props: {
     <Button
       type="button"
       data-testid={`${tid}-button`}
+      {...(props.big ? { "data-card-button": "" } : {})}
       variant={on ? "destructive" : props.big ? "outline" : "ghost"}
-      className={cn(PHONE_TAP, "shrink-0 gap-1.5", props.big ? "h-11 px-4 text-sm font-medium [&_svg]:size-5" : on ? "max-sm:h-11 max-sm:px-3" : "max-sm:size-11 max-sm:px-0", card && !props.big && "h-8")}
+      className={cn(PHONE_TAP, "shrink-0 gap-1.5", props.big ? "h-8 px-3 text-sm font-medium whitespace-nowrap [&_svg]:size-4 max-sm:flex-auto max-sm:justify-center" : on ? "max-sm:h-11 max-sm:px-3" : "max-sm:size-11 max-sm:px-0", card && !props.big && "h-8")}
       disabled={props.disabled || capped || sending || v.phase === "starting"}
       pending={sending}
       pendingLabel={<span className="max-sm:sr-only">Sending…</span>}

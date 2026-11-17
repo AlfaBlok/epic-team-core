@@ -130,13 +130,14 @@ function Answered({ text }: { text?: string }) {
 
 /** The owner 2026-11-15: the feedback box is one of the answer's options, so it sits right under the
  * buttons with no grey line explaining them ("more fluff about what I think the buttons mean, and then feedback"). */
-function Feedback({ card, answer }: { card: TeamCard; answer: ReturnType<typeof useAnswer>["answer"] }) {
+function Feedback({ card, answer, actions }: { card: TeamCard; answer: ReturnType<typeof useAnswer>["answer"]; actions?: ReactNode }) {
   return (
     <CardFeedback
       origin={`team-card:${card.id}`}
       title={card.title}
       refName={card.id}
-      className="mt-2"
+      className="mt-3.5"
+      actions={actions}
       send={(words, files, via) => answer("words", { text: words, via, ...(files.length ? { attachments: files } : {}) })}
     />
   );
@@ -205,14 +206,17 @@ function TeamDigestBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c:
           Open the {SET_NAME.one.toLowerCase()}
         </Link>
       )}
-      <div className="mt-3.5 flex flex-wrap items-center gap-2">
-        {st.done === undefined && (
-          <CardButton variant="outline" disabled={!!st.busy} pending={st.busy === "seen"} pendingLabel="Saving…" onClick={() => void st.answer("seen", { text: "Seen", via: "button" }).catch(() => {})} data-testid="digest-seen">
-            Seen
-          </CardButton>
-        )}
-      </div>
-      <Feedback card={card} answer={st.answer} />
+      <Feedback
+        card={card}
+        answer={st.answer}
+        actions={
+          st.done === undefined && (
+            <CardButton variant="outline" disabled={!!st.busy} pending={st.busy === "seen"} pendingLabel="Saving…" onClick={() => void st.answer("seen", { text: "Seen", via: "button" }).catch(() => {})} data-testid="digest-seen">
+              Seen
+            </CardButton>
+          )
+        }
+      />
       <Answered text={st.done} />
       {st.error && <div className="mt-1 text-xs text-destructive">{st.error}</div>}
     </CardShell>
@@ -258,15 +262,20 @@ function TeamIdeaBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: T
           ))}
         </div>
       )}
-      {st.done === undefined && (
-        <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <CardButton disabled={!!st.busy} pending={st.busy === "go"} pendingLabel="Saving…" onClick={() => void st.answer("go", { text: "Go ahead", via: "button" }).catch(() => {})} data-testid="idea-go">
-            Go ahead
-          </CardButton>
-          <TeamPark st={st} />
-        </div>
-      )}
-      <Feedback card={card} answer={st.answer} />
+      <Feedback
+        card={card}
+        answer={st.answer}
+        actions={
+          st.done === undefined && (
+            <>
+              <CardButton disabled={!!st.busy} pending={st.busy === "go"} pendingLabel="Saving…" onClick={() => void st.answer("go", { text: "Go ahead", via: "button" }).catch(() => {})} data-testid="idea-go">
+                Go ahead
+              </CardButton>
+              <TeamPark st={st} />
+            </>
+          )
+        }
+      />
       <Answered text={st.done} />
       {st.error && <div className="mt-1 text-xs text-destructive">{st.error}</div>}
     </CardShell>
@@ -279,19 +288,6 @@ const ORDINAL = ["first", "second", "third", "fourth"];
 export function goalQuestion(g: NonNullable<TeamCard["goal"]>): string {
   const rec = g.recommend !== undefined && g.options[g.recommend] ? ORDINAL[g.recommend] : undefined;
   return `Which goal do we set?${rec ? ` We recommend the ${rec} one.` : ""}`;
-}
-
-/** Give feedback beside the buttons, as on every other card: it takes him to the feedback box under them. */
-function GiveFeedback({ box }: { box: string }) {
-  return (
-    <CardButton
-      variant="outline"
-      onClick={() => document.getElementById(box)?.querySelector<HTMLTextAreaElement>("textarea")?.focus()}
-      data-testid="goal-feedback"
-    >
-      Give feedback
-    </CardButton>
-  );
 }
 
 /** the "Your decision" box every decision card ends with, right above the buttons that answer it. */
@@ -350,28 +346,32 @@ function GoalTalkBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: T
       ))}
       <DecisionBox>{goalQuestion(g)}</DecisionBox>
       <div className="mt-3.5 grid min-w-0 gap-2" data-card-answer="">
-        <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="goal-options" data-card-buttons="decision">
-          {g.options.map((o, n) => (
-            <CardButton
-              key={n}
-              variant={g.recommend === n ? "default" : "outline"}
-              className={cn("h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]", st.done !== undefined && card.answer?.pick === n && "ring-2 ring-foreground/40")}
-              disabled={!!st.busy || st.done !== undefined}
-              pending={st.busy === `pick${n}`}
-              pendingLabel="Saving…"
-              title={`${o.number}${g.recommend === n ? ", we recommend this one" : ""}`}
-              onClick={() => void st.answer(`pick${n}`, { pick: n, text: "", via: "button" }).catch(() => {})}
-              data-testid="goal-option"
-              data-recommended={g.recommend === n ? "yes" : "no"}
-            >
-              {o.goal}
-            </CardButton>
-          ))}
-          {st.done === undefined && <TeamPark st={st} />}
-          <GiveFeedback box={box} />
-        </div>
         <div id={box}>
-          <Feedback card={card} answer={st.answer} />
+          <Feedback
+            card={card}
+            answer={st.answer}
+            actions={
+            <div className="contents" data-testid="goal-options" data-card-buttons="decision">
+              {g.options.map((o, n) => (
+                <CardButton
+                  key={n}
+                  variant={g.recommend === n ? "default" : "outline"}
+                  className={cn("h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]", st.done !== undefined && card.answer?.pick === n && "ring-2 ring-foreground/40")}
+                  disabled={!!st.busy || st.done !== undefined}
+                  pending={st.busy === `pick${n}`}
+                  pendingLabel="Saving…"
+                  title={`${o.number}${g.recommend === n ? ", we recommend this one" : ""}`}
+                  onClick={() => void st.answer(`pick${n}`, { pick: n, text: "", via: "button" }).catch(() => {})}
+                  data-testid="goal-option"
+                  data-recommended={g.recommend === n ? "yes" : "no"}
+                >
+                  {o.goal}
+                </CardButton>
+              ))}
+                {st.done === undefined && <TeamPark st={st} />}
+              </div>
+            }
+          />
         </div>
       </div>
       <Answered text={st.done} />
@@ -474,14 +474,17 @@ function AdvisorSetBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c:
             <A href={set.page}>The Senior advisor&apos;s page for this week</A>
           </div>
         )}
-        {left.length > 0 && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            <CardButton disabled={!!busy} pending={busy === "all"} pendingLabel={`Accepting ${left.length}…`} onClick={() => void send("all", { verdict: "accept", via: "button" }).catch(() => {})} data-testid="advisor-accept-all">
-              Accept all {left.length}: make them tasks
-            </CardButton>
-          </div>
-        )}
-        <Feedback card={card} answer={st.answer} />
+        <Feedback
+          card={card}
+          answer={st.answer}
+          actions={
+            left.length > 0 && (
+              <CardButton disabled={!!busy} pending={busy === "all"} pendingLabel={`Accepting ${left.length}…`} onClick={() => void send("all", { verdict: "accept", via: "button" }).catch(() => {})} data-testid="advisor-accept-all">
+                Accept all {left.length}: make them tasks
+              </CardButton>
+            )
+          }
+        />
         {!left.length && (
           <p className="mt-2 text-xs text-muted-foreground" data-testid="team-card-answered">
             Your answer is saved ✓ every suggestion has it
@@ -552,16 +555,7 @@ function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: Suggesti
           {v.state === "accepted" ? `Accepted ✓ ${v.row ? `it is the ready task ${v.row}` : ""}` : "Declined ✓ the team drops it"}
           {v.text ? `. ${v.text}` : ""}
         </p>
-      ) : (
-        <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <CardButton disabled={!!busy} pending={busy === `a:${item.id}`} pendingLabel="Saving…" onClick={() => void send(`a:${item.id}`, { verdict: "accept", items: [item.id], via: "button" }).catch(() => {})} data-testid="advisor-accept">
-            Accept: make it a task
-          </CardButton>
-          <CardButton variant="outline" disabled={!!busy} pending={busy === `d:${item.id}`} pendingLabel="Saving…" onClick={() => void send(`d:${item.id}`, { verdict: "decline", items: [item.id], via: "button" }).catch(() => {})} data-testid="advisor-decline">
-            Decline: drop it
-          </CardButton>
-        </div>
-      )}
+      ) : null}
       {(item.notes ?? []).map((x) => (
         <p key={x.at} className="mt-1 text-xs text-muted-foreground" data-testid="advisor-item-note">
           You said: {x.text}
@@ -571,7 +565,19 @@ function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: Suggesti
         origin={`team-card:${card.id}:${item.id}`}
         title={item.title}
         refName={`${card.id} ${item.id}`}
-        className="mt-2"
+        className="mt-3.5"
+        actions={
+          v ? undefined : (
+            <>
+              <CardButton disabled={!!busy} pending={busy === `a:${item.id}`} pendingLabel="Saving…" onClick={() => void send(`a:${item.id}`, { verdict: "accept", items: [item.id], via: "button" }).catch(() => {})} data-testid="advisor-accept">
+                Accept: make it a task
+              </CardButton>
+              <CardButton variant="outline" disabled={!!busy} pending={busy === `d:${item.id}`} pendingLabel="Saving…" onClick={() => void send(`d:${item.id}`, { verdict: "decline", items: [item.id], via: "button" }).catch(() => {})} data-testid="advisor-decline">
+                Decline: drop it
+              </CardButton>
+            </>
+          )
+        }
         send={(words, files, via) => send(`n:${item.id}`, { verdict: "note", items: [item.id], text: words, via, ...(files.length ? { attachments: files } : {}) })}
       />
     </CardShell>

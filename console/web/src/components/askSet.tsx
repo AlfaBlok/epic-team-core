@@ -2,7 +2,7 @@ import { useState } from "react";
 import { goLink, SnoozeDropdown } from "@/components/waiting";
 import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
 import type { SnoozeChoice } from "@/api";
-import { CardFeedback, sendFeedback } from "@/components/cardFeedback";
+import { CardFeedback, RowPair, sendFeedback } from "@/components/cardFeedback";
 import { cardPage } from "@/voice/AnswerVoice";
 import { CARD_FRAME, CARD_META, CARD_TITLE } from "@/components/cardShell";
 import { Loader2 } from "lucide-react";
@@ -215,28 +215,39 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
           <SetRow key={i.id} item={i} done={pressed(i)} busy={busy} readOnly={readOnly} onPress={press} />
         ))}
       </ol>
-      {!readOnly && left.length > 0 && (
-        <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <CardButton disabled={!!busy} onClick={() => void acceptAll()} data-testid="accept-all">
-            {busy === "all" && <Loader2 className="animate-spin" />} Yes to all {left.length}: make them tasks
-          </CardButton>
-          {/* E948-S83 iteration 2: Park the whole set (a month on each ask's line, nothing decided). */}
-          {snoozable.length > 0 && (
-            <ParkButton
-              disabled={!!busy}
-              onPark={() => {
-                for (const i of snoozable) void snoozeItem(i, { days: PARK_DAYS }, undefined, true);
-                showClosed({ said: PARK.said, slot: setSlots(group), title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
-              }}
-            />
-          )}
-          {/* the owner 2026-11-15: Snooze beside Park, never in the meta line. */}
-          {snoozable.length > 0 && <SnoozeDropdown id={`set:${group.persona}`} disabled={!!busy} onPick={snoozeAll} />}
-        </div>
-      )}
       {/* E948-S60: the set takes feedback as a whole, to the Team desk with the set named; right under its buttons, nothing
           between (the owner 2026-11-15: the feedback is one of the buttons' options); who sent it is in the meta line. */}
-      <CardFeedback className="mt-2" origin={`set-feedback:${group.persona}:${group.items[0]?.id ?? ""}`} title={title} refName={refName} send={sendWords} />
+      <CardFeedback
+        className="mt-3.5"
+        origin={`set-feedback:${group.persona}:${group.items[0]?.id ?? ""}`}
+        title={title}
+        refName={refName}
+        send={sendWords}
+        actions={
+          !readOnly &&
+          left.length > 0 && (
+            <>
+                <CardButton disabled={!!busy} onClick={() => void acceptAll()} data-testid="accept-all">
+                  {busy === "all" && <Loader2 className="animate-spin" />} Yes to all {left.length}: make them tasks
+                </CardButton>
+                {/* E948-S83 iteration 2: Park the whole set (a month on each ask's line, nothing decided). */}
+                {snoozable.length > 0 && (
+                  <RowPair>
+                  <ParkButton
+                    disabled={!!busy}
+                    onPark={() => {
+                      for (const i of snoozable) void snoozeItem(i, { days: PARK_DAYS }, undefined, true);
+                      showClosed({ said: PARK.said, slot: setSlots(group), title: `The ${group.persona}'s ${group.items.length} recommendations`, back: async () => (await Promise.all(snoozable.map((i) => unsnoozeItem(i))), { back: true, line: "They are back in your inbox." }) });
+                    }}
+                  />
+                  {/* the owner 2026-11-15: Snooze beside Park, never in the meta line. */}
+                  <SnoozeDropdown id={`set:${group.persona}`} disabled={!!busy} onPick={snoozeAll} />
+                  </RowPair>
+                )}
+            </>
+          )
+        }
+      />
       {said && (
         <p className="mt-1 text-xs text-muted-foreground" data-testid="ask-set-said">
           {said}

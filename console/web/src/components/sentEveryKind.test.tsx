@@ -8,6 +8,7 @@ import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetDeskVoiceWorld } from "@/voice/deskBase";
 import { markSent, resetSent } from "@/lib/sentRows";
 import { api } from "@/api";
+import { openText } from "@/test/openText";
 
 // E948-S130 (the owner 17 Nov 17:28Z, vn_4f13161d: "after a text is sent, it ... collapses and remains there for you to add
 // things. Is this happening to all cards or only in the cards that are review? Because on decisions waiting on you, done,
@@ -60,6 +61,7 @@ describe("E948-S130 every card kind collapses to its Sent row after his words", 
       const root = container.firstElementChild as HTMLElement;
       const blocks = [...root.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       const block = blocks[blocks.length - 1];
+      openText(block);
       fireEvent.change(within(block).getByRole("textbox"), { target: { value: "Please also add the date on it." } });
       const send = block.querySelector<HTMLButtonElement>("[data-feedback-send]")!;
       await waitFor(() => expect(send.disabled).toBe(false));

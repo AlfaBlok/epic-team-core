@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { api, type WaitingItem } from "@/api";
 import { AskSet, askSets, setLine, setWhy } from "@/components/askSet";
 import { ownYesNo } from "@/lib/oneDecision";
+import { openText } from "@/test/openText";
 
 afterEach(() => {
   cleanup();
@@ -138,6 +139,7 @@ describe("AskSet", () => {
     });
     const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
     render(<AskSet group={{ persona: "Delivery Manager", items: [rec("ROOT-A1"), rec("ROOT-A2"), rec("ROOT-A3")] }} />);
+    openText();
     say(NOTE);
     await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Yes, no, yes"));
     expect(read).toHaveBeenCalledWith(NOTE, [expect.objectContaining({ id: "wj_ROOT-A1", code: "ROOT-A1", line: "Thing ROOT-A1" }), expect.anything(), expect.anything()]);
@@ -162,6 +164,7 @@ describe("AskSet", () => {
     });
     const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
     render(<AskSet group={{ persona: "Advisor", items: [rec("ROOT-A1"), rec("ROOT-A2")] }} />);
+    openText();
     say("the first one, yes, the second one, maybe later");
     await waitFor(() => expect(screen.getByTestId("ask-set-said").textContent).toBe("Took 1 of 2 as your answers. The desk asks you about the rest."));
     expect(calls).toEqual(["wj_ROOT-A1"]);
@@ -175,6 +178,7 @@ describe("AskSet", () => {
     vi.spyOn(api, "readSpokenAnswers").mockResolvedValue({ reads: [{ id: "wj_ROOT-A1", kind: "none" }, { id: "wj_ROOT-A2", kind: "none" }] });
     const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
     render(<AskSet group={{ persona: "Advisor", items: [rec("ROOT-A1"), rec("ROOT-A2")] }} />);
+    openText();
     say("what does the second one cost?");
     await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Your words went to the team"));
     expect(screen.getByTestId("sent-row-back")).toBeTruthy();

@@ -124,7 +124,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
     expect(within(lines[0] as HTMLElement).getByText("memo.example.com/connect").getAttribute("href")).toBe("https://memo.example.com/connect");
     // two buttons, the main one's sub-line is its title; the green evidence link its own line above them
     const buttons = within(c).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Snooze", "Give feedback"]); // E948-S83 iteration 2: Park on every card
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Snooze"]); // E948-S83 iteration 2: Park on every card; E948-S131: Voice and Text close the same row
     expect(within(buttons).getByTestId("review-complete").getAttribute("title")).toBe("The goal stays open. Next the team lists Memo in the official MCP registry, once you say yes to publishing.");
     const go = within(c).getByTestId("review-go");
     expect(buttons.contains(go)).toBe(false);
@@ -161,7 +161,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
     // the confirm and the feedback box too
     // the confirm, the note box (Give feedback) and everything under More too
     expect(within(screen.getAllByTestId("review-card")[1]).getByTestId("review-parked-left")).toBeTruthy();
-    fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-iteration"));
+    fireEvent.click(within(screen.getAllByTestId("review-card")[0]).getByTestId("card-feedback-text"));
     expect(within(screen.getAllByTestId("review-card")[0]).getByTestId("review-note")).toBeTruthy();
     for (const c of screen.getAllByTestId("review-card")) fireEvent.click(within(c).getByTestId("review-title"));
     fireEvent.click(within(screen.getAllByTestId("review-card")[2]).getByTestId("review-deny"));
@@ -286,13 +286,14 @@ describe("T48-S26 the buttons", () => {
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");
-    // E948-S60: the feedback block is always open; Give feedback with no words asks for them
+    // E948-S131: no box until Text opens it; Send waits for words
     expect(within(c).getByTestId("review-note")).toBeTruthy();
-    fireEvent.click(within(c).getByTestId("review-iteration"));
-    expect(within(c).getByTestId("review-note").textContent).toContain("Say what should change: write, paste a screenshot, or speak, then press Send.");
+    expect(within(c).queryByLabelText("Feedback")).toBeNull();
+    fireEvent.click(within(c).getByTestId("card-feedback-text"));
+    expect((within(c).getByTestId("card-feedback-send") as HTMLButtonElement).disabled).toBe(true);
     expect(relaunch).not.toHaveBeenCalled();
     fireEvent.change(within(c).getByLabelText("Feedback"), { target: { value: "show the Cursor steps first" } });
-    fireEvent.click(within(c).getByTestId("review-iteration"));
+    fireEvent.click(within(c).getByTestId("card-feedback-send"));
     await waitFor(() => expect(relaunch).toHaveBeenCalledWith("rv_1", "show the Cursor steps first"));
   });
 
@@ -448,7 +449,7 @@ describe("T48-S26 one flat list", () => {
     expect(screen.getByTestId("review-feed").className).toContain("min-w-0");
     expect(c.className).toContain("min-w-0");
     expect(c.className).toContain("[overflow-wrap:anywhere]");
-    expect(within(c).getByTestId("review-buttons").className).toContain("min-w-0");
+    expect(within(c).getByTestId("card-feedback-row").className).toContain("min-w-0");
     // the Snooze menu opens below its link: the card never clips it (only the screenshot frame clips its corners)
     expect(c.className).not.toContain("overflow-hidden");
     fireEvent.click(within(c).getByTestId("review-title"));

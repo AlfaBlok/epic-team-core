@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import fs from "node:fs";
 import path from "node:path";
 import { CARD_TYPES, CardInventoryPage, NOT_INBOX_CARDS, NO_PARK } from "@/components/cardInventory";
-import { FEEDBACK_HINT, FEEDBACK_SEND } from "@/components/cardFeedback";
+import { FEEDBACK_HINT, FEEDBACK_SEND, FEEDBACK_TEXT, FEEDBACK_VOICE } from "@/components/cardFeedback";
 import { forgetWorld } from "@/lib/useSocial";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetDeskVoiceWorld } from "@/voice/deskBase";
@@ -76,19 +76,26 @@ describe("E948-S60 every card type ends with the feedback block", () => {
   });
 
   for (const c of CARD_TYPES)
-    it(`${c.name}: a text box, a screenshot, a big microphone and Send, at the card's end, and no Not now`, async () => {
+    // E948-S131 (the owner 2026-11-17, vn_73e840cd): no box open by default; the row ends with Voice and Text, Text opens the box.
+    it(`${c.name}: its row ends with Voice and Text, no box until Text opens it (a screenshot and Send), at the card's end, and no Not now`, async () => {
       const { container } = render(<MemoryRouter>{c.render()}</MemoryRouter>);
       const root = container.firstElementChild as HTMLElement;
       // the card's own block (an alert's ask cards carry theirs; the card's is its last)
       const blocks = [...root.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       expect(blocks.length, "no feedback block").toBeGreaterThan(0);
       const block = blocks[blocks.length - 1];
+      expect(within(block).queryByRole("textbox"), "a text box is open by default").toBeNull();
+      const row = block.querySelector<HTMLElement>("[data-feedback-row]")!;
+      const mic = await within(row).findByTestId("answer-voice-button");
+      expect(mic.closest("[data-feedback-voice]")).toBeTruthy();
+      expect(mic.textContent).toContain(FEEDBACK_VOICE);
+      const text = within(row).getByTestId("card-feedback-text");
+      expect(text.textContent?.trim()).toBe(FEEDBACK_TEXT);
+      const rowButtons = [...row.querySelectorAll("button")];
+      expect(rowButtons.slice(-2), "Voice and Text close the row").toEqual([mic, text]);
+      fireEvent.click(text);
       expect(within(block).getByRole("textbox")).toBeTruthy();
       expect(within(block).getByTestId("chat-attach"), "no screenshot button").toBeTruthy();
-      const mic = await within(block).findByTestId("answer-voice-button");
-      expect(mic.closest("[data-feedback-mic]")).toBeTruthy();
-      expect(mic.className, "the microphone is big (44 px)").toMatch(/\bh-11\b/);
-      expect(mic.textContent).toContain("Speak");
       const send = block.querySelector("[data-feedback-send]");
       expect(send, "no Send").toBeTruthy();
       // the end: no button of the card comes after its feedback block
@@ -113,16 +120,20 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       const block = blocks[blocks.length - 1];
       const follows = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
       const shell = block.closest<HTMLElement>("[data-card-shell]") ?? root;
+      // E948-S131: the card's own answer buttons lead the block's row now; any still outside it come before it with nothing between
       const buttons = [...shell.querySelectorAll<HTMLElement>("button")].filter((b) => !b.closest("[data-card-feedback]") && !b.closest("details") && !b.closest("[data-card-meta], [data-testid=review-title], [data-testid=ask-lead]") && follows(b, block));
+      const firstInRow = block.querySelector<HTMLElement>("[data-feedback-row] button");
       const lastButton = buttons[buttons.length - 1];
       const from = lastButton ?? null;
       // no words between the card's last answer button and its feedback box (a press's own status line shows only after a press)
       const between = [...shell.querySelectorAll<HTMLElement>("*")].filter(
         (e) => e.children.length === 0 && (e.textContent ?? "").trim() && !block.contains(e) && follows(e, block) && (!from || (follows(from, e) && !from.contains(e))) && !e.closest("button"),
       );
-      if (from) expect(between.map((e) => e.textContent?.trim()), "words sit between the buttons and the feedback box").toEqual([]);
+      // E948-S131: a card whose answers lead the block's row has nothing between them and Voice and Text by construction
+      const answersInRow = (block.querySelectorAll("[data-feedback-row] button").length ?? 0) > 2;
+      if (from && !answersInRow) expect(between.map((e) => e.textContent?.trim()), "words sit between the buttons and the feedback box").toEqual([]);
       // the links to check come before the first answer button, never after it
-      const first = buttons[0];
+      const first = buttons[0] ?? firstInRow;
       if (first) {
         const late = [...shell.querySelectorAll<HTMLAnchorElement>("a[href]")].filter((a) => !block.contains(a) && !a.closest("details") && follows(first, a));
         expect(late.map((a) => `${a.textContent?.trim()} in ${a.parentElement?.closest("[data-testid]")?.getAttribute("data-testid")} after ${first.textContent?.trim()}`), "a link sits after the buttons").toEqual([]);
@@ -149,6 +160,7 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       expect(before.map((e) => e.textContent), "words come before the meta line").toEqual([]);
       const blocks = [...shell!.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       const block = blocks[blocks.length - 1];
+      fireEvent.click(within(block).getByTestId("card-feedback-text"));
       expect(within(block).getByRole("textbox").getAttribute("placeholder")).toBe(FEEDBACK_HINT);
       expect(block.querySelector("[data-feedback-send]")?.textContent?.trim()).toBe(FEEDBACK_SEND);
     });
@@ -164,12 +176,16 @@ describe("E948-S60 every card type ends with the feedback block", () => {
     expect(within(b.container).getByTestId("review-complete").textContent).toBe("Mark complete");
   });
 
-  // E948-S60 iteration 3 (the owner 2026-11-12 21:46Z): a review card offers only two actions, "Mark complete" (accept it as is) or "Give feedback".
-  it("a review card has exactly Mark complete and Give feedback, then the feedback block", () => {
+  // E948-S60 iteration 3 (the owner 2026-11-12 21:46Z): a review card offers only two actions, "Mark complete" (accept it as is) or
+  // his feedback; E948-S131 (vn_73e840cd): his feedback is Voice or Text, closing the same row (Give feedback is gone).
+  it("a review card has exactly Mark complete, Park, Snooze, then Voice and Text in the same row", () => {
     const review = CARD_TYPES.find((c) => c.id === "review")!;
     const { container } = render(<MemoryRouter>{review.render()}</MemoryRouter>);
     const buttons = within(container).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Park", "Snooze", "Give feedback"]);
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Park", "Snooze"]);
+    const row = buttons.closest("[data-feedback-row]")!;
+    expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim()).slice(-2)).toEqual(["Voice", "Text"]);
+    fireEvent.click(within(container).getByTestId("card-feedback-text"));
     expect(container.querySelector("[data-card-feedback] [data-feedback-send]")).toBeTruthy();
   });
 
@@ -201,6 +217,8 @@ const ANSWER_IDS = ["review-choice", "yes", "no", "approve", "decline", "ask-set
 const OPTION_IDS = ["ask-option", "goal-option"];
 const BARE = /^(?:yes|no|ok|okay|approve|accept|decline|send|send my pick|pick|confirm|submit)$/i;
 const NAMES_NEXT = /^[^:]{1,30}:\s*\S/;
+/** the feedback block's own presses (Voice, Text and the box Text opens), apart from the card's answers that lead its row. */
+const OWN_FEEDBACK = "[data-testid=card-feedback-reply], [data-testid=card-feedback-box]";
 
 describe("E948-S69 a decision card's buttons are its options, each naming its next step", () => {
   it("every card type is in the one table: what it asks of him and its buttons", () => {
@@ -214,7 +232,7 @@ describe("E948-S69 a decision card's buttons are its options, each naming its ne
   for (const c of CARD_TYPES.filter((x) => x.kind === "decision"))
     it(`${c.name}: never Mark complete or Send my pick, every option names its next step, Give feedback stays`, () => {
       const { container } = render(<MemoryRouter>{c.render()}</MemoryRouter>);
-      const buttons = [...container.querySelectorAll<HTMLElement>("button")].filter((b) => !b.closest("[data-card-feedback]"));
+      const buttons = [...container.querySelectorAll<HTMLElement>("button")].filter((b) => !b.closest(OWN_FEEDBACK));
       const words = buttons.map((b) => (b.textContent ?? "").replace(/\s+/g, " ").trim());
       expect(words.filter((w) => /mark complete|send my pick/i.test(w)), "a decision card offers Mark complete or Send my pick").toEqual([]);
       expect(container.querySelector("[data-testid=review-complete], [data-testid=review-complete-park], [data-testid=send-pick]")).toBeNull();
@@ -224,8 +242,9 @@ describe("E948-S69 a decision card's buttons are its options, each naming its ne
       for (const b of answers) expect(b.textContent?.trim(), "a yes or no button does not say what happens next").toMatch(NAMES_NEXT);
       for (const b of options) expect(BARE.test((b.textContent ?? "").replace(/·.*$/, "").trim()), `option "${b.textContent}" is one bare word`).toBe(false);
       for (const w of words) expect(BARE.test(w), `"${w}" is a bare button`).toBe(false);
-      // and his own words always: the feedback block (Give feedback on a review-shaped card)
-      expect(container.querySelector("[data-card-feedback] [data-feedback-send]")).toBeTruthy();
+      // and his own words always: Voice and Text close the row (E948-S131)
+      expect(container.querySelector("[data-card-feedback] [data-feedback-text]")).toBeTruthy();
+      expect(container.querySelector("[data-card-feedback] [data-feedback-voice]")).toBeTruthy();
     });
 
   // E948-S69 iteration 2 (the owner on E946-A31, 2026-11-13, vn_11f06422: "It's still happening that I'm getting decide cards with
@@ -254,7 +273,7 @@ describe("E948-S69 a decision card's buttons are its options, each naming its ne
     const { container } = render(<MemoryRouter>{car.render()}</MemoryRouter>);
     const row = within(container).getByTestId("review-buttons");
     expect(row.getAttribute("data-card-buttons")).toBe("decision");
-    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Park", "Snooze", "Give feedback"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Park", "Snooze"]);
     const [yes, no] = within(row).getAllByTestId("review-choice");
     expect(yes.dataset.start).toBe("yes");
     expect(no.dataset.start).toBe("no");
@@ -375,8 +394,8 @@ describe("E948-S83 iteration 2 every card that waits on him has Park", () => {
         // beside the card's own buttons, never alone in the meta line, and before the feedback block
         const row = parks[0].parentElement!;
         expect(row.closest("[data-card-meta]"), c.id).toBeNull();
-        const block = container.querySelector("[data-card-feedback], [data-testid=review-note], [data-testid^=answer-][data-testid$=-box]");
-        if (block) expect(parks[0].compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING, `${c.id}: Park comes before the answer box`).toBeTruthy();
+        const block = container.querySelector("[data-feedback-voice]");
+        if (block) expect(parks[0].compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING, `${c.id}: Park comes before Voice and Text`).toBeTruthy();
         expect(c.buttons, `${c.id}: the table names Park`).toMatch(/\bPark\b/);
         parked.push(c.id);
       }
@@ -435,8 +454,8 @@ describe("the owner 2026-11-15: one decisions block on every card", () => {
         const park = container.querySelector("[data-testid=card-park]");
         expect(park, `${c.id}: Snooze has Park beside it`).toBeTruthy();
         expect(s.parentElement, `${c.id}: Snooze and Park share one button row`).toBe(park!.parentElement);
-        const block = container.querySelector("[data-card-feedback], [data-testid=review-note], [data-testid^=answer-][data-testid$=-box]");
-        if (block) expect(s.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING, `${c.id}: Snooze comes before the answer box`).toBeTruthy();
+        const block = container.querySelector("[data-feedback-voice]");
+        if (block) expect(s.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING, `${c.id}: Snooze comes before Voice and Text`).toBeTruthy();
         expect(c.buttons, `${c.id}: the table names Snooze`).toMatch(/\bSnooze\b/);
         snoozed.push(c.id);
       } else expect(c.buttons, `${c.id}: the table names no Snooze it does not show`).not.toMatch(/\bSnooze\b/);

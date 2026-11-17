@@ -25,7 +25,7 @@ import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach, wordsWithFiles } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
-import { CardFeedback, FeedbackBlock, type FeedbackTarget } from "@/components/cardFeedback";
+import { CardFeedback, FeedbackBlock, RowPair, type FeedbackTarget } from "@/components/cardFeedback";
 import { CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { GrantWriteAction, waitingAnchor } from "@/components/unblock";
 import { ACTION, PRESS } from "@/components/cardActions";
@@ -457,25 +457,35 @@ function FyiCardBody({ item, showMilestone = false, qualify = false }: { item: W
       <div className={CARD_TITLE}>{item.question}</div>
       {item.answer && <p className="mt-1 text-sm leading-relaxed text-foreground/85">{item.answer}</p>}
       {item.rubric && <div className="mt-1 text-xs text-muted-foreground" data-testid="fyi-rubric">{item.rubric}</div>}
-      <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="fyi-head">
-        {r ? (
+      {r && (
+        <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="fyi-head">
           <span className="text-xs text-muted-foreground" data-testid="fyi-reversed">
             You asked to reverse this <RelTime iso={r.createdAt} />
             {r.delivery !== "sent" ? ` (not delivered: ${r.deliveryError ?? r.delivery})` : ""}
           </span>
-        ) : (
-          <span className="flex min-w-0 flex-wrap items-center gap-2" data-testid="fyi-actions">
-            <CardButton variant="outline" disabled={busy} pending={busy} pendingLabel="Reversing…" onClick={reverse}>
-              <RotateCw /> Reverse
-            </CardButton>
-            <WakeToggle item={item} checked={wake} onChange={setWake} disabled={busy} />
-          </span>
-        )}
-      </div>
+        </div>
+      )}
       {r?.wake && <WakeNote wake={r.wake} responseId={r.delivery === "sent" ? r.id : undefined} thread />}
       {error && <div className="text-xs text-red-600">{error}</div>}
       {/* E948-S60: a decision made for him still takes his words, short of reversing it. */}
-      <CardFeedback origin={`fyi-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} sent={{ slot: `fyi:${item.id}` }} />
+      <CardFeedback
+        origin={`fyi-feedback:${item.id}`}
+        title={item.question || item.title}
+        refName={item.code ?? item.id}
+        target={askTarget(item)}
+        sent={{ slot: `fyi:${item.id}` }}
+        className="mt-3.5"
+        actions={
+          !r && (
+            <span className="contents" data-testid="fyi-actions">
+              <CardButton variant="outline" disabled={busy} pending={busy} pendingLabel="Reversing…" onClick={reverse}>
+                <RotateCw /> Reverse
+              </CardButton>
+              <WakeToggle item={item} checked={wake} onChange={setWake} disabled={busy} />
+            </span>
+          )
+        }
+      />
     </CardShell>
   );
 }
@@ -1450,57 +1460,6 @@ function WaitingCardBody({
                 {go.label} ↗
               </a>
             )}
-            <div className="mt-3.5 flex flex-wrap items-center gap-2" data-testid="answer-buttons">
-              {doCard ? (
-                <>
-                  {main("done", ACTION.done.label, () => void respond("done", "answer", withNote("done")), "done", current("answer", "done"))}
-                  {second("stuck", "Stuck", secondPress("answer", () => void respond("stuck", "answer", withNote("Stuck"))), "stuck")}
-                </>
-              ) : approveCard ? (
-                <>
-                  {/* E948-S128: the ask's own "Yes: …" and "No: …" words, so yes says exactly what happens */}
-                  {main("approve", (item.ask === "approve" && ownYesNo(item).yes) || YES_LABEL, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"), false, OPTION_BUTTON)}
-                  {canDeny && second("deny", (item.ask === "approve" && ownYesNo(item).no) || NO_LABEL, secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"), OPTION_BUTTON)}
-                </>
-              ) : options.length > 0 ? (
-                <>
-                  {/* E948-S69: one button per option, named by what happens next, the recommended one filled; never a lone Send my pick. */}
-                  {options.map((o) => {
-                    const own = isOwnOption(o);
-                    // a "your own" option first opens its box, the next press sends his words with it
-                    const press = () => (own && !(pick === o && ownWords.trim()) ? setPick(o) : void respond(`option:${o}`, "answer", withNote(own ? `${o}: ${ownWords.trim()}` : o)));
-                    const lead = o === pickOf && !ownPicked;
-                    const cur = current("answer", o);
-                    return <Fragment key={o}>{lead ? main(`option:${o}`, optionLabel(o), press, "ask-option", cur, false, OPTION_BUTTON) : second(`option:${o}`, optionLabel(o), press, "ask-option", cur, OPTION_BUTTON)}</Fragment>;
-                  })}
-                </>
-              ) : yesNo ? (
-                <>
-                  {main("yes", YES_LABEL, () => void respond("yes", "answer", withNote("Yes")), "yes", current("answer", "Yes"))}
-                  {second("no", NO_LABEL, () => void respond("no", "answer", withNote("No")), "no", current("answer", "No"))}
-                </>
-              ) : null}
-              {/* E948-S83 iteration 2: Park beside the card's own buttons (a month on its spine line, nothing decided). */}
-              {canSnooze && <ParkButton disabled={busy} onPark={() => parkAsk(item)} />}
-              {/* the owner 2026-11-15: Snooze beside Park, in the one decisions block, never at the top of the card. */}
-              {canSnooze && <SnoozeMenu item={item} />}
-              {editing && (
-                <CardButton
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    setEditing(false);
-                    setBox(undefined);
-                    setAnswer("");
-                    files.clear();
-                    setError(undefined);
-                  }}
-                >
-                  Cancel
-                </CardButton>
-              )}
-              {canDecide && !editing && <GrantWriteAction item={item} />}
-            </div>
           </>
         )}
         {/* The owner 2026-11-15 00:0xZ: the buttons and the feedback box with its microphone are one group, nothing between
@@ -1509,7 +1468,65 @@ function WaitingCardBody({
               <div className="grid" data-testid={`answer-${box ?? "answer"}-box`}>
                 <FeedbackBlock
                   id={`note-${item.id}`}
-                  className="mt-2"
+                  className="mt-3.5"
+                  open={editing || noteOpen}
+                  actions={
+                    <div className="contents" data-testid="answer-buttons">
+                    {doCard ? (
+                      <>
+                        {main("done", ACTION.done.label, () => void respond("done", "answer", withNote("done")), "done", current("answer", "done"))}
+                        {second("stuck", "Stuck", secondPress("answer", () => void respond("stuck", "answer", withNote("Stuck"))), "stuck")}
+                      </>
+                    ) : approveCard ? (
+                      <>
+                        {/* E948-S128: the ask's own "Yes: …" and "No: …" words, so yes says exactly what happens */}
+                        {main("approve", (item.ask === "approve" && ownYesNo(item).yes) || YES_LABEL, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"), false, OPTION_BUTTON)}
+                        {canDeny && second("deny", (item.ask === "approve" && ownYesNo(item).no) || NO_LABEL, secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"), OPTION_BUTTON)}
+                      </>
+                    ) : options.length > 0 ? (
+                      <>
+                        {/* E948-S69: one button per option, named by what happens next, the recommended one filled; never a lone Send my pick. */}
+                        {options.map((o) => {
+                          const own = isOwnOption(o);
+                          // a "your own" option first opens its box, the next press sends his words with it
+                          const press = () => (own && !(pick === o && ownWords.trim()) ? setPick(o) : void respond(`option:${o}`, "answer", withNote(own ? `${o}: ${ownWords.trim()}` : o)));
+                          const lead = o === pickOf && !ownPicked;
+                          const cur = current("answer", o);
+                          return <Fragment key={o}>{lead ? main(`option:${o}`, optionLabel(o), press, "ask-option", cur, false, OPTION_BUTTON) : second(`option:${o}`, optionLabel(o), press, "ask-option", cur, OPTION_BUTTON)}</Fragment>;
+                        })}
+                      </>
+                    ) : yesNo ? (
+                      <>
+                        {main("yes", YES_LABEL, () => void respond("yes", "answer", withNote("Yes")), "yes", current("answer", "Yes"))}
+                        {second("no", NO_LABEL, () => void respond("no", "answer", withNote("No")), "no", current("answer", "No"))}
+                      </>
+                    ) : null}
+                    {/* E948-S83 iteration 2: Park beside the card's own buttons (a month on its spine line, nothing decided). */}
+                    {canSnooze && (
+                      <RowPair>
+                        <ParkButton disabled={busy} onPark={() => parkAsk(item)} />
+                        <SnoozeMenu item={item} />
+                      </RowPair>
+                    )}
+                    {/* the owner 2026-11-15: Snooze beside Park, in the one decisions block, never at the top of the card. */}
+                    {editing && (
+                      <CardButton
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(false);
+                          setBox(undefined);
+                          setAnswer("");
+                          files.clear();
+                          setError(undefined);
+                        }}
+                      >
+                        Cancel
+                      </CardButton>
+                    )}
+                    {canDecide && !editing && <GrantWriteAction item={item} />}
+                    </div>
+                  }
                   note={item.secret ? "Never paste the key here: use the private box above." : undefined}
                   value={answer}
                   onChange={setAnswer}
@@ -2130,20 +2147,28 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
       <div className={CARD_TITLE}>{item.title}</div>
       {/* every Blocked card gives its info (what waits on the owner), not only the ready stamp. */}
       {item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="status-item-detail">{item.detail}</p>}
-      <div className="mt-3.5 flex flex-wrap items-center gap-2">
-        {/* the owner's ready stamp is the item's one action, right here (writes Status: ready, like the Tree's button). */}
-        {item.kind === "mark_ready" ? (
-          <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
-        ) : (
-          "to" in action && (
-            <CardButton asChild variant="outline" >
-              <Link to={action.to}>{action.label}</Link>
-            </CardButton>
-          )
-        )}
-      </div>
-      {/* E948-S60: a status card takes feedback too, to the Team desk with the card named. */}
-      <CardFeedback origin={`status-feedback:${item.id}`} title={item.title} refName={item.id} sent={{ slot: `status:${item.id}` }} />
+      {/* E948-S60: a status card takes feedback too, to the Team desk with the card named; E948-S131: its one action leads the row. */}
+      <CardFeedback
+        origin={`status-feedback:${item.id}`}
+        title={item.title}
+        refName={item.id}
+        sent={{ slot: `status:${item.id}` }}
+        className="mt-3.5"
+        actions={
+          <>
+            {/* the owner's ready stamp is the item's one action, right here (writes Status: ready, like the Tree's button). */}
+            {item.kind === "mark_ready" ? (
+              <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
+            ) : (
+              "to" in action && (
+                <CardButton asChild variant="outline" >
+                  <Link to={action.to}>{action.label}</Link>
+                </CardButton>
+              )
+            )}
+          </>
+        }
+      />
     </CardShell>
   );
 }

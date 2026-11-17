@@ -9,6 +9,7 @@ import { api } from "@/api";
 import { forgetWorld } from "@/lib/useSocial";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetDeskVoiceWorld } from "@/voice/deskBase";
+import { openText } from "@/test/openText";
 
 // E948-S66 (the owner, vn_fe52ef4a 2026-11-12 22:19Z): the inbox carries, after what is blocked on him, a digest per
 // scorecard, then ideas, then goals to set; each kind can be shown alone; a scorecard's own inbox shows only its cards.
@@ -168,6 +169,7 @@ describe("E948-S59 the Senior advisor's weekly set", () => {
       expect(i.getAttribute("data-card-shell")).toBe("advisor-item");
       expect(i.querySelector("[data-testid=advisor-accept]")).not.toBeNull();
       expect(i.querySelector("[data-testid=advisor-decline]")).not.toBeNull();
+      openText(i);
       expect(i.querySelector("textarea")).not.toBeNull();
       expect(i.textContent).toContain("Senior advisor, week of 9 to 15 November");
     }

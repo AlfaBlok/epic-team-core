@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api, type LaptopStep, type LaptopView, type MacTask, type WaitingItem } from "@/api";
 import { LaptopSwitch, laptopRows, MacCards } from "@/components/laptopSwitch";
+import { openText } from "@/test/openText";
 
 // (the owner on the Team desk: "at the end of the day this has to be a card. I have to be able to provide feedback,
 // click done, click feedback, the voice notes, as with a regular card"): every Mac task is a full card; a task with a
@@ -63,6 +64,7 @@ describe("T96-S12 the card", () => {
     expect(within(card).getByTestId("laptop-copy").textContent).toContain("Copy the text");
     expect(within(card).getByTestId("laptop-done").textContent).toContain("Done");
     expect(within(card).getByTestId("laptop-stuck").textContent).toContain("Stuck or changes wanted");
+    openText();
     const box = card.querySelector("textarea")!;
     expect(box.getAttribute("maxlength")).toBeNull();
     expect((within(card).getByTestId("laptop-send-note") as HTMLButtonElement).disabled).toBe(true);
@@ -71,6 +73,7 @@ describe("T96-S12 the card", () => {
   it("Done writes the ticket page's step with his words; the card becomes its green Sent row and Bring it back sets it not done (E948-S130)", async () => {
     const tick = vi.spyOn(api, "stepTick").mockResolvedValue({ state: "done", spine: "saved" });
     const { rerender } = render(<MacCards rows={laptopRows([e5s9], [])} />);
+    openText();
     fireEvent.change(screen.getByTestId("laptop-card").querySelector("textarea")!, { target: { value: "both made: @TowerwatchHQ and @YieldDesk_data" } });
     fireEvent.click(screen.getByTestId("laptop-done"));
     await waitFor(() =>
@@ -92,12 +95,14 @@ describe("T96-S12 the card", () => {
   it("Stuck and a note: the state and his words; a note alone changes no state; each collapses the card (E948-S130)", async () => {
     const tick = vi.spyOn(api, "stepTick").mockResolvedValue({ state: "stuck", spine: "saved" });
     render(<MacCards rows={laptopRows([e81s8], [])} />);
+    openText();
     fireEvent.change(screen.getByTestId("laptop-card").querySelector("textarea")!, { target: { value: "Stripe asked for a phone code" } });
     fireEvent.click(screen.getByTestId("laptop-stuck"));
     await waitFor(() => expect(tick).toHaveBeenCalledWith("sp_81", expect.objectContaining({ state: "stuck", comment: "Stripe asked for a phone code", row: "T81-S8" })));
     await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Stuck sent to the team"));
     // Bring it back: the card again, its box empty, and a note alone changes no state
     fireEvent.click(screen.getByTestId("sent-row-back"));
+    openText(await screen.findByTestId("laptop-card"));
     const box = (await screen.findByTestId("laptop-card")).querySelector("textarea")!;
     expect(box.value).toBe("");
     fireEvent.change(box, { target: { value: "x".repeat(5000) } });

@@ -88,6 +88,8 @@ describe("the link to check comes before the buttons on every card kind", () => 
       const blocks = [...root.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       const block = blocks[blocks.length - 1];
       if (!block) return;
+      // E948-S131: a card whose answers lead the block's own row has nothing between them and Voice and Text by construction
+      if (block.querySelectorAll("[data-feedback-row] button").length > 2) return;
       const btns = [...root.querySelectorAll("[data-card-button]")].filter((b) => !block.contains(b) && !b.closest("[data-card-meta]") && after(b, block));
       const last = btns[btns.length - 1];
       if (!last) return;

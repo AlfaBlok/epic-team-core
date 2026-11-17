@@ -11,6 +11,7 @@ import { LiveFeedback, type BoardSource } from "@/pages/social/Pipeline";
 import { FeedbackBox } from "@/pages/social/parts";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetChats } from "@/pages/Chat";
+import { openText } from "@/test/openText";
 
 /**
  * (1) a `do` step that asks him for a
@@ -105,6 +106,7 @@ describe("T18-S12: a do step's Answer box (the T18-A1 card)", () => {
       </MemoryRouter>,
     );
     // a do step has Done and Stuck (was Done, Answer, Changes wanted, Decline); E948-S60: the note box is always open
+    openText();
     expect(within(container).getByTestId("card-feedback-box")).toBeTruthy();
     fireEvent.click(await within(container).findByTestId("stuck"));
     const box = await within(container).findByTestId("card-feedback-box");
@@ -128,6 +130,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_2", ask: "provide", question: "Which screen looks wrong?" })} />
       </MemoryRouter>,
     );
+    openText();
     const box = await within(container).findByTestId("card-feedback-box");
     // Paste is folded into the paperclip's menu (the box's row keeps the paperclip, the mic and the press)
     const clip = within(box).getByRole("button", { name: "Attach a screenshot or file" });
@@ -151,6 +154,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_3", ask: "provide" })} />
       </MemoryRouter>,
     );
+    openText();
     const box = await within(container).findByTestId("card-feedback-box");
     fireEvent.click(within(box).getByRole("button", { name: "Attach a screenshot or file" }));
     fireEvent.click(within(box).getByRole("menuitem", { name: "Paste a screenshot" }));
@@ -162,6 +166,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_4", ask: "provide" })} />
       </MemoryRouter>,
     );
+    openText();
     const box2 = await within(again.container).findByTestId("card-feedback-box");
     fireEvent.click(within(box2).getByRole("button", { name: "Attach a screenshot or file" }));
     fireEvent.click(within(box2).getByRole("menuitem", { name: "Paste a screenshot" }));
@@ -176,6 +181,7 @@ describe("T18-S12: the phone's Paste button", () => {
         <WaitingCard item={ask({ id: "wj_5", ask: "provide" })} />
       </MemoryRouter>,
     );
+    openText();
     const box = await within(container).findByTestId("card-feedback-box");
     expect(within(box).queryByRole("button", { name: "Paste a screenshot" })).toBeNull();
     // with a mouse the paperclip opens the file dialog at once, no menu

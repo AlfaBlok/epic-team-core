@@ -6,6 +6,7 @@ import { api, type PendingItem, type StatusBatch, type WaitingItem } from "@/api
 import { PendingSelector } from "@/components/pending";
 import { WaitingCard } from "@/components/waiting";
 import { AnswerTextarea } from "@/components/common";
+import { openText } from "@/test/openText";
 
 afterEach(() => {
   cleanup();
@@ -67,6 +68,7 @@ describe("T17-S1 answer box on a phone", () => {
   it("WaitingCard's answer box is Chat's box: 16 px, grows below sm; its buttons are 44 px tap targets", () => {
     // a question that needs words shows its "Your answer" box at once (an options card shows it under More)
     wrap(<WaitingCard item={{ ...item, ask: "provide" }} />);
+    openText();
     const box = screen.getByRole("textbox", { name: "Feedback" });
     // the words take the frame's whole width; the buttons sit in a short row under them, inside the same frame
     expect(box.className).toContain("w-full min-w-0 resize-none border-0 bg-transparent px-3 py-2 text-sm");

@@ -8,6 +8,7 @@ import { WaitingCard } from "@/components/waiting";
 import { WaitingForReview } from "@/components/review";
 import { ChatPage, forgetChats } from "@/pages/Chat";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
+import { openText } from "@/test/openText";
 
 /**
  * one box (WordsBox) everywhere: the same text area, paperclip, paste, drop, thumbnails and voice note in
@@ -76,13 +77,15 @@ const answered = (itemId: string) => ({ id: "jr_1", itemId, kind: "answer" as co
 
 /** The one box: text area, paperclip and the voice note's microphone in one row. */
 async function oneBox(root: HTMLElement, label: string) {
-  // E948-S60: a card's box is the feedback block (its big microphone); a panel's (Decline) and Chat's are the WordsBox
+  // E948-S60: a card's box is the feedback block; a panel's (Decline) and Chat's are the WordsBox. E948-S131: a card's box
+  // opens on Text, and its microphone is Voice in the card's row beside Text
+  openText(root);
   const box = await waitFor(() => (root.querySelector("[data-testid='card-feedback-box']") ?? within(root).getByTestId("words-box")) as HTMLElement);
   const area = within(box).getByLabelText(label);
   expect(area.tagName).toBe("TEXTAREA");
   const row = area.parentElement!;
   expect(within(row).getByRole("button", { name: "Attach a screenshot or file" }).className).toMatch(/max-sm:size-11/);
-  await waitFor(() => expect(within(row).getByTestId(/(answer-voice|note)-button/).className).toMatch(/max-sm:size-11|\bh-11\b/));
+  await waitFor(() => expect(within(root.querySelector("[data-feedback-row]") ?? row).getByTestId(/(answer-voice|note)-button/).className).toMatch(/max-sm:size-11|\bh-11\b|max-sm:min-h-11/));
   return { box, area };
 }
 
@@ -95,6 +98,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
         <WaitingCard item={ask()} />
       </MemoryRouter>,
     );
+    openText();
     const { box, area } = await oneBox(container, "Feedback");
     const press = within(container).getByTestId("answer") as HTMLButtonElement;
     expect(press.disabled).toBe(true);
@@ -118,6 +122,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
     // the first press of No opens the note; the next sends it with the note and the files
     fireEvent.click(await within(container).findByTestId("decline"));
     expect(respond).not.toHaveBeenCalled();
+    openText();
     const { box, area } = await oneBox(container, "Feedback");
     pasteItem(area, png("phone.png"));
     fireEvent.drop(box, { dataTransfer: { files: [png("dropped.png")], types: ["Files"] } });
@@ -137,6 +142,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
       </MemoryRouter>,
     );
     fireEvent.click(await within(container).findByTestId("decline"));
+    openText();
     await oneBox(container, "Feedback");
     fireEvent.click(within(container).getByTestId("decline"));
     await waitFor(() => expect(respond).toHaveBeenCalled());
@@ -192,12 +198,12 @@ describe("T18-S11 round 2: a review card's Give feedback and Decline", () => {
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");
-    fireEvent.click(within(c).getByTestId("review-iteration"));
+    fireEvent.click(within(c).getByTestId("card-feedback-text"));
     const { box, area } = await oneBox(c, "Feedback");
     pasteFile(area);
     await waitFor(() => expect(within(box).getByTestId("chat-attach-item").getAttribute("data-state")).toBe("ready"));
     fireEvent.change(area, { target: { value: "this was only in the main chat" } });
-    fireEvent.click(within(c).getByTestId("review-iteration"));
+    fireEvent.click(within(c).getByTestId("card-feedback-send"));
     await waitFor(() => expect(relaunch).toHaveBeenCalledWith("rv_1", "this was only in the main chat", ["att_1"]));
   });
 

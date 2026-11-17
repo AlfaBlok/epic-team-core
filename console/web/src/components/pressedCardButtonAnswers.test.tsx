@@ -81,8 +81,8 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     expect(mark.getAttribute("data-press")).toBe("sending");
     expect(within(mark).getByTestId("button-spinner")).toBeTruthy();
     expect((mark as HTMLButtonElement).disabled).toBe(true);
-    // two buttons on the card (Mark complete, Give feedback); Decline sits under More
-    for (const id of ["review-iteration"]) {
+    // the card's row (Mark complete, Park, Snooze, Voice, Text) waits too; Decline sits under More
+    for (const id of ["card-feedback-text"]) {
       const b = within(c).getByTestId(id) as HTMLButtonElement;
       expect(b.disabled).toBe(true);
       expect(b.getAttribute("aria-busy")).toBeNull();
@@ -114,7 +114,7 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     const mark = within(c).getByRole("button", { name: MARK }) as HTMLButtonElement;
     expect(mark.disabled).toBe(false);
     expect(mark.getAttribute("aria-busy")).toBeNull();
-    expect((within(c).getByTestId("review-iteration") as HTMLButtonElement).disabled).toBe(false);
+    expect((within(c).getByTestId("card-feedback-text") as HTMLButtonElement).disabled).toBe(false);
     expect(within(c).queryByTestId("button-spinner")).toBeNull();
   });
 
@@ -136,10 +136,10 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     mount();
     vi.spyOn(api, "relaunchReviewItem").mockReturnValue(new Promise(() => {}));
     const c = await screen.findByTestId("review-card");
-    // Give feedback's first press opens the note, its next press sends the words
-    fireEvent.click(within(c).getByTestId("review-iteration"));
+    // E948-S131: Text opens the note, its Send sends the words
+    fireEvent.click(within(c).getByTestId("card-feedback-text"));
     fireEvent.change(within(c).getByLabelText("Feedback"), { target: { value: "TEST words" } });
-    const send = within(c).getByTestId("review-iteration");
+    const send = within(c).getByTestId("card-feedback-send");
     fireEvent.click(send);
     expect(send.textContent).toBe(PRESS.sending);
     expect(within(send).getByTestId("button-spinner")).toBeTruthy();

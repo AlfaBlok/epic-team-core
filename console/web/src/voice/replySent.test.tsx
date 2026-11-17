@@ -7,6 +7,7 @@ import { WaitingCard } from "@/components/waiting";
 import { WaitingForReview } from "@/components/review";
 import { clearAnswerVoiceState, withVoiceNote } from "./AnswerVoice";
 import { NoteProvider, NoteTab, NoteWidget } from "./NoteProvider";
+import { openText } from "@/test/openText";
 
 // (the owner 2026-11-08: "In a card pane (answer, new iteration with feedback) the owner can record a voice note as his answer,
 // transcribed into the reply"): a microphone beside every card box that takes his words. The same
@@ -124,6 +125,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
   it("Answer on a question: Send note sends the spoken answer at once, with what was typed, the note's id and recording", async () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_1", itemId: "wj_1", kind: "answer", text: "x", delivery: "sent", createdAt: new Date().toISOString() });
     const { container } = wrap(<WaitingCard item={ask()} />);
+    openText();
     fireEvent.change(await screen.findByLabelText("Feedback"), { target: { value: "Yes:" } });
     await speak(container);
     await waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: `Yes: ship it after the tests pass (voice note vn_ab12cd34, audio ${AUDIO})`, milestoneId: "ms_1", wake: true }));
@@ -165,6 +167,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
     await speak(container);
     expect((await screen.findByTestId("answer-voice-out")).textContent).toBe("Nothing was heard, so nothing was sent.");
     expect(spy).not.toHaveBeenCalled();
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "pino" } });
     fireEvent.click(screen.getByTestId("answer"));
     await waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ text: "pino" })));
@@ -201,6 +204,7 @@ describe("T72-S8 + T72-S11 a voice note as the answer on an ask card", () => {
         </MemoryRouter>
       </NoteProvider>,
     );
+    openText();
     fireEvent.change(await screen.findByLabelText("Feedback"), { target: { value: "Use pino." } });
     fireEvent.click(await screen.findByTestId("answer-voice-button"));
     await screen.findByTestId("answer-voice-timer");
@@ -271,7 +275,6 @@ describe("T72-S8 a voice note on a review card", () => {
     const relaunch = vi.spyOn(api, "relaunchReviewItem").mockResolvedValue({ ...ITEM, state: "relaunched" });
     mount();
     const c = await screen.findByTestId("review-card");
-    fireEvent.click(within(c).getByTestId("review-iteration"));
     await speak(c);
     await waitFor(() => expect(relaunch).toHaveBeenCalledWith("rv_1", `ship it after the tests pass (voice note vn_ab12cd34, audio ${AUDIO})`));
     expect(calls.find((x) => x.url === "/api/voice/notes")?.body).toEqual({ page: expect.stringMatching(/^card T972-D4: \S/), clientId: expect.stringMatching(/^[\w-]{8,64}$/) });

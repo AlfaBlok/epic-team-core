@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { api, type Assignment, type MilestoneStatusView, type Persona, type WaitingItem } from "@/api";
 import { FyiCard, OwnerActivityList, SendToDialog, WaitingCard, WaitingOnYou } from "@/components/waiting";
 import { threadHref } from "@/components/common";
+import { openText } from "@/test/openText";
 
 afterEach(() => {
   cleanup();
@@ -98,6 +99,7 @@ describe("WaitingCard", () => {
     await vi.waitFor(() => expect((screen.getByRole("button", { name: "two" }) as HTMLButtonElement).disabled).toBe(false));
     // the note (under More) goes with the pick, still "two"...
     fireEvent.click(screen.getByTestId("ask-lead"));
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "after the audit" } });
     fireEvent.click(screen.getByRole("button", { name: "two" }));
     await vi.waitFor(() => expect(spy).toHaveBeenLastCalledWith("wj_1", { kind: "answer", text: "two. after the audit", milestoneId: "ms_1", wake: true }));
@@ -105,6 +107,7 @@ describe("WaitingCard", () => {
     //... and a typed answer alone goes with the feedback block's Send (E948-S60: Not now is gone)
     wrap(<WaitingCard item={item()} />);
     expect(screen.queryByTestId("not-now")).toBeNull();
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "neither, wait a week" } });
     fireEvent.click(screen.getByTestId("card-feedback-send"));
     await vi.waitFor(() => expect(spy).toHaveBeenLastCalledWith("wj_1", { kind: "answer", text: "neither, wait a week", milestoneId: "ms_1", wake: true }));
@@ -144,7 +147,7 @@ describe("WaitingCard", () => {
     expect(screen.getByText("Recommended:").parentElement!.textContent).toBe("Recommended: do it tonight");
     // Order: kind word, heading, steps, More, foot with the code, then the controls (the buttons and the feedback, one group).
     const card = screen.getByTestId("waiting-card");
-    const order = ["card-kind", "ask-lead", "ask-steps", "card-foot", "ask-code", "ask-more", "waiting-details", "answer-buttons", "card-feedback"].map((id) => card.innerHTML.indexOf(`data-testid="${id}"`));
+    const order = ["card-kind", "ask-lead", "ask-steps", "card-foot", "ask-code", "ask-more", "waiting-details", "card-feedback", "answer-buttons"].map((id) => card.innerHTML.indexOf(`data-testid="${id}"`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     fireEvent.click(screen.getByTestId("done"));
@@ -194,6 +197,7 @@ describe("WaitingCard", () => {
     expect(screen.queryByRole("button", { name: /^\s*Answer$/ })).toBeNull();
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
     // E948-S60: the feedback block is always open; the note travels with the button he presses
+    openText();
     expect(screen.getByRole("textbox")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "another iteration later, simpler" } });
     fireEvent.click(screen.getByTestId("approve"));
@@ -205,6 +209,7 @@ describe("WaitingCard", () => {
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined })} />);
     fireEvent.click(screen.getByTestId("decline"));
     expect(screen.getByTestId("answer-decline-box")).toBeTruthy();
+    openText();
     expect(screen.getByLabelText("Feedback")).toBeTruthy();
     expect(spy).not.toHaveBeenCalled();
     const no = screen.getByTestId("decline") as HTMLButtonElement;
@@ -716,6 +721,7 @@ describe("E948-S127: a plain spoken yes or no on an approve card is his answer",
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_1", itemId: "wj_1", kind: "approve", text: "", delivery: "sent", createdAt: new Date().toISOString() });
     const read = vi.spyOn(api, "readSpokenAnswers").mockResolvedValueOnce({ reads: [{ id: "wj_1", kind: "approve", quote: "Yes, go ahead.", how: "only" }] });
     wrap(<WaitingCard item={item({ ask: "approve", question: "You approve: send the mail?", contextText: "" })} />);
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "Yes, go ahead." } });
     fireEvent.click(screen.getByTestId("card-feedback-send"));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ kind: "approve", text: "Yes, go ahead." })));
@@ -724,6 +730,7 @@ describe("E948-S127: a plain spoken yes or no on an approve card is his answer",
     spy.mockClear();
     vi.spyOn(api, "readSpokenAnswers").mockResolvedValueOnce({ reads: [{ id: "wj_9", kind: "none" }] });
     wrap(<WaitingCard item={item({ id: "wj_9", ask: "approve", question: "You approve: send the mail?", contextText: "" })} />);
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "Yes, but shorter" } });
     fireEvent.click(screen.getByTestId("card-feedback-send"));
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("wj_9", expect.objectContaining({ kind: "feedback", text: "Yes, but shorter" })));

@@ -415,31 +415,6 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
           </ul>
         )}
         {r.command && st.state !== "done" && <CopyCommand command={r.command} />}
-        <div className="flex flex-wrap items-center gap-2" data-testid="laptop-buttons">
-          {st.state !== "done" ? (
-            <>
-              <Button size="sm" className={PHONE_TAP} onClick={() => send("done")} data-testid="laptop-done" {...pressProps(press, "done", wait)}>
-                <Check /> {ACTION.done.label}
-              </Button>
-              <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("stuck")} data-testid="laptop-stuck" {...pressProps(press, "stuck", wait || (st.state === "stuck" && !typed))}>
-                <MessageSquareReply /> Stuck or changes wanted
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("todo")} data-testid="laptop-undo" {...pressProps(press, "todo", wait)}>
-              <RotateCcw /> Not done after all
-            </Button>
-          )}
-          {err ? (
-            <span className="text-xs text-red-700 dark:text-red-400" data-testid="laptop-error">{err}</span>
-          ) : (
-            line && (
-              <span className={cn("text-xs", line.bad ? "text-red-700 dark:text-red-400" : "text-muted-foreground")} data-testid="laptop-change">
-                {line.text}
-              </span>
-            )
-          )}
-        </div>
         {/* E948-S60: the card ends with the one feedback block (its Send is Send the note). */}
         <div className="grid" data-testid="laptop-note">
           <FeedbackBlock
@@ -451,6 +426,36 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
             disabled={!!press}
             sendTestId="laptop-send-note"
             onSend={() => void send("note")}
+            className="mt-0"
+            actions={
+              <div className="contents" data-testid="laptop-buttons">
+                {st.state !== "done" ? (
+                  <>
+                    <Button size="sm" className={PHONE_TAP} onClick={() => send("done")} data-testid="laptop-done" {...pressProps(press, "done", wait)}>
+                      <Check /> {ACTION.done.label}
+                    </Button>
+                    <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("stuck")} data-testid="laptop-stuck" {...pressProps(press, "stuck", wait || (st.state === "stuck" && !typed))}>
+                      <MessageSquareReply /> Stuck or changes wanted
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("todo")} data-testid="laptop-undo" {...pressProps(press, "todo", wait)}>
+                    <RotateCcw /> Not done after all
+                  </Button>
+                )}
+              </div>
+            }
+            note={
+              err ? (
+            <span className="text-xs text-red-700 dark:text-red-400" data-testid="laptop-error">{err}</span>
+          ) : (
+            line && (
+              <span className={cn("text-xs", line.bad ? "text-red-700 dark:text-red-400" : "text-muted-foreground")} data-testid="laptop-change">
+                {line.text}
+              </span>
+            )
+          )
+            }
           />
         </div>
       </div>

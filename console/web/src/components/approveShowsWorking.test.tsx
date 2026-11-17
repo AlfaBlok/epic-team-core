@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { api, type OwnerResponse, type WaitingItem } from "@/api";
 import { SAVED_HOLD_MS, SecretBox, WaitingCard } from "@/components/waiting";
+import { openText } from "@/test/openText";
 
 /**
  * the clicked answer button keeps its colour with a spinner, and "Updating task…" ("Saving…") shows until the
@@ -117,6 +118,7 @@ describe("Answer (free text) shows it is working", () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockReturnValue(d.promise);
     // a question that needs words (not a yes/no "?") shows the "Your answer" box with one Answer button
     wrap(<WaitingCard item={item({ ask: "decide", decidable: false, options: undefined, question: "Say when to ship the logger." })} />);
+    openText();
     fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "wait a week" } });
     const answer = btn(/^\s*Send$/);
     fireEvent.click(answer);
@@ -137,8 +139,8 @@ describe("Answer (free text) shows it is working", () => {
     expect(spy).toHaveBeenCalledWith("wj_1", expect.objectContaining({ kind: "answer", text: "two" }));
     expect(send.textContent).toBe("Sending…");
     expect(send.querySelector(".animate-spin")).not.toBeNull();
-    // E948-S60: no Not now; the feedback block's Send waits while the pick is sending
-    const other = screen.getByTestId("card-feedback-send") as HTMLButtonElement;
+    // E948-S60: no Not now; E948-S131: the row's Text waits while the pick is sending
+    const other = screen.getByTestId("card-feedback-text") as HTMLButtonElement;
     expect(other.querySelector(".animate-spin")).toBeNull();
     expect(other.disabled).toBe(true);
   });

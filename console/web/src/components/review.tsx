@@ -28,7 +28,7 @@ import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
-import { CardFeedback, FeedbackBlock } from "@/components/cardFeedback";
+import { CardFeedback, FeedbackBlock, RowPair } from "@/components/cardFeedback";
 import { CARD_FRAME, CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 
 /** A voice note's press the card did not take (the card says why). */
@@ -865,10 +865,6 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   const mainLabel = mainButtonLabel(face, start);
   // E948-S60 iteration 3 (the owner 2026-11-12 21:46Z: only "Mark complete" or "Give feedback", never "Not yet"):
   // the feedback block is always open; Give feedback sends his words, or asks for them and puts the cursor in the box
-  const giveFeedback = () => {
-    if (!feedback.trim() && !files.ids.length) setTimeout(() => document.getElementById(`note-review-${item.id}`)?.querySelector("textarea")?.focus(), 0);
-    feedbackSend();
-  };
   const feedbackSend = () => {
     const words = feedback.trim();
     if (!words && !files.ids.length) return setNeedWords(true);
@@ -1123,7 +1119,11 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
       {/* The owner 2026-11-15 00:0xZ: "Isn't the feedback one of the options of the buttons? Why is there something in between?":
           the buttons and the feedback box with its microphone are one group, nothing between, no text explaining them. */}
       <div className="mt-3.5 grid min-w-0 gap-2" data-testid="review-answer" data-card-answer="">
-      <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons" data-card-buttons={choices ? "decision" : "review"}>
+      {/* E948-S131 (vn_73e840cd): one row, his answers then Voice and Text; the box opens on Text (it replaced Give feedback). */}
+      <div className="grid" data-testid="review-note">
+        <FeedbackBlock
+          actions={
+            <div className="contents" data-testid="review-buttons" data-card-buttons={choices ? "decision" : "review"}>
         {choices ? (
           choices.map((c) => (
             <CardButton key={c.label} variant={c.recommended ? "default" : "outline"} className="h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]" {...props(`choice:${c.label}`)} onClick={() => choose(c)} title={c.sub} data-testid="review-choice" data-start={c.start ? "yes" : "no"}>
@@ -1136,9 +1136,10 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
           </CardButton>
         )}
         {/* E948-S83 iteration 2: Park on every card, beside its own buttons (a month, nothing decided, brought back any time). */}
-        {item.state === "review" && <ParkButton disabled={busy} onPark={() => parkReview(item, face.title, cardOf(item))} />}
-        {/* (the owner 2026-11-15, vn_5ef65752): Snooze beside Park, in the one decisions block, never at the top of the card. */}
         {item.state === "review" && (
+          <RowPair>
+          <ParkButton disabled={busy} onPark={() => parkReview(item, face.title, cardOf(item))} />
+          {/* (the owner 2026-11-15, vn_5ef65752): Snooze beside Park, in the one decisions block, never at the top of the card. */}
           <SnoozeDropdown
             id={item.id}
             disabled={busy}
@@ -1155,15 +1156,11 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
               });
             }}
           />
+          </RowPair>
         )}
 
-        <CardButton variant="outline" {...props("changes", voice.busy || !files.ready)} onClick={giveFeedback} data-testid="review-iteration">
-          Give feedback
-        </CardButton>
-      </div>
-      {/* E948-S60: the one feedback block, open on every card: words, a screenshot, the big microphone, Send (it goes back to the team as a new round). */}
-      <div className="grid" data-testid="review-note">
-        <FeedbackBlock
+            </div>
+          }
           id={`note-review-${item.id}`}
           value={feedback}
           onChange={(v) => (setFeedback(v), setNeedWords(false))}
@@ -1277,6 +1274,31 @@ function PostReviewCardBody(card: CardProps) {
   const where = [p.platform, p.community].filter(Boolean).join(", ");
   const when = slotWords(p.slot);
   const BTN = cn("h-auto min-h-10 justify-start whitespace-normal px-4 py-2.5 text-left text-[15px] font-bold [overflow-wrap:normal]", PHONE_TAP);
+  // E948-S131: the post's own buttons lead the card's one row, Voice and Text close it.
+  const postRow = (
+            <div className="contents" data-testid="review-buttons">
+              {postButtons(p).map((b) => (
+                <Button
+                  key={b.label}
+                  className={cn(BTN, b.go && "bg-green-600 text-white hover:bg-green-700")}
+                  variant={b.go ? "default" : "outline"}
+                  title={b.sub}
+                  {...props(`schedule:${b.label}`)}
+                  onClick={() => (b.how === "pick" ? setPickOpen(true) : void act(`schedule:${b.label}`, () => api.completeReviewItem(item.id, b.slot ? { slot: b.slot } : {})))}
+                  data-testid={b.how === "pick" ? "review-pick" : "review-schedule"}
+                >
+                  {b.label}
+                </Button>
+              ))}
+              <Button variant="secondary" className={BTN} disabled={busy} title="The writer makes a new version with your words. It comes back to you." onClick={() => setRelaunchOpen(true)} data-testid="review-iteration">
+                ↻ {ACTION.changes.label}
+              </Button>
+              {/* the third outcome: the held post is not sent. */}
+              <Button variant="outline" className={BTN} disabled={busy} title="The post is not sent." onClick={() => setDenyOpen(true)} data-testid="review-deny">
+                ✕ {ACTION.decline.label}
+              </Button>
+            </div>
+  );
   return (
     <CardShell as="article" kind="post" data-testid="review-card" data-review-id={item.id} data-kind="post">
       {/* E948-S60: the one shell: the kind word first, then the project and the campaign, like every card. */}
@@ -1383,30 +1405,7 @@ function PostReviewCardBody(card: CardProps) {
             onSend={(words, files) => act("changes", () => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words)))}
             onCancel={() => setRelaunchOpen(false)}
           />
-        ) : (
-          <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="review-buttons">
-            {postButtons(p).map((b) => (
-              <Button
-                key={b.label}
-                className={cn(BTN, b.go && "bg-green-600 text-white hover:bg-green-700")}
-                variant={b.go ? "default" : "outline"}
-                title={b.sub}
-                {...props(`schedule:${b.label}`)}
-                onClick={() => (b.how === "pick" ? setPickOpen(true) : void act(`schedule:${b.label}`, () => api.completeReviewItem(item.id, b.slot ? { slot: b.slot } : {})))}
-                data-testid={b.how === "pick" ? "review-pick" : "review-schedule"}
-              >
-                {b.label}
-              </Button>
-            ))}
-            <Button variant="secondary" className={BTN} disabled={busy} title="The writer makes a new version with your words. It comes back to you." onClick={() => setRelaunchOpen(true)} data-testid="review-iteration">
-              ↻ {ACTION.changes.label}
-            </Button>
-            {/* the third outcome: the held post is not sent. */}
-            <Button variant="outline" className={BTN} disabled={busy} title="The post is not sent." onClick={() => setDenyOpen(true)} data-testid="review-deny">
-              ✕ {ACTION.decline.label}
-            </Button>
-          </div>
-        )}
+        ) : null}
         {/* E948-S60: the one feedback block on the held post too: the writer makes a new version with his words. */}
         {!relaunchOpen && (
           <CardFeedback
@@ -1415,6 +1414,7 @@ function PostReviewCardBody(card: CardProps) {
             className="mt-0"
             refName={item.ref ?? item.id}
             send={(words, files) => act("changes", () => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))).then((ok) => { if (!ok) throw new Error("the card did not take it"); })}
+            actions={pickOpen ? undefined : postRow}
           />
         )}
         {/* what a press did, after the answer block, never between the buttons and the feedback */}

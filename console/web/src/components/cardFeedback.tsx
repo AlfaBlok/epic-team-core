@@ -1,10 +1,9 @@
-import { useState, type ReactNode } from "react";
-import { Mic } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MessageSquareText, Mic } from "lucide-react";
 import { api } from "@/api";
 import { mutate } from "@/lib/data";
 import { markSent } from "@/lib/sentRows";
 import type { ClosedCardRef } from "@/api/review-types";
-import { Button } from "@/components/ui/button";
 import { CardButton } from "@/components/ui/cardButton";
 import { useChatAttach, type ChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
@@ -20,25 +19,48 @@ import { cardPage, shortTo, useAnswerVoice, type AnswerVoice } from "@/voice/Ans
  *
  * - a text box (any length),
  * - a screenshot: paste it (Ctrl/Cmd+V, a phone's Paste in the paperclip menu), drop it, or pick it with the paperclip,
- * - a BIG microphone with its word ("Speak") on every screen, recording in place (the card recorder, useAnswerVoice),
+ * - a microphone with its word ("Voice") on every screen, recording in place (the card recorder, useAnswerVoice),
  * - Send.
  *
- * Shown open on every card, never behind a press. A card with its own words state (an ask's answer box, a review's
+ * E948-S131 (vn_73e840cd): no box open by default. The card's one row is its answer buttons, then Voice (one tap records,
+ * the next sends) and Text (opens the box with its paperclip and Send), even on a phone. A card with its own words state (an ask's answer box, a review's
  * Not yet note) passes its state in (`FeedbackBlock`); every other card uses `CardFeedback`, which keeps its own.
  * The inventory (cardInventory.tsx) lists every card type and its test fails when one has no block.
  */
 
 export const FEEDBACK_LABEL = "Feedback";
-/** E948-S60 iteration 2: the box's one prompt and its one button, on every card ("Why are the cards so different every time?"). */
-export const FEEDBACK_HINT = "Feedback: write, paste a screenshot, or speak";
+/** the box's one prompt, once Text opened it (the microphone is its own button, Voice, beside it). */
+export const FEEDBACK_HINT = "Write, or paste a screenshot";
 export const FEEDBACK_SEND = "Send";
+/** E948-S131 (vn_73e840cd): the two buttons every card ends with, after its own answer buttons. */
+export const FEEDBACK_VOICE = "Voice";
+export const FEEDBACK_TEXT = "Text";
 
-/** a microphone that is off (voice paused for the month, or no voice on this console): still big and in place, it says why. */
+/**
+ * every button in a card's one row (its answers, Park, Snooze, Voice, Text): the same height, and on a phone each line of
+ * the row is filled evenly (each button grows), so a row that wraps reads as even blocks, never a ragged run (vn_73e840cd:
+ * "harmonize the buttons so that they look harmonious on the mobile and not messy").
+ */
+export const ROW_BUTTON = "max-sm:min-h-11 max-sm:flex-auto max-sm:justify-center";
+
+/**
+ * two quiet buttons that belong together (Park and Snooze, Voice and Text): on a computer they sit in the card's one row
+ * like the rest; on a phone they take a line of their own as two equal halves, so the row reads as even blocks.
+ */
+export function RowPair({ children, ...rest }: { children: ReactNode } & Record<`data-${string}`, string>) {
+  return (
+    <span className="contents max-sm:grid max-sm:basis-full max-sm:grid-cols-2 max-sm:gap-2 max-sm:[&>*]:w-full max-sm:[&_button]:w-full" data-row-pair="" {...rest}>
+      {children}
+    </span>
+  );
+}
+
+/** a microphone that is off (voice paused for the month, or no voice on this console): still in place, it says why. */
 function MicOff() {
   return (
-    <Button type="button" variant="outline" disabled className="h-11 shrink-0 gap-1.5 px-4 text-sm font-medium max-sm:min-h-11 [&_svg]:size-5" title="Voice is off on this console or paused for the month" data-testid="feedback-mic-off">
-      <Mic /> Speak
-    </Button>
+    <CardButton type="button" variant="outline" disabled className={cn("gap-1.5 text-sm [&_svg]:size-4", ROW_BUTTON)} title="Voice is off on this console or paused for the month" data-testid="feedback-mic-off">
+      <Mic /> {FEEDBACK_VOICE}
+    </CardButton>
   );
 }
 
@@ -54,6 +76,8 @@ export function FeedbackBlock({
   id,
   note,
   className,
+  actions,
+  open: openProp,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -68,34 +92,81 @@ export function FeedbackBlock({
   /** one grey line under the box (what Send does, a card's own hint, a refusal): a card says its difference here, never in the box. */
   note?: ReactNode;
   className?: string;
+  /** E948-S131: the card's own answer buttons (its choices, Park, Snooze): they lead the one row, Voice and Text close it. */
+  actions?: ReactNode;
+  /** the box shown open from the start (a card that asks for words now): Text is then already pressed. */
+  open?: boolean;
 }) {
   const empty = !value.trim() && !files.ids.length;
+  // E948-S131 (the owner 2026-11-17, vn_73e840cd): "we have the normal button, and then one button which is voice and one
+  // button which is text ... with text, it unfolds the text dialogue, but it's not showing by default". The box opens on
+  // Text, and stays open while it holds words or a screenshot (a paste or a drop opens it too).
+  const [shown, setShown] = useState(false);
+  const open = shown || !!openProp || !empty;
+  const ref = useRef<HTMLDivElement>(null);
+  const focusNext = useRef(false);
+  useEffect(() => {
+    if (open && focusNext.current) {
+      focusNext.current = false;
+      ref.current?.querySelector("textarea")?.focus();
+    }
+  }, [open]);
+  const toggle = () => {
+    if (open && empty) return setShown(false);
+    focusNext.current = true;
+    setShown(true);
+    if (open) ref.current?.querySelector("textarea")?.focus();
+  };
   return (
-    <div className={cn("mt-3 grid min-w-0 gap-1", className)} id={id} data-testid="card-feedback" data-card-feedback="">
-      <WordsBox
-        label={FEEDBACK_LABEL}
-        rows={2}
-        boxClassName="min-h-12"
-        placeholder={FEEDBACK_HINT}
-        value={value}
-        onChange={onChange}
-        files={files}
-        voice={{ button: <span data-feedback-mic="">{voice.button ?? <MicOff />}</span>, strip: voice.strip }}
-        testid="card-feedback-box"
-        send={
-          <CardButton
-            className="h-11"
-            disabled={disabled || sending || voice.busy || !files.ready || empty}
-            pending={sending}
-            pendingLabel="Sending…"
-            onClick={onSend}
-            data-testid={sendTestId}
-            data-feedback-send=""
-          >
-            {FEEDBACK_SEND}
-          </CardButton>
-        }
-      />
+    <div ref={ref} className={cn("mt-3 grid min-w-0 gap-2", className)} id={id} data-testid="card-feedback" data-card-feedback="" data-open={open ? "yes" : "no"} {...(open ? {} : files.dropProps)}>
+      {!open && voice.strip}
+      <div className="flex min-w-0 flex-wrap items-center gap-2 max-sm:[&_button]:flex-auto max-sm:[&_button]:justify-center" data-feedback-row="" data-card-buttons-row="" data-testid="card-feedback-row">
+        {actions}
+        <RowPair data-testid="card-feedback-reply">
+        <span className="contents" data-feedback-mic="" data-feedback-voice="">
+          {voice.button ?? <MicOff />}
+        </span>
+        <CardButton
+          type="button"
+          variant={open ? "secondary" : "outline"}
+          className={cn("gap-1.5 text-sm [&_svg]:size-4", ROW_BUTTON)}
+          aria-expanded={open}
+          aria-controls={id ? `${id}-box` : undefined}
+          disabled={disabled}
+          onClick={toggle}
+          data-testid="card-feedback-text"
+          data-feedback-text=""
+        >
+          <MessageSquareText /> {FEEDBACK_TEXT}
+        </CardButton>
+        </RowPair>
+      </div>
+      {open && (
+        <WordsBox
+          label={FEEDBACK_LABEL}
+          rows={2}
+          boxClassName="min-h-12"
+          placeholder={FEEDBACK_HINT}
+          value={value}
+          onChange={onChange}
+          files={files}
+          voice={{ strip: voice.strip }}
+          testid="card-feedback-box"
+          send={
+            <CardButton
+              className="h-9"
+              disabled={disabled || sending || voice.busy || !files.ready || empty}
+              pending={sending}
+              pendingLabel="Sending…"
+              onClick={onSend}
+              data-testid={sendTestId}
+              data-feedback-send=""
+            >
+              {FEEDBACK_SEND}
+            </CardButton>
+          }
+        />
+      )}
       {note && <div className="text-xs text-muted-foreground">{note}</div>}
     </div>
   );
@@ -133,6 +204,7 @@ export function CardFeedback({
   disabled,
   className,
   sent,
+  actions,
 }: {
   /** one per card (`card:<id>`): the floating voice pill sends to it. */
   origin: string;
@@ -150,6 +222,8 @@ export function CardFeedback({
    * comment files (its row or ask), else the Team desk; `said` the row's words ("Your words went to the team").
    */
   sent?: { slot: string | string[]; card?: ClosedCardRef; said?: string };
+  /** E948-S131: the card's own buttons, first in the one row before Voice and Text. */
+  actions?: ReactNode;
 }) {
   const [words, setWords] = useState("");
   const [sending, setSending] = useState(false);
@@ -198,6 +272,7 @@ export function CardFeedback({
       disabled={disabled}
       note={line}
       className={className}
+      actions={actions}
     />
   );
 }

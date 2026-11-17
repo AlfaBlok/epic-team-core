@@ -174,7 +174,7 @@ const CARDS: { name: string; mount: () => void; root: () => HTMLElement; open?: 
       inSkin(skinNow, <WaitingForReview fold="review" />);
     },
     root: () => screen.getByTestId("review-card"),
-    open: (c) => fireEvent.click(within(c).getByTestId("review-iteration")),
+    open: (c) => fireEvent.click(within(c).getByTestId("card-feedback-text")),
   },
 ];
 let skinNow: SkinId = "console";

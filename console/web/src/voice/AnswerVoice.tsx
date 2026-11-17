@@ -67,7 +67,8 @@ export function useAnswerVoice(props: {
   /** E948-S60: the card feedback block's big, labelled microphone. */
   big?: boolean;
 }): AnswerVoice {
-  const n = useNote({ ...props, tid: "answer-voice", idleLabel: "Speak" });
+  // E948-S131: the card row's button is Voice (one tap records, the next sends); a box's own microphone stays Speak.
+  const n = useNote({ ...props, tid: "answer-voice", idleLabel: props.big ? "Voice" : "Speak" });
   // while the owner records or types here the inbox holds still, and this card is marked (index.css)
   const holding = useInboxHold(props.origin, { recording: n.busy, typed: props.typed });
   const mark = holding ? <span hidden data-inbox-hold="" data-testid="inbox-hold" /> : null;
