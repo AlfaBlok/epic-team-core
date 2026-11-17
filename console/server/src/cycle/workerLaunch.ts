@@ -63,7 +63,7 @@ export const workerSummary = (ticket: string, title?: string | null) => `${ticke
 export const workerThreadTitle = (ticket: string, title?: string | null) => `${ticket}: ${title || "worker"}`.slice(0, 120);
 
 /** The first message of the worker's thread: the manager's brief plus how this worker reports (it has no parent thread). */
-export function workerMessage(o: { base: string; runId: string; parentRunId: string; ticket: string; brief: string; deckUrl?: string }): string {
+export function workerMessage(o: { base: string; runId: string; parentRunId: string; ticket: string; brief: string; deckUrl?: string; where?: string }): string {
   const h = "-H 'content-type: application/json'";
   const brief = o.brief.split("<child run id>").join(o.runId);
   return [
@@ -71,7 +71,7 @@ export function workerMessage(o: { base: string; runId: string; parentRunId: str
     ...(o.deckUrl && !brief.includes(o.deckUrl) ? [deckBriefLine(o.deckUrl), ""] : []),
     brief,
     "",
-    `## Console protocol (child run ${o.runId} of wake ${o.parentRunId}, launched by the console on ${mainHost()})`,
+    `## Console protocol (child run ${o.runId} of wake ${o.parentRunId}, launched by the console on ${o.where ?? mainHost()})`,
     `You work ticket ${o.ticket}. End every commit message with the trailer line \`Run: ${o.runId}\`.`,
     `Your report goes to the console, not to a parent thread: as your last step PATCH your run: \`curl -sS -X PATCH ${o.base}/api/runs/${o.runId} ${h} -d '{"outcome":"progressed|blocked|monitoring|idle|failed","summary":"${o.ticket} <one line>","endedAt":"<ISO-8601 UTC now>"}'\`.`,
     WORKER_FINISH_RULE,

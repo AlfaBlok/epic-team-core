@@ -71,6 +71,16 @@ export const dispatchRule = (max: number) =>
   `A row whose Role is \`Mac agent\` (the \`needs Mac agent\` label) is never a server worker's and never reads ready: Claude in the Claude app on ${ownerName()}'s Mac does it from its ticket page's bootstrap text (\`scripts/laptop_ticket.py\`, all on the Mac list); ` +
   "its ask carries `— label: needs Mac agent`, and its Done or Stuck report is what you act on. Work that needs his laptop (a browser sign-up, a provider dashboard, Stripe) becomes such a row, never a steps page.";
 
+/**
+ * the dispatch line of a wake that runs on its world's own job servers: no dispatcher and no seat there; the
+ * console starts each worker as a job on a job server of that world (section B of the console protocol).
+ */
+export const jobDispatchRule = (max: number) =>
+  "Dispatch every ready, unblocked row in your scope that your remit and write rule allow, one worker per row, with the console's workers call (section B of the console protocol): " +
+  `each worker runs as a job on a job server of this workspace. Run at most ${max} child workers at once for this milestone (count its child runs still \`running\`). ` +
+  `Record every ready row you did not start in the run summary as \`${queuedCeiling(max)}\`: queued is not idle. ` +
+  "A row whose Owner cell says `<someone> — claimed …, lease until <a time still ahead>` is held: never start a second worker on it.";
+
 /** safety rule, in every wake whatever the write setting. */
 export const NO_SELF_GREEN =
   `Never mark your own node done or green; propose done with evidence for the Delivery manager / ${ownerName()} to verify.`;
@@ -163,14 +173,14 @@ export const childLine = (c: ChildEpic) => {
 };
 
 /** steps 1-2 of a wake on a spine with children: it steers them and starts only what the owner stamped ready. */
-export function parentWakeSteps(children: ChildEpic[], maxWorkers = DEFAULT_MAX_WORKERS): string[] {
+export function parentWakeSteps(children: ChildEpic[], maxWorkers = DEFAULT_MAX_WORKERS, rule: (max: number) => string = dispatchRule): string[] {
   return [
     "This spine has child epics; you steer them. Read each child's `## Current State` and Status, not its rows, and do not start rows that belong to a child spine except as below.",
     "Children (the console's reading of `spines.py --json`; trust the spine if it changed since):",
     ...children.map(childLine),
     "1. For each PICK UP child (Status `ready`, or `active` with no enabled persona of its own): read its Issue Ledger and list its rows with Status `ready` that are unblocked. " +
       "A `draft` row is planning: never start it. An `active` child with no ready rows needs nothing from you.",
-    `2. Start those rows: ${dispatchRule(maxWorkers)} Each brief names \`Bound epic: <child path>\`. ` +
+    `2. Start those rows: ${rule(maxWorkers)} Each brief names \`Bound epic: <child path>\`. ` +
       "For each child you start, set its `Status: active` and its `Last attempted:` naming this run. " +
       "Never start a draft, deferred or finished child, nor one owned by another persona. In this spine's own ledger start only rows with Status `ready` (its old `draft` rows stay as they are). " +
       "Ready children you could not start (ceiling or no seat) stay `ready` and queued: name them in the summary; the follow-up wake picks them up.",
@@ -260,7 +270,10 @@ export function buildWakePrompt(
   brief?: string,
   /** the milestone's deck link (the home world's milestones; another world has no deck), right after the first line. */
   deckUrl?: string,
+  /** the wake runs on its world's own job servers (workers through the console, no dispatcher). */
+  onJobServers = false,
 ): string {
+  const dispatch = onJobServers ? jobDispatchRule : dispatchRule;
   // only the assignment's write_enabled + write_scope open writes; persona.mayWrite is not consulted here.
   const w = effectiveWrite(assignment);
   const writeRule = w.scope
@@ -302,10 +315,10 @@ export function buildWakePrompt(
     ...(ownWork
       ? ownWorkSteps(children)
       : steer
-      ? parentWakeSteps(children!, maxWorkers)
+      ? parentWakeSteps(children!, maxWorkers, dispatch)
       : [
           "1. Read the spine and its tickets; list EVERY unblocked item that falls in your remit (an open ask blocks only the rows it names; a blocked row never stops the others).",
-          `2. ${dispatchRule(maxWorkers)} Or decide there is nothing to do. Your goal is green: do the reversible step instead of asking (see C of the console protocol).`,
+          `2. ${dispatch(maxWorkers)} Or decide there is nothing to do. Your goal is green: do the reversible step instead of asking (see C of the console protocol).`,
         ]),
     `3. Before you PATCH, finish what this wake started: ${FINISH_THE_JOB_RULE} ${VISUAL_FIRST_RULE}`,
     "4. Finish with one line: `outcome: progressed: <step done>, next <step> | blocked: waits on <open ask code> | monitoring: <what> until <when>, next check <ISO> | idle: no step ready` " +

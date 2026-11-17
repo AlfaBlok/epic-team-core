@@ -57,7 +57,7 @@ export const openForJobs = (hold: WorldWakeHold, route: JobRoute | undefined): W
 
 export interface HostedHooks {
   /** The wake / chat seed text of a world's persona: its curls carry the world token (hosted: tenancy/agentAuth.ts withWorldAuth). */
-  worldPrompt(text: string, w: { tenant: string; personaId: string; consoleUrl?: string }): string;
+  worldPrompt(text: string, w: { tenant: string; personaId: string; consoleUrl?: string; /** a wake on its world's own job servers */ job?: boolean }): string;
   /** Every curl in the text carries the world token (hosted: tenancy/agentAuth.ts curlsWithWorldAuth). */
   worldCurls(text: string, w: { tenant: string; personaId: string }): string;
   /** The wake gate for worlds on shared hosts (hosted: cycle/worldGate.ts worldWakeGate). */

@@ -1647,7 +1647,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const route = jobRoute!;
     const stub = hooks.worldPrompt(
       wakeStub(route.base, a.id, { note: run.instructions ?? undefined, noteBy: run.instructionsBy ?? undefined, clientRequestId: run.id }),
-      { tenant: world, personaId: p.id, consoleUrl: route.base },
+      { tenant: world, personaId: p.id, consoleUrl: route.base, job: true },
     );
     store.updateRun(run.id, { summary: `Run now: handed to a job server of ${world} (waiting for the persona to wake)` });
     track(
@@ -1989,7 +1989,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const map = o.totemMap ? await o.totemMap(m).catch(() => undefined) : undefined;
     const deckUrl = deckUrlOf(m);
     let prompt =
-      buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl) +
+      buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl, !!jobBase) +
       (owned?.block ? "\n\n" + owned.block : "") +
       (map ? "\n\n" + map : "") +
       (priority ? "\n\n" + priority : "") +
@@ -2007,7 +2007,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       (launch ? "\n\n" + launch : "") +
       (services ? "\n\n" + services : "") +
       "\n" +
-      wakeProtocol({ base: jobBase ?? baseFor(p.host), run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, roomLine: room ? roomLine(room) : undefined, rubric, deckUrl, objectivesLine: owned?.line || undefined });
+      wakeProtocol({ base: jobBase ?? baseFor(p.host), jobWorld: jobBase ? jobWorldOf(m) : undefined, run, assignment: a, milestone: m, persona: p, grants, managerAssignmentId, maxWorkers, runningWorkers, roomLine: room ? roomLine(room) : undefined, rubric, deckUrl, objectivesLine: owned?.line || undefined });
     if (skills.note) prompt += `\nNote: ${skills.note}.\n`;
     // the world's own skills are project skills of this checkout, not of the seat
     if (skills.world?.length)
@@ -2018,7 +2018,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const pre = store.getRun(run.id)?.preWake;
     if (pre && /pull failed|unreadable/.test(pre))
       prompt += `\nNote: console ${pre}. Your checkout and repo tools may be stale: fix it if it is yours to fix (never reset others' work), else say so in your summary.\n`;
-    prompt = hooks.worldPrompt(prompt, { tenant: milestoneWorld(db, m.id), personaId: p.id, consoleUrl: jobBase ?? baseFor(p.host === workerHost() ? workerHost() : mainHost()) }); // the home world unchanged
+    prompt = hooks.worldPrompt(prompt, { tenant: milestoneWorld(db, m.id), personaId: p.id, consoleUrl: jobBase ?? baseFor(p.host === workerHost() ? workerHost() : mainHost()), job: !!jobBase }); // the home world unchanged
     if (p.freshThreadEachWake && !jobBase) return launchFresh(a, m, p, run, prompt); // a job is a fresh session already
     return { prompt, run };
   }
@@ -2140,7 +2140,6 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
    * final one fails it. The seat is held until the run reports a terminal outcome (cycle_seat_hold, as bootstrap).
    */
   async function launchWorker(parentRunId: string, i: WorkerLaunchInput): Promise<{ run: Run; replayed: boolean }> {
-    t3();
     const parent = store.getRun(parentRunId);
     if (!parent) throw new CycleError(404, "not_found", `run ${parentRunId} not found`);
     if (parent.parentRunId) throw new CycleError(400, "not_a_wake", `run ${parentRunId} is a child run; launch workers from its wake ${parent.parentRunId}`);
@@ -2148,8 +2147,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     if (!a) throw new CycleError(404, "not_found", `assignment ${parent.assignmentId} not found`);
     const prev = store.getRunByClientRequest(a.id, i.clientRequestId);
     if (prev) return { run: prev, replayed: true };
-    if (o.capFallback !== true) throw new CycleError(409, "vps1_workers_off", workersOffText());
     const m = store.getMilestone(a.milestoneId)!;
+    const jw = jobWorldOf(m);
+    if (jw) return { run: launchJobWorker(a, m, parentRunId, i, jw), replayed: false }; // the world's own job servers
+    t3();
+    if (o.capFallback !== true) throw new CycleError(409, "vps1_workers_off", workersOffText());
     refuseHeld(m);
     const child = store.createRun({
       assignmentId: a.id,
@@ -2160,6 +2162,44 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     });
     saveWorkerLaunch(db, child.id, i, iso());
     return { run: await tryWorker(child.id), replayed: false };
+  }
+
+  /**
+   * a worker of a world whose wakes run on its own job servers (model A). Its Delivery Manager, itself a job
+   * there, has no dispatcher and no delegate_task: it asks the console here, and the console hands the worker to the job
+   * route like a wake (a job server of that world, its helper login and keys from its own vault, a per-job token for the
+   * gateway; never a seat of ours). The worker reports on its own child run through the gateway; when the job ends with
+   * the run still open, the run fails with the job's reason (never left running).
+   */
+  function launchJobWorker(a: Assignment, m: Milestone, parentRunId: string, i: WorkerLaunchInput, world: string): Run {
+    const route = jobRoute!;
+    const p = store.getPersona(a.personaId)!;
+    const where = `a job server of ${world}`;
+    const child = store.createRun({
+      assignmentId: a.id,
+      parentRunId,
+      outcome: "running",
+      summary: `${i.ticket} ${i.title || "worker"} (handed to ${where})`,
+      clientRequestId: i.clientRequestId,
+    });
+    saveWorkerLaunch(db, child.id, i, iso());
+    const message = hooks.worldCurls(
+      workerMessage({ base: route.base, runId: child.id, parentRunId, ticket: i.ticket, brief: i.brief, deckUrl: deckUrlOf(m), where }),
+      { tenant: world, personaId: p.id },
+    );
+    console.log(`worker ${child.id} (${i.ticket}, wake ${parentRunId}) handed to ${where}`);
+    track(
+      route
+        .start({ runId: child.id, world, assignmentId: a.id, personaId: p.id, model: i.model || p.model, stub: message })
+        .catch((e): JobEnd => ({ ok: false, result: "failed", detail: errorText(e) }))
+        .then((end) => {
+          const cur = store.getRun(child.id);
+          if (cur?.outcome !== "running") return;
+          const why = end.ok ? "the job ended without the worker's report" : `job server ${end.result}${end.detail ? `: ${end.detail}` : ""}`;
+          store.updateRun(child.id, { outcome: "failed", endedAt: iso(), summary: `${cur.summary} · ${why}${end.server ? ` (${end.server})` : ""}`.slice(0, 2000) });
+        }),
+    );
+    return store.getRun(child.id)!;
   }
 
   /** One launch attempt of a console worker run (first try or a deferred retry). */

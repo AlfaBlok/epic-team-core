@@ -200,6 +200,26 @@ export const HELD_RULE =
   "a child run that reports HELD counts too. The console wakes you when the egress is back (a 6 h fallback check is set for you if you give no nextCheckAt).";
 
 /** Appended to buildWakePrompt: how this wake reports back to the console. */
+/**
+ * section B of a wake that runs on its world's own job servers (model A). There is no `$EPICSPINE_DISPATCHER`
+ * and no T3 `delegate_task` on a job server; the console starts each worker as a job on a job server of the same world
+ * (POST /api/runs/<this run>/workers through the gateway), with that world's own vault keys, never a seat of ours.
+ */
+export function jobWorkerSection(o: { base: string; runId: string; world: string; maxWorkers: number; runningWorkers?: number }): string[] {
+  const h = "-H 'content-type: application/json'";
+  const body = { ticket: "<row id>", title: "<what it does, a few words>", brief: "<the brief>", clientRequestId: "<row id>-<UTC HHMMSS now>" };
+  return [
+    "B. Child workers: never do long work in this thread.",
+    `   This workspace (${o.world}) runs on its own job servers: there is no \`$EPICSPINE_DISPATCHER\` and no \`delegate_task\` here. The console starts each worker for you as a job on a job server of this workspace (its keys from this workspace's own vault).`,
+    `   Dispatch every ready, unblocked row in your scope that your remit and write rule allow, one worker per row, at most ${o.maxWorkers} child runs \`running\` at once for this milestone` +
+      (o.runningWorkers === undefined ? "." : ` (${o.runningWorkers} running at this wake's start: you may start ${Math.max(0, o.maxWorkers - o.runningWorkers)} more).`) +
+      " A row whose Owner cell holds a live claim is never started twice. Record every ready row you did not start as `" + queuedCeiling(o.maxWorkers) + "` in your summary.",
+    `   For each worker: \`curl -sS -X POST ${o.base}/api/runs/${o.runId}/workers ${h} -d '${JSON.stringify(body)}'\` → the child run (keep its \`id\`).`,
+    "   The brief names the row, its spine, the task and its done check, and says: claim the row first, name the row in every commit, end every commit message with `Run: <child run id>`, push to the repo. The console adds how the worker reports.",
+    "   You do not wait for the worker: it reports on its own child run (it PATCHes it). Name each started row and its child run id in your finishing summary; your next wake reads their outcomes.",
+  ];
+}
+
 export function wakeProtocol(o: {
   base: string;
   run: Run;
@@ -221,6 +241,8 @@ export function wakeProtocol(o: {
   deckUrl?: string;
   /** the owner's objectives in one line (objectives.ts), carried in the first worker rule (absent: another world). */
   objectivesLine?: string;
+  /** the world when this wake runs on its own job servers (no dispatcher, no delegate_task: the console starts workers there). */
+  jobWorld?: string;
 }): string {
   const { base, run, assignment, milestone, persona } = o;
   const maxWorkers = o.maxWorkers ?? DEFAULT_MAX_WORKERS;
@@ -248,6 +270,8 @@ export function wakeProtocol(o: {
           "   name it in your finishing summary as `queued: <what it does>` (or add it as a row if your remit writes the spine); the Delivery manager dispatches it on " + workerHost().toUpperCase() + " at its next wake.",
           `   ${childStateRule(base, run.id)} Before you finish, verify a finished child's effect in the repo.`,
         ]
+      : o.jobWorld
+      ? jobWorkerSection({ base, runId: run.id, world: o.jobWorld, maxWorkers, runningWorkers: o.runningWorkers })
       : [
         "B. Child workers: never do long work in this thread.",
         `   ${childStateRule(base, run.id)}`,
