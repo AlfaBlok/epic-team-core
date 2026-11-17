@@ -8,6 +8,8 @@ import { mutate, useQuery } from "@/lib/data";
 import { useInboxSearch } from "@/lib/inboxSearch";
 import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { CardFeedback } from "@/components/cardFeedback";
+import { SentOr, SentRow } from "@/components/sentRow";
+import { markSent, useKeepSent } from "@/lib/sentRows";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { RelTime } from "@/components/common";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
@@ -35,6 +37,11 @@ export const TREND_WORD = { greener: "Greener", redder: "Redder", same: "No chan
 
 /** the card's goal set, opened on its key result when it names one (every card points at its objective and key result). */
 const scorecardHref = (c: Pick<TeamCard, "scorecard" | "keyResult">, kr = c.keyResult) => (c.scorecard ? `${scorecardHref0(c.scorecard)}${kr ? `?kr=${encodeURIComponent(kr)}` : ""}` : undefined);
+
+/** E948-S130: a team card's place in a list and its Sent row (`data-inbox-card`). */
+export const teamSlot = (c: Pick<TeamCard, "id">) => `team:${c.id}`;
+const teamSaid = (a: { text?: string; pick?: number; via: "text" | "voice" | "button" }) =>
+  a.text === TEAM_PARKED ? "Parked for later" : a.pick !== undefined ? "Goal picked" : a.via === "voice" ? "Voice note sent to the team" : a.via === "text" ? "Your words went to the team" : "Answered";
 
 function answerWords(c: TeamCard): string {
   const a = c.answer;
@@ -89,6 +96,9 @@ function useAnswer(card: TeamCard, onAnswered?: (c: TeamCard) => void) {
     try {
       const r = await mutate(() => api.answerTeamCard(card.id, a), "inbox");
       setDone(answerWords(r.card));
+      // E948-S130 (vn_4f13161d): a team card he answered (a button, Park, his words or a voice note) collapses in place to
+      // its green Sent row with Add comment, like every card; before, it said "saved" and vanished 2.5 s later
+      markSent(teamSlot(card), { said: teamSaid(a), title: card.title });
       onAnswered?.(r.card);
     } catch (e) {
       setError(`Not saved: ${(e as Error).message}`);
@@ -133,7 +143,15 @@ function Feedback({ card, answer }: { card: TeamCard; answer: ReturnType<typeof 
 }
 
 /** a scorecard's daily digest: its numbers against the last digest, greener or redder, and why. */
-export function TeamDigestCard({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+export function TeamDigestCard(props: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  return (
+    <SentOr slot={teamSlot(props.card)}>
+      <TeamDigestBody {...props} />
+    </SentOr>
+  );
+}
+
+function TeamDigestBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   const d = card.digest!;
   const st = useAnswer(card, onAnswered);
   const changed = (d.lines ?? []).filter((l) => l.was);
@@ -202,7 +220,15 @@ export function TeamDigestCard({ card, onAnswered }: { card: TeamCard; onAnswere
 }
 
 /** a strategic idea: the idea, the gain, the team's recommendation; Go ahead, or his words. */
-export function TeamIdeaCard({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+export function TeamIdeaCard(props: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  return (
+    <SentOr slot={teamSlot(props.card)}>
+      <TeamIdeaBody {...props} />
+    </SentOr>
+  );
+}
+
+function TeamIdeaBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   const i = card.idea!;
   const st = useAnswer(card, onAnswered);
   return (
@@ -285,7 +311,15 @@ export function DecisionBox({ children }: { children: ReactNode }) {
  * came from, what is not set, the link to check, Your decision, then one row of answer buttons (the team's pick filled),
  * Park and Give feedback, then the same feedback box with its microphone. No stacked list of options.
  */
-export function GoalTalkCard({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+export function GoalTalkCard(props: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  return (
+    <SentOr slot={teamSlot(props.card)}>
+      <GoalTalkBody {...props} />
+    </SentOr>
+  );
+}
+
+function GoalTalkBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   const g = card.goal!;
   const st = useAnswer(card, onAnswered);
   const box = `goal-feedback-${card.id}`;
@@ -352,6 +386,14 @@ export function GoalTalkCard({ card, onAnswered }: { card: TeamCard; onAnswered?
  */
 export function CampaignGoalCard({ t }: { t: { name: string; openUrl: string; app: string; text: string } }) {
   return (
+    <SentOr slot={`goal:${t.openUrl}`}>
+      <CampaignGoalBody t={t} />
+    </SentOr>
+  );
+}
+
+function CampaignGoalBody({ t }: { t: { name: string; openUrl: string; app: string; text: string } }) {
+  return (
     <CardShell kind="goal" className="text-sm" data-testid="goal-talk-line" data-team-kind="goal">
       <CardMeta kind={TEAM_KIND_WORD.goal}>
         <span>{t.name}</span>
@@ -364,7 +406,7 @@ export function CampaignGoalCard({ t }: { t: { name: string; openUrl: string; ap
       </div>
       <DecisionBox>{t.text}</DecisionBox>
       <div className="mt-3.5 grid min-w-0 gap-2" data-card-answer="">
-        <CardFeedback origin={`campaign-goal:${t.openUrl}`} title={`${t.name} goal`} refName={t.name} className="mt-0" />
+        <CardFeedback origin={`campaign-goal:${t.openUrl}`} title={`${t.name} goal`} refName={t.name} className="mt-0" sent={{ slot: `goal:${t.openUrl}` }} />
       </div>
     </CardShell>
   );
@@ -379,7 +421,15 @@ export const advisorWeek = (c: TeamCard) => `week of ${c.advisor?.weekLabel ?? c
  * and the week, with Accept all; each suggestion is its own card on the one shell with Accept, Decline and its answer box.
  * Accept writes a ready row on the suggestion's spine first (server/src/inbox/advisorCards.ts), then the card says which.
  */
-export function AdvisorSetCard({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+export function AdvisorSetCard(props: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  return (
+    <SentOr slot={teamSlot(props.card)}>
+      <AdvisorSetBody {...props} />
+    </SentOr>
+  );
+}
+
+function AdvisorSetBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   const [set, setSet] = useState(card.advisor!);
   const st = useAnswer(card);
   const [busy, setBusy] = useState<string>();
@@ -392,7 +442,13 @@ export function AdvisorSetCard({ card, onAnswered }: { card: TeamCard; onAnswere
       const r = await mutate(() => api.advisorVerdict(card.id, v), "inbox");
       if (r.card.advisor) setSet(r.card.advisor);
       if (r.failed?.length) setError(`Not accepted yet: ${r.failed.map((f) => f.reason).join("; ")}`);
-      if (r.card.advisor && !r.card.advisor.items.some((i) => !i.verdict)) onAnswered?.(r.card);
+      const took = !r.failed?.length;
+      if (r.card.advisor && !r.card.advisor.items.some((i) => !i.verdict)) {
+        const rows = r.card.advisor.items.flatMap((i) => (i.verdict?.state === "accepted" && i.verdict.row ? [i.verdict.row] : []));
+        markSent(teamSlot(card), { said: v.verdict === "accept" ? "Accepted" : v.verdict === "decline" ? "Declined" : "Answered", title: card.title, ...(rows.length ? { detail: `Ready tasks: ${rows.join(", ")}` } : {}) });
+        onAnswered?.(r.card);
+      }
+      return took;
     } catch (e) {
       setError(`Not saved: ${(e as Error).message}`);
       throw e;
@@ -445,7 +501,24 @@ export function AdvisorSetCard({ card, onAnswered }: { card: TeamCard; onAnswere
   );
 }
 
-function AdvisorSuggestion({ card, item, n, of, week, busy, send }: { card: TeamCard; item: AdvisorItem; n: number; of: number; week: string; busy?: string; send: (key: string, v: Parameters<typeof api.advisorVerdict>[1]) => Promise<void> }) {
+type SuggestionProps = { card: TeamCard; item: AdvisorItem; n: number; of: number; week: string; busy?: string; send: (key: string, v: Parameters<typeof api.advisorVerdict>[1]) => Promise<boolean> };
+
+/** E948-S130: one suggestion he answered (Accept, Decline or his words) collapses to its own green Sent row, like every card. */
+function AdvisorSuggestion(props: SuggestionProps) {
+  const slot = `${teamSlot(props.card)}:${props.item.id}`;
+  const send: SuggestionProps["send"] = async (key, v) => {
+    if (!(await props.send(key, v))) return false;
+    markSent(slot, { said: v.verdict === "accept" ? "Accepted: made a task" : v.verdict === "decline" ? "Declined: the team drops it" : v.via === "voice" ? "Voice note sent to the team" : "Your words went to the team", title: props.item.title });
+    return true;
+  };
+  return (
+    <SentOr slot={slot}>
+      <AdvisorSuggestionBody {...props} send={send} />
+    </SentOr>
+  );
+}
+
+function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: SuggestionProps) {
   const v = item.verdict;
   return (
     <CardShell kind="advisor-item" className="text-sm" data-testid="advisor-item" data-item={item.id} data-verdict={v?.state ?? "open"}>
@@ -505,6 +578,7 @@ function AdvisorSuggestion({ card, item, n, of, week, busy, send }: { card: Team
   );
 }
 
+/** E948-S130: each team card kind collapses to its own Sent row (teamSlot) once he answered it. */
 export function TeamCardView({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   if (card.kind === "advisor" && card.advisor) return <AdvisorSetCard card={card} onAnswered={onAnswered} />;
   if (card.kind === "digest" && card.digest) return <TeamDigestCard card={card} onAnswered={onAnswered} />;
@@ -541,7 +615,7 @@ export function TeamCardsSections({ kinds = ["advisor", "idea", "goal", "digest"
       {kinds.map((k) => (
         <Fragment key={k}>
           {extra?.[k]}
-          {data && <KindSection kind={k} cards={open.filter((c) => c.kind === k)} onAnswered={(c) => setTimeout(() => setGone((s) => new Set(s).add(c.id)), 2500)} />}
+          {data && <KindSection kind={k} cards={open.filter((c) => c.kind === k)} onAnswered={(c) => setGone((s) => new Set(s).add(c.id))} />}
         </Fragment>
       ))}
     </>
@@ -550,15 +624,12 @@ export function TeamCardsSections({ kinds = ["advisor", "idea", "goal", "digest"
 
 function KindSection({ kind, cards, onAnswered }: { kind: TeamCardKind; cards: TeamCard[]; onAnswered: (c: TeamCard) => void }) {
   const [open, setOpen] = useSectionOpen(`team-${kind}`);
-  if (!cards.length) return null;
+  const kept = useKeepSent(cards, teamSlot, `team-${kind}`);
+  if (!kept.length) return null;
   return (
     <FoldSection title={TEAM_SECTION_TITLE[kind]} count={cards.length} tone="info" testId={`team-cards-${kind}`} open={open} onToggle={setOpen}>
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid={`team-cards-${kind}-list`}>
-        {cards.map((c) => (
-          <li key={c.id} className="min-w-0">
-            <TeamCardView card={c} onAnswered={onAnswered} />
-          </li>
-        ))}
+        <TeamCardRows rows={kept} onAnswered={onAnswered} />
       </ul>
     </FoldSection>
   );
@@ -585,7 +656,8 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
   // a goal set's own inbox (scorecard) is that set's cards only: the campaigns' questions belong to the whole Inbox.
   const lines = scorecard ? [] : talk;
   const count = cards.length + lines.length;
-  if (!count) return null;
+  const rows = useKeepSent(cards, teamSlot, "inbox-goals");
+  if (!count && !rows.length) return null;
   return (
     <FoldSection title={INBOX_SECTION_TITLE.goal} count={count} tone="needs-you" testId="inbox-goals-to-set" open={open || !!needle} onToggle={setOpen}>
       {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
@@ -595,13 +667,25 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
             <CampaignGoalCard t={t} />
           </li>
         ))}
-        {cards.map((c) => (
-          <li key={c.id} className="min-w-0">
-            <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
-          </li>
-        ))}
+        <TeamCardRows rows={rows} onAnswered={(x) => setGone((s) => new Set(s).add(x.id))} />
       </ul>
     </FoldSection>
+  );
+}
+
+/**
+ * E948-S130: a list of team cards where each one he answered stays as its green Sent row in the place it had (after the
+ * refetch drops it and after a reload), like Blocked on you and the review lists.
+ */
+function TeamCardRows({ rows, onAnswered }: { rows: ReturnType<typeof useKeepSent<TeamCard>>; onAnswered: (c: TeamCard) => void }) {
+  return (
+    <>
+      {rows.map(({ slot, item: c, sent }) => (
+        <li key={slot} className="min-w-0" data-team-kind={c?.kind} data-inbox-card={slot}>
+          {sent ? <SentRow slot={slot} entry={sent} /> : c && <TeamCardView card={c} onAnswered={onAnswered} />}
+        </li>
+      ))}
+    </>
   );
 }
 
@@ -615,15 +699,12 @@ export function InboxIdeasAndDigests({ kinds = TEAM_GROUP_KINDS, scorecard }: { 
   const all = (data?.open ?? []).filter((c) => kinds.includes(c.kind) && !gone.has(c.id) && (!q || teamCardText(c).includes(q)));
   // his old order inside the one list: the Senior advisor's suggestions, then ideas, then digests.
   const cards = kinds.flatMap((k) => all.filter((c) => c.kind === k));
-  if (!cards.length) return null;
+  const rows = useKeepSent(cards, teamSlot, "inbox-team");
+  if (!rows.length) return null;
   return (
     <FoldSection title={INBOX_SECTION_TITLE.team} count={cards.length} tone="review" testId="inbox-team-cards" open={open || !!q} onToggle={setOpen}>
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="inbox-team-cards-list">
-        {cards.map((c) => (
-          <li key={c.id} className="min-w-0" data-team-kind={c.kind}>
-            <TeamCardView card={c} onAnswered={(x) => setTimeout(() => setGone((s) => new Set(s).add(x.id)), 2500)} />
-          </li>
-        ))}
+        <TeamCardRows rows={rows} onAnswered={(x) => setGone((s) => new Set(s).add(x.id))} />
       </ul>
     </FoldSection>
   );

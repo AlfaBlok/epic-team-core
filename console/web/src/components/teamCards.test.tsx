@@ -172,8 +172,9 @@ describe("E948-S59 the Senior advisor's weekly set", () => {
       expect(i.textContent).toContain("Senior advisor, week of 9 to 15 November");
     }
     fireEvent.click(screen.getByTestId("advisor-accept-all"));
-    await waitFor(() => expect(screen.getAllByTestId("advisor-item-verdict")).toHaveLength(2));
+    // E948-S130: the whole set answered collapses to its green Sent row, naming the tasks it made
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Accepted"));
     expect(calls).toEqual([{ id: "tc_20261113_advisor_2026-w46", verdict: "accept", via: "button" }]);
-    expect(screen.getAllByTestId("advisor-item-verdict")[0].textContent).toContain("E946-S9");
+    expect(screen.getByTestId("sent-row-detail").textContent).toContain("E946-S9");
   });
 });

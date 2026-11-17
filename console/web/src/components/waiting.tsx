@@ -39,7 +39,7 @@ import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/componen
 import { ConnectCards, useConnects } from "@/components/connectCards";
 import { showClosed } from "@/lib/afterClose";
 import { answeredHere, markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
-import { SentRow } from "@/components/sentRow";
+import { SentOr, SentRow } from "@/components/sentRow";
 import { DEFAULT_SKIN, useWords } from "@/lib/skin";
 import { AskSet, askSets } from "@/components/askSet";
 import { ownYesNo } from "@/lib/oneDecision";
@@ -406,7 +406,16 @@ export function WakeToggle({ item, checked, onChange, disabled }: { item: Waitin
  * FYI card: an ask a persona answered for the owner (`[answered … @<persona>]`): what was decided, why and the rollback,
  * with one-click Reverse (an answer to the owner, same path as respond). Compact, green-ish, never counted as waiting.
  */
-export function FyiCard({ item, showMilestone = false, qualify = false }: { item: WaitingItem; showMilestone?: boolean; qualify?: boolean }) {
+export function FyiCard(props: { item: WaitingItem; showMilestone?: boolean; qualify?: boolean }) {
+  // E948-S130: his words on a decided card collapse it to its Sent row, like every card
+  return (
+    <SentOr slot={`fyi:${props.item.id}`}>
+      <FyiCardBody {...props} />
+    </SentOr>
+  );
+}
+
+function FyiCardBody({ item, showMilestone = false, qualify = false }: { item: WaitingItem; showMilestone?: boolean; qualify?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [wake, setWake] = useState(true);
@@ -466,7 +475,7 @@ export function FyiCard({ item, showMilestone = false, qualify = false }: { item
       {r?.wake && <WakeNote wake={r.wake} responseId={r.delivery === "sent" ? r.id : undefined} thread />}
       {error && <div className="text-xs text-red-600">{error}</div>}
       {/* E948-S60: a decision made for him still takes his words, short of reversing it. */}
-      <CardFeedback origin={`fyi-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} />
+      <CardFeedback origin={`fyi-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} sent={{ slot: `fyi:${item.id}` }} />
     </CardShell>
   );
 }
@@ -1513,7 +1522,7 @@ function WaitingCardBody({
                 />
               </div>
         ) : (
-          <CardFeedback origin={`card-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} />
+          <CardFeedback origin={`card-feedback:${item.id}`} title={item.question || item.title} refName={item.code ?? item.id} target={askTarget(item)} sent={{ slot: `ask:${item.id}` }} />
         )}
         {pending && (pending.held ? <SavedLine /> : pending.status !== PRESS.sending && <WorkingLine text={pending.status} />)}
         {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
@@ -1790,8 +1799,9 @@ export function WaitingOnYou({
     if (first?.card) setLead.add(first.card.id);
   }
   // vn_e00f1134: an ask he answered stays where it was, as its green Sent row, after the refetch drops it
-  const keptRows = useKeepSent(openRows, (r) => (r.card ? `ask:${r.card.id}` : `status:${r.status!.id}`));
-  const keptBlocking = useKeepSent(blocking, (i) => `ask:${i.id}`);
+  const placeKey = `blocked:${milestoneId ?? nodeKey ?? "all"}:${part ?? "all"}`;
+  const keptRows = useKeepSent(openRows, (r) => (r.card ? `ask:${r.card.id}` : `status:${r.status!.id}`), `${placeKey}:rows`);
+  const keptBlocking = useKeepSent(blocking, (i) => `ask:${i.id}`, `${placeKey}:blocking`);
   const blockedBy = useRef(new Map<string, string>());
   const byPersona = new Map<string, { slot: string; item?: WaitingItem; sent?: SentEntry }[]>();
   for (const r of keptBlocking) {
@@ -2097,7 +2107,16 @@ function WholeAskLoader({ item, ...rest }: { item: WaitingItem; showMilestone?: 
 }
 
 /** an open status item with no Waiting-on-you card (Ready to mark, a failed run): one row, its one action. */
-export function StatusItemRow({ item, milestone }: { item: PendingItem; milestone?: string }) {
+export function StatusItemRow(props: { item: PendingItem; milestone?: string }) {
+  // E948-S130: a status line or an alert he wrote on collapses to its Sent row, like every card
+  return (
+    <SentOr slot={`status:${props.item.id}`}>
+      <StatusItemBody {...props} />
+    </SentOr>
+  );
+}
+
+function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: string }) {
   if (item.kind === "monitor_alert") return <MonitorAlertCard item={item} />;
   const action = pendingAction(item);
   // a status line is a card of the one family: meta, heading, body, its one button.
@@ -2124,7 +2143,7 @@ export function StatusItemRow({ item, milestone }: { item: PendingItem; mileston
         )}
       </div>
       {/* E948-S60: a status card takes feedback too, to the Team desk with the card named. */}
-      <CardFeedback origin={`status-feedback:${item.id}`} title={item.title} refName={item.id} />
+      <CardFeedback origin={`status-feedback:${item.id}`} title={item.title} refName={item.id} sent={{ slot: `status:${item.id}` }} />
     </CardShell>
   );
 }
@@ -2172,6 +2191,14 @@ export function alertAskItem(alert: PendingItem, a: MonitorAlertAsk): WaitingIte
  * so the owner acts here; snoozed and Delivery Manager alerts are a quiet line (MonitorAlertLine), never this card.
  */
 export function MonitorAlertCard({ item }: { item: PendingItem }) {
+  return (
+    <SentOr slot={`status:${item.id}`}>
+      <MonitorAlertBody item={item} />
+    </SentOr>
+  );
+}
+
+function MonitorAlertBody({ item }: { item: PendingItem }) {
   const m = item.monitor;
   const asks = m?.asks ?? [];
   return (
@@ -2210,7 +2237,7 @@ export function MonitorAlertCard({ item }: { item: PendingItem }) {
       )}
       {m && !asks.some((a) => a.state === "open") && <span className="mt-1 text-xs text-muted-foreground" data-testid="monitor-alert-next">{m.next}</span>}
       {/* E948-S60: the alert itself takes feedback (its asks' cards carry their own). */}
-      <CardFeedback origin={`alert-feedback:${item.id}`} title={item.title.replace(/^Monitor alert:\s*/, "")} refName={item.id} />
+      <CardFeedback origin={`alert-feedback:${item.id}`} title={item.title.replace(/^Monitor alert:\s*/, "")} refName={item.id} sent={{ slot: `status:${item.id}` }} />
     </CardShell>
   );
 }

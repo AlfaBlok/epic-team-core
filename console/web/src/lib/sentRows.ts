@@ -31,8 +31,41 @@ export interface SentEntry {
   at: number;
 }
 
-let sent = new Map<string, SentEntry>();
-let seq = 0;
+/**
+ * E948-S130 (the owner 17 Nov 17:28Z, vn_4f13161d: "after a text is sent, it ... collapses and remains there for you to add
+ * things ... basically all cards should have the same behavior"): the Sent rows outlive a reload. Every entry (without its
+ * Bring it back, a function) and each list's last order are kept in this browser's localStorage for SENT_KEEP_MS, so a
+ * reload draws the same green rows where the cards were, never the answered card again.
+ */
+const STORE = "inbox.sent.v1";
+const PLACES = "inbox.sentPlaces.v1";
+const storage = (): Storage | undefined => {
+  try {
+    return typeof window !== "undefined" && window.localStorage ? window.localStorage : undefined;
+  } catch {
+    return undefined;
+  }
+};
+function loadSent(): Map<string, SentEntry> {
+  try {
+    const raw = storage()?.getItem(STORE);
+    const list = raw ? (JSON.parse(raw) as [string, SentEntry][]) : [];
+    const now = Date.now();
+    return new Map(list.filter(([k, e]) => typeof k === "string" && e && typeof e.at === "number" && now - e.at < SENT_KEEP_MS));
+  } catch {
+    return new Map();
+  }
+}
+function saveSent(m: Map<string, SentEntry>) {
+  try {
+    const now = Date.now();
+    storage()?.setItem(STORE, JSON.stringify([...m].filter(([, e]) => now - e.at < SENT_KEEP_MS).map(([k, { back: _b, ...e }]) => [k, e])));
+  } catch {
+    /* a full or private store: the rows still show until the page closes */
+  }
+}
+let sent = loadSent();
+let seq = Math.max(0, ...[...sent.values()].map((e) => e.id));
 /** Sent rows on the page now (a slot drawn by a list or a card), so the floating note stays away when one shows. */
 const mounted = new Map<string, number>();
 const subs = new Set<() => void>();
@@ -45,6 +78,7 @@ export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at
   const next = new Map(sent);
   for (const s of [slots].flat()) next.set(s, entry);
   sent = next;
+  saveSent(sent);
   emit();
   return entry;
 }
@@ -56,6 +90,7 @@ export function unmarkSent(slots: string | string[]) {
   const next = new Map(sent);
   list.forEach((s) => next.delete(s));
   sent = next;
+  saveSent(sent);
   emit();
 }
 
@@ -114,11 +149,23 @@ export function keepPlaces<T>(prev: { slot: string; item?: T }[], items: T[], sl
  * A list keeps its sent cards in place: each row is `{slot, item}` (a card still listed) or `{slot}` (it left the
  * list after he answered it: draw its Sent row there). One press that closed several cards (a set) keeps one row.
  */
-export function useKeepSent<T>(items: T[], slotOf: (t: T) => string): { slot: string; item?: T; sent?: SentEntry }[] {
+export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: string): { slot: string; item?: T; sent?: SentEntry }[] {
   const map = useSentMap();
-  const prev = useRef<{ slot: string; item?: T }[]>([]);
+  // E948-S130: a named list starts from its order before the reload, so a sent card that left keeps its place
+  const prev = useRef<{ slot: string; item?: T }[] | undefined>(undefined);
+  if (prev.current === undefined) prev.current = list ? loadPlaces(list) : [];
   const kept = keepPlaces(prev.current, items, slotOf, (s) => !!live(map.get(s)));
-  prev.current = kept;
+  // an empty list (still loading after a reload) keeps the order it had, so the cards around a Sent row are not lost
+  const saved = useRef("");
+  if (items.length || !list) {
+    // written when the order or which of them are sent changed (a press marks one without changing the order)
+    const now = kept.map((r) => `${r.slot}${live(map.get(r.slot)) ? "*" : ""}`).join(" ");
+    if (list && now !== saved.current) {
+      savePlaces(list, kept);
+      saved.current = now;
+    }
+    prev.current = kept;
+  }
   const seen = new Set<number>();
   const out: { slot: string; item?: T; sent?: SentEntry }[] = [];
   for (const r of kept) {
@@ -131,9 +178,37 @@ export function useKeepSent<T>(items: T[], slotOf: (t: T) => string): { slot: st
   return out;
 }
 
+/** a list's last order (its slots), kept while it holds a Sent row; read once when the list first draws after a reload. */
+function loadPlaces(list: string): { slot: string }[] {
+  try {
+    const all = JSON.parse(storage()?.getItem(PLACES) ?? "{}") as Record<string, string[]>;
+    return (all[list] ?? []).filter((s) => typeof s === "string").map((slot) => ({ slot }));
+  } catch {
+    return [];
+  }
+}
+function savePlaces(list: string, rows: { slot: string }[]) {
+  try {
+    const st = storage();
+    if (!st) return;
+    const all = JSON.parse(st.getItem(PLACES) ?? "{}") as Record<string, string[]>;
+    if (rows.some((r) => live(sent.get(r.slot)))) all[list] = rows.map((r) => r.slot);
+    else delete all[list];
+    st.setItem(PLACES, JSON.stringify(all));
+  } catch {
+    /* as above */
+  }
+}
+
 /** Tests only. */
 export const resetSent = () => {
   sent = new Map();
+  try {
+    storage()?.removeItem(STORE);
+    storage()?.removeItem(PLACES);
+  } catch {
+    /* none */
+  }
   mounted.clear();
   emit();
 };

@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MessageSquarePlus, Undo2 } from "lucide-react";
 import { invalidate } from "@/lib/data";
 import { GAP, scrollerOf, visibleTop } from "@/lib/keepPlace";
-import { sentMounted, unmarkSent, type SentEntry } from "@/lib/sentRows";
+import { sentMounted, unmarkSent, useSent, type SentEntry } from "@/lib/sentRows";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
@@ -104,4 +104,14 @@ export function SentRow({ slot, entry, className }: { slot: string; entry: SentE
       )}
     </div>
   );
+}
+
+/**
+ * E948-S130 (vn_4f13161d: "basically all cards should have the same behavior"): the one wrapper every card kind uses, so
+ * each collapses to its green Sent row the same way once he answered it (a press, his words or a voice note), and keeps
+ * it after a reload. `slot` is the card's `data-inbox-card` id (`ask:`, `review:`, `team:`, `status:`, `mac:`, `connect:`).
+ */
+export function SentOr({ slot, children }: { slot: string; children: ReactNode }) {
+  const sent = useSent(slot);
+  return sent ? <SentRow slot={slot} entry={sent} /> : <>{children}</>;
 }

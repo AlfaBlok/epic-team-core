@@ -3,7 +3,6 @@ import { useInRouterContext, useNavigate, useSearchParams } from "react-router-d
 import { briefingHref, isBriefMe } from "@/lib/briefing";
 import { ArrowDown, ExternalLink, Mic, Phone, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
-import type { FirstObjective } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, Loading, PHONE_TAP, RelTime, ThreadLink, threadHref } from "@/components/common";
@@ -221,50 +220,26 @@ function WorldDesk({ world }: { world: string }) {
 }
 
 /**
- * the owner 2026-11-16 ("it should just chat, we should direct to chat ... load with first objective:
- * to accomplish a simple set of results, make them all green"): a paid EpicTeam workspace's Home is its chat, its first
- * objective on one line above it (each result a dot, green when done), so a new customer starts by talking.
+ * a paid EpicTeam workspace's chat on its Home, under its one first objective, Get set up (homeView.tsx; the owner 17 Nov:
+ * "one objective and several key results"): the workspace's team desk, which works each key result to green.
  */
-export function GettingGoingChat({ world, objective }: { world: string; objective: FirstObjective }) {
+export function GettingGoingChat({ world, fresh }: { world: string; fresh: boolean }) {
   const load = useCallback((read?: ChatRead) => api.getWorldDeskChat(world, read), [world]);
   const send = useCallback((text: string, page?: string, id?: string, files?: string[]) => (files?.length ? api.sendWorldDeskMessage(world, text, page ?? "home", id, files) : api.sendWorldDeskMessage(world, text, page ?? "home", id)), [world]);
   const [params, setParams] = useSearchParams();
   const hint = params.get("page")?.trim() || "";
   return (
     <DeskPage
-      title={objective.starter ? "Let's get going" : "Chat"}
-      description="Tell your team what you want done first. It writes it as a few results and works until each one is green."
+      title="Chat with your team"
+      description="Your team works here to turn each key result green."
       who="Team desk"
       callBase={deskVoiceBase(world)}
       load={load}
       sendMessage={send}
       hint={hint}
       clearHint={() => setParams({}, { replace: true })}
-      placeholder={objective.starter ? "What do you want your team to get done first?" : "Ask the team, or say what is next…"}
-      above={<ObjectiveLine objective={objective} />}
+      placeholder={fresh ? "Say hello, or what you want your team to get done first…" : "Ask the team, or say what is next…"}
     />
-  );
-}
-
-/** the first objective in one line: its goal and one dot per result (green when done), linked to its project page. */
-function ObjectiveLine({ objective }: { objective: FirstObjective }) {
-  return (
-    <a
-      href={`/milestones/${encodeURIComponent(objective.milestoneId)}`}
-      className="mb-3 flex min-w-0 items-center gap-3 rounded-md border px-3 py-2 text-sm hover:bg-accent"
-      data-testid="first-objective"
-    >
-      <span className="shrink-0 text-muted-foreground">{objective.starter ? "First objective" : "Objective"}</span>
-      <span className="min-w-0 flex-1 truncate">{objective.goal}</span>
-      <span className="flex shrink-0 items-center gap-1" aria-label={`${objective.green} of ${objective.total} results green`}>
-        {objective.results.map((r) => (
-          <span key={r.id} title={r.text} className={cn("size-2.5 rounded-full", r.green ? "bg-emerald-600" : "border border-muted-foreground/50")} />
-        ))}
-        <span className="ml-1 tabular-nums text-muted-foreground">
-          {objective.green}/{objective.total}
-        </span>
-      </span>
-    </a>
   );
 }
 
@@ -301,13 +276,10 @@ export function DeskPage({
   placeholder,
   markSeen = markDeskSeen,
   title = "Chat",
-  above,
 }: {
   description: string;
   /** the page's heading (default Chat). */
   title?: string;
-  /** one line between the header and the history (a new workspace's first objective). */
-  above?: ReactNode;
   who: string;
   /** The call routes' root (default `/api/voice`, the Team desk's). */
   callBase?: string;
@@ -356,7 +328,6 @@ export function DeskPage({
         </div>
       </div>
       {push.banner && <div className="mb-2">{push.banner}</div>}
-      {above}
       <ChatView
         panel
         voiceBase={callBase ?? deskVoiceBase(undefined)}

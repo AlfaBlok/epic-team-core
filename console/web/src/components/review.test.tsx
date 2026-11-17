@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { resetSent } from "@/lib/sentRows";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -402,7 +403,10 @@ describe("T61-S2 a held post is the same card, in its own words", () => {
     expect(within(c).queryByText(/post now/i)).toBeNull();
     fireEvent.click(within(c).getByTestId("review-schedule"));
     await waitFor(() => expect(schedule).toHaveBeenCalledWith("post~social~P-0063", { slot: "2026-11-05T14:00Z" }));
+    // E948-S130: a held post he scheduled collapses to its green Sent row, like every card
+    expect((await screen.findByTestId("sent-row-said")).textContent).toBe("Scheduled");
     cleanup();
+    resetSent();
     list([POST({ slot: "2026-11-02 14:00", nextSlot: "2026-11-05T14:00Z" })]);
     mount();
     const d = await screen.findByTestId("review-card");

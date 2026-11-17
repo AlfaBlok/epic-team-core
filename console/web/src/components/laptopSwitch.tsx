@@ -8,6 +8,8 @@ import { ACTION, PRESS, pressProps, type Pressing } from "@/components/cardActio
 import { useChatAttach, wordsWithFiles } from "@/components/ChatAttach";
 import { CardFeedback, FeedbackBlock } from "@/components/cardFeedback";
 import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
+import { SentOr } from "@/components/sentRow";
+import { markSent } from "@/lib/sentRows";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { cn } from "@/lib/utils";
 import { homeRepo } from "@/lib/identity";
@@ -276,13 +278,15 @@ export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { r
               {askCard(r.item)}
             </div>
           ) : (
-            <CardShell kind="mac" data-testid="mac-ticket-card">
-              <TaskHead row={r} n={open.indexOf(r) + 1} />
-              <TaskTitle row={r} />
-              <div className="mt-3.5">{r.command ? <CopyCommand command={r.command} /> : <span className="text-xs text-muted-foreground">No text yet: its next wake writes the ticket.</span>}</div>
-              {/* E948-S60: a ticket with no page yet still takes feedback, to the Team desk with the ticket named. */}
-              <CardFeedback origin={`mac-feedback:${r.key}`} title={r.title} refName={r.code ?? r.key} />
-            </CardShell>
+            <SentOr slot={`mac:${r.key}`}>
+              <CardShell kind="mac" data-testid="mac-ticket-card">
+                <TaskHead row={r} n={open.indexOf(r) + 1} />
+                <TaskTitle row={r} />
+                <div className="mt-3.5">{r.command ? <CopyCommand command={r.command} /> : <span className="text-xs text-muted-foreground">No text yet: its next wake writes the ticket.</span>}</div>
+                {/* E948-S60: a ticket with no page yet still takes feedback, to the Team desk with the ticket named. */}
+                <CardFeedback origin={`mac-feedback:${r.key}`} title={r.title} refName={r.code ?? r.key} sent={{ slot: `mac:${r.key}` }} />
+              </CardShell>
+            </SentOr>
           )}
         </li>
       ))}
@@ -325,7 +329,16 @@ function changeLine(c: LaptopStep["change"]): { text: string; bad?: boolean } | 
 
 type Press = "done" | "stuck" | "note" | "todo";
 
-export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; onDone?: () => void }) {
+/** E948-S130 (vn_4f13161d): a Mac ticket he pressed (Done, Stuck, a note) collapses to its green Sent row like every card. */
+export function LaptopCard(props: { row: LaptopRow; n: number; onDone?: () => void }) {
+  return (
+    <SentOr slot={`mac:${props.row.key}`}>
+      <LaptopCardBody {...props} />
+    </SentOr>
+  );
+}
+
+function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDone?: () => void }) {
   const st = r.step!;
   const [words, setWords] = useState("");
   const [press, setPress] = useState<Pressing>();
@@ -341,6 +354,17 @@ export function LaptopCard({ row: r, n, onDone }: { row: LaptopRow; n: number; o
       if (kind === "done") onDone?.();
       setWords("");
       files.clear();
+      // Bring it back after Done sets it not done again; after Stuck or a note the card shows again (his words went)
+      const sentSaid = kind === "done" ? "Done" : kind === "stuck" ? "Stuck sent to the team" : kind === "note" ? (spoken !== undefined ? "Voice note sent to the team" : "Your words went to the team") : undefined;
+      if (sentSaid)
+        markSent(`mac:${r.key}`, {
+          said: sentSaid,
+          title: r.title,
+          back: async () => {
+            if (kind === "done") await mutate(() => api.stepTick(st.pageId, { step: st.step, title: r.title, ...(r.row ? { row: r.row } : r.ask ? { ask: r.ask } : {}), state: "todo" }), "inbox");
+            return { back: true, line: kind === "done" ? "It is back on your Mac list." : "The card is back. Your words already reached the team." };
+          },
+        });
       setPress({ key: kind, phase: "saved" });
       setTimeout(() => setPress(undefined), PRESS.savedMs * 4);
       return true;

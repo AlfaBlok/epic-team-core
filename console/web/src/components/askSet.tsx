@@ -181,8 +181,14 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
       const first = group.items.find((i) => i.source === "ask" && i.repo && i.path && i.code);
       markSent(setSlots(group), { said: took.map((t) => t.split(" ").pop()).join(", ").replace(/^./, (c) => c.toUpperCase()), title, ...(first ? { card: { kind: "ask" as const, repo: first.repo!, path: first.path!, ref: first.code!, ...(first.milestoneId ? { milestoneId: first.milestoneId } : {}) } } : {}) });
     } else if (took.length) setSaid(`Took ${took.length} of ${open.length} as your answers.${unclear.length ? " The desk asks you about the rest." : " Answer the rest with their buttons."}`);
-    else if (unclear.length) setSaid("Not sure which answer you gave: the desk asks you in Chat. Nothing was pressed.");
-    else setSaid("Your words reached the team. No answer was read from them, so the recommendations stay open.");
+    // E948-S130 (vn_4f13161d): his words that answer none of them still collapse the card to its Sent row, like every
+    // card; Bring it back shows the recommendations again to press (they stay open, the desk has his words)
+    else
+      markSent(setSlots(group), {
+        said: unclear.length ? "Sent: the desk asks which answer you meant" : via === "voice" ? "Voice note sent to the team" : "Your words went to the team",
+        title,
+        back: async () => ({ back: true, line: "The recommendations are back. Your words already reached the team." }),
+      });
   };
   const project = projectLabel(group.items[0]?.milestoneTitle);
   // one quiet card, then one decisions block: Accept all, Park, Snooze and the feedback block.

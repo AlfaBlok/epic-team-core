@@ -170,13 +170,14 @@ describe("AskSet", () => {
     expect(screen.getAllByTestId("ask-set-done").map((d) => d.textContent)).toEqual(["✓ Accepted: it becomes a ready row"]);
     expect(screen.getByTestId("ask-set").textContent).toContain("Yes to all 1");
   });
-  it("words that answer nothing still reach the desk, and the card says the asks stay open", async () => {
+  it("words that answer nothing still reach the desk, and the card collapses to its Sent row (E948-S130)", async () => {
     const respond = vi.spyOn(api, "respondToWaiting");
     vi.spyOn(api, "readSpokenAnswers").mockResolvedValue({ reads: [{ id: "wj_ROOT-A1", kind: "none" }, { id: "wj_ROOT-A2", kind: "none" }] });
     const desk = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "t", pending: false });
     render(<AskSet group={{ persona: "Advisor", items: [rec("ROOT-A1"), rec("ROOT-A2")] }} />);
     say("what does the second one cost?");
-    await waitFor(() => expect(screen.getByTestId("ask-set-said").textContent).toMatch(/stay open/));
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Your words went to the team"));
+    expect(screen.getByTestId("sent-row-back")).toBeTruthy();
     expect(respond).not.toHaveBeenCalled();
     expect(desk.mock.calls[0][0]).toMatch(/what does the second one cost\?$/);
   });

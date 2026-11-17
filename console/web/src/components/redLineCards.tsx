@@ -29,7 +29,7 @@ export function RedLineCards({ r }: { r: RedLine }) {
     ...(mine ?? []).map((review) => ({ review, n: place(review.repo, review.ref) })),
   ].sort((a, b) => a.n - b.n);
   // vn_e00f1134: a card he answered stays where it was, as its green Sent row
-  const kept = useKeepSent(list, (c) => ("ask" in c ? `ask:${c.ask.id}` : `review:${c.review.id}`));
+  const kept = useKeepSent(list, (c) => ("ask" in c ? `ask:${c.ask.id}` : `review:${c.review.id}`), `red-line:${r.name ?? r.sentence}`);
   if (!asks || !mine) {
     return (
       <p className="border-t border-red-600/20 px-3 py-2 text-sm text-muted-foreground" data-testid="red-line-cards-loading">

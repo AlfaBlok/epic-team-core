@@ -526,8 +526,12 @@ function KrWhen({ r }: { r: ScorecardRow }) {
   );
 }
 
-/** the key results as the mock-up drew them: a colour bar, the name, how much work is under it, the value; one opens its work. */
-export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow[]; setId: string; open?: string | null; onOpen?: (label: string | null) => void }) {
+/**
+ * the key results as the mock-up drew them: a colour bar, the name, how much work is under it, the value; one opens its work.
+ * `plain` (a new workspace's Get set up): each key result's name, target and light stacked in one column, nothing to
+ * open and no work count (the workspace's chat works them).
+ */
+export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { krs: ScorecardRow[]; setId: string; open?: string | null; onOpen?: (label: string | null) => void; plain?: boolean }) {
   const by = { green: 0, amber: 0, red: 0, unknown: 0 };
   krs.forEach((r) => by[r.state]++);
   const stale = krs.filter((r) => krMeasured(r).stale).length;
@@ -541,10 +545,10 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
           {by.amber} amber · {by.red} red{by.unknown ? ` · ${by.unknown} no data yet` : ""}
           {stale ? ` · ${stale} stale, greyed` : ""}
         </span>
-        <span>tap a key result for the work under it</span>
+        {!plain && <span>tap a key result for the work under it</span>}
       </p>
       <ul className="overflow-hidden rounded-xl border bg-card" data-testid="kr-sheet">
-        <li aria-hidden="true" className="hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid" data-testid="kr-sheet-head">
+        <li aria-hidden="true" className={plain ? "hidden" : "hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid"} data-testid="kr-sheet-head">
           <i />
           <span className="py-2">Key result</span>
           <span className="py-2">Target</span>
@@ -552,12 +556,12 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
           <span className="w-4" />
         </li>
         {krs.map((r) => {
-          const isOpen = open === r.label;
+          const isOpen = !plain && open === r.label;
           const all = r.work ?? [];
           const toggle = () => onOpen?.(isOpen ? null : r.label);
           return (
             <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className={cn("border-b last:border-b-0", krMeasured(r).stale && "opacity-55 grayscale")} data-testid="kr-item" data-state={r.state} data-stale={krMeasured(r).stale ? "1" : "0"}>
-              <button type="button" onClick={toggle} aria-expanded={isOpen} className={cn("grid w-full grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-3 pr-3 text-left hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
+              <button type="button" onClick={plain ? undefined : toggle} aria-expanded={plain ? undefined : isOpen} className={cn("grid w-full items-center gap-x-3 pr-3 text-left", plain ? "cursor-default grid-cols-[6px_minmax(0,1fr)]" : "grid-cols-[6px_minmax(0,1fr)_auto] hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
                 <i className="block self-stretch" style={{ background: STATE_FILL[r.state] }} aria-hidden="true" />
                 <span className="grid min-w-0 gap-0.5 py-3">
                   <span className="text-[15px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="kr-name">
@@ -565,11 +569,11 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
                     <span className="sr-only"> ({STATE_WORD[r.state]})</span>
                   </span>
                   {/* on a phone the target and the status sit under the name, one line each. */}
-                  <span className="grid gap-0.5 text-xs sm:hidden" data-testid="kr-target-status-phone">
+                  <span className={cn("grid gap-0.5 text-xs", !plain && "sm:hidden")} data-testid="kr-target-status-phone">
                     <KrTarget r={r} label />
                     <KrNow r={r} label />
                   </span>
-                  {all.length ? (
+                  {plain ? null : all.length ? (
                     <span className="text-xs text-muted-foreground" data-testid="kr-things">
                       {all.length} {all.length === 1 ? "thing" : "things"} under it
                     </span>
@@ -579,15 +583,19 @@ export function KeyResultSheet({ krs, setId, open, onOpen }: { krs: ScorecardRow
                     </span>
                   )}
                 </span>
-                <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-target">
-                  <KrTarget r={r} />
-                </span>
-                <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-now">
-                  <KrNow r={r} />
-                </span>
-                <span className="text-muted-foreground" aria-hidden="true">
-                  {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </span>
+                {!plain && (
+                  <>
+                    <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-target">
+                      <KrTarget r={r} />
+                    </span>
+                    <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-now">
+                      <KrNow r={r} />
+                    </span>
+                    <span className="text-muted-foreground" aria-hidden="true">
+                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </span>
+                  </>
+                )}
               </button>
               {isOpen && (
                 <div className="grid gap-1.5 border-t bg-muted/20 px-3 py-3 sm:px-5" data-testid="kr-detail">

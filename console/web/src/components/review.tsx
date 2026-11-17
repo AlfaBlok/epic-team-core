@@ -42,7 +42,7 @@ import { ParkButton, parkReview } from "@/components/parkButton";
 import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/postBasics";
 import { keepPlace } from "@/lib/keepPlace";
 import { unmarkSent, useKeepSent, useSent } from "@/lib/sentRows";
-import { SentRow } from "@/components/sentRow";
+import { SentOr, SentRow } from "@/components/sentRow";
 
 /** the server adds the milestone's title to each card it lists. */
 type Listed = ReviewItem & { milestoneTitle?: string };
@@ -120,7 +120,7 @@ export function WaitingForReview({
   const snoozed = hits ? snoozedAll.filter((i) => hits.has(i.id)) : snoozedAll;
   const items = data ?? [];
   // vn_e00f1134: a card he pressed stays where it was as its green Sent row, after the refetch drops it too
-  const rows = useKeepSent(items, (i) => `review:${i.id}`);
+  const rows = useKeepSent(items, (i) => `review:${i.id}`, `review:${fold ?? testId}`);
   // tasks just marked here are no longer open, before the list refetches (a goal's confirm never names them)
   // what a pressed card is doing once it has left: "Saved · writing it to the project… 3 s", then "Done ✓ … in 6.1 s"
   const progress = usePressProgress((id) => fetched?.find((i) => i.id === id));
@@ -664,7 +664,12 @@ const SAID: Record<string, string> = { close: "Closed", decline: "Declined", cha
 /** the row a review card is on (its spine), for Add a last thought and Bring it back; undefined when unknown. */
 const cardOf = (item: ReviewItem): ClosedCardRef | undefined =>
   item.repo && item.path && item.ref ? { kind: "review", repo: item.repo, path: item.path, ref: item.ref, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } : undefined;
-const saidOf = (key: string) => SAID[key] ?? (key.startsWith("complete:") ? "Closed" : undefined);
+/**
+ * what the Sent row says for each press. E948-S130 (vn_4f13161d): every press collapses its card alike, a Decision's option
+ * (its own words, "Yes: plan it") and a held post's schedule too; before, those two slid away with no Sent row.
+ */
+const saidOf = (key: string) =>
+  SAID[key] ?? (key.startsWith("complete:") ? "Closed" : key.startsWith("choice:") ? key.slice(7) : key.startsWith("schedule:") || key === "pick-schedule" ? "Scheduled" : undefined);
 
 /**
  * one press on a review or post card. The pressed button spins with "Sending…" in the frame of the
@@ -726,7 +731,7 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
       void reopened.catch(() => undefined);
       return { back: true, line: "It is coming back to your inbox. The team was told to hold." };
     };
-    const said = item.kind === "post" ? undefined : saidOf(key.replace(/^retry$/, last?.key ?? "retry"));
+    const said = saidOf(key.replace(/^retry$/, last?.key ?? "retry"));
     const onSaved = () => {
       if (saved) return;
       saved = true;
@@ -1214,7 +1219,7 @@ function OldCard({ item }: { item: Listed }) {
         </div>
       )}
       {/* E948-S60: even a card from an older release takes feedback; it goes back to the team as a new round. */}
-      <CardFeedback origin={`review-feedback:${item.id}`} title={item.title} refName={item.ref ?? item.id} send={(words, files) => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))} />
+      <CardFeedback origin={`review-feedback:${item.id}`} title={item.title} refName={item.ref ?? item.id} send={(words, files) => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))} sent={{ slot: `review:${item.id}`, said: "Changes sent to the team", ...(cardOf(item) ? { card: cardOf(item) } : {}) }} />
     </CardShell>
   );
 }
@@ -1250,7 +1255,16 @@ export function postButtons(p: Pick<PostCardInfo, "kind" | "slot" | "nextSlot">,
   return [{ label: "✓ Schedule", sub: when && when !== "its time has passed" ? `It goes out ${when}.` : "It goes out at the next free time.", how: "schedule", go: true }];
 }
 
-export function PostReviewCard(card: CardProps) {
+/** E948-S130: a held post he answered collapses to its green Sent row too, like every card. */
+export function PostReviewCard(props: CardProps) {
+  return (
+    <SentOr slot={`review:${props.item.id}`}>
+      <PostReviewCardBody {...props} />
+    </SentOr>
+  );
+}
+
+function PostReviewCardBody(card: CardProps) {
   const { item } = card;
   const p = item.post!;
   const { act, pressing, busy, err, last, landing, props } = useCardPress(card);

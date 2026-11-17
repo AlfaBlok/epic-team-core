@@ -1,4 +1,6 @@
-import { GoalSetsPage, useGoalSets } from "@/components/goalSets";
+import { GoalHeader, GoalSetsPage, KeyResultSheet, useGoalSets } from "@/components/goalSets";
+import type { ScorecardRow } from "@/api/pursuit-types";
+import type { FirstObjective } from "@/api/client";
 import { useShows, useSkin } from "@/lib/skin";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { HomeBuyLine } from "@/components/buyPlan";
@@ -42,9 +44,12 @@ export function HomePage() {
 }
 
 /**
- * the owner 2026-11-16 ("it should just chat, we should direct to chat"): a paid EpicTeam customer
- * workspace's Home is its chat, its first objective on top; every other world (ours, an unpaid workspace, through the door
- * none either) keeps what it had.
+ * the owner 2026-11-17 (vn_7bc94847: "one objective and several key results ... First objective, get set up, and then key
+ * results, each of the key results"; 16 Nov: "it should just chat ... load with first objective ... make them all green.
+ * With an eager chat agent focused on getting green"): a paid EpicTeam customer workspace's Home is its one objective,
+ * Get set up, with its key results and their lights, drawn like the owner's own objectives (GoalHeader, KeyResultSheet), and
+ * its chat beside it (under it on a phone), which works them green. Every other world (ours, an unpaid workspace, through
+ * the door) keeps what it had.
  */
 function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
   const [known] = useState(knownWorld);
@@ -54,7 +59,27 @@ function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
   const objective = useQuery(() => (customer ? api.getFirstObjective(w) : Promise.resolve(undefined)), [customer, w]);
   if (!customer) return world.loading && w === undefined ? <Loading /> : fallback;
   if (objective.loading && !objective.data) return <Loading />;
-  return objective.data ? <GettingGoingChat world={w} objective={objective.data} /> : fallback;
+  if (!objective.data) return fallback;
+  return (
+    <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-5" data-testid="get-set-up-home">
+      <GetSetUp objective={objective.data} />
+      <GettingGoingChat world={w} fresh={objective.data.green <= 1} />
+    </div>
+  );
+}
+
+const KR_VALUE = { green: "Done", amber: "Not yet", red: "Waiting" } as const;
+
+/** the workspace's one first objective as the owner's objectives are drawn: its wheel, its name, its answer, its key results. */
+export function GetSetUp({ objective: o }: { objective: FirstObjective }) {
+  const krs: ScorecardRow[] = o.keyResults.map((k) => ({ label: k.name, state: k.state, kind: "key-result", value: KR_VALUE[k.state], target: k.target, note: k.note, measuredAt: o.measuredAt }));
+  const next = o.keyResults.find((k) => k.state === "amber") ?? o.keyResults.find((k) => k.state !== "green");
+  return (
+    <section className="grid min-w-0 content-start gap-3" data-testid="get-set-up" aria-label={`${o.name}: ${o.green} of ${o.total} key results green`}>
+      <GoalHeader rows={krs} title={o.name} answer={next ? `${o.green} of ${o.total} key results are green. Next: ${next.name.toLowerCase()}.` : `All ${o.total} key results are green: you are set up.`} />
+      <KeyResultSheet krs={krs} setId={o.milestoneId} plain />
+    </section>
+  );
 }
 
 function GoalsHome({ fallback }: { fallback: JSX.Element }) {

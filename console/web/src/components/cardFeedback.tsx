@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { Mic } from "lucide-react";
 import { api } from "@/api";
 import { mutate } from "@/lib/data";
+import { markSent } from "@/lib/sentRows";
+import type { ClosedCardRef } from "@/api/review-types";
 import { Button } from "@/components/ui/button";
 import { CardButton } from "@/components/ui/cardButton";
 import { useChatAttach, type ChatAttach } from "@/components/ChatAttach";
@@ -130,6 +132,7 @@ export function CardFeedback({
   send,
   disabled,
   className,
+  sent,
 }: {
   /** one per card (`card:<id>`): the floating voice pill sends to it. */
   origin: string;
@@ -141,6 +144,12 @@ export function CardFeedback({
   hint?: ReactNode;
   disabled?: boolean;
   className?: string;
+  /**
+   * E948-S130 (vn_4f13161d): the card this block is on (`slot`, as its `data-inbox-card`). Once his words or voice note
+   * are sent the card collapses to its green Sent row with Add comment, like every other card. `card` is where Add
+   * comment files (its row or ask), else the Team desk; `said` the row's words ("Your words went to the team").
+   */
+  sent?: { slot: string | string[]; card?: ClosedCardRef; said?: string };
 }) {
   const [words, setWords] = useState("");
   const [sending, setSending] = useState(false);
@@ -155,6 +164,8 @@ export function CardFeedback({
       setWords("");
       files.clear();
       setLine("Sent ✓ The team has your words.");
+      // Bring it back shows the card again here (his words already went; nothing to take back)
+      if (sent) markSent(sent.slot, { said: sent.said ?? (via === "voice" ? "Voice note sent to the team" : "Your words went to the team"), title, ...(sent.card ? { card: sent.card } : target?.kind === "card" ? { card: target.card } : {}), back: async () => ({ back: true, line: "The card is back. Your words already reached the team." }) });
       return true;
     } catch (e) {
       // typed words stay in the box, so Not sent is true; a voice note's own line says where his words went

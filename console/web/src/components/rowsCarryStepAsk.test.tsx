@@ -68,7 +68,7 @@ describe("T96-S12 the card", () => {
     expect((within(card).getByTestId("laptop-send-note") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("Done writes the ticket page's step with his words and keeps the card, done, with Not done after all", async () => {
+  it("Done writes the ticket page's step with his words; the card becomes its green Sent row and Bring it back sets it not done (E948-S130)", async () => {
     const tick = vi.spyOn(api, "stepTick").mockResolvedValue({ state: "done", spine: "saved" });
     const { rerender } = render(<MacCards rows={laptopRows([e5s9], [])} />);
     fireEvent.change(screen.getByTestId("laptop-card").querySelector("textarea")!, { target: { value: "both made: @TowerwatchHQ and @YieldDesk_data" } });
@@ -76,12 +76,11 @@ describe("T96-S12 the card", () => {
     await waitFor(() =>
       expect(tick).toHaveBeenCalledWith("sp_64272444", { step: "laptop-run", title: "Set up the two X accounts", row: "T5-S9", state: "done", comment: "both made: @TowerwatchHQ and @YieldDesk_data" }),
     );
-    // the refresh: the task is done (out of the list), the card he pressed stays
+    // the refresh: the task is done (out of the list), the card he pressed stays as its Sent row
     rerender(<MacCards rows={laptopRows([], [], [{ ...e5s9, step: step("done", { change: { status: "saved", at: "x", wake: "none" } }) }])} />);
-    await waitFor(() => expect(screen.getByTestId("laptop-task").dataset.state).toBe("done"));
-    expect(screen.getByTestId("laptop-change").textContent).toContain("Filing it to the repo");
-    await waitFor(() => expect((screen.getByTestId("laptop-undo") as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
-    fireEvent.click(screen.getByTestId("laptop-undo"));
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Done"));
+    expect(screen.getByTestId("sent-row-comment")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("sent-row-back"));
     await waitFor(() => expect(tick).toHaveBeenLastCalledWith("sp_64272444", expect.objectContaining({ state: "todo" })));
   });
 
@@ -90,20 +89,24 @@ describe("T96-S12 the card", () => {
     expect(screen.getAllByTestId("laptop-task").map((x) => x.dataset.state)).toEqual(["todo"]);
   });
 
-  it("Stuck and a note: the state and his words; a note alone changes no state", async () => {
+  it("Stuck and a note: the state and his words; a note alone changes no state; each collapses the card (E948-S130)", async () => {
     const tick = vi.spyOn(api, "stepTick").mockResolvedValue({ state: "stuck", spine: "saved" });
     render(<MacCards rows={laptopRows([e81s8], [])} />);
-    const box = screen.getByTestId("laptop-card").querySelector("textarea")!;
-    fireEvent.change(box, { target: { value: "Stripe asked for a phone code" } });
+    fireEvent.change(screen.getByTestId("laptop-card").querySelector("textarea")!, { target: { value: "Stripe asked for a phone code" } });
     fireEvent.click(screen.getByTestId("laptop-stuck"));
     await waitFor(() => expect(tick).toHaveBeenCalledWith("sp_81", expect.objectContaining({ state: "stuck", comment: "Stripe asked for a phone code", row: "T81-S8" })));
-    await waitFor(() => expect((screen.getByTestId("laptop-card").querySelector("textarea") as HTMLTextAreaElement).value).toBe(""));
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Stuck sent to the team"));
+    // Bring it back: the card again, its box empty, and a note alone changes no state
+    fireEvent.click(screen.getByTestId("sent-row-back"));
+    const box = (await screen.findByTestId("laptop-card")).querySelector("textarea")!;
+    expect(box.value).toBe("");
     fireEvent.change(box, { target: { value: "x".repeat(5000) } });
     await waitFor(() => expect((screen.getByTestId("laptop-send-note") as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
     fireEvent.click(screen.getByTestId("laptop-send-note"));
     await waitFor(() => expect(tick).toHaveBeenCalledTimes(2));
     expect(tick.mock.calls[1][1]).not.toHaveProperty("state");
     expect(tick.mock.calls[1][1].comment).toHaveLength(5000);
+    await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Your words went to the team"));
   });
 
   it("a refused press says why at the buttons", async () => {

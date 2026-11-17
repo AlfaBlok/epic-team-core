@@ -123,14 +123,20 @@ import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignR
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult, SpokenRead } from "./inbox-types";
 
 /** GET /api/push. */
-/** a paid EpicTeam workspace's first objective (its root spine's goal and results), shown on top of its chat. */
+/**
+ * a paid EpicTeam workspace's one first objective, Get set up, and its key results with their lights,
+ * shown on its Home above its chat.
+ */
 export interface FirstObjective {
   milestoneId: string;
-  goal: string;
-  results: { id: string; text: string; green: boolean }[];
-  starter: boolean;
+  name: string;
+  /** what the owner typed at checkout, the first thing to make a project of */
+  words?: string;
+  keyResults: { id: string; name: string; target: string; green: boolean; state: "green" | "amber" | "red"; note?: string; by?: "measured" | "ticked" }[];
   green: number;
   total: number;
+  /** when the server read it (the lights are measured on each read) */
+  measuredAt?: string;
 }
 
 export interface PushInfo {
@@ -276,7 +282,7 @@ export interface ApiClient {
   /** a world's team desk (the social skin's top-level Chat), one thread across its campaigns: same shape as the Team desk. */
   getWorldDeskChat(tenantId: string, read?: ChatRead): Promise<DeskChat>;
   sendWorldDeskMessage(tenantId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean }>;
-  /** a paid EpicTeam workspace's first objective; 404 no_first_objective elsewhere. */
+  /** a paid EpicTeam workspace's one first objective, Get set up, with its key results; 404 no_first_objective elsewhere. */
   getFirstObjective(tenantId: string): Promise<FirstObjective>;
   /** send the owner's message to the milestone's repo desk. */
   sendMilestoneChatMessage(milestoneId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean; queued?: boolean }>;

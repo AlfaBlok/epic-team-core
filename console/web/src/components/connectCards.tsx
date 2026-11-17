@@ -5,6 +5,7 @@ import { saysNeedle, useSearchNeedle } from "@/lib/inboxSearch";
 import { Badge } from "@/components/ui/badge";
 import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { CardFeedback } from "@/components/cardFeedback";
+import { SentOr } from "@/components/sentRow";
 
 /**
  * The owner asked for a full description of what to do, in which browser: one button per account the team needs. It opens Google's own consent page in the browser he is in, with the
@@ -37,7 +38,16 @@ export function useConnects(where: "inbox" | "connections", on = true): ConnectI
  * one account to connect, on the one card shell: the kind word Connect, the account, the steps, the green button to
  * Google's page, then the same feedback box as every card. No Park: it stays until the account is connected (server auth/connects.ts).
  */
+/** E948-S130: a connect card he wrote on collapses to its green Sent row, like every card. */
 export function ConnectCard({ c }: { c: ConnectItem }) {
+  return (
+    <SentOr slot={`connect:${c.id}`}>
+      <ConnectBody c={c} />
+    </SentOr>
+  );
+}
+
+function ConnectBody({ c }: { c: ConnectItem }) {
   const channel = c.channel ? `${c.channel.name} ${c.channel.handle}` : undefined;
   return (
     <CardShell as="section" kind="connect" data-testid={`connect-${c.id}`}>
@@ -89,7 +99,7 @@ export function ConnectCard({ c }: { c: ConnectItem }) {
       >
         {c.connected ? `Connect again with ${c.account}` : c.title}
       </a>
-      <CardFeedback origin={`connect-feedback:${c.id}`} title={c.title} refName={c.id} />
+      <CardFeedback origin={`connect-feedback:${c.id}`} title={c.title} refName={c.id} sent={{ slot: `connect:${c.id}` }} />
     </CardShell>
   );
 }
