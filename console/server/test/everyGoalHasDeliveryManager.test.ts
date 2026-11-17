@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { NO_TURNER, TURNER_OFF, milestoneGaps, objectiveGaps, turnerOf } from "../src/personaGaps.js";
+import { NO_TURNER, TURNER_OFF, isTestWorld, milestoneGaps, objectiveGaps, turnerOf } from "../src/personaGaps.js";
 import { tempApp } from "./helpers.js";
 
 /**
@@ -46,6 +46,11 @@ describe("a new milestone comes with a Delivery Manager", () => {
 });
 
 describe("the persona check", () => {
+  it("leaves TEST customer workspaces out, the one rule every reader of the check uses", () => {
+    for (const w of ["acme-test", "acme-test-b", "acmes9-test", "x-y-test-b-461e2b", "TEST"]) expect(isTestWorld(w), w).toBe(true);
+    for (const w of ["default", "acme-social", "contest", "testers", "latest-news", "", undefined]) expect(isTestWorld(w as string), String(w)).toBe(false);
+  });
+
   const mk = (id: string, o: Partial<{ repo: string; path: string; paused: boolean; settledAt: string }> = {}) =>
     ({ id, title: id, repo: o.repo ?? `acme/${id}`, path: o.path ?? "EPIC.md", owner: "", paused: !!o.paused, createdAt: "", ...(o.settledAt ? { settledAt: o.settledAt } : {}) }) as never;
   const store = (milestones: never[], teams: Record<string, { name: string; enabled: boolean; parkedAt?: string }[]>) => ({

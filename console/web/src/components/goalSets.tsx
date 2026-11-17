@@ -1520,14 +1520,22 @@ export function WheelsTable({
                     )}
                     <TrafficLight light={light} testId="wheel-light" />
                     <span className="grid min-w-0 gap-1">
-                      <span className="text-[15px] font-medium text-foreground [overflow-wrap:anywhere]" data-testid="wheel-name">
+                      {/* the owner's phone showed a name one letter per line: break-word, never anywhere, so the name keeps whole
+                          words; the status pills sit under it, never beside it squeezing it. */}
+                      <span className="text-[15px] font-medium text-foreground [overflow-wrap:break-word]" data-testid="wheel-name">
                         <span className="flex min-w-0 items-baseline gap-1">
-                          <span className="text-muted-foreground">{i + 1}.</span>
+                          <span className="shrink-0 text-muted-foreground">{i + 1}.</span>
                           <ObjectiveName name={titleOf(n)} after={n.objectiveStatus === "proposed" && <ProposedMark />} />
                         </span>
                       </span>
                       {/* lean rows (the owner 13 Nov 21:46Z: "only the colors and pills is enough, the small gray stuff you can remove"): name, colour bar, pills. */}
                       <KrStrip rows={krs} />
+                      {(n.noPersona || n.idle?.idle) && (
+                        <span className="flex flex-wrap items-center gap-1" data-testid="wheel-status-pills">
+                          <NoPersonaPill n={n} />
+                          <IdlePill n={n} />
+                        </span>
+                      )}
                     </span>
                   </>
                 );
@@ -1543,8 +1551,6 @@ export function WheelsTable({
                 );
               })()}
               <span className="flex shrink-0 items-center gap-1 pr-2">
-                <NoPersonaPill n={n} />
-                <IdlePill n={n} />
                 {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} />}
                 {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} />}
                 <Link to={hrefOf(n)} className="grid h-10 w-10 place-items-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground" aria-label={`Open ${titleOf(n)}`} data-testid="wheel-open">

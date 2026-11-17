@@ -24,6 +24,13 @@ export function turnerOf(teams: { persona: string; enabled: boolean; parked?: bo
 
 export const gapWords = (t: Turner) => (t === "none" ? NO_TURNER : t === "off" ? TURNER_OFF : "");
 
+/**
+ * A TEST customer workspace (a live test's own: acme-test, acme-test-b, x-…-test-b-…) is not a goal of the owner's and
+ * needs no persona (the owner's phone showed test milestones in the red "no persona" box). The one rule: GET /api/persona-gaps
+ * leaves them out (the objectives screen and scripts/persona_check.py read it) and counts them in `testsLeftOut`.
+ */
+export const isTestWorld = (world: string | undefined) => /(^|-)test(-|$)/i.test(world ?? "");
+
 /** a gap is a goal with no persona at all; personas switched off are there, only not waking (shown, never failed). */
 export const isGap = (g: Pick<PersonaGap, "turner">) => g.turner === "none";
 

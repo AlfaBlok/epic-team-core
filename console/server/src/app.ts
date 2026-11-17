@@ -76,7 +76,7 @@ import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
-import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
+import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, isTestWorld, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
 import { cardRepoOf, mountTeamCards } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { readHisWords } from "./desk/hisObjectives.js";
@@ -1815,8 +1815,9 @@ export function createApp(
       /* no file: his pursuits only */
     }
     const objectives: ObjectiveIn[] = [...(body?.pursuits ?? []).filter((p) => !p.parked).map((p) => ({ id: p.id, name: p.name, epics: p.epics })), ...other];
-    const gaps = [...objectiveGaps(objectives, all, world), ...milestoneGaps(all, world)];
-    return c.json({ ok: !gaps.some(isGap), gaps, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
+    const every = [...objectiveGaps(objectives, all, world), ...milestoneGaps(all, world)];
+    const gaps = every.filter((g) => !isTestWorld(g.world));
+    return c.json({ ok: !gaps.some(isGap), gaps, testsLeftOut: every.length - gaps.length, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
   });
   api.get("/objectives", async (c) => c.text(((await ownerObjectivesNow!().catch(() => undefined))?.block || "No objectives read.") + "\n"));
   // each objective's key results as the page shows them (its file's, a ticked Done-means box green), for the

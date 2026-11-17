@@ -483,6 +483,9 @@ describe("the key-result table of every wheel", () => {
     const rows = screen.getAllByTestId("all-sets-row");
     const pill = within(rows[0]).getByTestId("wheel-idle");
     expect(pill.textContent).toBe("idle");
+    // the owner's phone: the name squeezed one letter per line beside the pills; the pills sit under the name, in its column.
+    expect(pill.closest('[data-testid="wheel-status-pills"]')?.parentElement?.contains(within(rows[0]).getByTestId("wheel-name"))).toBe(true);
+    expect(within(rows[0]).getByTestId("wheel-name").className).not.toContain("anywhere");
     expect(pill.getAttribute("title")).toContain("Its Delivery Manager starts its next step on its next regular wake");
     rows.slice(1).forEach((r) => expect(within(r).queryByTestId("wheel-idle")).toBeNull());
     cleanup();
