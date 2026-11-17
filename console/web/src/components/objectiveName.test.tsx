@@ -79,4 +79,13 @@ describe("an objective's name in two parts", () => {
     expect(goal.className).toContain("inline-block");
     expect(goal.className).toContain("max-w-full");
   });
+  it("the label is a placed box, so its hidden colon never escapes a clipped tag and widens the phone page", () => {
+    for (const layout of ["stack", "inline", "flow"] as const) {
+      const { unmount } = render(<ObjectiveName name="Acme: multi-tenant working" layout={layout} />);
+      const label = screen.getByTestId("objective-product");
+      expect(label.className.split(" ")).toContain("relative");
+      expect(label.querySelector(".sr-only")).not.toBeNull();
+      unmount();
+    }
+  });
 });

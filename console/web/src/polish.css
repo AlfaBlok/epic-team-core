@@ -201,6 +201,9 @@ main .border-amber-500\/40, main .border-amber-500\/60 { border-color: hsl(38 85
   main [data-card-meta]:has(a, button) > a { flex-shrink: 1; min-width: 2.5rem; display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* the why-it-ranks-here tag gives way too (ends in …, the whole line in its tooltip and its box) */
   main [data-card-meta] > button[data-testid="owner-priority"] { flex-shrink: 1; min-width: 3rem; display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* every part of the line that is cut to fit is a placed box, so nothing absolutely placed inside it (a screen reader's
+     hidden word) escapes the cut and pushes the page wider than the phone (it made the inbox 411 px wide on a 360 px phone) */
+  main [data-card-meta]:has(a, button) > :is(a, button, span:not([data-card-kind-word])) { position: relative; }
   /* its box, once tapped, takes a line of its own under the row instead of running off the card */
   main [data-card-meta]:has([data-testid="owner-priority-why"]) { flex-wrap: wrap; }
 }

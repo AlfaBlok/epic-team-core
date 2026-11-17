@@ -42,7 +42,9 @@ export function ObjectiveName({ name, layout = "stack", after, className }: { na
       </span>
     );
   const label = (
-    <span className={cn("w-fit rounded px-1.5 py-px text-[12px] font-semibold leading-tight", productInk(product))} data-testid="objective-product" data-product={product}>
+    // relative: the hidden colon below is absolutely placed; without a placed box around it, it escapes any clipped tag
+    // the name sits in (a card's one-row top line on a phone) and makes the whole page scroll sideways
+    <span className={cn("relative w-fit rounded px-1.5 py-px text-[12px] font-semibold leading-tight", productInk(product))} data-testid="objective-product" data-product={product}>
       {product}
       {/* the colon stays for screen readers and copy-paste: the name reads whole. */}
       <span className="sr-only">: </span>
