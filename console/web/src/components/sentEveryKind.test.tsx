@@ -127,3 +127,23 @@ describe("E948-S130 a Decision's option press collapses like every other press",
     expect(pressed, "no decision card in the inventory").toBeGreaterThan(0);
   });
 });
+
+describe("E948-S130 the last card of a list, answered, keeps its Sent row after a reload", () => {
+  it("the refetch empties the list before the press marks it: the place is still kept", async () => {
+    vi.resetModules();
+    const { renderHook } = await import("@testing-library/react");
+    const { useKeepSent, markSent, resetSent } = await import("@/lib/sentRows");
+    resetSent();
+    const slot = (x: string) => `ask:${x}`;
+    const a = renderHook(({ items }) => useKeepSent(items, slot, "only-one"), { initialProps: { items: ["t"] } });
+    a.rerender({ items: [] as string[] }); // the refetch came first: the answered card left the list
+    markSent("ask:t", { said: "Changes sent to the team", title: "T" });
+    a.rerender({ items: [] as string[] });
+    expect(a.result.current.map((r) => r.slot)).toEqual(["ask:t"]);
+    a.unmount();
+    vi.resetModules();
+    const fresh = await import("@/lib/sentRows");
+    const b = renderHook(() => fresh.useKeepSent([] as string[], slot, "only-one"));
+    expect(b.result.current.map((r) => r.slot)).toEqual(["ask:t"]);
+  });
+});

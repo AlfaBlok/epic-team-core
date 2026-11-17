@@ -157,15 +157,17 @@ export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: stri
   const kept = keepPlaces(prev.current, items, slotOf, (s) => !!live(map.get(s)));
   // an empty list (still loading after a reload) keeps the order it had, so the cards around a Sent row are not lost
   const saved = useRef("");
-  if (items.length || !list) {
-    // written when the order or which of them are sent changed (a press marks one without changing the order)
-    const now = kept.map((r) => `${r.slot}${live(map.get(r.slot)) ? "*" : ""}`).join(" ");
-    if (list && now !== saved.current) {
-      savePlaces(list, kept);
+  if (list) {
+    // written when the order or which of them are sent changed (a press marks one without changing the order). An empty
+    // list (loading after a reload, or he just answered its last card) writes the order it had, never a shorter one.
+    const order = items.length ? kept : prev.current;
+    const now = order.map((r) => `${r.slot}${live(map.get(r.slot)) ? "*" : ""}`).join(" ");
+    if (now !== saved.current) {
+      savePlaces(list, order);
       saved.current = now;
     }
-    prev.current = kept;
   }
+  if (items.length || !list) prev.current = kept;
   const seen = new Set<number>();
   const out: { slot: string; item?: T; sent?: SentEntry }[] = [];
   for (const r of kept) {
