@@ -517,6 +517,31 @@ describe("the key-result table of every wheel", () => {
     expect(within(rows[0]).queryByTestId("kr-sheet")).toBeNull();
   });
 
+  it("the owner's phone: one grid per row, number, label and goal flow from one left edge, bars stay on one line, shade only on hover devices", async () => {
+    const { WheelsTable } = await import("@/components/goalSets");
+    render(
+      <MemoryRouter>
+        <WheelsTable nodes={BODY.nodes} />
+      </MemoryRouter>,
+    );
+    const rows = screen.getAllByTestId("all-sets-row");
+    for (const r of rows) {
+      const grid = within(r).getByTestId("wheel-row-grid");
+      // the shade covers the whole row, and never sticks after a tap on a phone
+      expect(grid.className).toContain("[@media(hover:hover)]:hover:bg-accent/30");
+      expect(within(r).getByTestId("wheel-toggle").className).not.toMatch(/(^| )hover:bg/);
+      // the number is inline text in the name, never its own column the name hangs beside
+      const name = within(r).getByTestId("wheel-name");
+      expect(within(name).getByTestId("wheel-number").textContent).toMatch(/^\d+\.$/);
+      expect(name.className).not.toMatch(/(^| )(flex|grid|inline-flex)( |$)/);
+      expect(name.querySelector("span")?.className ?? "").not.toMatch(/(^| )(flex|grid)( |$)/);
+      // bars never wrap to a second row
+      expect(within(r).getByTestId("kr-strip").className).toContain("flex-nowrap");
+      // the count slot is there on every row, so the name column is the same width on every row
+      expect(within(r).getByTestId("wheel-counts")).toBeTruthy();
+    }
+  });
+
   it("an opened wheel says what its place in his order buys it (effort follows importance)", async () => {
     vi.spyOn(api, "listPursuits").mockResolvedValue({ pursuits: [{ id: BODY.nodes[0].id, effort: { tier: "Top", wakeFactor: 2, maxWorkers: 10, stallHours: 1, words: "Wakes twice as often, up to 10 workers, nudged after 1 h idle." } }] } as never);
     const { WheelsTable } = await import("@/components/goalSets");

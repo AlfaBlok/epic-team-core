@@ -28,10 +28,11 @@ export function splitObjectiveName(name: string): { product?: string; goal: stri
 
 /**
  * `stack` (the default): the product label above the goal, for lists and headers. `inline`: label then goal on one line,
- * for crumbs and bars. `after` sits right after the goal (a count, a proposed mark). The goal text keeps the caller's
+ * for crumbs and bars. `flow`: label and goal run as one line of text that wraps back to the column's left edge, never
+ * under the goal's own start (the objectives rows on the owner's phone: a number, the label and the goal on one line). `after` sits right after the goal (a count, a proposed mark). The goal text keeps the caller's
  * size and weight (it inherits); the label is always the same small one.
  */
-export function ObjectiveName({ name, layout = "stack", after, className }: { name: string; layout?: "stack" | "inline"; after?: ReactNode; className?: string }) {
+export function ObjectiveName({ name, layout = "stack", after, className }: { name: string; layout?: "stack" | "inline" | "flow"; after?: ReactNode; className?: string }) {
   const { product, goal } = splitObjectiveName(name);
   if (!product)
     return (
@@ -47,6 +48,17 @@ export function ObjectiveName({ name, layout = "stack", after, className }: { na
       <span className="sr-only">: </span>
     </span>
   );
+  if (layout === "flow")
+    return (
+      <span className={cn("min-w-0", className)} data-testid="objective-name" data-layout="flow">
+        <span className="mr-1.5 inline-block align-[1px]">{label}</span>
+        {/* one block: beside the label when it fits, else whole on the next line from the left edge ("5 testers", never "5" then "testers") */}
+        <span className="inline-block max-w-full" data-testid="objective-goal">
+          {goal}
+          {after}
+        </span>
+      </span>
+    );
   return layout === "inline" ? (
     <span className={cn("inline-flex min-w-0 flex-wrap items-baseline gap-x-1.5", className)} data-testid="objective-name" data-layout="inline">
       {label}

@@ -368,11 +368,12 @@ export function keyResultsOf(node: ScorecardNode): ScorecardRow[] {
 }
 
 /** one block per key result, in its colour, each colour together: the objective's strip (the sidebar and the all list). */
-export function KrStrip({ rows, className }: { rows: Pick<ScorecardRow, "state" | "label">[]; className?: string }) {
+export function KrStrip({ rows, className, fit }: { rows: Pick<ScorecardRow, "state" | "label">[]; className?: string; fit?: boolean }) {
+  // `fit` (the objectives rows): one line always, each bar shrinks to the column instead of wrapping to a second row.
   return (
-    <span className={cn("flex flex-wrap gap-[3px]", className)} role="img" aria-label={`${rows.filter((r) => r.state === "green").length} of ${rows.length} key results green`} data-testid="kr-strip">
+    <span className={cn("flex gap-[3px]", fit ? "min-w-0 flex-nowrap" : "flex-wrap", className)} role="img" aria-label={`${rows.filter((r) => r.state === "green").length} of ${rows.length} key results green`} data-testid="kr-strip">
       {byRingColour(rows).map((r, i) => (
-        <i key={i} className="block h-1.5 w-5 rounded-[1px]" style={{ background: STATE_FILL[r.state] }} title={`${r.label}: ${STATE_WORD[r.state]}`} data-state={r.state} />
+        <i key={i} className={cn("block h-1.5 rounded-[1px]", fit ? "min-w-[4px] max-w-5 flex-1" : "w-5")} style={{ background: STATE_FILL[r.state] }} title={`${r.label}: ${STATE_WORD[r.state]}`} data-state={r.state} />
       ))}
     </span>
   );
@@ -1507,31 +1508,34 @@ export function WheelsTable({
         const c = countFor?.(n.id) ?? { ask: 0, review: 0 };
         return (
           <li key={n.id} className="border-b last:border-b-0" data-testid="all-sets-row" data-set={n.id} data-state={light}>
-            <div className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-center", isOpen && "bg-accent/30")}>
+            {/* one grid per row (the owner's phone 17 Nov: "Alignment off on the traffic's line"): [chevron][light][number
+                label goal / bars][count][arrow], every cell on the name's first line, the count slot the same width on every
+                row so the name column is too; the hover shade (only where there is a mouse, never stuck after a tap) and the
+                open shade cover the whole row. */}
+            <div className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-start [@media(hover:hover)]:hover:bg-accent/30", isOpen && "bg-accent/30")} data-testid="wheel-row-grid">
               {(() => {
                 const inner = (
                   <>
-                    {lead ? (
-                      lead(n)
-                    ) : (
-                      <span className="text-muted-foreground" aria-hidden="true">
-                        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      </span>
-                    )}
-                    <TrafficLight light={light} testId="wheel-light" />
-                    <span className="grid min-w-0 gap-1">
-                      {/* the owner's phone showed a name one letter per line: break-word, never anywhere, so the name keeps whole
-                          words; the status pills sit under it, never beside it squeezing it. */}
-                      <span className="text-[15px] font-medium text-foreground [overflow-wrap:break-word]" data-testid="wheel-name">
-                        <span className="flex min-w-0 items-baseline gap-1">
-                          <span className="shrink-0 text-muted-foreground">{i + 1}.</span>
-                          <ObjectiveName name={titleOf(n)} after={n.objectiveStatus === "proposed" && <ProposedMark />} />
+                    <span className="flex min-h-6 items-center text-muted-foreground" aria-hidden={lead ? undefined : true}>
+                      {lead ? lead(n) : isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </span>
+                    <span className="flex h-6 items-center">
+                      <TrafficLight light={light} testId="wheel-light" />
+                    </span>
+                    <span className="grid min-w-0 gap-1.5">
+                      {/* the number, the product label and the goal run as one line of text that wraps back to this column's
+                          left edge: nothing hangs, a name breaks between words, never one letter per line. */}
+                      <span className="text-[15px] font-medium leading-6 text-foreground [overflow-wrap:break-word]" data-testid="wheel-name">
+                        <span className="mr-1.5 tabular-nums text-muted-foreground" data-testid="wheel-number">
+                          {i + 1}.
                         </span>
+                        <ObjectiveName name={titleOf(n)} layout="flow" />
                       </span>
                       {/* lean rows (the owner 13 Nov 21:46Z: "only the colors and pills is enough, the small gray stuff you can remove"): name, colour bar, pills. */}
-                      <KrStrip rows={krs} />
-                      {(n.noPersona || n.idle?.idle) && (
-                        <span className="flex flex-wrap items-center gap-1" data-testid="wheel-status-pills">
+                      <KrStrip rows={krs} fit />
+                      {(n.noPersona || n.idle?.idle || n.objectiveStatus === "proposed") && (
+                        <span className="flex flex-wrap items-center gap-1 [&>[data-testid=objective-proposed]]:ml-0" data-testid="wheel-status-pills">
+                          {n.objectiveStatus === "proposed" && <ProposedMark />}
                           <NoPersonaPill n={n} />
                           <IdlePill n={n} />
                         </span>
@@ -1539,7 +1543,7 @@ export function WheelsTable({
                     </span>
                   </>
                 );
-                const cls = "flex min-h-14 min-w-0 items-center gap-3 px-3 py-2.5 text-left hover:bg-accent/30";
+                const cls = "grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-x-2 py-3 pl-3 text-left sm:gap-x-3";
                 return lead ? (
                   <Link to={hrefOf(n)} className={cls} data-testid="wheel-row-link">
                     {inner}
@@ -1550,10 +1554,12 @@ export function WheelsTable({
                   </button>
                 );
               })()}
-              <span className="flex shrink-0 items-center gap-1 pr-2">
-                {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} />}
-                {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} />}
-                <Link to={hrefOf(n)} className="grid h-10 w-10 place-items-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground" aria-label={`Open ${titleOf(n)}`} data-testid="wheel-open">
+              <span className="flex items-start gap-1 py-3 pl-2 pr-1 sm:pr-2">
+                <span className="flex min-h-6 min-w-6 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center" data-testid="wheel-counts">
+                  {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} />}
+                  {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} />}
+                </span>
+                <Link to={hrefOf(n)} className="-my-2 grid h-10 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground sm:w-10" aria-label={`Open ${titleOf(n)}`} data-testid="wheel-open">
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </span>

@@ -68,4 +68,15 @@ describe("an objective's name in two parts", () => {
     expect(sets.map((s) => within(s).getByTestId("objective-product").dataset.product)).toEqual(["Acme", "Beta"]);
     expect(sets.map((s) => within(s).getByTestId("objective-goal").textContent)).toEqual(["5 testers", "5 testers"]);
   });
+  it("flow (the objectives rows on the owner's phone): the label and the goal run as text, the goal one block that moves whole to the next line", () => {
+    render(<ObjectiveName name="Acme: 5 testers" layout="flow" />);
+    const n = screen.getByTestId("objective-name");
+    expect(n.dataset.layout).toBe("flow");
+    expect(n.className).not.toMatch(/(^| )(flex|grid|inline-flex)( |$)/);
+    expect(screen.getByTestId("objective-product").textContent).toBe("Acme: ");
+    const goal = screen.getByTestId("objective-goal");
+    expect(goal.textContent).toBe("5 testers");
+    expect(goal.className).toContain("inline-block");
+    expect(goal.className).toContain("max-w-full");
+  });
 });
