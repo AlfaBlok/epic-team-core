@@ -46,7 +46,14 @@ export function scrollerOf(el: Element | null): HTMLElement | null {
 export function visibleTop(scroller: HTMLElement | null): number {
   if (scroller) return scroller.getBoundingClientRect().top;
   const bar = document.querySelector('[data-testid="topbar"]');
-  return bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+  const top = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+  // E948-S145: an open section's heading stuck under the bar covers the cards too
+  let under = top;
+  for (const h of Array.from(document.querySelectorAll("[data-fold-header][data-sticky]"))) {
+    const r = h.getBoundingClientRect();
+    if (r.height && Math.abs(r.top - top) < 2) under = Math.max(under, r.bottom);
+  }
+  return under;
 }
 
 /**

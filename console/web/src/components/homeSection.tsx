@@ -195,6 +195,8 @@ export function FoldSection({
   children?: ReactNode;
 }) {
   const pill = hideZero && count === 0 ? null : <CountPill count={count} tone={tone} testId={`${testId}-count`} />;
+  // a folded section is its header line alone, so its sticky heading never moves: one class for open and folded
+  const stick = !!onToggle;
   const label = (
     <>
       {onToggle && (open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />)}
@@ -205,7 +207,12 @@ export function FoldSection({
   return (
     // a section is its heading and its cards, room instead of a frame around them.
     <section className={cn("mb-7 min-w-0 [overflow-wrap:anywhere]", className)} data-testid={testId} data-fold-section="">
-      <div className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1" data-fold-header="">
+      {/* E948-S145 (vn_a95bfbab): an open section's heading sticks under the top bar while he scrolls its cards */}
+      <div
+        className={cn("flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1", stick && "sticky top-[calc(52px+env(safe-area-inset-top))] z-30 bg-background md:top-[calc(2.75rem+env(safe-area-inset-top))]")}
+        data-fold-header=""
+        data-sticky={stick ? "" : undefined}
+      >
         <h2 className="min-w-0 text-[15px] font-semibold">
           {onToggle ? (
             <button type="button" className="flex min-h-8 items-center gap-2 text-left hover:text-foreground/80" onClick={() => onToggle(!open)} aria-expanded={open} data-testid={`${testId}-toggle`}>

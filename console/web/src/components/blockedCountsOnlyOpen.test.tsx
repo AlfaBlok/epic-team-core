@@ -41,8 +41,9 @@ describe("Blocked on you counts only what is still open for him", () => {
     // he answers all four; the status batch has not caught up and still lists them open
     act(() => asks.forEach((a) => markSent(`status:${a.id}`, { said: "Answered", title: a.title })));
     await waitFor(() => expect(count()).toBe("0"));
-    // the four green Sent rows stay where they were, counted nowhere
-    expect(screen.getAllByTestId("sent-row")).toHaveLength(4);
+    // E948-S140 (the owner 17 Nov 21:39Z: "I just want to see the last one that was done"): only the last answer keeps
+    // its green Sent row, counted nowhere; the other three are off the page, still answered
+    expect(screen.getAllByTestId("sent-row")).toHaveLength(1);
     // the laptop box says its own count, apart from the red one
     expect((await screen.findByTestId("laptop-summary")).textContent).toContain("2 tasks for Claude on your Mac");
   });

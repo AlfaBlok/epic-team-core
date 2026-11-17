@@ -29,6 +29,12 @@ export interface SentEntry {
   card?: ClosedCardRef;
   back?: () => Promise<BackResult>;
   at: number;
+  /**
+   * E948-S140 (the owner 17 Nov 21:39Z: "I just want to see the last one that was done. I don't want to see 20 cards
+   * parked."): the card stays answered (it never comes back as a card) but its green row is off the page: an older
+   * answer once a newer one was sent, or a row he swiped away or closed with its x (E948-S145).
+   */
+  gone?: boolean;
 }
 
 /**
@@ -73,9 +79,10 @@ const emit = () => subs.forEach((f) => f());
 const subscribe = (f: () => void) => (subs.add(f), () => void subs.delete(f));
 
 /** Mark one card (or several cards closed by one press: a set) as sent; returns the entry. */
-export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at">): SentEntry {
+export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at" | "gone">): SentEntry {
   const entry: SentEntry = { ...e, id: ++seq, at: Date.now() };
-  const next = new Map(sent);
+  // E948-S140: only the newest answer keeps its green row; every earlier one leaves the page (still answered)
+  const next = new Map([...sent].map(([k, v]) => [k, v.gone ? v : { ...v, gone: true }]));
   for (const s of [slots].flat()) next.set(s, entry);
   sent = next;
   saveSent(sent);
@@ -95,6 +102,19 @@ export function unmarkSent(slots: string | string[]) {
 }
 
 const live = (e: SentEntry | undefined, now = Date.now()) => (e && now - e.at < SENT_KEEP_MS ? e : undefined);
+/** E948-S140: an answered card whose green row still shows (the newest answer, not swiped away). */
+export const shownSent = (e: SentEntry | undefined) => (live(e) && !e!.gone ? e : undefined);
+
+/** E948-S145: he swiped the Sent row away (phone) or closed it with its x (desktop): the card stays answered, the row goes. */
+export function dismissSent(slot: string) {
+  const e = sent.get(slot);
+  if (!e || e.gone) return;
+  const next = new Map(sent);
+  for (const [k, v] of sent) if (v.id === e.id) next.set(k, { ...v, gone: true });
+  sent = next;
+  saveSent(sent);
+  emit();
+}
 
 export const sentOf = (slot: string) => live(sent.get(slot));
 /**
@@ -175,6 +195,7 @@ export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: stri
     if (e && seen.has(e.id)) continue;
     if (e) seen.add(e.id);
     if (!r.item && !e) continue;
+    if (e?.gone) continue; // E948-S140: answered earlier, or swiped away: neither the card nor its row shows
     out.push(e ? { ...r, sent: e } : r);
   }
   return out;
