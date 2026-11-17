@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api, type WaitingItem } from "@/api";
 import { AskSet, askSets, setLine, setWhy } from "@/components/askSet";
+import { ownYesNo } from "@/lib/oneDecision";
 
 afterEach(() => {
   cleanup();
@@ -28,10 +29,28 @@ const rec = (code: string, over: Partial<WaitingItem> = {}): WaitingItem => ({
   asker: { assignmentId: "as_2", personaId: "p_2", personaName: "Advisor", via: "ask" },
   since: "2026-11-11T02:30:00Z",
   decidable: false,
+  unblocks: "ROOT-S1",
   ...over,
 } as WaitingItem);
 
 describe("askSets", () => {
+  // E948-S128 (vn_dc4a25de): the 17 Nov pair, an application send and a chat bot opening, both the Delivery Manager's
+  it("never joins unrelated asks: the 17 Nov pair stays two cards, each with its own Yes and No words", () => {
+    const dm = { assignmentId: "as_9", personaName: "Delivery Manager", via: "run" as const };
+    const sendApp = rec("E995-A4", { repo: "home_repo", path: "docs/spines/programs.md", asker: dm, unblocks: "E995-2, the program Submit", options: ["Yes: we press Submit", "No: say what to change"], question: "You approve: send this program application as shown." });
+    const chatBot = rec("EPIC-905-A22", { repo: "deals_repo", milestoneId: "ms_2", path: "docs/spines/deals.md", asker: dm, unblocks: "the bot tester readiness (home_repo products-ready)", options: ["Yes: open it, 3 dollar cap ; No: keep it to me only"], question: "You approve: let the chat bot answer any user." });
+    expect(askSets([sendApp, chatBot])).toEqual([]);
+    // the same two in one spine but holding up different work: still two cards
+    expect(askSets([sendApp, { ...chatBot, repo: "home_repo", milestoneId: "ms_1", path: sendApp.path, id: "wj_x" }])).toEqual([]);
+    // two parts of one decision (one spine, the same row waits on both) stay one card
+    const part = rec("E995-A5", { repo: "home_repo", path: sendApp.path, asker: dm, unblocks: "E995-2" });
+    expect(askSets([sendApp, chatBot, part])).toEqual([{ persona: "Delivery Manager", items: [sendApp, part] }]);
+    render(<AskSet group={{ persona: "Delivery Manager", items: [sendApp, part] }} />);
+    const first = screen.getAllByTestId("ask-set-row")[0];
+    expect(within(first).getByTestId("ask-set-accept").textContent).toContain("Yes: we press Submit");
+    // "No: say what to change" asks for his words (the feedback box), so the decline keeps its own words
+    expect(within(first).getByTestId("ask-set-no").textContent).toContain("No: drop it");
+  });
   it("groups two or more open approve asks one persona wrote; leaves the rest", () => {
     const a = rec("ROOT-A1");
     const b = rec("ROOT-A2");
@@ -163,3 +182,12 @@ describe("AskSet", () => {
   });
 });
 
+
+describe("ownYesNo", () => {
+  it("reads the ask's own Yes and No words, written with a middle dot, a pipe or a semicolon", () => {
+    expect(ownYesNo({ options: ["Yes: open it, 3 dollar cap ; No: keep it to me only"] })).toEqual({ yes: "Yes: open it, 3 dollar cap", no: "No: keep it to me only" });
+    expect(ownYesNo({ options: ["Yes: we press Submit", "No: say what to change"] })).toEqual({ yes: "Yes: we press Submit" });
+    expect(ownYesNo({ options: ["approve", "approve with feedback", "not now"] })).toEqual({});
+    expect(ownYesNo({})).toEqual({});
+  });
+});

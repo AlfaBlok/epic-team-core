@@ -14,9 +14,10 @@ import { markSent, useSent } from "@/lib/sentRows";
 import { SentRow } from "@/components/sentRow";
 import { CardButton } from "@/components/ui/cardButton";
 import { askLead, projectLabel } from "@/lib/askLead";
+import { decisionGroups, ownYesNo } from "@/lib/oneDecision";
 
 /**
- * when one persona (the Advisor) has a set of recommendations in his inbox,
+ * when one persona (the Advisor) has a set of recommendations in his inbox that are one decision (E948-S128),
  * one "Accept all" for the set, next to accept one, ask a question back or say no on each. Every accept becomes a ready
  * row the team delivers (the approve goes with `asRow`: the console adds the row in the ask's spine, his accept the ready
  * stamp, root L-37). A set is two or more open approve asks a persona's own run wrote (`asker.via` ask or run, never the
@@ -44,11 +45,15 @@ export function inSet(i: WaitingItem): boolean {
   );
 }
 
-/** The sets in `cards` (two or more from one persona), in the order their first ask comes. */
+/**
+ * The sets in `cards`, in the order their first ask comes: two or more from one persona that are ONE decision (one spine,
+ * the same work waiting on them, lib/oneDecision). E948-S128 (vn_dc4a25de): asks from one persona that are not one decision
+ * are each their own card, never one "Yes to all".
+ */
 export function askSets(cards: WaitingItem[]): AskSetGroup[] {
   const by = new Map<string, WaitingItem[]>();
   for (const i of cards) if (inSet(i)) by.set(i.asker!.personaName!, [...(by.get(i.asker!.personaName!) ?? []), i]);
-  return [...by].filter(([, l]) => l.length >= 2).map(([persona, items]) => ({ persona, items }));
+  return [...by].flatMap(([persona, l]) => decisionGroups(l).filter((g) => g.length >= 2).map((items) => ({ persona, items })));
 }
 
 /** The one line he reads, as's cards say it (lib/askLead): what he approves, without "You approve:". */
@@ -286,13 +291,13 @@ function SetRow({
       ) : (
         <div className="mt-0.5 flex flex-wrap items-center gap-3">
           <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => void onPress(i, "approve")} data-testid="ask-set-accept">
-            {working && <Loader2 className="animate-spin" />} Yes: make it a task
+            {working && <Loader2 className="animate-spin" />} {ownYesNo(i).yes ?? "Yes: make it a task"}
           </CardButton>
           <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("feedback")} data-testid="ask-set-ask">
             Ask a question
           </CardButton>
           <CardButton variant="ghost" className={quiet} disabled={!!busy} onClick={() => setBox("deny")} data-testid="ask-set-no">
-            No: drop it
+            {ownYesNo(i).no ?? "No: drop it"}
           </CardButton>
         </div>
       )}

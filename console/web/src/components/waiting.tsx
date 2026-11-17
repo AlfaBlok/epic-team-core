@@ -42,6 +42,7 @@ import { answeredHere, markSent, unmarkSent, useSent, useKeepSent, type SentEntr
 import { SentRow } from "@/components/sentRow";
 import { DEFAULT_SKIN, useWords } from "@/lib/skin";
 import { AskSet, askSets } from "@/components/askSet";
+import { ownYesNo } from "@/lib/oneDecision";
 import { AskVerdictTap } from "@/components/askLog";
 import { askLead, askLeadUrl, cardBody, cardHeading, KIND_WORD, projectLabel, splitSteps } from "@/lib/askLead";
 import { deployerName, sites } from "@/lib/identity";
@@ -1448,8 +1449,9 @@ function WaitingCardBody({
                 </>
               ) : approveCard ? (
                 <>
-                  {main("approve", YES_LABEL, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"))}
-                  {canDeny && second("deny", NO_LABEL, secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"))}
+                  {/* E948-S128: the ask's own "Yes: …" and "No: …" words, so yes says exactly what happens */}
+                  {main("approve", (item.ask === "approve" && ownYesNo(item).yes) || YES_LABEL, () => void respond("approve", "approve", answer.trim()), "approve", current("approve"), false, OPTION_BUTTON)}
+                  {canDeny && second("deny", (item.ask === "approve" && ownYesNo(item).no) || NO_LABEL, secondPress("decline", () => void respond("deny", "deny", answer.trim())), "decline", current("deny"), OPTION_BUTTON)}
                 </>
               ) : options.length > 0 ? (
                 <>
