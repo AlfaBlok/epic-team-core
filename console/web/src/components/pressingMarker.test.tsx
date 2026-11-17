@@ -70,4 +70,11 @@ describe("his objectives rank the inbox by themselves", () => {
     expect(pressingInReviewOnly([{ ownerPriority: { objective: { n: 0 } } }], [], [])).toBe(true);
     expect(pressingInReviewOnly([{ ownerPriority: { objective: { n: 1 } } }], [], [])).toBe(false);
   });
+  it("a card's objective tag shows its product as the small tinted label, the words whole (vn_c2d7cc29)", () => {
+    render(<OwnerPriorityTag p={{ level: "normal", why: "x", ref: "a", objective: { n: 3, id: "b", name: "Acme: multi-tenant working" } }} />);
+    const tag = screen.getByTestId("owner-priority");
+    expect(tag.textContent).toBe("Your objective 4: Acme: multi-tenant working");
+    expect(tag.querySelector("[data-testid=objective-product]")?.getAttribute("data-product")).toBe("Acme");
+    expect(tag.querySelector("[data-testid=objective-goal]")?.textContent).toBe("multi-tenant working");
+  });
 });

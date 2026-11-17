@@ -38,6 +38,8 @@ export interface LaptopRow {
   item?: WaitingItem;
   /** a Done (on the card or the page) cleared it; shown only on the card he just pressed. */
   done?: boolean;
+  /** when it reached his list: its ask's time, the card's age. */
+  since?: string;
 }
 
 const FOR: { f: LaptopFor; label: string }[] = [
@@ -98,12 +100,13 @@ export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTas
     ...(t.ask ? { ask: t.ask } : {}),
     ...(t.step ? { step: t.step } : {}),
     ...(i ? { item: i } : {}),
+    ...(i?.since ? { since: i.since } : {}),
     ...(finished.has(t.key) || t.step?.state === "done" ? { done: true } : {}),
     rank,
   }));
   for (const [n, i] of mac.entries()) {
     if (used.has(i.id)) continue;
-    out.push({ key: i.id, title: plainTitle(i.question || i.title, i.code ?? i.title), repo: i.repo ?? "", code: i.code, url: ticketOf(i), redLine: !!i.ownerPriority?.redLine, item: i, rank: rankOf(i, n) });
+    out.push({ key: i.id, title: plainTitle(i.question || i.title, i.code ?? i.title), repo: i.repo ?? "", code: i.code, url: ticketOf(i), redLine: !!i.ownerPriority?.redLine, item: i, ...(i.since ? { since: i.since } : {}), rank: rankOf(i, n) });
   }
   return out.sort((a, b) => a.rank - b.rank).map(({ rank: _r, ...r }) => r);
 }
@@ -296,7 +299,7 @@ export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { r
 
 function TaskHead({ row: r, n }: { row: LaptopRow; n: number }) {
   return (
-    <CardMeta kind="Mac">
+    <CardMeta kind="Mac" since={r.since ?? r.item?.since} sinceWhat="issued">
       {n > 0 && <span>{n}</span>}
       {r.redLine && <span className="text-xs text-muted-foreground" data-testid="laptop-red-line">Red line</span>}
       {r.minutes != null && <span data-testid="laptop-minutes">{r.minutes} min</span>}

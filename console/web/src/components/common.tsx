@@ -84,22 +84,53 @@ export function RelTime({ iso, now, className }: { iso?: string | null; now?: nu
 }
 
 /**
- * how long ago a card's item was issued ("5 min ago", "3 days ago", "1 year ago"), for the card header next
- * to its chip or code; the full date and time on hover. A date-only value (an old ask line) reads in days ("today").
+ * The owner 17 Nov (vn_4d2a86f9: "this very card ... it is not showing its age, bro"; vn_c2d7cc29: "Why can
+ * I not see how old this card is?"): how old a card is, in his short form ("12 min old", "3 h old", "2 d old", "1 wk old"),
+ * the full date and time on hover. ONE component for every card: CardMeta draws it right after the kind word, so it sits
+ * in the same spot on every card in every place (Inbox, an objective's Inbox and Board, red lines, Mac, posts); lists
+ * (the slim inbox, the Board) draw it first on each line. Ink, not grey, so it reads at a glance. A date-only value (an
+ * old ask line) counts calendar days ("today", "3 d old").
  */
-export function IssuedAge({ iso, className, what = "issued" }: { iso?: string | null; className?: string; what?: string }) {
-  if (!iso) return null;
+export function cardAgeWords(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  let min: number;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-").map(Number);
+    const days = Math.round((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - Date.UTC(y, m - 1, d)) / 86_400_000);
+    if (days <= 0) return "today";
+    min = days * 1440;
+  } else {
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    min = Math.max(0, Math.floor((now.getTime() - t) / 60_000));
+  }
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min old`;
+  if (min < 1440) return `${Math.floor(min / 60)} h old`;
+  const days = Math.floor(min / 1440);
+  if (days < 14) return `${days} d old`;
+  if (days < 60) return `${Math.floor(days / 7)} wk old`;
+  if (days < 365) return `${Math.floor(days / 30)} mo old`;
+  return `${Math.floor(days / 365)} yr old`;
+}
+
+export function CardAge({ iso, className, what = "issued" }: { iso?: string | null; className?: string; what?: string }) {
+  const words = cardAgeWords(iso);
+  if (!iso || !words) return null;
   return (
     <time
       dateTime={iso}
       title={/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${what} ${iso} (day only)` : `${what} ${formatDateTime(iso)}`}
-      className={cn("whitespace-nowrap text-xs text-muted-foreground", className)}
+      className={cn("whitespace-nowrap text-xs tabular-nums text-foreground/85", className)}
       data-testid="issued-age"
+      data-card-age=""
     >
-      {formatRelative(iso)}
+      {words}
     </time>
   );
 }
+/** the old name: every card's age is CardAge. */
+export const IssuedAge = CardAge;
 
 /**
  * A run's word: Working / Needs you / Monitoring / Progressed / Failed / Idle. With `run`, a `blocked` run reads Needs

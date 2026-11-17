@@ -96,7 +96,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
     const c = await screen.findByTestId("review-card");
     const crumb = within(c).getByTestId("review-crumb");
     // the meta line is the kind word, the project (a link) and the age; Snooze is a button beside Park
-    expect(crumb.textContent).toMatch(/^ReviewMemo, the memory app/);
+    expect(crumb.textContent).toMatch(/^Review\d+ \w+ oldMemo, the memory app/);
     expect(within(crumb).getByText("Memo, the memory app").getAttribute("href")).toBe("https://memo.example.com/");
     expect(within(crumb).queryByTestId("snooze")).toBeNull();
     expect(within(within(c).getByTestId("review-buttons")).getByTestId("snooze")).toBeTruthy();
@@ -499,7 +499,7 @@ describe("a review card shows how long it has waited", () => {
       list([card({ id: "a", createdAt: "2026-11-16", inboxSince: "2026-11-16T09:00:00Z" }), card({ id: "b", ref: "T1-S2", createdAt: "2026-11-16", inboxSince: "2026-11-02T12:00:00Z" }), card({ id: "c", ref: "T1-S3", createdAt: "2026-11-15" })]);
       mount();
       const ages = (await screen.findAllByTestId("review-crumb")).map((c) => within(c).getByTestId("issued-age"));
-      expect(ages.map((a) => a.textContent)).toEqual(["3 h ago", "2 weeks ago", "1 day ago"]);
+      expect(ages.map((a) => a.textContent)).toEqual(["3 h old", "2 wk old", "1 d old"]);
       expect(ages[0].getAttribute("title")).toMatch(/^reached your inbox /);
     } finally {
       vi.useRealTimers();
@@ -517,7 +517,7 @@ describe("a review card shows how long it has waited", () => {
       list([post("post~social~P-1", { inboxSince: "2026-11-16T11:48:00Z" }), post("post~social~P-2", {})]);
       mount();
       const ages = (await screen.findAllByTestId("review-crumb")).map((c) => within(c).getByTestId("issued-age").textContent);
-      expect(ages).toEqual(["12 min ago", "1 day ago"]);
+      expect(ages).toEqual(["12 min old", "1 d old"]);
     } finally {
       vi.useRealTimers();
     }

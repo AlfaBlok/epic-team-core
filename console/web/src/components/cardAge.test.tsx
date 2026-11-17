@@ -40,7 +40,7 @@ describe("card age (T48-S11)", () => {
     vi.setSystemTime(NOW);
     render(<MemoryRouter><WaitingCard item={ask(at(5))} /></MemoryRouter>);
     const age = screen.getByTestId("issued-age");
-    expect(age.textContent).toBe("5 min ago");
+    expect(age.textContent).toBe("5 min old");
     expect(age.getAttribute("title")).toMatch(/^issued Nov 1, 2026, \d\d:55/);
     const header = age.parentElement!;
     expect(header.getAttribute("data-testid")).toBe("card-meta");
@@ -54,11 +54,11 @@ describe("card age (T48-S11)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const cases: [string, string][] = [
-      [at(180), "3 h ago"],
-      [at(3 * 1440), "3 days ago"],
-      [at(400 * 1440), "1 year ago"],
+      [at(180), "3 h old"],
+      [at(3 * 1440), "3 d old"],
+      [at(400 * 1440), "1 yr old"],
       ["2026-11-01", "today"],
-      ["2026-10-29", "3 days ago"],
+      ["2026-10-29", "3 d old"],
     ];
     for (const [since, label] of cases) {
       render(<MemoryRouter><WaitingCard item={ask(since)} /></MemoryRouter>);

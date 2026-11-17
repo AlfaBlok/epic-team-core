@@ -59,7 +59,7 @@ describe("WaitingCard", () => {
     expect(screen.queryByTestId("decline")).toBeNull();
     expect(screen.queryByTestId("changes-wanted")).toBeNull();
     expect(screen.queryByTestId("hint-answer")).toBeNull(); // no hint lines under the buttons
-    expect(screen.getByTestId("issued-age").textContent).toBe("2 days ago");
+    expect(screen.getByTestId("issued-age").textContent).toBe("2 d old");
     expect(screen.getByTestId("card-meta").contains(screen.getByTestId("issued-age"))).toBe(true);
     expect(screen.queryByTestId("waiting-details")).toBeNull(); // folded
     fireEvent.click(screen.getByTestId("ask-lead"));

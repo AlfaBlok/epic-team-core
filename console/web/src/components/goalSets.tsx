@@ -25,13 +25,13 @@ import {
   queueOf,
   scorecardHref,
   sortInbox,
-  waitedFor,
   type InboxRow,
   type InboxSort,
   type Placeable,
   type ScorecardIndex,
 } from "@/lib/scorecards";
 import { cn } from "@/lib/utils";
+import { CardAge, cardAgeWords } from "@/components/common";
 import { lazyPage } from "@/lib/lazyPage";
 import { useFold } from "@/lib/storedFlag";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
@@ -951,16 +951,17 @@ export function SlimInbox({ rows, showSet = true, loading, sortKey }: { rows: In
         <ul className="divide-y rounded-xl border bg-card">
           {shown.map((r) => (
             <li key={r.id} data-testid="slim-inbox-row" data-kind={r.kind}>
-              <Link to={r.node ? scorecardHref(r.node.id, "inbox") : "/"} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 px-3 py-2.5 hover:bg-accent/40">
+              <Link to={r.node ? scorecardHref(r.node.id, "inbox") : "/"} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 px-3 py-2.5 hover:bg-accent/40">
                 <Dot state={r.kind === "ask" ? "red" : "green"} />
                 <span className="min-w-0">
                   <span className="block text-sm text-foreground [overflow-wrap:anywhere]">{r.title}</span>
                   <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
                     {r.kind === "ask" ? "waiting on you" : "ready for your review"}
+                    {/* its age right after what it is, the one CardAge every card shows */}
+                    {r.since && cardAgeWords(r.since) ? <> · <CardAge iso={r.since} what="reached your inbox" /></> : null}
                     {showSet ? ` · ${r.pursuit ? (r.node && r.node !== r.pursuit ? `${titleOf(r.pursuit)} › ${titleOf(r.node)}` : titleOf(r.pursuit)) : `outside every ${SET_NAME.one.toLowerCase()}`}` : r.node ? ` · ${r.node.name}` : ""}
                   </span>
                 </span>
-                <span className="text-xs tabular-nums text-muted-foreground">{waitedFor(r.since)}</span>
               </Link>
             </li>
           ))}
@@ -1128,11 +1129,11 @@ function Crumbs({ ix, node }: { ix: ScorecardIndex; node: ScorecardNode }) {
 /** Kanban: Ready, Running, Waiting from the spines' ledgers, Review from the inbox's cards. */
 function Kanban({ body, node, reviews }: { body: ScorecardsBody; node: ScorecardNode; reviews: InboxRow[] }) {
   const q = queueOf(body, node);
-  const cols: { id: string; title: string; items: { key: string; code?: string; title: string; sub?: string; href?: string }[] }[] = [
+  const cols: { id: string; title: string; items: { key: string; code?: string; title: string; sub?: string; href?: string; since?: string }[] }[] = [
     { id: "ready", title: "Ready", items: q.filter((r) => r.state === "ready").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.epicCode ?? r.epic })) },
     { id: "running", title: "Running", items: q.filter((r) => r.state === "running").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.status })) },
     { id: "waiting", title: "Waiting", items: q.filter((r) => r.state === "waiting").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.status })) },
-    { id: "review", title: "Your review", items: reviews.map((r) => ({ key: r.id, code: r.code, title: r.title, href: scorecardHref(node.id, "inbox") })) },
+    { id: "review", title: "Your review", items: reviews.map((r) => ({ key: r.id, code: r.code, title: r.title, href: scorecardHref(node.id, "inbox"), since: r.since })) },
   ];
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="set-kanban">
@@ -1146,7 +1147,11 @@ function Kanban({ body, node, reviews }: { body: ScorecardsBody; node: Scorecard
             const inner = (
               <>
                 <span className="block text-sm text-foreground [overflow-wrap:anywhere]">{i.title}</span>
-                <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">{[i.code, i.sub].filter(Boolean).join(" · ")}</span>
+                <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {/* a card waiting on him shows its age first, the one CardAge */}
+                  {i.since && cardAgeWords(i.since) ? <><CardAge iso={i.since} what="reached your inbox" />{i.code || i.sub ? " · " : ""}</> : null}
+                  {[i.code, i.sub].filter(Boolean).join(" · ")}
+                </span>
               </>
             );
             return i.href ? (

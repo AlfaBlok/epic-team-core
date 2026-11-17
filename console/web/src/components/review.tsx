@@ -23,13 +23,13 @@ import { useProject } from "@/lib/project";
 import { markReviewGoneAfter, unmarkReviewGone, useReviewCards } from "@/lib/inbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Empty, ErrorBox, IssuedAge, PHONE_TAP, RelTime } from "@/components/common";
+import { Empty, ErrorBox, PHONE_TAP, RelTime } from "@/components/common";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
 import { CardFeedback, FeedbackBlock, RowPair } from "@/components/cardFeedback";
-import { CARD_FRAME, CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
+import { CARD_FRAME, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 
 /** A voice note's press the card did not take (the card says why). */
 const refused = (): never => {
@@ -872,16 +872,12 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   };
   return (
     <article className={CARD_FRAME} data-card-shell="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
-      <div className={CARD_META} data-card-meta="" data-testid="review-crumb">
-        <span className="font-medium text-foreground" data-card-kind-word="" data-testid="review-kind-word">
-          {isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review}
-        </span>
+      {/* vn_7c5aa36e, vn_4d2a86f9: its age right after the kind word, from when it reached his inbox, as on every card */}
+      <CardMeta kind={isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review} kindTestId="review-kind-word" since={item.inboxSince ?? item.createdAt} data-testid="review-crumb">
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
-        {/* vn_7c5aa36e: how long it has waited on him, from when it reached his inbox, as on every ask card */}
-        <IssuedAge iso={item.inboxSince ?? item.createdAt} what="reached your inbox" />
         {/* on a phone the long objective tag wraps inside the card, never past its edge */}
         {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
-      </div>
+      </CardMeta>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
       {/* a note he left inside the page itself shows on its card, so he sees it landed. */}
@@ -1197,9 +1193,8 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
 function OldCard({ item }: { item: Listed }) {
   return (
     <CardShell as="article" kind="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
-      <CardMeta kind="Review">
+      <CardMeta kind="Review" since={item.inboxSince ?? item.createdAt}>
         {milestoneLabel(item.milestoneTitle) && <span>{milestoneLabel(item.milestoneTitle)}</span>}
-        <IssuedAge iso={item.inboxSince ?? item.createdAt} what="reached your inbox" />
       </CardMeta>
       <div className={CARD_TITLE}>
         <CardText text={item.title} item={item} />
@@ -1302,12 +1297,11 @@ function PostReviewCardBody(card: CardProps) {
   return (
     <CardShell as="article" kind="post" data-testid="review-card" data-review-id={item.id} data-kind="post">
       {/* E948-S60: the one shell: the kind word first, then the project and the campaign, like every card. */}
-      <CardMeta kind={p.kind === "outreach" ? "Reply" : "Post"} data-testid="review-crumb">
+      {/* how long: from the commit that made it held; an old server's day-only date reads in days */}
+      <CardMeta kind={p.kind === "outreach" ? "Reply" : "Post"} since={item.inboxSince ?? item.createdAt?.replace(/T00:00:00(?:\.000)?Z$/, "")} data-testid="review-crumb">
         {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>}
         {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>}
         <span>waiting for you</span>
-        {/* how long: from the commit that made it held; an old server's day-only date reads in days */}
-        <IssuedAge iso={item.inboxSince ?? item.createdAt?.replace(/T00:00:00(?:\.000)?Z$/, "")} what="reached your inbox" />
       </CardMeta>
       <section>
         <h3 className={CARD_TITLE} data-testid="review-title">

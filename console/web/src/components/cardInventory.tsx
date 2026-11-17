@@ -164,6 +164,7 @@ const macRow = (page: boolean): LaptopRow => ({
   code: page ? "E900-A2" : "E900-A3",
   minutes: 3,
   redLine: false,
+  since: SINCE,
   command: "Open the Claude app, start a new session and paste the ticket text.",
   ...(page ? { step: { pageId: "sp_sample", step: "1", state: "todo" as const, notes: [] } } : {}),
 });

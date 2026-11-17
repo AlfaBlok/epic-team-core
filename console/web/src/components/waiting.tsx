@@ -20,13 +20,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { EmptyState, ErrorBox, IssuedAge, PHONE_TAP, RelTime, threadHref, ThreadLink } from "@/components/common";
+import { EmptyState, ErrorBox, PHONE_TAP, RelTime, threadHref, ThreadLink } from "@/components/common";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach, wordsWithFiles } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
 import { CardFeedback, FeedbackBlock, RowPair, type FeedbackTarget } from "@/components/cardFeedback";
-import { CARD_META, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
+import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { GrantWriteAction, waitingAnchor } from "@/components/unblock";
 import { ACTION, PRESS } from "@/components/cardActions";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
@@ -444,7 +444,7 @@ function FyiCardBody({ item, showMilestone = false, qualify = false }: { item: W
   return (
     <CardShell kind="decided" className="text-sm" data-testid="fyi-card" id={waitingAnchor(item.id)}>
       {/* E948-S60: the one shell: the kind word first, then who decided, the code, the project, the age. */}
-      <CardMeta kind="Decided" data-testid="fyi-meta">
+      <CardMeta kind="Decided" since={item.since} sinceWhat="decided" data-testid="fyi-meta">
         <span>by {decidedByName(item.decidedBy)}</span>
         {code && <span>{code}</span>}
         {showMilestone && (
@@ -452,7 +452,6 @@ function FyiCardBody({ item, showMilestone = false, qualify = false }: { item: W
             {onceTitle(item.milestoneTitle)}
           </Link>
         )}
-        {item.since && <RelTime iso={item.since} />}
       </CardMeta>
       <div className={CARD_TITLE}>{item.question}</div>
       {item.answer && <p className="mt-1 text-sm leading-relaxed text-foreground/85">{item.answer}</p>}
@@ -1234,10 +1233,8 @@ function WaitingCardBody({
       id={waitingAnchor(item.id)}
     >
       <CardContent className="grid grid-cols-1 p-4">
-        <div className={CARD_META} data-card-meta="" data-testid="card-meta">
-          <span className="font-medium text-foreground" data-card-kind-word="" data-testid="card-kind">
-            {kindWord}
-          </span>
+        {/* the one meta line, its age right after the kind word as on every card */}
+        <CardMeta kind={kindWord} kindTestId="card-kind" since={item.since} sinceWhat="issued" data-testid="card-meta">
           {project &&
             (showMilestone && item.milestoneId ? (
               <Link className="hover:text-foreground hover:underline" to={`/milestones/${item.milestoneId}`}>
@@ -1246,12 +1243,11 @@ function WaitingCardBody({
             ) : (
               <span>{project}</span>
             ))}
-          <IssuedAge iso={item.since} />
           {/* the owner's level from the Prioritizer, a grey word ("red line" when it is one); a tap shows why. */}
           <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
           {item.source === "needs_jordi" && <span>persona request</span>}
           {item.improvement && <span data-testid="improvement-tag">improvement request</span>}
-        </div>
+        </CardMeta>
         {/* his long voice note touched this ask: stale or updated until its owner rewrites it. */}
         {item.state === "open" && item.noteMark && <NoteMarkBand mark={item.noteMark} />}
         <button
@@ -2139,9 +2135,8 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
     <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
-      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"}>
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} since={item.since} sinceWhat="issued">
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
-        <IssuedAge iso={item.since} />
         <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
       <div className={CARD_TITLE}>{item.title}</div>
@@ -2228,9 +2223,8 @@ function MonitorAlertBody({ item }: { item: PendingItem }) {
   const asks = m?.asks ?? [];
   return (
     <CardShell kind="monitor_alert" className="text-sm" data-testid="monitor-alert" data-kind={item.kind} data-pending-id={item.id} id={waitingAnchor(item.id)}>
-      <CardMeta kind="Alert">
+      <CardMeta kind="Alert" since={item.since} sinceWhat="issued">
         <span data-testid="monitor-alert-state">{m?.why.includes("stop") ? "Stopped" : "Check overdue"}</span>
-        <IssuedAge iso={item.since} />
       </CardMeta>
       <div className={CARD_TITLE}>{item.title.replace(/^Monitor alert:\s*/, "")}</div>
       {item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="monitor-alert-detail">{item.detail}</p>}

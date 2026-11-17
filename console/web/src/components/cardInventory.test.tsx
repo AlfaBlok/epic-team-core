@@ -467,3 +467,23 @@ describe("the owner 2026-11-15: one decisions block on every card", () => {
     for (const id of ["review", "review-decision", "review-next-steps", "decide-options", "decide-yes-no", "approve", "do", "answer", "ask-set"]) expect(snoozed).toContain(id);
   });
 });
+
+// the owner 17 Nov (vn_4d2a86f9: "this very card that I'm receiving saying that every card shows its age, it
+// is not showing its age, bro"; vn_c2d7cc29: "Why can I not see how old this card is?"): every card shows how old it is, from
+// one component (CardAge, drawn by CardMeta), in the same spot: right after its kind word. Only a card with no time at all
+// (a campaign's goal question, a connect card) shows none.
+const NO_TIME = new Set(["CampaignGoalCard", "ConnectCard"]);
+describe("every card shows its age in the same spot", () => {
+  for (const c of CARD_TYPES)
+    it(`${c.name}: its age right after the kind word`, () => {
+      const { container } = render(<MemoryRouter>{c.render()}</MemoryRouter>);
+      const meta = container.querySelector<HTMLElement>("[data-card-meta]");
+      expect(meta, "no meta line").toBeTruthy();
+      const kind = meta!.querySelector("[data-card-kind-word]");
+      const age = meta!.querySelector("[data-card-age]");
+      if (NO_TIME.has(c.component)) return expect(age).toBeNull();
+      expect(age, "no age on the card").toBeTruthy();
+      expect(kind?.nextElementSibling, "the age is not right after the kind word").toBe(age);
+      expect(age!.textContent).toMatch(/^(just now|today|\d+ (min|h|d|wk|mo|yr) old)$/);
+    });
+});

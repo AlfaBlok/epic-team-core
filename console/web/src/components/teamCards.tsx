@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { ObjectiveName } from "@/components/objectiveName";
 import { ParkButton } from "@/components/parkButton";
 import { scorecardHref as scorecardHref0, SET_NAME } from "@/lib/scorecards";
 import { Link, useSearchParams } from "react-router-dom";
@@ -11,7 +12,6 @@ import { CardFeedback } from "@/components/cardFeedback";
 import { SentOr, SentRow } from "@/components/sentRow";
 import { markSent, useKeepSent } from "@/lib/sentRows";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
-import { RelTime } from "@/components/common";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { useSlotReady } from "@/components/slot";
 import { useGoalTalk } from "@/components/campaignGoals";
@@ -54,20 +54,19 @@ function answerWords(c: TeamCard): string {
 function Meta({ card, noBy }: { card: TeamCard; noBy?: boolean }) {
   const href = scorecardHref(card);
   return (
-    <CardMeta kind={TEAM_KIND_WORD[card.kind]} data-testid="team-card-meta">
+    <CardMeta kind={TEAM_KIND_WORD[card.kind]} since={card.at} data-testid="team-card-meta">
       {card.scorecardName || card.scorecard ? (
         href ? (
           <Link className="hover:text-foreground hover:underline" to={href} data-testid="team-card-scorecard">
-            {card.scorecardName ?? card.scorecard}
-            {card.keyResult ? ` › ${card.keyResult}` : ""}
+            {/* the product as its small tinted label, as everywhere an objective's name shows (vn_c2d7cc29) */}
+            <ObjectiveName name={card.scorecardName ?? card.scorecard ?? ""} layout="inline" after={card.keyResult ? ` › ${card.keyResult}` : undefined} />
           </Link>
         ) : (
-          <span>{card.scorecardName ?? card.scorecard}</span>
+          <ObjectiveName name={card.scorecardName ?? card.scorecard ?? ""} layout="inline" />
         )
       ) : null}
       {noBy ? null : <span>by {card.by}</span>}
       {card.world ? <span data-testid="team-card-world">from {card.world}</span> : null}
-      <RelTime iso={card.at} />
     </CardMeta>
   );
 }
@@ -460,13 +459,12 @@ function AdvisorSetBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c:
   return (
     <section className="grid min-w-0 gap-3" data-testid="advisor-set" data-week={set.week}>
       <CardShell kind="advisor" className="text-sm" data-testid="team-card" data-team-kind="advisor">
-        <CardMeta kind="Suggestions" data-testid="advisor-header">
+        <CardMeta kind="Suggestions" since={card.at} data-testid="advisor-header">
           <span>from the Senior advisor</span>
           <span data-testid="advisor-week">{week}</span>
           <span>
             {set.items.length} suggestion{set.items.length === 1 ? "" : "s"}
           </span>
-          <RelTime iso={card.at} />
         </CardMeta>
         <div className={CARD_TITLE}>{card.title}</div>
         {set.page && (
@@ -525,7 +523,7 @@ function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: Suggesti
   const v = item.verdict;
   return (
     <CardShell kind="advisor-item" className="text-sm" data-testid="advisor-item" data-item={item.id} data-verdict={v?.state ?? "open"}>
-      <CardMeta kind={TEAM_KIND_WORD.advisor}>
+      <CardMeta kind={TEAM_KIND_WORD.advisor} since={card.at}>
         <span>
           {n} of {of}
         </span>

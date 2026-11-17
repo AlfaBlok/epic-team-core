@@ -4,7 +4,7 @@ import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
 import type { SnoozeChoice } from "@/api";
 import { CardFeedback, RowPair, sendFeedback } from "@/components/cardFeedback";
 import { cardPage } from "@/voice/AnswerVoice";
-import { CARD_FRAME, CARD_META, CARD_TITLE } from "@/components/cardShell";
+import { CARD_FRAME, CARD_TITLE, CardMeta } from "@/components/cardShell";
 import { Loader2 } from "lucide-react";
 import { api, type SpokenRead, type WaitingItem } from "@/api";
 import { invalidate, mutate } from "@/lib/data";
@@ -194,13 +194,13 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
   // one quiet card, then one decisions block: Accept all, Park, Snooze and the feedback block.
   return (
     <section className={CARD_FRAME} data-card-shell="ask-set" data-testid="ask-set" data-persona={group.persona}>
-      <div className={CARD_META} data-card-meta="">
-        <span className="font-medium text-foreground" data-card-kind-word="">Decision</span>
+      {/* the set is as old as its oldest recommendation, right after the kind word as on every card */}
+      <CardMeta kind="Decision" since={group.items.map((i) => i.since).filter((x): x is string => !!x).sort()[0]} sinceWhat="issued">
         {project && <span>{project}</span>}
         <span>
           {group.items.length} from the {group.persona}
         </span>
-      </div>
+      </CardMeta>
       <h3 className={CARD_TITLE}>
         The {group.persona}&apos;s {group.items.length} recommendations
       </h3>

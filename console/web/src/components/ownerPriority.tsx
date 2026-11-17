@@ -9,6 +9,7 @@ import { PHONE_TAP } from "@/components/common";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
 import { RedLineCards } from "@/components/redLineCards";
+import { ObjectiveName } from "@/components/objectiveName";
 import { shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 
 const LABEL: Record<OwnerPriority["level"], string> = {
@@ -46,6 +47,23 @@ export function rankWhy(p: OwnerPriority): string {
 }
 
 /**
+ * the tag as drawn: when it ends on the objective's name, that name goes through ObjectiveName, so the product is its
+ * small tinted label here too, as on the sidebar and the objective's page (the owner 17 Nov, vn_c2d7cc29, on a review
+ * card: "Didn't we ask for the product to be on like a different font or something?"). It reads the same words whole.
+ */
+function RankWords({ p, label }: { p: OwnerPriority; label: string }) {
+  const name = p.objective?.name;
+  const tail = name ? `: ${name}` : "";
+  if (!name || !label.endsWith(tail)) return <>{label}</>;
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+      <span>{`${label.slice(0, -tail.length)}: `}</span>
+      <ObjectiveName name={name} layout="inline" />
+    </span>
+  );
+}
+
+/**
  * the owner's level for an inbox item (the Prioritizer read his voice notes and wrote it into the repo); a tap shows
  * why, with his words and the day he said them. Inside a wrapping flex row the why takes its own full-width line.
  * an item on his red line shows a red "On the red line" marker instead, and its why opens with the line.
@@ -77,7 +95,7 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
         {...(hot ? { "data-pressing": hot.kind } : {})}
         {...(p.objective ? { "data-objective": p.objective.n + 1 } : {})}
       >
-        {label}
+        <RankWords p={p} label={label} />
       </button>
       {open && (
         <div className="basis-full rounded-md border bg-muted/40 px-3 py-2 text-sm text-foreground" data-testid="owner-priority-why">
