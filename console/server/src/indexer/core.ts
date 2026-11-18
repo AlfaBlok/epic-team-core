@@ -10,6 +10,7 @@ import type { ViewKey } from "../readModel/views.js";
 import { BEAT_KEY, DRIFT_KEY, T3_KEY, ensureIndexerTables, kvGet, kvSet, takeIndexerMsgs, type IndexerBeat, type IndexerMsg } from "./queue.js";
 import { persistingRunner, scannerVersion, seedFrom } from "./spinesCache.js";
 import { useGitMemo } from "../inbox/waiting.js";
+import { remoteSpinesRunner } from "./remoteSpines.js";
 
 /**
  * the console's scans, out of
@@ -43,6 +44,8 @@ export interface IndexerConfig {
   /** rescan gap (default CONSOLE_RESCAN_GAP_MS or 5 min; tests set it). */
   rescanGapMs?: number;
   revision?: string;
+  /** a scan host that runs spines.py for this one (CONSOLE_SPINES_REMOTE); undefined = every scan runs here. */
+  spinesRemote?: string;
   /** the console's identity (owner, home world …), set by main.ts before anything loads (E996-S29). */
   identity?: Partial<Identity>;
 }
@@ -61,7 +64,10 @@ export function createIndexer(db: DB, c: IndexerConfig, d: IndexerDeps = {}) {
   const now = d.now ?? Date.now;
   const startedAt = now();
   let runs = 0;
-  const raw = d.spines ?? (c.spinesFixture ? fixtureRunner(c.spinesFixture) : c.skillDir ? spinesPyRunner(c.skillDir) : undefined);
+  const here = d.spines ?? (c.spinesFixture ? fixtureRunner(c.spinesFixture) : c.skillDir ? spinesPyRunner(c.skillDir) : undefined);
+  // with a scan host, a clean checkout's scan runs there; anything it cannot read falls back to `here`.
+  const remote = here && c.spinesRemote && !c.spinesFixture ? remoteSpinesRunner({ url: c.spinesRemote, local: here, log }) : undefined;
+  const raw: SpinesRunner | undefined = remote ?? here;
   const counted: SpinesRunner | undefined = raw && ((dir) => (runs++, raw(dir)));
   // the scanner each stored output was read with (another one re-reads it), and git's blame and first-added
   // answers kept in console.db, so a restart (a deploy, a crash) asks git nothing it already answered.
@@ -196,6 +202,7 @@ export function createIndexer(db: DB, c: IndexerConfig, d: IndexerDeps = {}) {
       runs,
       seeded,
       ...(book?.builtAt() ? { book: new Date(book.builtAt()).toISOString() } : {}),
+      ...(remote ? { scans: remote.stats() } : {}),
     };
     try {
       kvSet(db, BEAT_KEY, b, new Date(now()).toISOString());

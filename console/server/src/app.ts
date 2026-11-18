@@ -552,6 +552,7 @@ export function createApp(
             ...(opts.teamState?.repo ? { teamRepo: opts.teamState.repo } : {}),
             ...(opts.indexer.revision ? { revision: opts.indexer.revision } : {}),
             ...(process.env.CONSOLE_BOOK_PREWARM === "0" ? { bookTickMs: 0 } : {}),
+            ...(process.env.CONSOLE_SPINES_REMOTE ? { spinesRemote: process.env.CONSOLE_SPINES_REMOTE } : {}),
           },
         })
       : undefined;
@@ -744,7 +745,7 @@ export function createApp(
       ? { state: "off" as const }
       : !beat
         ? { state: "pending" as const, how: indexer.how }
-        : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null };
+        : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null, scans: beat.scans ?? null };
     return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).

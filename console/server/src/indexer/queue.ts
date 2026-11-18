@@ -86,6 +86,8 @@ export interface IndexerBeat {
   runs: number;
   seeded: number;
   book?: string;
+  /** scans another host read for this one (CONSOLE_SPINES_REMOTE), and the ones that fell back here. */
+  scans?: { remote: number; local: number; why: string[] };
 }
 
 export const BEAT_KEY = "beat";
