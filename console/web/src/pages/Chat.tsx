@@ -807,9 +807,12 @@ export function ChatView({
     <>
       {error && !chat && (
         <>
-          <p role="status" className="mb-2 text-sm text-muted-foreground" data-testid="chat-retrying">
-            Can't reach the console, retrying…
-          </p>
+          {/* a workspace whose chat waits for its own server is reached fine: only its one line shows */}
+          {(error as { code?: string }).code !== "world_needs_box" && (
+            <p role="status" className="mb-2 text-sm text-muted-foreground" data-testid="chat-retrying">
+              Can't reach the console, retrying…
+            </p>
+          )}
           <ErrorBox error={error} muted />
         </>
       )}

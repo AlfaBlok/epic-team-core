@@ -5,6 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type Me } from "@/api";
 import { HomePage } from "@/components/homeView";
+import { ApiError } from "@/api/real";
 
 // the owner 2026-11-17 (vn_7bc94847: "one objective and several key results ... First objective, get set up, and then key
 // results"): a paid team workspace's Home is its one objective, Get set up, with each key result and its light, and its
@@ -85,6 +86,15 @@ describe("Home opens on the chat in a paid team workspace", () => {
     expect(screen.getByTestId("clean-workspace-add").textContent).toBe("Add the first objective");
     expect(await screen.findByText("Tell your team what this workspace is for and its first objective.")).toBeTruthy();
     await waitFor(() => expect(desk).toHaveBeenCalledWith("et-dana-side", { limit: 20 }));
+  });
+
+  it("its chat waiting for the workspace's own server says only that, never can't reach the console", async () => {
+    vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-dana-side"));
+    vi.spyOn(api, "getFirstObjective").mockResolvedValue({ firstObjective: false, workspace: "Side project", objectives: [] });
+    vi.spyOn(api, "getWorldDeskChat").mockRejectedValue(new ApiError(503, "Your team's chat starts when your workspace's own sealed server is ready.", "world_needs_box"));
+    home();
+    expect(await screen.findByText(/own sealed server is ready/)).toBeTruthy();
+    expect(screen.queryByTestId("chat-retrying")).toBeNull();
   });
 
   it("its objectives show with their results once added", async () => {
