@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { api, type PendingItem, type ReviewItem, type StatusBatch, type TeamCard } from "@/api";
+import { api, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
+import type { TeamCard } from "@/api/teamcard-types";
 import { TeamPage } from "@/pages/Team";
 import { TopBarPills } from "@/components/Layout";
 import { forgetOtherWorlds } from "@/components/otherWorlds";
