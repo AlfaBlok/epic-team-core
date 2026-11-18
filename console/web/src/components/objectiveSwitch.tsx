@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "@/api";
 import { ObjectiveName } from "@/components/objectiveName";
 import { usePursuits } from "@/components/pursuits";
@@ -62,10 +63,12 @@ export function ObjectiveOffButton({ id }: { id: string }) {
 /** one fold of objectives kept out of every list: Done (with Undo) or Inactive (with Switch on). Nothing when none. */
 function KeptFold({ kind, items }: { kind: "done" | "inactive"; items: { id: string; name: string; since?: string }[] }) {
   const s = useSwitch();
+  const { hash } = useLocation();
   if (!items.length) return null;
   const isDone = kind === "done";
+  // a link to /pursuits#done (or #inactive) opens its fold, so a review card can point straight at it
   return (
-    <details className="min-w-0 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-muted-foreground" data-testid={`objectives-${kind}`}>
+    <details id={kind} open={hash === `#${kind}` || undefined} className="min-w-0 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-muted-foreground" data-testid={`objectives-${kind}`}>
       <summary className="cursor-pointer text-sm">
         {isDone ? "Done" : "Inactive"} ({items.length})
       </summary>
