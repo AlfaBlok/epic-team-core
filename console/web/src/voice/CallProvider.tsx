@@ -86,6 +86,16 @@ export class CallTab {
         session: (hs) => m().session?.(hs),
       }),
     };
+    // the Team desk's call walks his whole inbox and his objectives: it presses and files from any page.
+    // SectionCall imports this file: its hands are read when first used, so the two never load each other in a loop.
+    if (base === "/api/voice" && !o.api) {
+      const hands = () => import("./SectionCall").then((m) => m.inboxHands());
+      h.engine.hands = {
+        press: async (p) => (await hands()).press!(p),
+        show: (id) => void hands().then((x) => x.show?.(id)),
+        file: async (p) => (await hands()).file!(p),
+      };
+    }
     h.engine.subscribe(() => this.changed());
     this.held.set(base, h); // no change event: this runs while a page renders, and nothing floats until a call starts
     return h;

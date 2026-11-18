@@ -113,9 +113,9 @@ describe("a section call through the API", () => {
     expect((await call("POST", `/api/voice/calls/${id}/tool`, { name: "next_card" })).json).toMatchObject({ place: "card 1 of 2", id: "tc_1" });
     const pressed = await call("POST", `/api/voice/calls/${id}/tool`, { name: "press_card", args: { button: "10 testers", confirmed: true } });
     expect(pressed.json.press).toMatchObject({ id: "tc_1", kind: "goal", button: "10 testers" });
-    // a plain call (no focus) has no press tool
+    // a plain call (his whole inbox) presses too
     await call("POST", `/api/voice/calls/${id}/end`, { reason: "hangup" });
     expect((await call("POST", "/api/voice/calls")).status).toBe(201);
-    expect(minted[1].session.tools.map((t: { name: string }) => t.name)).not.toContain("press_card");
+    expect(minted[1].session.tools.map((t: { name: string }) => t.name)).toContain("press_card");
   });
 });

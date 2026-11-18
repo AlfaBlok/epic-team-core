@@ -161,6 +161,46 @@ describe("T42-S5 call engine", () => {
     expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "pressed Mark complete on card 1 of 1: done: marked complete")).toBe(true);
   });
 
+  it("a whole-inbox call presses with the page's hands and shows the card from the console's step", async () => {
+    const f = fakes();
+    const press = vi.fn(async () => "done: said yes");
+    const show = vi.fn();
+    f.engine.hands = { press, show };
+    await f.open();
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 3 of 9", id: "w1", title: "Can we spend 5 dollars?", pos: 3, total: 9, card: "…" }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_n", name: "read_card", arguments: JSON.stringify({ number: 3 }) });
+    await f.emit({ type: "response.done", response: { id: "resp_n" } });
+    expect(show).toHaveBeenCalledWith("w1");
+    expect(f.engine.view().onCard).toEqual({ id: "w1", place: "card 3 of 9", title: "Can we spend 5 dollars?" });
+    f.sent.length = 0;
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 3 of 9", pos: 3, total: 9, press: { id: "w1", kind: "ask", button: "Yes: go ahead", title: "x", milestoneId: "ms_1" } }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Yes: go ahead", confirmed: true }) });
+    await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    expect(press).toHaveBeenCalledWith({ id: "w1", kind: "ask", button: "Yes: go ahead", title: "x", milestoneId: "ms_1" });
+    expect(JSON.parse(f.sent[0].item.output).note).toMatch(/pressed, it landed/);
+  });
+
+  it("his words about an objective are filed as he said them (the captions since it came up), not the voice's summary", async () => {
+    const f = fakes();
+    const file = vi.fn(async () => "filed: docs/his-words.json");
+    f.engine.hands = { file };
+    await f.open();
+    f.api.tool.mockImplementationOnce(async () => ({ place: "objective 1 of 2", id: "notes-testers", pos: 1, total: 2, objective: "Objective 1 of 2 …" }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_o", name: "next_objective", arguments: "{}" });
+    await f.emit({ type: "response.done", response: { id: "resp_o" } });
+    // the objective is not shown as an inbox card
+    expect(f.engine.view().onCard).toBeUndefined();
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "i1", transcript: "Push the second tester this week." });
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "i2", transcript: "Yes." });
+    f.sent.length = 0;
+    f.api.tool.mockImplementationOnce(async () => ({ place: "objective 1 of 2", id: "notes-testers", pos: 1, total: 2, file: { id: "notes-testers", name: "Notes: 5 testers", words: "second tester" } }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_f", name: "file_objective_words", arguments: JSON.stringify({ words: "second tester", confirmed: true }) });
+    await f.emit({ type: "response.done", response: { id: "resp_f" } });
+    expect(file).toHaveBeenCalledWith({ id: "notes-testers", name: "Notes: 5 testers", words: "Push the second tester this week." });
+    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ result: "filed: docs/his-words.json" });
+    expect(JSON.parse(f.sent[0].item.output).note).toContain("Filed on Notes: 5 testers.");
+  });
+
   it("ask the desk: sent at once, no spoken updates while it works (T42-S31), the answer said at once (T42-S33)", async () => {
     const f = fakes();
     await f.open();

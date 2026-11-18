@@ -89,6 +89,17 @@ export interface CallFocus {
   show?: (id: string) => void;
 }
 
+/**
+ * how a page presses his button on a card of a whole-inbox call (no section's cards on the page)
+ * and files his words on an objective; CallProvider sets it on the Team desk's call.
+ */
+export interface CallHands {
+  press?: (p: { id: string; kind: string; button: string; words?: string; milestoneId?: string }) => Promise<string>;
+  show?: (id: string) => void;
+  /** POST /api/briefing/answer: his words filed on the objective; returns "filed: …" or "not filed: <why>". */
+  file?: (p: { id: string; name: string; words: string }) => Promise<string>;
+}
+
 export interface VoiceApi {
   start(focus?: { section: string; cards: Record<string, unknown>[] }): Promise<StartAnswer>;
   beat(id: string): Promise<{ call: CallInfo; monthUsd: number; stop?: string }>;
@@ -185,7 +196,9 @@ export const BYE_MAX_MS = 8_000;
 /** listen mode (call_bfdb5e0f): the tool the voice calls when he wants to give feedback, and every word it says in it. */
 export const LISTEN_TOOL = "listen_for_feedback";
 /** the tools the console answers itself (POST …/calls/:cid/tool): the inbox walk. */
-export const CONSOLE_TOOLS = new Set(["next_card", "read_card", "press_card"]);
+export const CONSOLE_TOOLS = new Set(["next_card", "read_card", "press_card", "next_objective", "read_objective", "file_objective_words"]);
+/** his short yes to a read-back ("yes", "yeah, file it"): not part of the words filed. */
+const SHORT_YES = /^\s*(?:yes|yeah|yep|sure|ok(?:ay)?|s[ií]|vale|claro|do it|go ahead|file it|please)\b[\s\w,.!']{0,24}$/i;
 export const LISTEN_START_LINE = "I'm listening. Take your time, and say done when you're finished.";
 /**
  * a few very
@@ -307,6 +320,10 @@ export class CallEngine {
 
   /** the section the next call starts with (kept for a reconnect of that call; cleared by a plain start). */
   private focus?: CallFocus;
+  /** a whole-inbox call's hands (the page presses and files with them); a section call uses its focus first. */
+  hands?: CallHands;
+  /** index in lines where the objective he is on was reached: his words about it are the owner lines after it. */
+  private objectiveFrom = 0;
   /** start a call holding one inbox section's cards (its phone button). */
   startFocused(focus: CallFocus): Promise<void> {
     if (this.v.phase === "starting" || this.v.phase === "connecting" || this.v.phase === "live") return Promise.resolve();
@@ -654,20 +671,45 @@ export class CallEngine {
         } else if (CONSOLE_TOOLS.has(c.name) && this.api.tool) {
           // the inbox walk; the console keeps which card he is on.
           const args = JSON.parse(c.arguments || "{}") as Record<string, unknown>;
-          const r = (await this.api.tool(id, c.name, args)) as { place?: string; id?: string; press?: { id: string; kind: string; button: string; words?: string; title?: string } };
-          if (r?.id && this.focus) {
+          const r = (await this.api.tool(id, c.name, args)) as {
+            place?: string;
+            id?: string;
+            title?: string;
+            link?: { label: string; url: string };
+            objective?: string;
+            press?: { id: string; kind: string; button: string; words?: string; title?: string; milestoneId?: string };
+            file?: { id: string; name: string; words: string };
+          };
+          const isObjective = c.name.endsWith("_objective") || c.name === "file_objective_words";
+          if (isObjective && r?.objective) this.objectiveFrom = this.v.lines.length;
+          if (r?.id && !isObjective) {
             // the card he is on shows on his screen, with its evidence, while the voice talks about it.
-            const card = this.focus.cards.find((x) => x.id === r.id) as { title?: string; link?: { label: string; url: string } } | undefined;
-            this.set({ onCard: { id: r.id, place: r.place ?? "", ...(card?.title ? { title: card.title } : {}), ...(card?.link ? { link: card.link } : {}) } });
+            const card = this.focus?.cards.find((x) => x.id === r.id) as { title?: string; link?: { label: string; url: string } } | undefined;
+            const title = card?.title ?? r.title;
+            const link = card?.link ?? r.link;
+            this.set({ onCard: { id: r.id, place: r.place ?? "", ...(title ? { title } : {}), ...(link ? { link } : {}) } });
             try {
-              this.focus.show?.(r.id);
+              (this.focus?.show ?? this.hands?.show)?.(r.id);
             } catch {
               /* the page is gone: the widget still shows the card */
             }
           }
-          if (r?.press) {
+          if (r?.file) {
+            // the console checked his yes; the page files his own words (the captions since the objective came up).
+            const said = this.v.lines.slice(this.objectiveFrom).filter((l) => l.who === "owner").map((l) => l.text.trim()).filter(Boolean);
+            while (said.length > 1 && SHORT_YES.test(said[said.length - 1])) said.pop();
+            const words = said.join(" ").trim() || r.file.words;
+            let done: string;
+            try {
+              done = this.hands?.file ? await this.hands.file({ ...r.file, words }) : "not filed: this page cannot file it";
+            } catch (e) {
+              done = `not filed: ${(e as Error).message}`;
+            }
+            this.line("tool", `filed his words on ${r.place ?? "the objective"}: ${done}`);
+            output = { ...r, file: { ...r.file, words }, result: done, note: done.startsWith("not filed") ? "It did not go through: tell him in one line and offer to pass it to the desk." : `Filed. Say "Filed on ${r.file.name}." and nothing more, then offer the next objective.` };
+          } else if (r?.press) {
             // the console checked his yes and the button; the page presses it as his own button would.
-            const press = this.focus?.press;
+            const press = this.focus?.press ?? this.hands?.press;
             let done: string;
             try {
               done = press ? await press(r.press) : "not pressed: this page cannot press it";

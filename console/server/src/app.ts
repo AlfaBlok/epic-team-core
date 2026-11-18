@@ -78,10 +78,10 @@ import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type Priorit
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
 import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, isTestWorld, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
-import { cardRepoOf, mountTeamCards } from "./inbox/teamCards.js";
+import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as parseTeamCards, TEAM_CARDS_FILE } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { readHisWords } from "./desk/hisObjectives.js";
-import { objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
+import { objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
 import { SCORECARD_DIR, applyLiveKeyResults, buildScorecards, createGreenHistory, createSpineFileReader, createWorkFinder } from "./scorecards.js";
 import { createOneOffs } from "./oneOffs.js";
 import { createOutcomes, mountOutcomes, outcomesIn, OutcomeError } from "./outcomes.js";
@@ -150,7 +150,7 @@ import { createUsageCollector, type UsageOptions } from "./usage/collector.js";
 import { createStatus, mountStatus, coverOfIn, statusRows } from "./status/routes.js";
 import { createAlertHandBack } from "./status/alertHandBack.js";
 import type { PendingItem } from "./status/compute.js";
-import type { InboxCard } from "./voice/inbox.js";
+import { ANSWER_IN_WORDS, askButtons, goalLabel, reviewButtons, type InboxCard, type ObjectiveCard } from "./voice/inbox.js";
 import { worldCallContext } from "./voice/worldContext.js";
 import { createInboxSearch, SEARCH_MAX_CHARS } from "./inbox/search.js";
 import { mountAlertActions } from "./status/alertActions.js";
@@ -193,6 +193,7 @@ import { requestScopedStore } from "./auth/scopedStore.js";
 import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
 import { byMilestonePriority, milestoneRanks, storeRanks } from "./inbox/priority.js";
+import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { mountReplyVoice } from "./voice/speak.js";
@@ -519,7 +520,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; now?: () => number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -2637,6 +2638,9 @@ export function createApp(
           ...(f?.evidence?.label ? { evidence: f.evidence.label } : i.liveUrl ? { evidence: i.liveUrl } : {}),
           ...(f?.decision ? { decision: f.decision } : {}),
           ...(f?.options?.length ? { options: f.options } : {}),
+          ...(f?.evidence?.url ? { link: { label: f.evidence.label || "Evidence", url: f.evidence.url } } : {}),
+          // the buttons the voice may press for him on his spoken yes (the page presses them as his own).
+          buttons: reviewButtons(f),
         };
       });
     const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
@@ -2646,9 +2650,43 @@ export function createApp(
     for (const i of all.items as PendingItem[]) {
       if (i.state !== "open" || seen.has(i.id) || !home(i.milestoneId) || isTestItem({ repo: i.repo, code: i.code, title: i.title })) continue;
       seen.add(i.id);
-      asks.push({ kind: "ask", id: i.id, ...(i.code ? { code: i.code } : {}), title: i.title, ...(titles.has(i.milestoneId) ? { where: titles.get(i.milestoneId) } : {}), ...(i.question && i.question !== i.title ? { question: i.question } : {}) });
+      asks.push({
+        kind: "ask",
+        id: i.id,
+        ...(i.code ? { code: i.code } : {}),
+        title: i.title,
+        ...(titles.has(i.milestoneId) ? { where: titles.get(i.milestoneId) } : {}),
+        ...(i.question && i.question !== i.title ? { question: i.question } : {}),
+        milestoneId: i.milestoneId,
+        // only an ask he answers with his words or a yes; a monitor alert, a stalled goal or a mark goes to the desk.
+        buttons: i.kind === "ask" || i.kind === "needs_jordi" ? askButtons(i.ask) : [],
+      });
     }
-    return [...reviews, ...asks];
+    // the goals to set and the team's ideas, after the asks, as his inbox shows them (voice/SectionCall teamCard).
+    let team: InboxCard[] = [];
+    try {
+      const dir = pursuits.homeDir();
+      const doc = dir ? parseTeamCards(fs.readFileSync(path.join(dir, TEAM_CARDS_FILE), "utf8")) : undefined;
+      const open = doc ? listTeamCards(doc, { now: new Date().toISOString() }).open : [];
+      team = [...open.filter((c) => c.kind === "goal"), ...open.filter((c) => c.kind === "idea")].map((c) => {
+        const goals = c.goal?.options ?? [];
+        const links = c.goal?.links ?? c.idea?.links;
+        return {
+          kind: c.kind === "goal" ? ("goal" as const) : ("team" as const),
+          id: c.id,
+          title: c.title,
+          ...(c.source ? { source: c.source } : {}),
+          ...(c.goal ? { question: `${c.goal.unset}. Options: ${goals.map((g, n) => `${n + 1}) ${goalLabel(g)}`).join("; ")}` } : {}),
+          ...(c.goal?.recommend !== undefined && goals[c.goal.recommend] ? { recommend: goalLabel(goals[c.goal.recommend]) } : {}),
+          ...(c.idea ? { question: c.idea.gain, recommend: c.idea.recommend } : {}),
+          ...(links?.length ? { evidence: links.map((l) => l.label).join(", "), link: links[0] } : {}),
+          buttons: [...goals.map(goalLabel), ANSWER_IN_WORDS],
+        };
+      });
+    } catch {
+      /* no team cards file: the walk has the reviews and asks */
+    }
+    return [...reviews, ...asks, ...team];
   };
   // his objectives for the call: the last read at once (a cold read takes about 2 s, the call waits at most 3 s for all its
   // context together), refreshed behind it; read once at boot so the first call has them too.
@@ -2662,6 +2700,22 @@ export function createApp(
     const fresh = readObjectives();
     return lastObjectives || fresh;
   };
+  // the same objectives one by one for the call's briefing (light, key results, where it stands, his words);
+  // the last read at once, refreshed behind it, like the line above.
+  let lastObjectiveCards: ObjectiveCard[] = [];
+  const readObjectiveCards = async () => {
+    const body = await ownerObjectivesInput?.().catch(() => undefined);
+    if (!body) return lastObjectiveCards;
+    const home = pursuits.homeDir();
+    const plot = home ? readHisWords(path.dirname(home), path.basename(home)) : undefined;
+    lastObjectiveCards = objectiveCards(body, plot);
+    return lastObjectiveCards;
+  };
+  const voiceObjectiveCards = async () => {
+    const fresh = readObjectiveCards();
+    return lastObjectiveCards.length ? lastObjectiveCards : fresh;
+  };
+  setTimeout(() => void readObjectiveCards(), 6_000).unref?.();
   setTimeout(() => void readObjectives(), 5_000).unref?.();
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
   const voice = createVoice({
@@ -2675,6 +2729,7 @@ export function createApp(
     brief: deskBrief,
     inbox: voiceInbox,
     objectives: voiceObjectives,
+    objectiveCards: voiceObjectiveCards,
     quickStatus: async () => {
       const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
       const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
@@ -2853,6 +2908,21 @@ export function createApp(
     const w = c.req.param("id") ?? "";
     return w !== DEFAULT_TENANT && store.getTenant(w) ? worldVoice(w) : undefined;
   });
+  // each ended call is checked once it settled: what he asked, what the call did (each press and its
+  // landing commit, each desk question and its answer), any gap; one line to the desk the call was on, with its memory link (voice/afterCall.ts).
+  const afterCall = createAfterCall({
+    db,
+    deskOf: (c) =>
+      c.milestone_id
+        ? { send: (t, page, crid) => milestoneChats.send(c.milestone_id!, t, page, crid), view: () => milestoneChats.view(c.milestone_id!) }
+        : c.tenant_id && c.tenant_id !== DEFAULT_TENANT
+          ? { send: (t, page, crid) => worldDesks.send(c.tenant_id!, t, page, crid), view: () => worldDesks.view(c.tenant_id!) }
+          : { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    kept: (id) => memoryForward?.callKept?.(id),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  const afterCallMs = opts.voice?.afterCallTickMs ?? (process.env.VITEST ? 0 : 60_000);
+  if (afterCallMs > 0) setInterval(() => void afterCall.tick().catch((e) => console.error("[voice] after-call check:", e)), afterCallMs).unref();
   // rework (the owner's review): voice notes in every chat (the Team desk, a milestone's or campaign's chat): recorded in
   // segments by the page, transcribed once each (gpt-4o-mini-transcribe), posted as his message; the cost is in the voice budget.
   const notesDir = opts.voice?.notesDir ?? process.env.CONSOLE_VOICE_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "voice-notes");

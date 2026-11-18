@@ -8,7 +8,7 @@ import { isDecisionCard } from "@/lib/cardKind";
 import { decisionChoices } from "@/components/review";
 import { cn } from "@/lib/utils";
 import { busy, useCallTab } from "./CallProvider";
-import type { CallFocus } from "./engine";
+import type { CallFocus, CallHands } from "./engine";
 
 /**
  * A phone button next to each inbox section ("Goals to set (14 cards)") starts the same Team desk call (one voice, one
@@ -125,6 +125,59 @@ export function teamCard(c: TeamCard): PressableCard {
 /** A question or block waiting on him: its answer goes to the desk (the voice presses nothing). */
 export function askCard(a: { id: string; code?: string; title: string; question?: string; where?: string; url?: string }): PressableCard {
   return { ...(a.url ? { link: { label: "Open it", url: a.url } } : {}), kind: "ask", id: a.id, ...(a.code ? { code: a.code } : {}), title: a.title, ...(a.question && a.question !== a.title ? { question: a.question } : {}), ...(a.where ? { where: a.where } : {}), buttons: [] };
+}
+
+export const ASK_YES = "Yes: go ahead";
+export const ASK_NO = "No: drop it";
+
+/**
+ * a question's own answer route (the waiting card's respond: POST …/respond), for a whole-inbox call: Yes / No
+ * on an approve ask, his words on any ask. The console checked his yes and that the button is one the card lists.
+ */
+export async function pressAsk(p: { id: string; button: string; words?: string; milestoneId?: string }): Promise<string> {
+  const kind = p.button === ASK_YES ? "approve" : p.button === ASK_NO ? "deny" : "answer";
+  const text = kind === "answer" ? (p.words ?? "").trim() : "";
+  if (kind === "answer" && !text) return "not pressed: his answer needs his words";
+  await mutate(() => api.respondToWaiting(p.id, { kind, text, ...(p.milestoneId ? { milestoneId: p.milestoneId } : {}), wake: true }), "inbox");
+  return done(kind === "approve" ? "said yes" : kind === "deny" ? "said no" : "his answer was sent");
+}
+
+/** the button on the card read fresh (the list may have moved since the call started): pressed only when it is still one of his. */
+async function pressOn(card: PressableCard | undefined, button: string, words?: string): Promise<string> {
+  if (!card?.press) return "not pressed: the card is no longer in his inbox";
+  const want = button.toLowerCase().replace(/[….]+$/, "");
+  const b = (card.buttons ?? []).find((x) => x.toLowerCase().replace(/[….]+$/, "") === want);
+  if (!b) return `not pressed: ${button} is not one of his buttons on it now (${(card.buttons ?? []).join(" · ")})`;
+  return card.press(b, words);
+}
+
+/**
+ * the hands of the Team desk's whole-inbox call (no section's cards on this page): it presses his button through
+ * the same card builders a section call uses (reviewCard, teamCard, the ask's respond), each card read fresh, shows the
+ * card when the inbox is on screen, and files his words on an objective through the briefing's own route.
+ */
+export function inboxHands(): CallHands {
+  return {
+    press: async (p) => {
+      if (p.kind === "review") {
+        const items = await api.listReviewItems();
+        const i = items.find((x) => x.id === p.id);
+        return pressOn(i ? reviewCard(i) : undefined, p.button, p.words);
+      }
+      if (p.kind === "goal" || p.kind === "team") {
+        const body = await api.listTeamCards();
+        const c = body.open.find((x) => x.id === p.id);
+        return pressOn(c ? teamCard(c) : undefined, p.button, p.words);
+      }
+      if (p.kind === "ask") return pressAsk(p);
+      return "not pressed: this card has no button the call may press";
+    },
+    show: (id) => void showOnScreen(id),
+    file: async (p) => {
+      const r = await api.briefingAnswer({ kind: "objective", id: p.id, name: p.name, words: p.words });
+      return `filed: ${r.filed.join(" and ")}`;
+    },
+  };
 }
 
 /** the Team desk's voice is on here (his own console, voice switched on): the section buttons show. One read per page. */

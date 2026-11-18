@@ -171,7 +171,7 @@ export interface MemoryArea {
   connected(world: string): boolean;
   tick(): Promise<unknown>;
   /** a posted Chat note or an ended call to the world's the memory service (absent: the forward is off). */
-  forward?: { enqueue(id: string): void; enqueueCall(id: string): void };
+  forward?: { enqueue(id: string): void; enqueueCall(id: string): void; /** where a call's transcript is in the memory service (its forward state, note id and link). */ callKept?(id: string): { state: string; ref?: string; url?: string; error?: string } | undefined };
 }
 
 type Post = (text: string, page?: string, clientRequestId?: string) => Promise<true | string>;

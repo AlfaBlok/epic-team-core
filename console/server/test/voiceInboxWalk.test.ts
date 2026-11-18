@@ -91,13 +91,14 @@ describe("the inbox on the call", () => {
     expect(walk([], 0, "next_card")).toMatchObject({ done: true, total: 0 });
   });
 
-  it("a call starts with his inbox and objectives in its instructions, gets the two walk tools, and keeps his place", async () => {
+  it("a call starts with his inbox and objectives in its instructions, gets the walk tools and press_card, and keeps his place", async () => {
     const { voice, minted, desk } = setup();
     const s = await voice.start();
     const sess = minted[0].session;
     expect(sess.instructions).toContain("His inbox now: 3 cards (2 to review, 1 questions).");
     expect(sess.instructions).toContain("2. Notes: servers run themselves");
-    expect(sess.tools.map((t: { name: string }) => t.name)).toEqual(["quick_status", "ask_the_desk", "listen_for_feedback", "hang_up", "next_card", "read_card"]);
+    // the whole-inbox call presses too
+    expect(sess.tools.map((t: { name: string }) => t.name)).toEqual(["quick_status", "ask_the_desk", "listen_for_feedback", "hang_up", "next_card", "read_card", "press_card"]);
     const id = s.call.id;
     expect(voice.walkState(id)).toEqual({ pos: 0, total: 3 });
     expect(voice.tool(id, "next_card").place).toBe("card 1 of 3");

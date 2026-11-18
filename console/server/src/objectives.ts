@@ -28,7 +28,7 @@ export interface ObjectiveNode {
   objective?: string;
   greens: number;
   total: number;
-  keyResults?: { label?: string; state?: string; value?: string }[];
+  keyResults?: { label?: string; state?: string; value?: string; target?: string }[];
   /** another objective's page shows this one inside it: listed with that one, not on its own. */
   foldedInto?: string;
   /** the screen's own colour (the worst key result); read first. */
@@ -115,6 +115,43 @@ export function objectiveLines(input: ObjectivesInput | undefined, plot?: HisWor
       krs: `${greens} of ${total} key results green`,
       today,
       ...(w ? { words: `his words${w.said ? ` ${w.said.slice(5, 10)}` : ""}: "${cut(w.words, 110)}"` } : {}),
+    };
+  });
+}
+
+/**
+ * his objectives one by one for the call's briefing: the same list in the same order as the block (one source),
+ * each with its key results, where it stands (moved today, else what moves it next) and his newest words whole.
+ */
+export function objectiveCards(input: ObjectivesInput | undefined, plot?: HisWordsFile): {
+  id: string;
+  name: string;
+  light: string;
+  krs: string;
+  keyResults: { label: string; state?: string; value?: string; target?: string }[];
+  stands: string;
+  words?: string;
+  said?: string;
+}[] {
+  const nodes = new Map((input?.nodes ?? []).map((n) => [n.id, n]));
+  const said = new Map<string, { words: string; said?: string }>();
+  for (const p of plot?.objectives ?? []) {
+    const w = p.aim?.words ? p.aim : p.after;
+    if (w?.words) said.set(p.id, { words: w.words, said: w.said });
+  }
+  return objectiveLines(input, plot).map((l) => {
+    const n = nodes.get(l.id);
+    const t = input?.progress?.sets?.[l.id]?.today;
+    const stands = t && t > 0 ? `moved today: ${t} key result${t === 1 ? "" : "s"} turned green` : n?.idle?.reason ? `not moved today: ${n.idle.reason}` : "not moved today";
+    const w = said.get(l.id);
+    return {
+      id: l.id,
+      name: l.name,
+      light: l.light,
+      krs: l.krs,
+      keyResults: (n?.keyResults ?? []).map((k) => ({ label: k.label ?? "", ...(k.state ? { state: k.state } : {}), ...(k.value ? { value: k.value } : {}), ...(k.target ? { target: k.target } : {}) })),
+      stands,
+      ...(w ? { words: w.words, ...(w.said ? { said: w.said } : {}) } : {}),
     };
   });
 }

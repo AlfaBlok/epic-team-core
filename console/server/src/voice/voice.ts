@@ -6,7 +6,8 @@ import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
-import { FOCUS_MAX, INBOX_WALK_MAX, focusGreeting, focusPack, inboxPack, isInboxTool, pressStep, walk, type InboxCard, type InboxFocus, type PressStep, type WalkStep } from "./inbox.js";
+import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
+import type { CallCheck } from "./afterCall.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -120,6 +121,14 @@ export const ASK_SPOKEN_WAIT_MS = 60_000;
 /** a call starts without its briefing rather than wait longer than this for it. */
 export const BRIEF_WAIT_MS = 3_000;
 
+const parseCheck = (s: string): CallCheck | undefined => {
+  try {
+    return JSON.parse(s) as CallCheck;
+  } catch {
+    return undefined;
+  }
+};
+
 export class VoiceError extends Error {
   constructor(
     readonly status: 400 | 403 | 404 | 409 | 502 | 503,
@@ -193,6 +202,9 @@ export function ensureVoiceTables(db: DB): void {
   // the inbox the call started with (JSON, the walk's cards) and the card he is on (1-based, 0 = not started).
   if (!cols.has("inbox")) db.exec("ALTER TABLE voice_calls ADD COLUMN inbox TEXT");
   if (!cols.has("inbox_pos")) db.exec("ALTER TABLE voice_calls ADD COLUMN inbox_pos INTEGER NOT NULL DEFAULT 0");
+  // his objectives the call started with (JSON, the briefing's cards) and the one he is on (1-based, 0 = not started).
+  if (!cols.has("objectives")) db.exec("ALTER TABLE voice_calls ADD COLUMN objectives TEXT");
+  if (!cols.has("objective_pos")) db.exec("ALTER TABLE voice_calls ADD COLUMN objective_pos INTEGER NOT NULL DEFAULT 0");
 }
 
 export interface VoiceCall {
@@ -215,6 +227,8 @@ export interface VoiceCall {
   briefTokens?: number;
   /** estimated tokens of earlier conversation (the last 24 h of chat and calls) this call started with. */
   recallTokens?: number;
+  /** the after-call check (what he asked, what the call did, gaps, the transcript's memory link), once it ran. */
+  afterCheck?: CallCheck;
 }
 
 /** What the browser needs to open the call: the 1-minute key and the limits the page enforces. */
@@ -312,6 +326,8 @@ export interface VoiceDeps {
   inbox?: () => Promise<InboxCard[]> | InboxCard[];
   /** his objectives in his order, one per line, loaded with the inbox. */
   objectives?: () => Promise<string> | string;
+  /** his objectives one by one (light, key results, where it stands, his newest words), for the briefing walk. */
+  objectiveCards?: () => Promise<ObjectiveCard[]> | ObjectiveCard[];
   /**
    * what this call knows before it starts, besides the briefing (a social world's call: every campaign, its key
    * results and the newest daily briefing). Read at each call's start, inside the same context wait.
@@ -365,7 +381,7 @@ export const INBOX_TOOLS = [
   },
 ];
 
-/** on a call started from an inbox section, the voice presses his own button on a card after his spoken yes. */
+/** on every call that walks his inbox (the whole inbox or one section), the voice presses his own button on a card after his spoken yes. */
 export const PRESS_TOOL = {
   type: "function",
   name: "press_card",
@@ -382,6 +398,37 @@ export const PRESS_TOOL = {
     additionalProperties: false,
   },
 };
+
+/** his objectives one by one on the same call; the console answers them, the page files his words. */
+export const OBJECTIVE_TOOLS = [
+  {
+    type: "function",
+    name: "next_objective",
+    description: `Go to ${ownerName()}'s next objective in his order and get it in full (its light, key results, where it stands, his newest words), with its place ('objective 2 of 13'). The console keeps which one he is on. Use it for 'brief me', 'go through my objectives', 'next objective'.`,
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "read_objective",
+    description: `Read one of ${ownerName()}'s objectives in full: the one he is on (no number), objective N in his order (number: N), or back (number: -1). It becomes the one he is on.`,
+    parameters: { type: "object", properties: { number: { type: "integer", description: "The objective's place in his order (1 = first), or -1 to go back one. Leave out for the one he is on." } }, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "file_objective_words",
+    description: `File what ${ownerName()} said about an objective on it (his words file and its epic, where its owner reads them), ONLY after you said back what you will file and he said yes. Leave number out for the one he is on.`,
+    parameters: {
+      type: "object",
+      properties: {
+        words: { type: "string", description: "His words about it, as he said them (never your summary)." },
+        number: { type: "integer", description: "The objective's place in his order; leave out for the one he is on." },
+        confirmed: { type: "boolean", description: "true only after his yes to what you said back." },
+      },
+      required: ["words", "confirmed"],
+      additionalProperties: false,
+    },
+  },
+];
 
 export const VOICE_TOOLS = [
   {
@@ -533,6 +580,7 @@ export function createVoice(d: VoiceDeps) {
       ...(r.transcript_error ? { transcriptError: r.transcript_error } : {}),
       ...(r.brief_tokens != null ? { briefTokens: r.brief_tokens } : {}),
       ...(r.recall_tokens != null ? { recallTokens: r.recall_tokens } : {}),
+      ...(r.after_check ? { afterCheck: parseCheck(r.after_check) } : {}),
     };
   };
   const get = (id: string): VoiceCall | undefined => {
@@ -657,19 +705,23 @@ export function createVoice(d: VoiceDeps) {
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
-    const [brief, recall, cards, objectives, context] = await Promise.all([
+    const [brief, recall, cards, objectives, context, objectiveCards] = await Promise.all([
       briefNow(),
       recallNow().catch(() => ""),
       focus ? focus.cards.slice(0, FOCUS_MAX) : d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
       d.objectives ? inTime("objectives", d.objectives, "") : "",
       d.context ? inTime("context", d.context, "") : "",
+      d.objectiveCards ? inTime("objective cards", d.objectiveCards, [] as ObjectiveCard[]) : ([] as ObjectiveCard[]),
     ]);
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
     const walkCards = cards?.slice(0, INBOX_WALK_MAX);
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
-    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
+    const briefing = objectiveCards.length ? briefingRule(objectiveCards.length) : "";
+    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
-    const walkTools = walkCards ? (focus ? [...INBOX_TOOLS, PRESS_TOOL] : INBOX_TOOLS) : [];
+    // the voice presses his button on every card it walks, the whole inbox's as a section's.
+    const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length ? OBJECTIVE_TOOLS : [])];
     const cfg = sessionConfig(mdl, instructions, [...tools, ...walkTools] as unknown as typeof VOICE_TOOLS, historyTokens());
     const key = await d.mint(cfg);
     const id = `call_${crypto.randomBytes(4).toString("hex")}`;
@@ -681,6 +733,7 @@ export function createVoice(d: VoiceDeps) {
       db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
       console.log(`[voice] ${id} starts with ${focus ? `the section "${focus.section}"` : "his inbox"}: ${walkCards.length} cards (~${tokensOf(pack)} tokens with the objectives)`);
     }
+    if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
     if (context) console.log(`[voice] ${id} starts with its context (~${tokensOf(context)} tokens)`);
     if (recall) console.log(`[voice] ${id} starts with ${recall.split("\n").length - 1} lines of earlier conversation (~${tokensOf(recall)} tokens)`);
     return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting: focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions) };
@@ -901,8 +954,22 @@ export function createVoice(d: VoiceDeps) {
    * a tool the console answers itself (the inbox walk). The call's inbox is the one it started with; the card he
    * is on is kept on the call row, so the voice never has to count.
    */
-  function tool(id: string, name: string, args: Record<string, unknown> = {}): WalkStep & { press?: PressStep["press"] } {
+  function tool(id: string, name: string, args: Record<string, unknown> = {}): WalkStep & { press?: PressStep["press"] } & Partial<Pick<ObjectiveStep, "objective" | "file">> {
     open(id);
+    if (isObjectiveTool(name)) {
+      const o = db.prepare("SELECT objectives, objective_pos FROM voice_calls WHERE id = ?").get(id) as { objectives: string | null; objective_pos: number };
+      let list: ObjectiveCard[];
+      try {
+        list = JSON.parse(o.objectives ?? "null");
+      } catch {
+        list = [];
+      }
+      if (!Array.isArray(list) || !list.length) throw new VoiceError(409, "no_objectives", "this call started without his objectives");
+      const step = objectiveStep(list, o.objective_pos ?? 0, name, args);
+      db.prepare("UPDATE voice_calls SET objective_pos = ? WHERE id = ?").run(step.pos, id);
+      if (step.file) console.log(`[voice] ${id} files his words on his yes: objective ${step.file.id}`);
+      return step;
+    }
     if (!isInboxTool(name)) throw new VoiceError(404, "unknown_tool", `no console tool ${name}`);
     const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number };
     if (!r.inbox) throw new VoiceError(409, "no_inbox", "this call started without his inbox");
