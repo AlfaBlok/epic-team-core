@@ -111,7 +111,7 @@ describe("E948-S6 (3) NO_SELF_READY: an item readied on Sam's ask is not flagged
   it("the desk and milestone chat seeds pass his words (chat) and keep drafts for 'just register it' (versions raised)", () => {
     const desk = endpointLines("http://c").join("\n");
     expect(desk).toMatch(/READY by default/);
-    expect(desk).toMatch(/"chat":"<his words from his newest message here, verbatim>"/);
+    expect(desk).toMatch(/"chat":"<his words from his message, verbatim>","matched":"new: /);
     expect(desk).toMatch(/"draft":true` only when he says so/);
     expect(desk).not.toMatch(/drafts only/);
     expect(SEED_VERSION).toBeGreaterThanOrEqual(15);
@@ -226,9 +226,21 @@ describe("E948-S6 (1) the Team desk and a milestone chat add on Sam's words", ()
 
   it("the desk: words not his, or 'just register it' in his message: a draft, no wake", async () => {
     const t = mount({ said: "just register it: snooze for later" });
-    expect(await t.add({ kind: "row", title: "Snooze", chat: "snooze for later" }, DESK)).toMatchObject({ ready: false, draftWhy: "Sam said to just register it" });
-    expect(await t.add({ kind: "row", title: "Other", chat: "something he never said" }, DESK)).toMatchObject({ ready: false, draftWhy: expect.stringMatching(/not Sam's ask/) });
+    const matched = "new: read E907-S3 and E907-S4, neither wants a snooze";
+    expect(await t.add({ kind: "row", title: "Snooze", chat: "snooze for later", matched }, DESK)).toMatchObject({ ready: false, draftWhy: "Sam said to just register it" });
+    expect(await t.add({ kind: "row", title: "Other", chat: "something he never said", matched }, DESK)).toMatchObject({ ready: false, draftWhy: expect.stringMatching(/not Sam's ask/) });
     expect(t.wakes).toEqual([]);
+  });
+
+  it("the desk files his words as a new row only after saying no ticket holds them", async () => {
+    const t = mount({ said: "add snooze to the inbox" });
+    const refused = await t.add({ kind: "row", title: "Snooze", chat: "add snooze to the inbox" }, DESK);
+    expect(refused.error.code).toBe("match_first");
+    expect(refused.error.message).toMatch(/voice_passes\.py match/);
+    expect((await t.add({ kind: "row", title: "Snooze", chat: "add snooze to the inbox", matched: "it is the snooze one" }, DESK)).error.code).toBe("match_first");
+    expect(await t.add({ kind: "row", title: "Snooze", chat: "add snooze to the inbox", matched: "new: read E907-S3 and E907-S4, neither wants a snooze" }, DESK)).toMatchObject({ ready: true });
+    // a Done-means line, the console page and a milestone chat keep their own paths
+    expect(await t.add({ kind: "done_means", title: "Snooze", chat: "add snooze to the inbox" }, DESK)).not.toHaveProperty("error");
   });
 
   it("a milestone chat with his words from its thread: ready; without them, or with a run id: a draft", async () => {

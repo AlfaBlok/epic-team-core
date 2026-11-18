@@ -39,7 +39,19 @@ export interface AddInput {
   draft?: boolean;
   /** the Team desk's Add: the owner's words from his newest desk message, verbatim (his ask, checked by the console). */
   chat?: string;
+  /**
+   * the desk's answer to "is this point new, or more context for a ticket we have?" before it files his words as a
+   * new row or epic: `new: <the tickets it read (voice_passes.py match) and why none wants the same outcome>`.
+   */
+  matched?: string;
 }
+
+/** a new row or epic from his words needs the desk's `matched: new: …` first (one point, one ticket). */
+export const MATCH_FIRST =
+  "Is this point new, or more context for a ticket we have? Run `python3 scripts/voice_passes.py match \"<his words for this point>\"` " +
+  "in the home repo and read every ticket it lists. When one wants the same outcome, put his words on that ticket (quoted, L-37), " +
+  "never a new card. Only when none does, add again with `matched: \"new: <the tickets you read> — <why none holds it>\"`.";
+const MATCH_NEW = /^new\s*:\s*\S.{11,}/i;
 
 const TITLE_MAX = 120;
 const LINE_MAX = 300;
@@ -64,6 +76,7 @@ export function addIn(raw: unknown): AddInput | string {
   if (b.path !== undefined && typeof b.path !== "string") return "path must be a repo-relative spine path";
   if (b.draft !== undefined && typeof b.draft !== "boolean") return "draft must be true or false";
   if (b.chat !== undefined && typeof b.chat !== "string") return `chat must be ${ownerName()}'s words, as text`;
+  if (b.matched !== undefined && (typeof b.matched !== "string" || b.matched.length > 600)) return "matched must be text under 600 characters";
   return {
     kind: b.kind as AddKind,
     title,
@@ -71,6 +84,7 @@ export function addIn(raw: unknown): AddInput | string {
     ...(typeof b.path === "string" && b.path.trim() ? { path: b.path.trim() } : {}),
     ...(b.draft === true ? { draft: true } : {}),
     ...(typeof b.chat === "string" && b.chat.trim() ? { chat: b.chat.trim().slice(0, 2000) } : {}),
+    ...(typeof b.matched === "string" && b.matched.trim() ? { matched: oneLine(b.matched) } : {}),
   };
 }
 
@@ -253,7 +267,11 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
     }
     const input = addIn(body);
     if (typeof input === "string") return err(c, 400, "validation_error", input);
-    const asker = await askerOf((n) => c.req.header(n), input);
+    // the Team desk filing his words as a new row or epic says first that no ticket we have holds them.
+    const header = (n: string) => c.req.header(n);
+    if (input.chat && input.kind !== "done_means" && notJordi(header) && !deskOnly(header) && !MATCH_NEW.test(input.matched ?? ""))
+      return err(c, 409, "match_first", MATCH_FIRST);
+    const asker = await askerOf(header, input);
     const ready = asker.owner && !input.draft;
     const draftWhy = !asker.owner ? asker.why : input.draft ? `${ownerName()} chose “just register it”` : undefined;
     const after = async (ids: string, where: string) => {
@@ -354,7 +372,7 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
             ? `Add ready ${what} ${out.id}${row ? ` + row ${row}` : ""} to ${path.posix.basename(target)} (${ownerName()}'s ask, via console)`
             : `Add draft ${what} ${out.id} to ${path.posix.basename(target)} (via console)`,
           body: ready
-            ? `${out.id}: ${label(input)}\n\nAdded from the agent-team console tree, ready on ${ownerName()}'s ask (L-37, ${(asker as { via: string }).via})${row ? `, with ready row ${row} building it` : ""}; a Decisions row cites it; written in the existing format of ${target}.`
+            ? `${out.id}: ${label(input)}\n\n${input.matched ? `New or existing: ${input.matched}\n\n` : ""}Added from the agent-team console tree, ready on ${ownerName()}'s ask (L-37, ${(asker as { via: string }).via})${row ? `, with ready row ${row} building it` : ""}; a Decisions row cites it; written in the existing format of ${target}.`
             : `${out.id}: ${label(input)}\n\nAdded from the agent-team console tree as a draft (${draftWhy}); written in the existing format of ${target}.`,
         };
       },

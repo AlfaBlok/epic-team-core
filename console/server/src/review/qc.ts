@@ -279,7 +279,15 @@ export const ASK_DRY_RUN_SCHEMA = {
   },
 } as const;
 /** The answer shapes a caller may ask for by name (never a schema of its own). */
-export const JUDGE_SCHEMAS = { qc: QC_JUDGE_SCHEMA, groups: DELIVERY_GROUPS_SCHEMA, live: DELIVERY_LIVE_SCHEMA, dryrun: ASK_DRY_RUN_SCHEMA } as const;
+/** Is one of his points new, or more context for a ticket we have (scripts/voice_passes.py judge): why first, then
+ * the one ticket's code, or NEW. */
+export const MATCH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["why", "ticket"],
+  properties: { why: { type: "string" }, ticket: { type: "string" } },
+} as const;
+export const JUDGE_SCHEMAS = { qc: QC_JUDGE_SCHEMA, groups: DELIVERY_GROUPS_SCHEMA, live: DELIVERY_LIVE_SCHEMA, dryrun: ASK_DRY_RUN_SCHEMA, match: MATCH_SCHEMA } as const;
 export type JudgeSchemaName = keyof typeof JUDGE_SCHEMAS;
 
 export const QC_IMAGES_MAX = 8;
@@ -322,7 +330,8 @@ export function anthropicQcJudge(key: () => Promise<string | undefined>, f: type
 }
 
 /** POST /api/review-qc/judge {prompt, images:[{label, data, mediaType}], schema?: "qc"|"groups"|"live"|"dryrun"} → the model's answer
- * (the card check calls it; a delivery check with `groups` and `live`; the ask dry run with `dryrun`, E996-S43). */
+ * (the card check calls it; a delivery check with `groups` and `live`; the ask dry run with `dryrun`, E996-S43; new or
+ * existing with `match`). */
 export function mountQcJudge(api: Hono, judge: QcJudge) {
   api.post("/review-qc/judge", async (c) => {
     const b = (await c.req.json().catch(() => undefined)) as { prompt?: unknown; images?: unknown; schema?: unknown } | undefined;

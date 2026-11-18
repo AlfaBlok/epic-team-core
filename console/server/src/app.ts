@@ -3012,7 +3012,8 @@ export function createApp(
     treePaths,
     invalidate: (dir) => dropSpines(dir),
     // the desk's Add with the owner's words is his ask (ready); a ready Add wakes the DM as the Approvals tab does.
-    deskAsk: (chat) => desk.jordiAsk(chat),
+    // his words from any of his desk messages of the last 24 h count, not only the newest one.
+    deskAsk: (chat) => desk.jordiWords(chat),
     chatSaid: async (header, chat) => {
       const callerId = chatScope.caller(header);
       if (!callerId || saidWords(chat).length < 8) return false;

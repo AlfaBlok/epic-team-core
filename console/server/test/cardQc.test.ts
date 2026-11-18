@@ -220,7 +220,7 @@ describe("the judge route answers the delivery check's two questions by name", (
     const bad = await ask({ prompt: "x", schema: "anything" });
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ error: { code: "bad_schema" } });
-    expect(Object.keys(JUDGE_SCHEMAS)).toEqual(["qc", "groups", "live", "dryrun"]);
+    expect(Object.keys(JUDGE_SCHEMAS)).toEqual(["qc", "groups", "live", "dryrun", "match"]);
     expect(DELIVERY_LIVE_SCHEMA.properties.live.enum).toEqual(["yes", "partly", "no"]);
     expect(DELIVERY_GROUPS_SCHEMA.properties.groups.items.required).toEqual(["ask", "items", "quotes", "screen"]);
   });
