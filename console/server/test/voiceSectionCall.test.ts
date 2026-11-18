@@ -26,7 +26,7 @@ describe("a section call", () => {
     expect(p).toMatch(/3\. Question \[E901-A3\]/);
     expect(p).toMatch(/only after his spoken yes/);
     expect(p).toMatch(/it's on your screen/);
-    expect(p).toMatch(/ask him which he wants/);
+    expect(p).toMatch(/Ask him which he wants[\s\S]*Do not read its choices aloud|Do not read its choices aloud[\s\S]*Ask him which he wants/);
     expect(p).toMatch(/goes to the desk with ask_the_desk/);
     expect(p).toMatch(/Acme: 5 testers/);
     expect(focusGreeting({ section: "Goals to set", cards: [goal] })).toBe("Goals to set: 1 card. Shall we go through them one by one?");

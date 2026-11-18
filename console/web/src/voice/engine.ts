@@ -675,7 +675,7 @@ export class CallEngine {
               done = `not pressed: ${(e as Error).message}`;
             }
             this.line("tool", `pressed ${r.press.button} on ${r.place ?? "the card"}: ${done}`);
-            output = { ...r, result: done, note: done.startsWith("not pressed") ? "It did not go through: tell him in one line and offer to pass it to the desk." : "Pressed. Say it is done in a few words, then offer the next card." };
+            output = { ...r, result: done, note: done.startsWith("not pressed") ? "It did not go through: tell him in one line and offer to pass it to the desk." : "Pressed and landed. Say plainly: pressed, it landed. Then offer the next card." };
           } else {
             this.line("tool", `${c.name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
             output = r;

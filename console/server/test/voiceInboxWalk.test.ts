@@ -73,7 +73,7 @@ describe("the inbox on the call", () => {
     expect(p).not.toContain(`${INBOX_PACK_MAX + 1}. Review`);
     expect(p).toContain("… and 5 more");
     expect(p).toContain("1. Notes: 5 testers");
-    expect(p).toContain("This call does not press his buttons yet");
+    expect(p).toContain("pressed, it landed");
     expect(inboxPack([])).toContain("His inbox is empty right now.");
   });
 

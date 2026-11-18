@@ -26,6 +26,29 @@ export function trackersAnswer(t: WheelTrackers): string {
   return [head, empty.length ? `Still empty: ${empty.join(", ")}.` : "", waiting ? `${waiting} asked for, waiting for your yes.` : ""].filter(Boolean).join(" ");
 }
 
+function Cell({ v }: { v: string | undefined }) {
+  return /^https?:\/\//.test(v ?? "") ? <a className="underline underline-offset-4" href={v} target="_blank" rel="noreferrer">link</a> : <>{v}</>;
+}
+
+/** On a phone each entry is one stacked block (its name, then each column as a label and value), never a squeezed table. */
+function Entries({ t }: { t: TrackerTable }) {
+  return (
+    <ul className="grid gap-2 sm:hidden" data-testid="tracker-entries">
+      {t.rows.map((r, i) => (
+        <li key={i} className="grid gap-1 border-b pb-2 text-sm last:border-0">
+          <p className="font-medium text-foreground">{r[0]}</p>
+          <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5">
+            {t.columns.slice(1).map((h, j) => (r[j + 1] ? [
+              <dt key={`h${j}`} className="text-xs leading-5 text-muted-foreground">{h}</dt>,
+              <dd key={`v${j}`} className="min-w-0 [overflow-wrap:anywhere]"><Cell v={r[j + 1]} /></dd>,
+            ] : null))}
+          </dl>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Table({ t }: { t: TrackerTable }) {
   return (
     <section className="grid min-w-0 gap-2 rounded-xl border bg-card p-3" data-testid="tracker" data-tracker={t.id} data-rows={t.rows.length}>
@@ -54,7 +77,9 @@ function Table({ t }: { t: TrackerTable }) {
           Empty. When the team shortlists someone, it is written here. Columns: {t.columns.join(", ")}.
         </div>
       ) : (
-        <div className="min-w-0 overflow-x-auto">
+        <>
+        <Entries t={t} />
+        <div className="hidden min-w-0 overflow-x-auto sm:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
@@ -67,13 +92,14 @@ function Table({ t }: { t: TrackerTable }) {
               {t.rows.map((r, i) => (
                 <tr key={i} className="border-b align-top last:border-0">
                   {t.columns.map((_, j) => (
-                    <td key={j} className="py-1.5 pr-3 [overflow-wrap:anywhere]">{/^https?:\/\//.test(r[j] ?? "") ? <a className="underline underline-offset-4" href={r[j]} target="_blank" rel="noreferrer">link</a> : r[j]}</td>
+                    <td key={j} className="py-1.5 pr-3 [overflow-wrap:anywhere]"><Cell v={r[j]} /></td>
                   ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );
