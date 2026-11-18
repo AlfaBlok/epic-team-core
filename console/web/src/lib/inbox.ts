@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, type MilestoneStatusView, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
 import { useSharedQuery } from "@/lib/data";
 import { useSnoozes } from "@/lib/snooze";
-import { answeredHere } from "@/lib/sentRows";
+import { answeredHere, answeredSlot, useSentVersion } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
 
 /**
@@ -15,6 +15,19 @@ import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
  * Before: the pills read /api/counts and their own /status fetch, each polled on its own 30 s clock, and they ignored a
  * snooze or a press the list had already applied.
  */
+
+/**
+ * E948-S141 (the owner 18 Nov 04:30Z, his phone: "Done, waiting for your review 4" and the top bar 4 over one Sent row
+ * and no open card; "Must have given this feedback more than 20 times"): THE rule every inbox count uses. A count is the
+ * number of open cards its section draws: an item he answered here (any Sent mark, its green row shown or not) is not
+ * open, in every section, the top bar and the sidebar, from the moment he answers until the server stops listing it.
+ * Before, only Blocked on you left answered items out (E948-S117); Done, Decisions, Goals to set and Ideas counted
+ * them while E948-S140 had already taken their rows off the page.
+ */
+export function openCards<T>(items: T[], slotOf: (t: T) => string, answered: (slot: string) => boolean = answeredSlot): T[] {
+  return items.filter((i) => !answered(slotOf(i)));
+}
+export const reviewSlot = (i: Pick<ReviewItem, "id">) => `review:${i.id}`;
 
 /** Which milestones a count covers: all, or the selected project's (lib/project `keep`). */
 export type Keep = (milestoneId?: string | null) => boolean;
@@ -87,10 +100,10 @@ export const resetReviewGone = () => {
 /** The review cards waiting on the owner: what the green pill counts and "Done, waiting for your review" lists. */
 export function reviewCards<T extends Pick<ReviewItem, "id" | "milestoneId">>(
   list: T[] | undefined,
-  o: { keep?: Keep; snoozing?: { has: (id: string) => boolean }; gone?: { has: (id: string) => boolean } } = {},
+  o: { keep?: Keep; snoozing?: { has: (id: string) => boolean }; gone?: { has: (id: string) => boolean }; answered?: (slot: string) => boolean } = {},
 ): T[] {
   const keep = o.keep ?? all;
-  return (list ?? []).filter((i) => keep(i.milestoneId) && !o.snoozing?.has(i.id) && !o.gone?.has(i.id));
+  return openCards((list ?? []).filter((i) => keep(i.milestoneId) && !o.snoozing?.has(i.id) && !o.gone?.has(i.id)), reviewSlot, o.answered);
 }
 
 /** The world's status batch, one fetch for every reader (sidebar, top bar, project switcher, Team home). */
@@ -104,6 +117,7 @@ export const useReviewList = () => useSharedQuery<(ReviewItem & { milestoneTitle
 /** The red list (and so the red count) of a status batch or one milestone's status, with this browser's snoozes applied. */
 export function useBlocked(status: { items?: PendingItem[] } | undefined, o: { keep?: Keep; nodeKey?: string } = {}) {
   const { entries } = useSnoozes();
+  useSentVersion(); // an answer here takes its item out of the count at once
   return blockedItems(status, { ...o, snoozing: entries });
 }
 
@@ -116,6 +130,7 @@ export function useReviewCards(o: { keep?: Keep } = {}) {
   const data = useMemo(() => (off ? listed?.filter((i) => !fromGapFinder(i.face?.from)) : listed), [listed, off]);
   const { entries } = useSnoozes();
   const g = useGone();
+  useSentVersion(); // E948-S141: an answer here takes its card out of every count at once
   // a pressed card stays out until a fetch no longer lists it; then its id is forgotten (a reopened row shows again)
   useEffect(() => {
     if (!data || ![...gone].some((id) => !data.some((i) => i.id === id))) return;

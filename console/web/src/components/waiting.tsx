@@ -33,7 +33,7 @@ import { ACTION, PRESS } from "@/components/cardActions";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { FoldSection, SkeletonCards, SortControl, sortSection, useSectionOpen, useSectionSort } from "@/components/homeSection";
 import { pendingAction } from "@/lib/pending";
-import { blockedItems, useStatusFor } from "@/lib/inbox";
+import { blockedItems, openCards as stillOpen, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
 import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
@@ -1720,7 +1720,8 @@ export function WaitingOnYou({
   // (the owner: "It should just be at the top on blocked waiting for me"): an open priority ask ("Put X first in
   // your objectives?", vn_cdcf1208) and an account to connect lead this section, never loose above every section;
   // while a priority ask is here the section opens by itself (an account to connect waits folded, as before).
-  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? (data ?? []).filter(isPinnedPriority) : [];
+  // E948-S141: an answered priority ask is out of the count and the list at once, like every card
+  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? stillOpen((data ?? []).filter(isPinnedPriority), (i) => `ask:${i.id}`) : [];
   const connectList = useConnects("inbox", connects && part !== "rest");
   const connectFirst = connects && part !== "rest" ? connectList : [];
   const [sectionOpen, setSectionOpen] = useSectionOpen(fold, true, pinnedFirst.length > 0);
@@ -1879,7 +1880,7 @@ export function WaitingOnYou({
         {pinnedFirst.length > 0 && (
           <div className="mb-3 grid gap-3" data-testid="pinned-priority">
             {pinnedFirst.map((i) => (
-              <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective}>
+              <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective} data-inbox-open="">
                 <WaitingCard item={i} showMilestone qualify={qualify} />
               </div>
             ))}
@@ -1931,7 +1932,9 @@ export function WaitingOnYou({
                   r.sent || !r.item ? (
                     r.sent && <SentRow key={r.slot} slot={r.slot} entry={r.sent} />
                   ) : (
-                    <WaitingCard key={r.item.id} item={r.item} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+                    <Open key={r.item.id}>
+                      <WaitingCard item={r.item} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+                    </Open>
                   ),
                 )}
               </div>
@@ -1941,11 +1944,19 @@ export function WaitingOnYou({
             sent || !r ? (
               sent && <SentRow key={slot} slot={slot} entry={sent} />
             ) : r.status ? (
-              <StatusItemRow key={r.status.id} item={r.status} milestone={showMilestone ? names.get(r.status.milestoneId) : undefined} />
+              <Open key={r.status.id}>
+                <StatusItemRow item={r.status} milestone={showMilestone ? names.get(r.status.milestoneId) : undefined} />
+              </Open>
             ) : setOf.has(r.card!.id) ? (
-              setLead.has(r.card!.id) && <AskSet key={`set:${r.card!.id}`} group={setOf.get(r.card!.id)!} readOnly={readOnly} />
+              setLead.has(r.card!.id) && (
+                <Open key={`set:${r.card!.id}`} n={setOf.get(r.card!.id)!.items.length}>
+                  <AskSet group={setOf.get(r.card!.id)!} readOnly={readOnly} />
+                </Open>
+              )
             ) : (
-              <WaitingCard key={r.card!.id} item={r.card!} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+              <Open key={r.card!.id}>
+                <WaitingCard item={r.card!} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
+              </Open>
             ),
           )}
         </div>
@@ -2136,6 +2147,18 @@ function WholeAskLoader({ item, ...rest }: { item: WaitingItem; showMilestone?: 
 }
 
 /** an open status item with no Waiting-on-you card (Ready to mark, a failed run): one row, its one action. */
+/**
+ * E948-S141: an open item drawn in Blocked on you (one card, one status row, or an ask set of `n` asks): the live inbox
+ * check (lib/countCheck) counts these and fails when the section's pill says another number. Layout-neutral.
+ */
+function Open({ n = 1, children }: { n?: number; children: ReactNode }) {
+  return (
+    <div className="contents" data-inbox-open={n === 1 ? "" : String(n)}>
+      {children}
+    </div>
+  );
+}
+
 export function StatusItemRow(props: { item: PendingItem; milestone?: string }) {
   // E948-S130: a status line or an alert he wrote on collapses to its Sent row, like every card
   return (

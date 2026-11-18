@@ -190,6 +190,7 @@ export function WaitingForReview({
                 style={leaving.has(i.id) ? { opacity: 0, transform: "translateX(-40px)" } : undefined}
                 data-testid="review-feed-item"
                 data-inbox-card={`review:${i.id}`}
+                data-inbox-open=""
                 data-lead={leadsSection(i.face) ? "yes" : undefined}
               >
                 {leadsSection(i.face) && (

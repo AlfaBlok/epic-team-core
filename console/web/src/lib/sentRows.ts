@@ -157,7 +157,13 @@ export const sentOf = (slot: string) => live(sent.get(slot));
  * (the owner 16 Nov, "why showing one, none left???"): an item he answered here (its card or status row is a green
  * Sent row now) is no longer open for him, so no red count holds it, even while the server's status batch still lists it.
  */
-export const answeredHere = (id: string) => !!(live(sent.get(`ask:${id}`)) || live(sent.get(`status:${id}`)));
+export const answeredHere = (id: string) => answeredSlot(`ask:${id}`) || answeredSlot(`status:${id}`);
+/**
+ * E948-S141 (the owner 18 Nov, "Must have given this feedback more than 20 times"): a card he answered here, by its slot
+ * (`review:<id>`, `team:<id>`, `ask:<id>`, `status:<id>`), whether its green row shows or not. Every inbox count leaves
+ * it out (lib/inbox `openCards`), so no pill counts a card the section no longer draws.
+ */
+export const answeredSlot = (slot: string) => !!live(sent.get(slot));
 /** Re-render on every Sent mark (the counts read `answeredHere`). */
 export const useSentVersion = () => useSyncExternalStore(subscribe, () => sent);
 export function useSent(slot: string | undefined): SentEntry | undefined {

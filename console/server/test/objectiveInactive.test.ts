@@ -50,10 +50,10 @@ describe("Goals to set counts his active objectives still needing a goal", () =>
   });
   const docWith = (ids: string[]): TeamCardsDoc => {
     let doc = emptyDoc();
-    ids.forEach((id, i) => {
+    ids.forEach((id) => {
       const ch = checkPost(goal(id), dayOf(now));
       if (!ch.ok) throw new Error(ch.message);
-      const r = addCard(doc, { ...ch.card, id: `tc_${i}`, at: now }, dayOf(now));
+      const r = addCard(doc, ch.card, now);
       if ("error" in r) throw new Error(r.error.message);
       doc = r.doc;
     });

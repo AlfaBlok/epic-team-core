@@ -1214,7 +1214,7 @@ export function Layout() {
  * selected project's Chat (the menu's Chat sits under the project's name). The dark grey pill is the unread
  * mark: desk replies since he last opened Chat (/counts, cleared by markChatSeen).
  */
-function TopBarPills({ counts }: { counts: CountsView | undefined }) {
+export function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   // only Inbox, Chat and the mic, at every width and in both skins (the owner, vn_87528e51); Home is the product mark,
   // every other page is in the sidebar (SidebarMorePages).
   const shows = useShows();

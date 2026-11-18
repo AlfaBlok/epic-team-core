@@ -10,7 +10,8 @@ import { useInboxSearch } from "@/lib/inboxSearch";
 import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { CardFeedback } from "@/components/cardFeedback";
 import { SentOr, SentRow } from "@/components/sentRow";
-import { markSent, useKeepSent } from "@/lib/sentRows";
+import { markSent, useKeepSent, useSentVersion } from "@/lib/sentRows";
+import { openCards } from "@/lib/inbox";
 import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { useSlotReady } from "@/components/slot";
@@ -669,7 +670,9 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [open, setOpen] = useSectionOpen("inbox-goals-to-set");
   const q = search.active ? search.q.trim().toLowerCase() : "";
-  const cards = (data?.open ?? []).filter((c) => c.kind === "goal" && !gone.has(c.id) && (!q || teamCardText(c).includes(q)));
+  useSentVersion();
+  // E948-S141: the count is the open cards drawn here: one he answered (a Sent mark) is out of it at once
+  const cards = openCards((data?.open ?? []).filter((c) => c.kind === "goal" && !gone.has(c.id) && (!q || teamCardText(c).includes(q))), teamSlot);
   // a goal set's own inbox (scorecard) is that set's cards only: the campaigns' questions belong to the whole Inbox.
   const lines = scorecard ? [] : talk;
   const count = cards.length + lines.length;
@@ -691,7 +694,7 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
       {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="team-cards-goal-list">
         {lines.map((t) => (
-          <li key={t.openUrl} className="min-w-0" data-inbox-card={`goal-talk:${t.openUrl}`}>
+          <li key={t.openUrl} className="min-w-0" data-inbox-card={`goal-talk:${t.openUrl}`} data-inbox-open="">
             <CampaignGoalCard t={t} />
           </li>
         ))}
@@ -709,7 +712,7 @@ function TeamCardRows({ rows, onAnswered }: { rows: ReturnType<typeof useKeepSen
   return (
     <>
       {rows.map(({ slot, item: c, sent }) => (
-        <li key={slot} className="min-w-0" data-team-kind={c?.kind} data-inbox-card={slot}>
+        <li key={slot} className="min-w-0" data-team-kind={c?.kind} data-inbox-card={slot} data-inbox-open={!sent && c ? "" : undefined}>
           {sent ? <SentRow slot={slot} entry={sent} /> : c && <TeamCardView card={c} onAnswered={onAnswered} />}
         </li>
       ))}
@@ -724,7 +727,8 @@ export function InboxIdeasAndDigests({ kinds = TEAM_GROUP_KINDS, scorecard }: { 
   const [gone, setGone] = useState<Set<string>>(new Set());
   const [open, setOpen] = useSectionOpen("inbox-team-cards");
   const q = search.active ? search.q.trim().toLowerCase() : "";
-  const all = (data?.open ?? []).filter((c) => kinds.includes(c.kind) && !gone.has(c.id) && (!q || teamCardText(c).includes(q)));
+  useSentVersion();
+  const all = openCards((data?.open ?? []).filter((c) => kinds.includes(c.kind) && !gone.has(c.id) && (!q || teamCardText(c).includes(q))), teamSlot);
   // his old order inside the one list: the Senior advisor's suggestions, then ideas, then digests.
   const cards = kinds.flatMap((k) => all.filter((c) => c.kind === k));
   const rows = useKeepSent(cards, teamSlot, "inbox-team");
