@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
-import { useInboxPlace } from "@/lib/inboxPlace";
+import { INBOX_LAND, useInboxPlace } from "@/lib/inboxPlace";
 
 /**
  * The owner: the Inbox button opens the Inbox with every section folded, at the top; Back returns to the same open
@@ -22,8 +22,11 @@ function Inbox() {
   const go = useNavigate();
   return (
     <>
-      <button type="button" onClick={() => go("/inbox")}>
+      <button type="button" onClick={() => go("/inbox", { replace: true, state: INBOX_LAND })}>
         Inbox button
+      </button>
+      <button type="button" onClick={() => go("/inbox?show=review", { replace: true })}>
+        a filter
       </button>
       <button type="button" onClick={() => go("/card")}>
         open a card
@@ -46,7 +49,7 @@ function Card() {
       <button type="button" onClick={() => go(-1)}>
         Back
       </button>
-      <button type="button" onClick={() => go("/inbox")}>
+      <button type="button" onClick={() => go("/inbox", { state: INBOX_LAND })}>
         Inbox button
       </button>
     </>
@@ -105,6 +108,10 @@ describe("the Inbox's place", () => {
     expect(scrolls.at(-1)).toEqual([0, 0]);
     fireEvent.click(screen.getByTestId("blocked"));
     expect(open("blocked")).toBe("true");
+    // a filter (a same-page replace) keeps what is open
+    fireEvent.click(screen.getByText("a filter"));
+    expect(open("blocked")).toBe("true");
+    // the Inbox button on the Inbox itself (a same-page link replaces, with the land state)
     fireEvent.click(screen.getByText("Inbox button"));
     expect(open("blocked")).toBe("false");
     expect(scrolls.at(-1)).toEqual([0, 0]);

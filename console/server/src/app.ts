@@ -202,7 +202,8 @@ import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcro
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
 import { anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchJudge, type NoteTouch, type TouchCard, type TouchJudge } from "./voice/touch.js";
 import { addMarks } from "./review/noteMarks.js";
-import { createVoiceNotes, mountVoiceNotesRec, openAiTranscriber, voiceSendHealth, type Transcriber, type VoiceNotes } from "./voice/notes.js";
+import { createVoiceNotes, DELIVER_WINDOW_MS, mountVoiceNotesRec, openAiTranscriber, voiceSendHealth, type Transcriber, type VoiceNote, type VoiceNotes } from "./voice/notes.js";
+import { writeUndeliveredNote } from "./voice/undeliveredNote.js";
 import { campaignQuickStatus, milestoneInstructions, milestoneTools } from "./voice/milestoneCall.js";
 import { createChatUnread } from "./desk/unread.js";
 import { DeskError, TEAM_KEY, type DeskMessage } from "./desk/session.js";
@@ -1375,7 +1376,9 @@ export function createApp(
     // a typed message is read too, from TOUCH_MIN_TYPED_WORDS words: the stale-card mark is not only for voice notes
     void noteTouch?.heard({ world, words: text, where: touchWhere(text), typed: isTyped(text), ...(requestId ? { id: requestId } : {}) }).catch((e) => console.error("note touch:", e));
   };
-  mountDesk(api, desk, milestoneChats, repoIndex, attachments, (text, crid, pending) => deskSaid(DEFAULT_TENANT, text, crid, pending));
+  // his Chat voice notes posted but not in the desk's chat yet (set once the voice notes are made, below).
+  let teamUndelivered: () => VoiceNote[] = () => [];
+  mountDesk(api, desk, milestoneChats, repoIndex, attachments, (text, crid, pending) => deskSaid(DEFAULT_TENANT, text, crid, pending), () => teamUndelivered());
   // the relay. The Team desk itself decides a part of the owner's words is the paired the social product desk's work and
   // passes it here, quoting him; no router decides for it. Only the Team desk's own call (header X-Console-Run: team-desk).
   /** The relay's body, the same for the Team desk and a world desk (each desk passes the other desk's part itself). */
@@ -3005,7 +3008,24 @@ export function createApp(
     void companyNotes?.filedVoice(f).catch((e) => console.error("wheel note:", e));
   };
   /** `chat`: where a posted (not card) note lands is the world's Team desk itself, which reads all of it: no spill. */
-  const notesFor = (v: Voice, desk: Pick<DeskPort, "send">, chat: "team-desk" | "milestone") => {
+  // a posted Chat note is checked in its chat's thread (its head line names the note id) before it counts as delivered.
+  const inChat = (read: () => Promise<{ messages: { role: string; text: string }[]; stale?: boolean }>) => async (id: string) => {
+    const v = await read();
+    if (v.messages.some((m) => m.role === "user" && m.text.includes(id))) return true;
+    return v.stale ? undefined : false;
+  };
+  // the note's world's Delivery Manager gets one desk-inbox line (its home checkout), and production one WhatsApp alert.
+  const undeliveredLine = (u: { id: string; world: string; tries: number; ms: number; gaveUp: boolean; postedAt: string; words: string }) => {
+    const text = u.gaveUp ? `Voice note ${u.id} is still not in the chat after ${u.tries} re-sends; the console stopped retrying.` : `Voice note ${u.id} showed Sent but is not in the chat ${Math.round(u.ms / 60_000)} min later; the console is re-sending it.`;
+    console.warn(`[voice] ${text}`);
+    if (opts.readModel?.drift?.alert) void whatsapp.alert("voice-send-undelivered", `${text}\nDetails: ${teamLink()}/api/health`);
+    const home = worldHome(u.world);
+    if (!home || opts.passive) return;
+    void writeUndeliveredNote({ ...u, replyTo: home.remote ?? home.name, day: new Date().toISOString().slice(0, 10) }, home, spine)
+      .then((r) => console.log(`[voice] ${u.id} not delivered: desk note ${r}`))
+      .catch((e) => console.error(`[voice] ${u.id} desk note failed:`, e instanceof Error ? e.message : e));
+  };
+  const notesFor = (v: Voice, desk: Pick<DeskPort, "send">, chat: "team-desk" | "milestone", seen?: (id: string) => Promise<boolean | undefined>) => {
     let n = notesOf.get(v);
     if (!n)
       notesOf.set(
@@ -3017,6 +3037,8 @@ export function createApp(
           transcribe,
           dir: notesDir,
           onPosted: (id) => void memoryForward?.enqueue(id),
+          ...(seen ? { seen } : {}),
+          onUndelivered: undeliveredLine,
           // tap stop to Sent over 3 s, or an accepted note still not posted: a log line, /api/health `voiceSend`
           // and, in production, one WhatsApp per episode (the notifier's per-kind gap).
           onSlow: (x) => {
@@ -3045,8 +3067,11 @@ export function createApp(
       );
     return n;
   };
-  const teamDeskNotes = () => notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk");
-  const worldDeskNotes = (w: string) => notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk");
+  const teamDeskNotes = () =>
+    notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk", inChat(() => desk.view()));
+  const worldDeskNotes = (w: string) =>
+    notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk", inChat(() => worldDesks.view(w)));
+  teamUndelivered = () => ((store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT ? teamDeskNotes().undelivered() : []);
   mountVoiceNotesRec(api, "/voice", (c) =>
     (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT
       ? teamDeskNotes()
@@ -3065,22 +3090,26 @@ export function createApp(
     const v = campaignVoice(id);
     if (!v) return c.json({ error: { code: "not_found", message: `milestone ${id} not found` } }, 404);
     const mid = v.scope.milestoneId!;
-    return notesFor(v, { send: (t, page, crid) => milestoneChats.send(mid, t, page, crid) }, "milestone");
+    return notesFor(v, { send: (t, page, crid) => milestoneChats.send(mid, t, page, crid) }, "milestone", inChat(() => milestoneChats.view(mid)));
   });
   // a note shown Sent (its audio safe here) whose words or post did not go (a failed post, a restart in
   // between) is finished by the console itself, once a minute, in whichever chat it was recorded.
   const resumeNotes = async () => {
     const scopes = db
-      .prepare("SELECT DISTINCT tenant_id, milestone_id FROM voice_notes WHERE accepted_at IS NOT NULL AND state IN ('recording', 'failed') AND finish_tries < 30")
-      .all() as { tenant_id: string; milestone_id: string | null }[];
+      .prepare(
+        "SELECT DISTINCT tenant_id, milestone_id FROM voice_notes WHERE (accepted_at IS NOT NULL AND state IN ('recording', 'failed') AND finish_tries < 30) OR (state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at >= ?)",
+      )
+      .all(new Date(Date.now() - DELIVER_WINDOW_MS).toISOString()) as { tenant_id: string; milestone_id: string | null }[];
     for (const sc of scopes) {
       let n: VoiceNotes | undefined;
       if (sc.milestone_id) {
         const v = campaignVoice(sc.milestone_id);
-        if (v) n = notesFor(v, { send: (t, page, crid) => milestoneChats.send(v.scope.milestoneId!, t, page, crid) }, "milestone");
+        if (v) n = notesFor(v, { send: (t, page, crid) => milestoneChats.send(v.scope.milestoneId!, t, page, crid) }, "milestone", inChat(() => milestoneChats.view(v.scope.milestoneId!)));
       } else if (sc.tenant_id === DEFAULT_TENANT) n = (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT ? teamDeskNotes() : undefined;
       else if (store.getTenant(sc.tenant_id)) n = worldDeskNotes(sc.tenant_id);
       await n?.resume().catch((e) => console.error("[voice] resume notes:", e));
+      // a posted note not in its chat 2 min on is re-sent, shown "not delivered yet, retrying", and named.
+      await n?.deliverCheck().catch((e) => console.error("[voice] delivery check:", e));
     }
   };
   const resumeMs = opts.voice?.resumeNotesMs ?? (process.env.VITEST ? 0 : 60_000);

@@ -1239,6 +1239,8 @@ export interface DeskChat {
   ownServer?: boolean;
   /** the owner's sends stored while T3 was down, oldest first; the console delivers them once T3 is back. */
   queued?: { id: string; text: string; page?: string; at: string }[];
+  /** his voice notes shown sent but not in this chat yet (the console re-sends each minute; `failed`: tries used up). */
+  undeliveredNotes?: { id: string; at: string; text: string; state: "retrying" | "failed"; error?: string }[];
   /** T3 was slow, so this is the console's last good read; a fresh one is under way (the page polls again soon). */
   stale?: boolean;
   /** the host whose T3 runs the desk's thread. */

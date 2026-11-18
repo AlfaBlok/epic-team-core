@@ -468,6 +468,23 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     expect(screen.queryByTestId("chat-t3-down")).toBeNull();
   });
 
+  it("a voice note the desk does not have yet shows on the note itself: 'not delivered yet, retrying'", async () => {
+    vi.spyOn(api, "getDeskChat").mockResolvedValue(
+      chat({
+        undeliveredNotes: [
+          { id: "vn_341120fc", at: "2026-11-18T03:43:31Z", text: "are these requests landing somewhere?", state: "retrying" },
+          { id: "vn_e423bce7", at: "2026-11-18T03:06:55Z", text: "is that already happening?", state: "failed" },
+        ],
+      }),
+    );
+    renderChat();
+    const notes = await screen.findAllByTestId("chat-undelivered-note");
+    expect(notes).toHaveLength(2);
+    expect(notes[0].textContent).toContain("are these requests landing somewhere?");
+    expect(within(notes[0]).getByTestId("chat-undelivered-state").textContent).toBe("Voice note not delivered yet, retrying");
+    expect(within(notes[1]).getByTestId("chat-undelivered-state").textContent).toMatch(/^Voice note not delivered\. Its words are kept/);
+  });
+
   it("a send queued while T3 is down shows as its own bubble: 'queued, sends when T3 is back'", async () => {
     const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));
     const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true, queued: true });

@@ -27,6 +27,9 @@ function write(key: string, v: Saved) {
   }
 }
 
+/** the Inbox button's navigation state: pressed, even on the Inbox itself (a same-page link replaces), it lands folded at the top. */
+export const INBOX_LAND = { land: true } as const;
+
 /** how long Back waits for the sections to draw before giving up on the scroll place. */
 export const RESTORE_WAIT_MS = 10_000;
 
@@ -49,7 +52,7 @@ export function useInboxPlace(drawnSelector = '[data-testid="inbox-stack"][data-
       if (nav !== "POP") window.scrollTo(0, 0);
       return;
     }
-    if (nav === "PUSH") {
+    if (nav === "PUSH" || (nav !== "POP" && (loc.state as { land?: boolean } | null)?.land)) {
       saved.current = { open: {}, y: 0 };
       setRestored(undefined);
       setVisit(loc.key);

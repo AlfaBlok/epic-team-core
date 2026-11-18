@@ -126,7 +126,8 @@ export const RELEASE_RULE =
   "it backs up the database, swaps, checks health and rolls back by itself when the health check fails. At most one release an hour: inside the hour it parks " +
   "and the flush timer ships the newest within 15 min after the hour opens, so never retry it. `deploy.sh --rollback --by <run id> --reason <why>` puts the previous release back at once. " +
   "There is no staging step: never park a change for staging, never wait for a promote; say `live <sha>` on the row only after the live revision shows it. " +
-  "`--incident <what is broken>` skips the hour for a real incident only (customers cannot sign in, pay, load their site or lose data, or a security hole is open), and is logged.";
+  "`--incident <what is broken>` skips the hour for a real incident only (customers cannot sign in, pay, load their site or lose data, or a security hole is open), and is logged. " +
+  "A fix of something the owner said again also skips the hour: add `--said-again <his note id>` (or `auto`) and name that note or its row in your commit; the build host checks it, and the console host refuses the skip while its load is red or in its morning quiet hours unless he spoke in the last hour.";
 
 /** the write rule of an assignment with write on: only within its scope. */
 export const scopedWriteRule = (scope: string) =>

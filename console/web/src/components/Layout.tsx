@@ -15,6 +15,7 @@ import { isVoiceNotesPin, useFold, useStoredFlag } from "@/lib/storedFlag";
 import { objectiveOf } from "@/lib/scorecards";
 import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
+import { INBOX_LAND } from "@/lib/inboxPlace";
 import { Button } from "@/components/ui/button";
 import { BackArrow } from "@/components/backArrow";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -444,7 +445,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             Home
           </NavLink>
         )}
-        <NavLink to={`/${INBOX_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-inbox">
+        <NavLink to={`/${INBOX_PATH}`} state={INBOX_LAND} className={itemClass} onClick={onNavigate} data-testid="nav-inbox">
           <InboxIcon className="h-4 w-4" />
           Inbox
           {statuses?.loading && <CountLoading className="ml-auto" />}
@@ -1309,7 +1310,7 @@ export function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   return (
     <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1 max-[379px]:gap-0" data-testid="topbar-pills">
       {/* the full aggregated Inbox, one tap from any page, its red (waiting on you) and green (to review) counts on it. */}
-      <NavLink to={`/${INBOX_PATH}`} className={link} aria-label={`Inbox: ${needsYou ?? 0} waiting on you, ${review ?? 0} to review`} data-testid="topbar-team">
+      <NavLink to={`/${INBOX_PATH}`} state={INBOX_LAND} className={link} aria-label={`Inbox: ${needsYou ?? 0} waiting on you, ${review ?? 0} to review`} data-testid="topbar-team">
         <InboxIcon className="h-4 w-4" />
         <span className="hidden md:inline">Inbox</span>
         <Pills needsYou={needsYou} review={review} ids={{ needsYou: "topbar-needs-you", review: "topbar-review" }} className="ml-0" />

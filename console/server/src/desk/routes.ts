@@ -33,7 +33,16 @@ const placeIn = z.object({
 
 /** the Chat page's two calls. The desk thread is launched on the first one that needs it. */
 /** `said` hears each of the owner's Team desk messages once T3 took it or queued it (voice/cross.ts passes a part across). */
-export function mountDesk(api: Hono, desk: Desk, milestoneChats?: MilestoneChats, repoIndex?: RepoIndex, attachments?: Attachments, said?: (text: string, clientRequestId?: string, pending?: boolean) => void) {
+export function mountDesk(
+  api: Hono,
+  desk: Desk,
+  milestoneChats?: MilestoneChats,
+  repoIndex?: RepoIndex,
+  attachments?: Attachments,
+  said?: (text: string, clientRequestId?: string, pending?: boolean) => void,
+  /** his Chat voice notes shown sent but not in this chat yet; the chat shows each "not delivered yet, retrying". */
+  undeliveredNotes?: () => { id: string; startedAt: string; transcript?: string; delivery?: string; deliverError?: string }[],
+) {
   const guard = (fn: (c: Context) => Promise<Response>) => async (c: Context) => {
     try {
       return await fn(c);
@@ -61,7 +70,21 @@ export function mountDesk(api: Hono, desk: Desk, milestoneChats?: MilestoneChats
       return c.json(r, r.pending ? 202 : 201);
     });
 
-  api.get("/desk/messages", compress(), guard(async (c) => c.json(await readChat(desk, viewOpts((n) => c.req.query(n))))));
+  api.get(
+    "/desk/messages",
+    compress(),
+    guard(async (c) => {
+      const v = await readChat(desk, viewOpts((n) => c.req.query(n)));
+      let notes: ReturnType<NonNullable<typeof undeliveredNotes>> = [];
+      try {
+        notes = undeliveredNotes?.() ?? [];
+      } catch (e) {
+        console.error("desk messages: undelivered notes:", e);
+      }
+      const out = notes.map((n) => ({ id: n.id, at: n.startedAt, text: n.transcript ?? "", state: n.delivery === "failed" ? "failed" : "retrying", ...(n.deliverError ? { error: n.deliverError } : {}) }));
+      return c.json(out.length && c.req.query("before") === undefined ? { ...v, undeliveredNotes: out } : v);
+    }),
+  );
   api.post(
     "/desk/messages",
     jordiSend("the desk chat", async (_c, m) => {

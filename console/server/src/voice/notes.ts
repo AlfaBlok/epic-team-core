@@ -97,6 +97,17 @@ export function ensureVoiceNoteRecTables(db: DB): void {
   if (!cols.has("accept_json")) db.exec("ALTER TABLE voice_notes ADD COLUMN accept_json TEXT");
   if (!cols.has("send_ms")) db.exec("ALTER TABLE voice_notes ADD COLUMN send_ms TEXT");
   if (!cols.has("finish_tries")) db.exec("ALTER TABLE voice_notes ADD COLUMN finish_tries INTEGER NOT NULL DEFAULT 0");
+  // `posted` meant the chat's send answered, even while it was still pending (T3 busy retries running on);
+  // a restart then lost it (vn_341120fc, 2026-11-18 03:44Z). delivered_at = the desk's thread took it; post_json = what
+  // a re-send needs; deliver_tries / deliver_error = the delivery check's tries. Notes posted before this column are
+  // taken as delivered (nothing to check them against).
+  if (!cols.has("delivered_at")) {
+    db.exec("ALTER TABLE voice_notes ADD COLUMN delivered_at TEXT");
+    db.exec("UPDATE voice_notes SET delivered_at = posted_at WHERE state = 'posted'");
+  }
+  if (!cols.has("post_json")) db.exec("ALTER TABLE voice_notes ADD COLUMN post_json TEXT");
+  if (!cols.has("deliver_tries")) db.exec("ALTER TABLE voice_notes ADD COLUMN deliver_tries INTEGER NOT NULL DEFAULT 0");
+  if (!cols.has("deliver_error")) db.exec("ALTER TABLE voice_notes ADD COLUMN deliver_error TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS voice_notes_client ON voice_notes (tenant_id, client_id) WHERE client_id IS NOT NULL");
 }
 
@@ -172,6 +183,11 @@ export interface VoiceNote {
   acceptedAt?: string;
   /** tap stop to Sent on the page (`sent`), and to his words in the chat (`words`), ms. */
   sendMs?: Record<string, number>;
+  /** the chat's thread took the note (a send that answered `pending` is posted, not yet delivered). */
+  deliveredAt?: string;
+  /** posted but not in the chat after DELIVER_CHECK_MS: `retrying` (re-sent each minute) or `failed` (tries used up). */
+  delivery?: "retrying" | "failed";
+  deliverError?: string;
 }
 
 /** tap stop to Sent over this is slow: an alert (the owner: "why is it so slow to send"). */
@@ -180,6 +196,13 @@ export const SEND_SLOW_MS = 3000;
 export const SEND_STUCK_MS = 3 * 60_000;
 /** the sweeper's most tries of one accepted note (one a minute). */
 const FINISH_TRIES = 30;
+/** a posted note not seen in the chat this long after its post is re-sent (one try a minute). */
+export const DELIVER_CHECK_MS = 2 * 60_000;
+/** the delivery check's most tries of one note; after them the note shows "not delivered" and stays named. */
+export const DELIVER_TRIES = 10;
+/** notes older than this are not checked again (a note that old in the chat's tail cannot be told from one missing). */
+export const DELIVER_WINDOW_MS = 6 * 3600_000;
+export const NOT_DELIVERED_RETRYING = "not delivered yet, retrying";
 
 export interface NoteStart {
   note: VoiceNote;
@@ -213,6 +236,13 @@ export interface NotesDeps {
   onFiled?: (f: { id: string; world: string; milestoneId?: string; fill: boolean; page?: string; words: string; audio: string }) => void;
   /** a note took over SEND_SLOW_MS from tap stop to Sent, or an accepted note is still not posted (alert). */
   onSlow?: (s: { id: string; world: string; kind: "slow" | "stuck"; ms: number }) => void;
+  /**
+   * is the note in its chat's thread now (its head line carries the note id)? undefined = cannot tell. A
+   * posted note it does not find DELIVER_CHECK_MS after the post is re-sent.
+   */
+  seen?: (id: string) => Promise<boolean | undefined>;
+  /** a posted note was not in the chat at its check (first miss), or its tries ran out (`gaveUp`); never awaited. */
+  onUndelivered?: (u: { id: string; world: string; milestoneId?: string; tries: number; ms: number; gaveUp: boolean; postedAt: string; words: string }) => void;
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
@@ -248,6 +278,9 @@ export function createVoiceNotes(d: NotesDeps) {
       ...(r.start_ms ? { startMs: JSON.parse(r.start_ms) as Record<string, number> } : {}),
       ...(r.accepted_at ? { acceptedAt: r.accepted_at } : {}),
       ...(r.send_ms ? { sendMs: JSON.parse(r.send_ms) as Record<string, number> } : {}),
+      ...(r.delivered_at ? { deliveredAt: r.delivered_at } : {}),
+      ...(r.state === "posted" && !r.delivered_at && r.deliver_tries > 0 ? { delivery: r.deliver_tries >= DELIVER_TRIES ? ("failed" as const) : ("retrying" as const) } : {}),
+      ...(r.deliver_error ? { deliverError: r.deliver_error } : {}),
     };
   };
   const get = (id: string): VoiceNote | undefined => {
@@ -437,8 +470,11 @@ export function createVoiceNotes(d: NotesDeps) {
     const n = must(id);
     if (!d.desk) throw new VoiceError(503, "desk_unavailable", "this chat has no desk to post the note to");
     try {
-      await d.desk.send(message(n, words, audioUrl, o.segments), page, `voice-note-chat-${id}`);
-      db.prepare("UPDATE voice_notes SET state = 'posted', posted_at = ?, post_error = NULL WHERE id = ?").run(iso(), id);
+      db.prepare("UPDATE voice_notes SET post_json = ? WHERE id = ?").run(JSON.stringify({ audioUrl, segments: o.segments, ...(page ? { page } : {}) }), id);
+      const r = await d.desk.send(message(n, words, audioUrl, o.segments), page, `voice-note-chat-${id}`);
+      // only a send T3 took is delivered; a pending or queued one is checked in the chat after DELIVER_CHECK_MS.
+      const at = iso();
+      db.prepare("UPDATE voice_notes SET state = 'posted', posted_at = ?, post_error = NULL, delivered_at = ? WHERE id = ?").run(at, r && r.pending === false ? at : null, id);
     } catch (e) {
       db.prepare("UPDATE voice_notes SET state = 'failed', post_error = ? WHERE id = ?").run((e as Error).message.slice(0, 300), id);
       throw new VoiceError(502, "desk_send_failed", `the chat did not take the note (its transcript is kept; press Send again): ${(e as Error).message.slice(0, 200)}`);
@@ -485,6 +521,72 @@ export function createVoiceNotes(d: NotesDeps) {
     return n;
   }
 
+  /** one delivery check per note at a time. */
+  const delivering = new Set<string>();
+  /**
+   * every posted note not delivered yet, DELIVER_CHECK_MS after its post: in the chat (`seen`) = delivered;
+   * else re-sent with its own request id (T3 drops a copy it already took) and named: the chat shows
+   * NOT_DELIVERED_RETRYING on it, the first miss and the last try go to `onUndelivered` (the Delivery Manager's line).
+   */
+  async function deliverCheck(): Promise<{ checked: number; delivered: number; resent: number; failed: number }> {
+    const out = { checked: 0, delivered: 0, resent: 0, failed: 0 };
+    const t = now();
+    const rows = db
+      .prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at <= @cut AND posted_at >= @since AND deliver_tries < @max ORDER BY posted_at")
+      .all({ ...sc, cut: iso(t - DELIVER_CHECK_MS), since: iso(t - DELIVER_WINDOW_MS), max: DELIVER_TRIES }) as any[];
+    for (const r of rows) {
+      if (delivering.has(r.id)) continue;
+      delivering.add(r.id);
+      out.checked++;
+      try {
+        const there = d.seen ? await d.seen(r.id).catch(() => undefined) : undefined;
+        if (there) {
+          db.prepare("UPDATE voice_notes SET delivered_at = ?, deliver_error = NULL WHERE id = ?").run(iso(), r.id);
+          out.delivered++;
+          continue;
+        }
+        const tries = r.deliver_tries + 1;
+        const n = rowTo(r);
+        const post = JSON.parse(r.post_json) as { audioUrl: string; segments: number; page?: string };
+        let error: string = NOT_DELIVERED_RETRYING;
+        let took = false;
+        try {
+          const s = await d.desk!.send(message(n, r.transcript ?? "", post.audioUrl, post.segments), post.page, `voice-note-chat-${r.id}`);
+          took = !!s && s.pending === false;
+        } catch (e) {
+          error = `${NOT_DELIVERED_RETRYING} (${(e as Error).message.slice(0, 200)})`;
+        }
+        out.resent++;
+        const gaveUp = !took && tries >= DELIVER_TRIES;
+        if (gaveUp) {
+          error = `not delivered: ${tries} tries failed; its words and audio are kept`;
+          out.failed++;
+        }
+        // a re-send T3 took is delivered unless the chat still lacks it at the next check
+        db.prepare("UPDATE voice_notes SET deliver_tries = ?, deliver_error = ?, delivered_at = ? WHERE id = ?").run(tries, took ? null : error, took ? iso() : null, r.id);
+        if (took) out.delivered++;
+        if (tries === 1 || gaveUp)
+          try {
+            d.onUndelivered?.({ id: r.id, world, ...(ms ? { milestoneId: ms } : {}), tries, ms: t - Date.parse(r.posted_at), gaveUp, postedAt: r.posted_at, words: r.transcript ?? "" });
+          } catch (e) {
+            console.error("voice note onUndelivered:", e);
+          }
+      } finally {
+        delivering.delete(r.id);
+      }
+    }
+    return out;
+  }
+
+  /** posted notes the chat does not hold yet (retrying, or failed in the last day): the chat shows each plainly. */
+  function undelivered(): VoiceNote[] {
+    return (
+      db
+        .prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND deliver_tries > 0 AND posted_at >= @since ORDER BY posted_at")
+        .all({ ...sc, since: iso(now() - 24 * 3600_000) }) as any[]
+    ).map(rowTo);
+  }
+
   /** the page's tap stop to Sent (ms); a slow one is an alert. Words: Sent plus the console's accept to post. */
   function timing(id: string, sentMs: number) {
     const n = must(id);
@@ -524,7 +626,7 @@ export function createVoiceNotes(d: NotesDeps) {
     return (db.prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m ORDER BY started_at DESC LIMIT @n").all({ ...sc, n: Math.min(200, Math.max(1, limit)) }) as any[]).map(rowTo);
   }
 
-  return { start, segment, finish, accept, resume, timing, discard, audio, list, get };
+  return { start, segment, finish, accept, resume, deliverCheck, undelivered, timing, discard, audio, list, get };
 }
 export type VoiceNotes = ReturnType<typeof createVoiceNotes>;
 
