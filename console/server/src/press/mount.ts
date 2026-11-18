@@ -96,6 +96,13 @@ export const PRESS_ROUTES: PressRoute[] = [
   },
 ];
 
+/** E948-S141: how far back GET /api/presses/answered reads (the web's Sent marks live as long, lib/sentRows SENT_KEEP_MS). */
+export const ANSWERED_MS = 2 * 60 * 60_000;
+/** E948-S141: a press that answers its card (it leaves his counts on every device); snoozes keep their own server state. */
+export const isAnswerPress = (action: string) => !/snooze|reopen|bring back|comment|change|retry/.test(action);
+/** E948-S141: a press that takes an answer back (Bring it back after it landed): the card is open again on every device. */
+export const isBringBack = (action: string) => /bring back/.test(action);
+
 export const REPLAY_HEADER = "x-press-replay";
 /** how many times a refusal right after another press on the same card landed is tried again. */
 export const SIBLING_RETRIES = 3;
@@ -365,6 +372,33 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
         ...(state === "landing" || state === "landed" || state === "failed" ? { state } : {}),
       }),
     );
+  });
+  // E948-S141 iteration 2 (the owner 18 Nov 18:30Z, his phone and his laptop side by side: "See counters on phone vs
+  // desktop. It's broken nasty."): what he answered on a card in the last ANSWERED_MS, from any device, so his phone and
+  // his laptop leave the same cards out of every count and list (web lib/sentRows `withServerAnswers`). Before, only the
+  // browser that pressed knew (its localStorage, 2 h), while the server still listed the card (a review card he sent
+  // words on stays listed until it is relaunched): the other device counted it. Newest press per card, his world only;
+  // snoozes (their own server state), reopen, comments and retries are not answers.
+  api.get("/presses/answered", (c) => {
+    const { tenant } = whoPressed();
+    const since = new Date(Date.now() - ANSWERED_MS).toISOString();
+    const rows = db
+      .prepare("SELECT target, at, action, state, tenant_id FROM presses WHERE at >= ? ORDER BY at DESC, rowid DESC")
+      .all(since) as { target: string; at: string; action: string; state: string; tenant_id: string | null }[];
+    const seen = new Set<string>();
+    const answers: { target: string; at: string; action: string; state: string }[] = [];
+    for (const r of rows) {
+      if (seen.has(r.target) || (mode === "on" && (r.tenant_id ?? DEFAULT_TENANT) !== tenant)) continue;
+      // Bring it back after it landed: every answer before it is taken back
+      if (isBringBack(r.action)) {
+        seen.add(r.target);
+        continue;
+      }
+      if (!isAnswerPress(r.action)) continue;
+      seen.add(r.target);
+      answers.push({ target: r.target, at: r.at, action: r.action, state: r.state });
+    }
+    return c.json({ since, answers });
   });
   // Bring it back on a card press still in its undo window: nothing was written, nobody woken. 409 `landed`
   // (or `writing`) once the worker has it: the card then reopens through the route that undoes what landed.

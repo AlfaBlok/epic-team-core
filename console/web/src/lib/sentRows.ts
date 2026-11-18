@@ -35,6 +35,8 @@ export interface SentEntry {
    * answer once a newer one was sent, or a row he swiped away or closed with its x (E948-S145).
    */
   gone?: boolean;
+  /** E948-S141 iteration 2: answered on another device (the server's press log), never pressed in this browser */
+  server?: boolean;
 }
 
 /**
@@ -129,6 +131,65 @@ export function unmarkSent(slots: string | string[]) {
   if (!list.length) return;
   const next = new Map(sent);
   list.forEach((s) => next.delete(s));
+  sent = next;
+  saveSent(sent);
+  emit();
+}
+
+/**
+ * E948-S141 iteration 2 (the owner 18 Nov 18:30Z, his phone and his laptop side by side: "See counters on phone vs desktop.
+ * It's broken nasty."): his laptop showed "Decisions waiting on you 0" and no red pill, his phone "2" and a red 2 over the
+ * same inbox. A Sent mark lived only in the browser that pressed (its localStorage), and the server keeps listing some
+ * answered cards for a while (a review card he sent words on stays listed until it is relaunched), so the device that
+ * answered left the card out of every count and the other device still counted it. Now his answers from every device
+ * come from the server (GET /api/presses/answered, the newest press per card in the last two hours) and one rule reads
+ * them on both:
+ *
+ *   pressed here or on any device, still landing or landed   →  answered: out of every list and count (no green row)
+ *   its newest press failed or was brought back             →  open again: this browser's mark goes too
+ */
+export interface ServerAnswer {
+  target: string;
+  at: string;
+  action: string;
+  state: string;
+}
+/** the slots one pressed card id can stand for (an ask, a red node, a review card, a team card): data-inbox-card */
+export const SERVER_SLOT_KINDS = ["ask", "status", "review", "team"] as const;
+const LANDS = new Set(["landing", "landed"]);
+/** Pure: the Sent marks with the server's answers in (every device's), and this browser's marks its failed press undid. */
+export function withServerAnswers(m: Map<string, SentEntry>, answers: ServerAnswer[], now = Date.now()): Map<string, SentEntry> {
+  const next = new Map(m);
+  // the server's earlier answers no longer listed (brought back, or older than the window) leave; ours stay
+  const listed = new Set(answers.filter((a) => LANDS.has(a.state)).flatMap((a) => SERVER_SLOT_KINDS.map((k) => `${k}:${a.target}`)));
+  for (const [k, v] of next) if (v.server && !listed.has(k)) next.delete(k);
+  let n = 0;
+  for (const a of answers) {
+    const at = Date.parse(a.at);
+    if (!Number.isFinite(at) || now - at >= SENT_KEEP_MS) continue;
+    for (const kind of SERVER_SLOT_KINDS) {
+      const slot = `${kind}:${a.target}`;
+      const mine = next.get(slot);
+      if (LANDS.has(a.state)) {
+        if (!mine) next.set(slot, { id: -++n, said: "Answered", title: "", at, gone: true, server: true });
+      } else if (mine && !mine.server && mine.at <= at + 60_000) {
+        // failed or brought back after this mark: the card is his to answer again, here as on every other device
+        next.delete(slot);
+      }
+    }
+  }
+  return next;
+}
+let serverKey = "";
+/** Fold the server's answers in (lib/inbox reads them with the status batch and the review list). */
+export function applyServerAnswers(answers: ServerAnswer[] | undefined) {
+  if (!answers) return;
+  const key = answers.map((a) => `${a.target}|${a.at}|${a.state}`).join(" ");
+  if (key === serverKey) return;
+  serverKey = key;
+  const next = withServerAnswers(sent, answers);
+  const same = next.size === sent.size && [...next].every(([k, v]) => sent.get(k) === v);
+  if (same) return;
   sent = next;
   saveSent(sent);
   emit();
@@ -268,6 +329,7 @@ function savePlaces(list: string, rows: { slot: string }[]) {
 /** Tests only. */
 export const resetSent = () => {
   sent = new Map();
+  serverKey = "";
   try {
     storage()?.removeItem(STORE);
     storage()?.removeItem(PLACES);

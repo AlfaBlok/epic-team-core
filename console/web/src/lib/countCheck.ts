@@ -6,6 +6,7 @@
  *   section pill  ==  open cards drawn in it ([data-inbox-open], a Sent row is never one)
  *   top bar red   ==  Blocked on you + Decisions waiting on you      top bar green  ==  Done, waiting for your review
  *
+ *   menu Inbox red/green  ==  top bar red/green (E948-S141 iteration 2: phone and laptop read the same numbers)
  * The same function runs in the unit test (inboxCountsMatchCards.test.tsx) and on his live inbox after each release
  * (hosted/console/scripts/inbox-count-check.mjs calls `window.inboxCountCheck()` on production, read only, at 390 px).
  * A folded section draws no cards, so it is reported `folded` and not compared: the live check opens every section first.
@@ -23,6 +24,8 @@ export interface SectionCount {
 export interface CountCheck {
   sections: SectionCount[];
   topbar: { red: number | null; green: number | null; redCards: number | null; greenCards: number | null } | null;
+  /** E948-S141 iteration 2: the menu's Inbox pills (the laptop's sidebar; the phone's menu when open), null when not drawn */
+  sidebar: { red: number | null; green: number | null } | null;
   mismatches: string[];
 }
 
@@ -73,7 +76,17 @@ export function inboxCountCheck(root: ParentNode = document): CountCheck {
       if (green !== null && greenCards !== null && green !== greenCards) mismatches.push(`top bar green: ${green}, ${greenCards} open cards in Done, waiting for your review`);
     }
   }
-  return { sections, topbar, mismatches };
+  // E948-S141 iteration 2 (the owner 18 Nov 18:30Z: "See counters on phone vs desktop"): the menu's Inbox pills say what
+  // the top bar says, which is what the sections draw
+  let sidebar: CountCheck["sidebar"] = null;
+  if (root.querySelector('[data-testid="nav-inbox"]')) {
+    sidebar = { red: pillOf(root, "waiting-count"), green: pillOf(root, "team-review-count") };
+    if (topbar) {
+      if (sidebar.red !== null && topbar.red !== null && sidebar.red !== topbar.red) mismatches.push(`menu Inbox red: ${sidebar.red}, top bar red ${topbar.red}`);
+      if (sidebar.green !== null && topbar.green !== null && sidebar.green !== topbar.green) mismatches.push(`menu Inbox green: ${sidebar.green}, top bar green ${topbar.green}`);
+    }
+  }
+  return { sections, topbar, sidebar, mismatches };
 }
 
 declare global {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, type MilestoneStatusView, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
 import { useSharedQuery } from "@/lib/data";
 import { useSnoozes } from "@/lib/snooze";
-import { answeredHere, answeredSlot, useSentVersion } from "@/lib/sentRows";
+import { answeredHere, answeredSlot, applyServerAnswers, useSentVersion } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
 
 /**
@@ -107,12 +107,27 @@ export function reviewCards<T extends Pick<ReviewItem, "id" | "milestoneId">>(
 }
 
 /** The world's status batch, one fetch for every reader (sidebar, top bar, project switcher, Team home). */
-export const useStatusBatch = () => useSharedQuery<StatusBatch>("status", () => api.listStatus(), { tag: "inbox" });
+/**
+ * E948-S141 iteration 2 (the owner 18 Nov 18:30Z: "See counters on phone vs desktop. It's broken nasty."): what he
+ * answered on any device (GET /api/presses/answered), read with every list a count stands for, so his phone and his
+ * laptop leave the same cards out (lib/sentRows withServerAnswers). One shared fetch, polled with the inbox.
+ */
+export function useServerAnswers() {
+  const { data } = useSharedQuery("presses-answered", () => (api.listAnsweredPresses ? api.listAnsweredPresses() : Promise.resolve(undefined)), { tag: "inbox" });
+  useEffect(() => applyServerAnswers(data?.answers), [data]);
+}
+export const useStatusBatch = () => {
+  useServerAnswers();
+  return useSharedQuery<StatusBatch>("status", () => api.listStatus(), { tag: "inbox" });
+};
 /** One milestone's status, one fetch for its page's tab count and its Waiting on you list. */
 export const useMilestoneStatus = (milestoneId: string) =>
   useSharedQuery<MilestoneStatusView>(`status:${milestoneId}`, () => api.getMilestoneStatus(milestoneId), { tag: "inbox" });
 /** The review cards, one fetch for every reader (green pills and the review section). */
-export const useReviewList = () => useSharedQuery<(ReviewItem & { milestoneTitle?: string })[]>("review-items", () => api.listReviewItems(), { tag: "inbox" });
+export const useReviewList = () => {
+  useServerAnswers();
+  return useSharedQuery<(ReviewItem & { milestoneTitle?: string })[]>("review-items", () => api.listReviewItems(), { tag: "inbox" });
+};
 
 /** The red list (and so the red count) of a status batch or one milestone's status, with this browser's snoozes applied. */
 export function useBlocked(status: { items?: PendingItem[] } | undefined, o: { keep?: Keep; nodeKey?: string } = {}) {

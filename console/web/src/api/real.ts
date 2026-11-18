@@ -537,6 +537,7 @@ export function createRealClient(): ApiClient {
     relaunchReviewItem: (id, feedback, attachments) => press("POST", `/review-items/${encodeURIComponent(id)}/relaunch`, { feedback, ...(attachments?.length ? { attachments } : {}) }, { undo: !id.startsWith("post~") }),
     denyReviewItem: (id, reason, attachments) => press("POST", `/review-items/${encodeURIComponent(id)}/deny`, { reason, ...(attachments?.length ? { attachments } : {}) }, { undo: !id.startsWith("post~") }),
     undoPress: (id) => call("POST", `/presses/${encodeURIComponent(id)}/undo`),
+    listAnsweredPresses: () => call("GET", "/presses/answered"),
     undoAnswer: (id) => call("POST", `/owner-responses/${encodeURIComponent(id)}/undo`),
     reopenReviewRow: (card) => press("POST", "/review-items/reopen", card),
     commentClosedCard: (input) => press("POST", "/closed-cards/comment", input),

@@ -650,6 +650,8 @@ export interface ApiClient {
    * 409 once it is being written or landed); `reopenReviewRow` sets a row his press closed back to review after it landed.
    */
   undoPress(pressId: string): Promise<{ undone: true }>;
+  /** E948-S141: his answers from every device in the last two hours, newest press per card (lib/sentRows withServerAnswers). */
+  listAnsweredPresses?(): Promise<{ since: string; answers: { target: string; at: string; action: string; state: string }[] }>;
   undoAnswer(responseId: string): Promise<{ undone: true; itemId: string }>;
   reopenReviewRow(card: ClosedCardRef & { /** the card's id: it lands after the close it undoes */ id?: string }): Promise<{ status: "review"; sha?: string }>;
   /** Add a last thought / Add comment: his words on a closed card, to its row or ask owner (spine first, then a wake). */

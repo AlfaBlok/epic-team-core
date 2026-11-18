@@ -261,3 +261,25 @@ describe("answer jobs: hold and cancel", () => {
     expect(jobs.cancel("a")).toBe(false);
   });
 });
+
+// E948-S141 iteration 2 (the owner 18 Nov 18:30Z: "See counters on phone vs desktop. It's broken nasty."): his answers from
+// every device, so his phone and his laptop leave the same cards out of their counts.
+describe("GET /api/presses/answered: what he answered on any device", () => {
+  it("lists the newest answer per card with its state; a snooze is not an answer; Bring it back in the window says undone", async () => {
+    const w = world();
+    const [one, two] = await w.cards();
+    const a = await w.req("POST", `/api/review-items/${encodeURIComponent(one.id)}/approve`);
+    await w.landed(a.pressId!);
+    await w.req("POST", `/api/review-items/${encodeURIComponent(two.id)}/snooze`, { hours: 24 });
+    let r = await w.req("GET", "/api/presses/answered");
+    expect(r.status).toBe(200);
+    expect(r.json.answers).toEqual([expect.objectContaining({ target: one.id, action: "review approve", state: "landed" })]);
+    // a press on the second card held in its undo window, then brought back: listed undone (the card is open again)
+    const h = await w.req("POST", `/api/review-items/${encodeURIComponent(two.id)}/complete`, undefined, { "x-undo-ms": "5000" });
+    r = await w.req("GET", "/api/presses/answered");
+    expect(r.json.answers.find((x: { target: string }) => x.target === two.id)).toMatchObject({ state: "landing" });
+    await w.req("POST", `/api/presses/${h.pressId}/undo`);
+    r = await w.req("GET", "/api/presses/answered");
+    expect(r.json.answers.find((x: { target: string }) => x.target === two.id)).toMatchObject({ state: "undone" });
+  });
+});
