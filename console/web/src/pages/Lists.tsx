@@ -158,7 +158,7 @@ function Load({ label, pct }: { label: string; pct?: number }) {
       ) : (
         <>
           <Progress value={pct} className="h-1.5" />
-          <span className="w-9 shrink-0 text-right tabular-nums">{Math.round(pct)}%</span>
+          <span className="w-10 shrink-0 whitespace-nowrap text-right tabular-nums">{Math.round(pct)}%</span>
         </>
       )}
     </div>
@@ -202,14 +202,22 @@ function SeatCard({ s }: { s: BoardSeat }) {
           <div className="text-sm font-semibold">{seatNumber(s.id)}</div>
           <div className="text-xs text-muted-foreground">{s.plan ?? "Plan not read"}</div>
         </div>
-        <Badge variant={st.variant} title={s.limitedUntil ? `until ${formatDateTime(s.limitedUntil)}` : undefined}>
+        <Badge className="shrink-0 whitespace-nowrap" variant={st.variant} title={s.limitedUntil ? `until ${formatDateTime(s.limitedUntil)}` : undefined}>
           {st.label}
-          {s.state === "limited" && s.limitedUntil && <span className="ml-1 font-normal">· back {formatRelative(s.limitedUntil)}</span>}
         </Badge>
       </div>
+      {s.state === "limited" && s.limitedUntil && (
+        <div className="-mt-1 text-xs text-muted-foreground" title={formatDateTime(s.limitedUntil)}>
+          Back {formatRelative(s.limitedUntil)}
+        </div>
+      )}
       <div className="text-xs">
         <div className="text-muted-foreground">On it now</div>
-        <People list={s.now} max={2} />
+        {s.now.length === 0 && s.running > 0 ? (
+          <span>{s.running === 1 ? "1 turn running" : `${s.running} turns running`}, its persona not recorded on this seat</span>
+        ) : (
+          <People list={s.now} max={2} />
+        )}
       </div>
       <div className="text-xs">
         <div className="text-muted-foreground">Last 24 hours · {s.runs24h} {s.runs24h === 1 ? "turn" : "turns"}</div>
