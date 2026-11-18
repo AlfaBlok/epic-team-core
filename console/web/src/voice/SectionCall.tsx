@@ -116,8 +116,9 @@ export function teamCard(c: TeamCard): PressableCard {
     buttons: [...goals.map(label), ANSWER_IN_WORDS],
     press: async (button, words) => {
       const pick = goals.findIndex((g) => label(g) === button);
-      await mutate(() => api.answerTeamCard(c.id, pick >= 0 ? { pick, via: "voice" } : { text: words ?? "", via: "voice" }), "inbox");
-      return done(pick >= 0 ? `picked ${button}` : "his answer was sent");
+      const r = await mutate(() => api.answerTeamCard(c.id, pick >= 0 ? { pick, via: "voice" } : { text: words ?? "", via: "voice" }), "inbox");
+      // its commit, when the route wrote one: the voice says "it landed" only with it
+      return done(`${pick >= 0 ? `picked ${button}` : "his answer was sent"}${r?.sha ? `, landed ${r.sha.slice(0, 9)}` : ""}`);
     },
   };
 }

@@ -80,6 +80,7 @@ import type {
   RunCommit,
   RunInput,
   Seat,
+  SeatBoard,
   Me,
   HostsView,
   TeamService,
@@ -447,6 +448,8 @@ export interface ApiClient {
   /** the first `limit` tickets (all when absent) and how many there are. */
   listTicketsTop(limit?: number): Promise<{ tickets: Ticket[]; total: number }>;
   listSeats(): Promise<Seat[]>;
+  /** every AI subscription with the personas on it and its load. */
+  getSeatBoard(): Promise<SeatBoard>;
   /** status of the main server/the worker server (server-cached ~15 s; never starts the worker server). */
   getHosts(): Promise<HostsView>;
   /** the team services (the memory service, Gmail), their status and which personas may use each; refresh re-probes. */

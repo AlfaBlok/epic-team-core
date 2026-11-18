@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BYE_MAX_MS, CallEngine, deskQuestionNote, deskReplyNote, needsHisAnswer, HANDOFF_NOTE, GREETING_MAX_MS, greetingInstructions, startsGreeting, FIXED_SLACK_WORDS, LISTEN_ACK_GAP_MS, LISTEN_ACK_WAIT_MS, LISTEN_ACKS, LISTEN_DONE, LISTEN_SEND_LINE, LISTEN_START_LINE, LISTEN_STILL_LINE, NORMAL_TURN, OPENING_NUDGE, QUIET_NUDGE, type Limits, type Media, type VoiceApi } from "./engine";
+import { BYE_MAX_MS, CallEngine, deskQuestionNote, deskReplyNote, needsHisAnswer, HANDOFF_NOTE, GREETING_MAX_MS, greetingInstructions, startsGreeting, FIXED_SLACK_WORDS, LISTEN_ACK_GAP_MS, LISTEN_ACK_WAIT_MS, LISTEN_ACKS, LISTEN_DONE, LISTEN_SEND_LINE, LISTEN_START_LINE, LISTEN_STILL_LINE, NORMAL_TURN, LISTEN_TURN, FEEDBACK_CUE, pressNote, OPENING_NUDGE, QUIET_NUDGE, type Limits, type Media, type VoiceApi } from "./engine";
 
 // the browser side of Call the desk: tools answered through the console, every usage forwarded to the
 // cost meter, captions and transcript kept, and the hang-ups (button, quiet, 20 min, console stop).
@@ -154,11 +154,16 @@ describe("T42-S5 call engine", () => {
     expect(f.engine.view().onCard).toEqual({ id: "ri_1", place: "card 1 of 1", title: "A card", link: { label: "The page", url: "https://example.com/p" } });
     f.sent.length = 0;
     f.api.tool.mockImplementationOnce(async () => ({ place: "card 1 of 1", pos: 1, total: 1, press: { id: "ri_1", kind: "review", button: "Mark complete", title: "A card" } }) as any);
+    // the press log shows its commit, so the voice may say it landed
+    f.api.tool.mockImplementationOnce(async () => ({ state: "landed", sha: "8ed652c5a" }) as any);
     await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Mark complete", confirmed: true }) });
     await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    await vi.waitFor(() => expect(f.sent.length).toBeGreaterThan(0));
     expect(press).toHaveBeenCalledWith({ id: "ri_1", kind: "review", button: "Mark complete", title: "A card" });
-    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ result: "done: marked complete" });
-    expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "pressed Mark complete on card 1 of 1: done: marked complete")).toBe(true);
+    expect(f.api.tool).toHaveBeenLastCalledWith("call_1", "press_landing", expect.objectContaining({ cardId: "ri_1" }));
+    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ result: "done: marked complete, landed 8ed652c5a" });
+    expect(JSON.parse(f.sent[0].item.output).note).toMatch(/Say plainly: pressed, it landed/);
+    expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "pressed Mark complete on card 1 of 1: done: marked complete, landed 8ed652c5a")).toBe(true);
   });
 
   it("a whole-inbox call presses with the page's hands and shows the card from the console's step", async () => {
@@ -176,8 +181,11 @@ describe("T42-S5 call engine", () => {
     f.api.tool.mockImplementationOnce(async () => ({ place: "card 3 of 9", pos: 3, total: 9, press: { id: "w1", kind: "ask", button: "Yes: go ahead", title: "x", milestoneId: "ms_1" } }) as any);
     await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Yes: go ahead", confirmed: true }) });
     await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    await vi.waitFor(() => expect(f.sent.length).toBeGreaterThan(0));
     expect(press).toHaveBeenCalledWith({ id: "w1", kind: "ask", button: "Yes: go ahead", title: "x", milestoneId: "ms_1" });
-    expect(JSON.parse(f.sent[0].item.output).note).toMatch(/pressed, it landed/);
+    // no commit in the press log yet, so the voice says it is still saving, never that it landed
+    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ result: "done: said yes, still saving" });
+    expect(JSON.parse(f.sent[0].item.output).note).toMatch(/Pressed, it's still saving.*Never say it landed/);
   });
 
   it("his words about an objective are filed as he said them (the captions since it came up), not the voice's summary", async () => {
@@ -236,6 +244,8 @@ describe("T42-S5 call engine", () => {
     expect(f.sent.some((e) => e.item?.role === "system")).toBe(false);
     expect(f.engine.view().warn).toMatch(/2 minutes left/);
     await f.emit({ type: "input_audio_buffer.speech_stopped" });
+    expect(f.sent.some((e) => e.item?.role === "system")).toBe(false); // not into his breath
+    await f.run(2_000);
     expect(f.sent.find((e) => e.item?.role === "system")?.item.content[0].text).toMatch(/two minutes left/);
   });
 
@@ -497,7 +507,7 @@ describe("PLAN-57 call listen mode", () => {
     const f = fakes(LIMITS);
     await f.open();
     await enter(f);
-    expect(f.sent[0]).toEqual({ type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: { ...NORMAL_TURN, silence_duration_ms: 1200, create_response: false, interrupt_response: true } } } } });
+    expect(f.sent[0]).toEqual({ type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: LISTEN_TURN } } } });
     expect(f.sent[1]).toMatchObject({ type: "conversation.item.create", item: { type: "function_call_output", call_id: "c_listen" } });
     expect(f.sent[2]).toEqual({ type: "response.create", response: { instructions: `Say exactly "${LISTEN_START_LINE}" and nothing else.`, tool_choice: "none" } });
     expect(f.sent).toHaveLength(3);
@@ -556,6 +566,7 @@ describe("PLAN-57 call listen mode", () => {
     expect(lines.find((l) => l.text === "I want to give feedback.")?.feedback).toBeUndefined();
     expect(lines.find((l) => l.text === "Done.")?.feedback).toBeUndefined();
     await done(f, "r_send");
+    await f.run(2_000); // a desk answer waits until he has been quiet a moment
     // Now the old answer is read, then the desk files the feedback and the voice confirms it in one line.
     expect(f.sent.some((e) => /The desk replied to "what moved\?"/.test(e.item?.content?.[0]?.text ?? ""))).toBe(true);
     await done(f, "r_old");
@@ -920,6 +931,8 @@ describe("T42-S33 (call_37f96758): a desk answer is spoken promptly, never withh
     await f.run(2_500);
     expect(f.sent).toEqual([]); // he is mid-sentence: nobody is cut off
     await f.emit({ type: "input_audio_buffer.speech_stopped" });
+    expect(f.sent).toEqual([]); // and not into his breath either
+    await f.run(2_000);
     expect(f.sent.map((e) => e.type)).toEqual(["conversation.item.create", "response.create"]);
     expect(f.sent[0].item.content[0].text).toBe(deskReplyNote("link to the queue", "Link: https://social.example.com"));
   });
@@ -928,5 +941,101 @@ describe("T42-S33 (call_37f96758): a desk answer is spoken promptly, never withh
     expect(HANDOFF_NOTE).toMatch(/When its answer comes, you tell him at once/);
     expect(HANDOFF_NOTE).not.toMatch(/do not mention the desk/);
     expect(deskReplyNote("x", "y")).not.toMatch(/Do not read this out/);
+  });
+});
+
+describe("the call keeps its word (his call defects of 18 Nov)", () => {
+  const onCard = async (f: ReturnType<typeof fakes>) => {
+    f.engine.hands = { press: vi.fn(async () => "done: marked complete"), show: vi.fn() };
+    await f.open();
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 2 of 5", id: "rv2", title: "Your call was given your inbox.", pos: 2, total: 5, card: "…" }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_n", name: "read_card", arguments: JSON.stringify({ number: 2 }) });
+    await f.emit({ type: "response.done", response: { id: "resp_n" } });
+    await f.emit({ type: "response.done", response: { id: "resp_said" } });
+    f.sent.length = 0;
+  };
+
+  it("his yes on a card that the voice did not press: the console checks it and tells the voice to press now (call_c83e51e8 card 2)", async () => {
+    const f = fakes();
+    await onCard(f);
+    const note = 'He said yes on card 2 of 5: press it now: call press_card with button "Mark complete", number 2 and confirmed=true.';
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 2 of 5", button: "Mark complete", note }) as any);
+    const his = "My answer is yes, but can you actually give the feedback that I'm literally on a call right now. Can you pass that feedback on?";
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "y1", transcript: his });
+    // the voice passes the feedback to the desk and presses nothing
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_a", name: "ask_the_desk", arguments: JSON.stringify({ request: "his feedback" }) });
+    await f.emit({ type: "response.done", response: { id: "resp_a" } });
+    await f.emit({ type: "response.done", response: { id: "resp_a2" } });
+    await f.run(4_000);
+    expect(f.api.tool).toHaveBeenCalledWith("call_1", "yes_check", { cardId: "rv2", words: his });
+    expect(f.sent.find((e) => e.item?.role === "system")?.item.content[0].text).toBe(note);
+    expect(f.engine.view().lines.some((l) => l.text === "his yes on card 2 of 5: press Mark complete")).toBe(true);
+  });
+
+  it("a press in the same turn: no yes check", async () => {
+    const f = fakes();
+    await onCard(f);
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "y1", transcript: "Yes." });
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 2 of 5", pos: 2, total: 5, press: { id: "rv2", kind: "review", button: "Mark complete", title: "x" } }) as any);
+    f.api.tool.mockImplementationOnce(async () => ({ state: "landed", sha: "abc12345" }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Mark complete", confirmed: true }) });
+    await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    await f.run(4_000);
+    expect(f.api.tool.mock.calls.some((c) => c[1] === "yes_check")).toBe(false);
+  });
+
+  it("a press still saving: the voice says so, then tells him when its commit shows", async () => {
+    const f = fakes();
+    await onCard(f);
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 2 of 5", pos: 2, total: 5, press: { id: "rv2", kind: "review", button: "Mark complete", title: "x" } }) as any);
+    f.api.tool.mockImplementationOnce(async () => ({ state: "landing" }) as any);
+    f.api.tool.mockImplementation(async () => ({ state: "landing" }) as any);
+    f.engine.pause = async (ms: number) => void (f.clock.t += ms);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Mark complete", confirmed: true }) });
+    await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    await vi.waitFor(() => expect(f.sent.length).toBeGreaterThan(0));
+    expect(JSON.parse(f.sent[0].item.output).note).toMatch(/Pressed, it's still saving/);
+    await f.emit({ type: "response.done", response: { id: "resp_saving" } });
+    f.sent.length = 0;
+    f.api.tool.mockImplementation(async () => ({ state: "landed", sha: "8ed652c5a" }) as any);
+    await f.run(12_000);
+    expect(f.engine.view().lines.some((l) => l.text === "landed 8ed652c5a: Mark complete on card 2 of 5")).toBe(true);
+    expect(f.sent.find((e) => e.item?.role === "system")?.item.content[0].text).toMatch(/has landed now: its commit is in the repo/);
+  });
+
+  it("'pressed, it landed' only with a commit", () => {
+    expect(pressNote("done: marked complete, landed 8ed652c5a")).toMatch(/Say plainly: pressed, it landed/);
+    expect(pressNote("done: marked complete, still saving")).toMatch(/Never say it landed/);
+    expect(pressNote("done: said yes")).toMatch(/Never say it landed/);
+    expect(pressNote("not pressed: gone")).toMatch(/did not go through/);
+  });
+
+  it("'please don't interrupt me' (call_a3e08f34): the voice stops, listen mode is on, his line is the first part held", async () => {
+    const f = fakes();
+    await f.open();
+    await f.emit({ type: "response.created", response: { id: "r_talking" } });
+    f.sent.length = 0;
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "f1", transcript: "This key result is badly worded, just pass the feedback, please don't interrupt me." });
+    expect(f.sent[0]).toEqual({ type: "response.cancel" });
+    expect(f.sent[1]).toEqual({ type: "output_audio_buffer.clear" });
+    expect(f.sent[2]).toEqual({ type: "session.update", session: { type: "realtime", audio: { input: { turn_detection: LISTEN_TURN } } } });
+    expect(f.engine.view().listening).toBe(true);
+    // the voice's ask_the_desk racing it is held, not sent
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_a", name: "ask_the_desk", arguments: JSON.stringify({ request: "badly worded" }) });
+    await f.emit({ type: "response.done", response: { id: "r_talking" } });
+    expect(f.api.ask).not.toHaveBeenCalled();
+    await f.emit({ type: "response.done", response: { id: "r_start" } });
+    await f.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "f2", transcript: "And the evidence link is missing. Done." });
+    await vi.waitFor(() => expect(f.api.ask).toHaveBeenCalledTimes(1));
+    expect(f.api.ask).toHaveBeenCalledWith("call_1", expect.any(String), true, "This key result is badly worded, just pass the feedback, please don't interrupt me.\nAnd the evidence link is missing.", "feedback");
+  });
+
+  it("feedback cues: forward-looking only", () => {
+    for (const t of ["I want to give you some feedback.", "Please don't interrupt me.", "Let me finish.", "Just listen.", "No me interrumpas."]) expect(FEEDBACK_CUE.test(t)).toBe(true);
+    for (const t of ["Can you pass that feedback on?", "What's waiting on me?", "Yes, go for it."]) expect(FEEDBACK_CUE.test(t)).toBe(false);
+  });
+
+  it("the default turn detection waits for his whole thought", () => {
+    expect(NORMAL_TURN).toMatchObject({ type: "semantic_vad", eagerness: "low", interrupt_response: true });
   });
 });

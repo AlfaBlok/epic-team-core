@@ -135,7 +135,7 @@ export function cardText(c: InboxCard): string {
 export function pressRule(): string {
   return [
     `Pressing his buttons (press_card): you can press his own buttons on the card he is on, the ones the card lists as yours to press. The choices are on his screen: never read the list of buttons aloud; say the team's recommendation when there is one and ask what he wants.`,
-    `Before you press, say back in one line what you will press on which card ("Mark the voice call card complete?") and press only after his spoken yes; then call press_card with that button (his words for a button ending in "…") and confirmed=true. When the result says it landed, say plainly "pressed, it landed" and offer the next card; if it did not go through, say so in one line. Never say a press is not possible yet, never press on a maybe, never on your own idea, never twice.`,
+    `Before you press, say back in one line what you will press on which card ("Mark the voice call card complete?") and press only after his spoken yes; then call press_card with that button (his words for a button ending in "…") and confirmed=true. Say "pressed, it landed" only when the result shows its commit (landed <commit>); when it says still saving, say "Pressed, it's still saving. I'll tell you when it lands." and nothing about landing; if it did not go through, say so in one line. His plain yes on a card, even in a line that also asks for something else ("My answer is yes, but pass this on"), is his yes to the card: press it and pass the rest to the desk. Never say a press is not possible yet, never press on a maybe, never on your own idea, never twice.`,
     `A card with no button for you, a change he wants, or anything else he asks goes to the desk with ask_the_desk, naming the card's code from the list.`,
   ].join("\n");
 }
@@ -259,7 +259,7 @@ export function pressStep(cards: InboxCard[], pos: number, args: { number?: unkn
   if (!button) return { place, id, pos: at, total, note: card.buttons?.length ? `Not pressed: that is not one of his buttons on this card (${card.buttons.join(" · ")}). Ask him which.` : "Not pressed: this card has no button you may press. Pass his answer to the desk with ask_the_desk." };
   const w = typeof args.words === "string" ? args.words.trim() : "";
   if (takesWords(button) && !w) return { place, id, pos: at, total, note: `Not pressed: ${button} needs his words. Ask him what to say.` };
-  return { place, id, pos: at, total, press: { id: card.id, kind: card.kind, button, ...(takesWords(button) ? { words: w.slice(0, 4000) } : {}), title: card.title, ...(card.milestoneId ? { milestoneId: card.milestoneId } : {}) }, note: "The page presses it now; once the result says it landed, say plainly \"pressed, it landed\"" };
+  return { place, id, pos: at, total, press: { id: card.id, kind: card.kind, button, ...(takesWords(button) ? { words: w.slice(0, 4000) } : {}), title: card.title, ...(card.milestoneId ? { milestoneId: card.milestoneId } : {}) }, note: "The page presses it now; say \"pressed, it landed\" only when the result shows its commit" };
 }
 
 /**
@@ -340,4 +340,51 @@ export function briefingRule(total: number): string {
     `When he wants his briefing or to go through his objectives ('brief me', 'go through my objectives', 'next objective'), walk them one at a time in his order: next_objective for the next, read_objective for one in full (its number, or -1 to go back). The console keeps which objective he is on. For each, say its place and name, its light, how many key results are green, the red ones in a few words, where it stands, and his newest words on it if any, in three or four short sentences, then ask what he thinks and stop.`,
     `When he has said what he thinks of one, say back in one line what you will file ("I'll file on Notes testers: push the second tester this week. File it?") and on his yes call file_objective_words with his words as he said them (never your summary) and confirmed=true. It is filed on that objective, where its owner reads it on the next wake. Then offer the next objective. Something he wants done goes to the desk with ask_the_desk as well.`,
   ].join("\n");
+}
+
+/**
+ * his yes on a card(his call_c83e51e8: on card 2 he said "My answer is yes, but can you actually give the
+ * feedback …" and the call passed the feedback and pressed nothing): a spoken yes on a card is a press, every time, even
+ * when the same line asks for something else. The after-call check counts yeses with the same words.
+ */
+export const SPOKEN_YES = /^\W*(?:yes|yeah|yep|yup|sure|ok(?:ay)?,? go|go for it|go ahead|do it|press it|s[ií],? (?:dale|hazlo|adelante))\b|\b(?:go for it|my answer is yes|the answer is yes|press it|mark it complete|do what you recommend|go with (?:your|the) recommendation)\b/i;
+export const SPOKEN_NO = /\b(?:no|not yet|don't|do not|wait|park it|skip)\b/i;
+/** a yes that moves on, not an answer to the card ("yes, next card"). */
+const MOVES_ON = /\b(?:next(?: one| card)?|skip|later|go back|back to|previous)\b/i;
+
+/** his yes on a card: a yes, no no (after "no need" is cut off), and not a yes that only moves on. */
+export function saidYes(text: string): boolean {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!SPOKEN_YES.test(t)) return false;
+  if (SPOKEN_NO.test(t.replace(/\b(?:don't need|no need|no problem)\b.*/i, ""))) return false;
+  return !MOVES_ON.test(t);
+}
+
+/** the button his plain yes presses on a card: the team's recommendation, else a Yes choice, else Mark complete. */
+export function yesButton(card: InboxCard): string | undefined {
+  const b = card.buttons ?? [];
+  const usable = b.filter((x) => !takesWords(x) && !/^(?:no|park|drop|not)\b/i.test(x));
+  if (card.recommend) {
+    const r = usable.find((x) => x === card.recommend || x.toLowerCase().startsWith(card.recommend!.toLowerCase()));
+    if (r) return r;
+  }
+  return usable.find((x) => /^yes\b/i.test(x)) ?? usable.find((x) => x === MARK_COMPLETE) ?? (card.kind === "review" ? usable[0] : undefined);
+}
+
+/**
+ * The console's check after each of his lines on a card (`yes_check`, the page and the TEST script call it, never the
+ * voice): when he said yes on the card he was on and the call has not pressed it, the voice is told to press now.
+ */
+export function yesCheck(cards: InboxCard[], cardId: string, words: string, pressed: string[]): { place?: string; button?: string; note?: string } {
+  const at = cards.findIndex((c) => c.id === cardId);
+  if (at < 0 || pressed.includes(cardId) || !saidYes(words)) return {};
+  const card = cards[at];
+  const button = yesButton(card);
+  const place = `card ${at + 1} of ${cards.length}`;
+  if (!button) return { place };
+  return {
+    place,
+    button,
+    note: `He said yes on ${place} ("${card.title.slice(0, 80)}"): that is his answer, and a spoken yes is a press. Press it now: call press_card with button "${button}", number ${at + 1} and confirmed=true. Say nothing before the result; then say "pressed" and what the result says about landing. Anything else he asked in the same breath went to the desk separately.`,
+  };
 }

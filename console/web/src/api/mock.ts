@@ -1291,6 +1291,44 @@ const mockMail = () => ({
       return ok(db.seats);
     },
 
+    /** the sample seats as the Seats screen reads them: who ran on each from the sample runs, never padded to 20. */
+    async getSeatBoard() {
+      const seats = db.seats.map((s) => {
+        const mine = db.runs.filter((r) => r.seat === s.id);
+        const tally = (rs: typeof mine) => {
+          const m = new Map<string, number>();
+          for (const r of rs) {
+            const name = db.personas.find((p) => p.id === r.personaId)?.name ?? "Unnamed persona";
+            m.set(name, (m.get(name) ?? 0) + 1);
+          }
+          return [...m].map(([name, runs]) => ({ name, world: "EpicTeam", runs })).sort((a, b) => b.runs - a.runs);
+        };
+        const open = mine.filter((r) => r.outcome === "running");
+        const state = s.status === "logged_out" ? "signed_out" : s.status === "limited" ? "limited" : open.length || s.inFlight ? "working" : s.status === "ok" ? "free" : "unknown";
+        return {
+          id: s.id,
+          plan: s.status === "logged_out" ? undefined : "Claude Team",
+          state: state as "working" | "free" | "limited" | "signed_out" | "unknown",
+          usage5h: s.usage5h,
+          usageWeekly: s.usageWeekly,
+          limitedUntil: s.resetsAt.limitedUntil,
+          running: Math.max(open.length, s.inFlight),
+          now: tally(open),
+          day: tally(mine),
+          runs24h: mine.length,
+        };
+      });
+      const names = new Set(seats.flatMap((s) => s.day.map((p) => p.name)));
+      return ok({
+        seats,
+        target: 20,
+        signedIn: seats.filter((s) => s.state !== "signed_out").length,
+        workingNow: seats.filter((s) => s.state === "working").length,
+        personas: names.size,
+        runs24h: seats.reduce((n, s) => n + s.runs24h, 0),
+      });
+    },
+
     /** every world reads the sample export (lib/social.ts), marked `sample`. */
     async getSocial(tenantId: string) {
       return ok(sampleSocialData(tenantId));

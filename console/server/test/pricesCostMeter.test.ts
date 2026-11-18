@@ -191,7 +191,8 @@ describe("E942-S5 the two tools and the transcript", () => {
     const m = [msg("1", "user", "other"), msg("2", "assistant", "old"), msg("3", "user", `${head}\nSam…`), msg("4", "assistant", "checking"), msg("5", "assistant", "Done: answered E945-A1 yes.")];
     expect(answerIn({ messages: m, working: true }, head)).toMatchObject({ state: "working" });
     expect(answerIn({ messages: m, working: false }, head)).toEqual({ state: "answered", answer: "Done: answered E945-A1 yes." });
-    expect(answerIn({ messages: [...m, msg("6", "user", "next")], working: true }, head).state).toBe("answered");
+    // a later question steered into a running turn no longer makes a line between tool calls the answer
+    expect(answerIn({ messages: [...m, msg("6", "user", "next")], working: true }, head).state).toBe("working");
   });
 
   it("the transcript lands in the desk chat once, marked as a call, with time, length and cost", async () => {

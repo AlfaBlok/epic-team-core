@@ -2,6 +2,7 @@ import { ClaimChip } from "@/components/tree";
 import { Link } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
+import type { BoardPersona, BoardSeat } from "@/api/types";
 import { useQuery } from "@/lib/data";
 import { formatDateTime, formatRelative, milestoneName } from "@/lib/format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -148,67 +149,124 @@ export function TicketsPage() {
   );
 }
 
-function Usage({ pct }: { pct?: number }) {
-  if (pct === undefined) return <span className="text-muted-foreground">unknown</span>;
+function Load({ label, pct }: { label: string; pct?: number }) {
   return (
-    <div className="flex min-w-[8rem] items-center gap-2">
-      <Progress value={pct} className="h-1.5" />
-      <span className="w-9 text-right text-xs tabular-nums">{pct}%</span>
+    <div className="flex items-center gap-2 text-xs">
+      <span className="w-14 shrink-0 text-muted-foreground">{label}</span>
+      {pct === undefined ? (
+        <span className="text-muted-foreground">not read</span>
+      ) : (
+        <>
+          <Progress value={pct} className="h-1.5" />
+          <span className="w-9 shrink-0 text-right tabular-nums">{Math.round(pct)}%</span>
+        </>
+      )}
     </div>
   );
 }
 
+const SEAT_STATE: Record<BoardSeat["state"], { label: string; variant: "green" | "blue" | "red" | "gray" | "amber" }> = {
+  working: { label: "Working", variant: "green" },
+  free: { label: "Free", variant: "blue" },
+  limited: { label: "At its limit", variant: "amber" },
+  signed_out: { label: "Signed out", variant: "red" },
+  unknown: { label: "Load not read", variant: "gray" },
+};
+
+const seatNumber = (id: string) => id.replace(/^seat/i, "Seat ");
+
+function People({ list, max }: { list: BoardPersona[]; max: number }) {
+  if (!list.length) return <span className="text-muted-foreground">nobody</span>;
+  const shown = list.slice(0, max);
+  return (
+    <span>
+      {shown.map((p, i) => (
+        <span key={`${p.world}-${p.name}`}>
+          {i > 0 && ", "}
+          <span className="text-foreground">{p.name}</span>
+          {p.world && p.world !== "EpicTeam" && <span className="text-muted-foreground"> in {p.world}</span>}
+          {p.runs > 1 && <span className="text-muted-foreground tabular-nums"> ×{p.runs}</span>}
+        </span>
+      ))}
+      {list.length > max && <span className="text-muted-foreground">, {list.length - max} more</span>}
+    </span>
+  );
+}
+
+function SeatCard({ s }: { s: BoardSeat }) {
+  const st = SEAT_STATE[s.state];
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border bg-card p-3" data-testid="seat-card" data-seat={s.id}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{seatNumber(s.id)}</div>
+          <div className="text-xs text-muted-foreground">{s.plan ?? "Plan not read"}</div>
+        </div>
+        <Badge variant={st.variant} title={s.limitedUntil ? `until ${formatDateTime(s.limitedUntil)}` : undefined}>
+          {st.label}
+          {s.state === "limited" && s.limitedUntil && <span className="ml-1 font-normal">· back {formatRelative(s.limitedUntil)}</span>}
+        </Badge>
+      </div>
+      <div className="text-xs">
+        <div className="text-muted-foreground">On it now</div>
+        <People list={s.now} max={2} />
+      </div>
+      <div className="text-xs">
+        <div className="text-muted-foreground">Last 24 hours · {s.runs24h} {s.runs24h === 1 ? "turn" : "turns"}</div>
+        <People list={s.day} max={3} />
+      </div>
+      <div className="mt-auto flex flex-col gap-1 border-t pt-2">
+        <Load label="5 hours" pct={s.usage5h} />
+        <Load label="Week" pct={s.usageWeekly} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Seats: every AI subscription the team runs on, who is on it and how loaded it is. Read-only (root L-80:
+ * with the console's pages, never under Settings). Only real seats from seats.json: never padded to the 20 the
+ * landing page shows; the gap is said in words. No account or company names.
+ */
 export function SeatsPage() {
-  const { data, error, loading } = useQuery(() => api.listSeats(), []);
+  const { data, error, loading } = useQuery(() => api.getSeatBoard(), []);
+  const count = data?.seats.length ?? 0;
   return (
     <>
-      <PageHeader title="Seats" description="Claude seats and their usage (from M1 seats.json, read-only)." />
+      <PageHeader title="Seats" description="Every AI subscription the team runs on, who is on it, and how loaded it is." />
       {error && <ErrorBox error={error} muted />}
       {loading && <Loading />}
       {data && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Seat</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>5-hour</TableHead>
-              <TableHead>Weekly</TableHead>
-              <TableHead>In flight</TableHead>
-              <TableHead>Resets</TableHead>
-              <TableHead>Read</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell className="font-medium">
-                  {s.name}
-                  {s.org && <span className="ml-2 text-xs font-normal text-muted-foreground">{s.org}</span>}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={s.status === "ok" ? "green" : s.status === "limited" ? "red" : "gray"} title={s.reason}>
-                    {s.status}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Usage pct={s.usage5h} />
-                </TableCell>
-                <TableCell>
-                  <Usage pct={s.usageWeekly} />
-                </TableCell>
-                <TableCell className="tabular-nums">{s.inFlight}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                  {s.limited && s.resetsAt.limitedUntil
-                    ? <span title={formatDateTime(s.resetsAt.limitedUntil)}>limited, resets {formatRelative(s.resetsAt.limitedUntil)}</span>
-                    : s.resetsAt.fiveHour
-                      ? <span title={formatDateTime(s.resetsAt.fiveHour)}>5h {formatRelative(s.resetsAt.fiveHour)}</span>
-                      : (s.reason ?? "—")}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-muted-foreground"><RelTime iso={s.readAt} /></TableCell>
-              </TableRow>
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4" data-testid="seat-summary">
+            {[
+              { n: count, what: count === 1 ? "AI subscription" : "AI subscriptions" },
+              { n: data.workingNow, what: "working now" },
+              { n: data.personas, what: data.personas === 1 ? "persona on them today" : "personas on them today" },
+              { n: data.runs24h, what: "turns in 24 hours" },
+            ].map((b) => (
+              <div key={b.what} className="bg-card px-3 py-2.5">
+                <div className="text-2xl font-semibold tabular-nums">{b.n}</div>
+                <div className="text-xs text-muted-foreground">{b.what}</div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+          <p className="mb-4 text-xs text-muted-foreground" data-testid="seat-target">
+            {count >= data.target
+              ? `${count} subscriptions running, the ${data.target} the landing page shows.`
+              : `${count} of the ${data.target} subscriptions the landing page shows are running today; ${data.target - count} more are not bought yet. ${count - data.signedIn > 0 ? `${count - data.signedIn} signed out.` : "All signed in."}`}
+            {data.readAt && <> Load read <RelTime iso={data.readAt} />.</>}
+          </p>
+          {count === 0 ? (
+            <Empty>No seats yet.</Empty>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {data.seats.map((s) => (
+                <SeatCard key={s.id} s={s} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </>
   );

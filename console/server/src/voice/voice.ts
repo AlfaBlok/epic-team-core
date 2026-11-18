@@ -6,7 +6,7 @@ import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
-import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
+import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
 
 /**
@@ -205,6 +205,28 @@ export function ensureVoiceTables(db: DB): void {
   // his objectives the call started with (JSON, the briefing's cards) and the one he is on (1-based, 0 = not started).
   if (!cols.has("objectives")) db.exec("ALTER TABLE voice_calls ADD COLUMN objectives TEXT");
   if (!cols.has("objective_pos")) db.exec("ALTER TABLE voice_calls ADD COLUMN objective_pos INTEGER NOT NULL DEFAULT 0");
+  // the cards the call pressed on his yes (JSON array of card ids), so a yes already pressed is never pressed again.
+  if (!cols.has("pressed")) db.exec("ALTER TABLE voice_calls ADD COLUMN pressed TEXT");
+}
+
+/**
+ * Where a press on a card is, from the press log (the voice says "pressed, it landed" only when the commit
+ * shows): the newest press on that card since `since`, `landed` with its commit, `landing`, `failed`, or `none`.
+ */
+export function pressLanding(db: DB, cardId: string, since: string): { state: "landed" | "landing" | "failed" | "none"; sha?: string; reason?: string } {
+  let p: { state: string; sha: string | null; reason: string | null } | undefined;
+  try {
+    p = db
+      .prepare("SELECT state, sha, reason FROM presses WHERE at >= ? AND (target = ? OR route LIKE ?) ORDER BY at DESC LIMIT 1")
+      .get(since, cardId, `%/${encodeURIComponent(cardId)}/%`) as typeof p;
+  } catch {
+    return { state: "none" };
+  }
+  if (!p) return { state: "none" };
+  if (p.state === "landed" && p.sha) return { state: "landed", sha: p.sha.slice(0, 9) };
+  if (p.state === "failed" || p.state === "undone") return { state: "failed", ...(p.reason ? { reason: p.reason.slice(0, 160) } : {}) };
+  // landed with no commit yet (an answer job still writing) is still landing for the voice: no "it landed" without a commit.
+  return { state: "landing" };
 }
 
 export interface VoiceCall {
@@ -357,7 +379,8 @@ export function voiceInstructions(): string {
     "Send each thing to the desk once. If he adds to a request, send only what is new.",
     "Never say something is done, started, answered or changed unless the desk said so. Never answer a question for the desk yourself: if you have no answer, pass it to the desk; while one is with the desk, say it is coming, never 'I don't know', and never list what you or the desk cannot do.",
     "Do not ask permission you do not need. Questions and lookups: just ask the desk. When he says he wants something built, changed or filed ('I want…', 'we need…', 'file it', 'yes, do it'), that is his yes: send it with confirmed=true, without reading it back. Read back only when you are unsure what he wants changed, in a few words, once.",
-    "Listen mode: when he says he wants to give feedback ('I want to give feedback', 'feedback time', 'just listen', 'quiero darte feedback'), call listen_for_feedback at once and say nothing yourself. From then on the console holds his words, now and then answers a pause with one short acknowledgement ('Mm-hm', 'Got it') and otherwise waits, and sends everything to the desk in one message when he says done; never call ask_the_desk with any of it, before or after.",
+    `He always has priority: never talk over him, and when he is giving you feedback or a long thought, let him finish it all before you say anything (his words, call_a3e08f34: "If I speak, you listen, please, always. Don't speak over me, ever").`,
+    "Listen mode: when he says he wants to give feedback, or asks you not to interrupt ('I want to give feedback', 'feedback time', 'just listen', 'don't interrupt me', 'let me finish', 'quiero darte feedback'), call listen_for_feedback at once and say nothing yourself (the console may already have switched it on: then say nothing). From then on the console holds his words, now and then answers a pause with one short acknowledgement ('Mm-hm', 'Got it') and otherwise waits, and sends everything to the desk in one message when he says done; never call ask_the_desk with any of it, before or after.",
     "The whole call is saved to Chat when he hangs up, as a record; there is nothing to send the desk about it.",
     `Ending the call: when he clearly says he is done ('hang up', 'bye', 'goodbye', 'that's all', 'that's it, thanks', 'nothing else', 'adiós', 'cuelga'), say one short goodbye ('Bye, ${ownerName()}.') and call hang_up in the same turn. Only when the phrase closes the call: never on a phrase inside a request ('that's all I wanted to ask about the release, and…', 'tell the desk bye to that idea'), never while he is still asking something, and never on your own initiative. If unsure, ask 'Hang up?' and hang up only on his yes.`,
     `If a system message says the line has been quiet, say exactly: "${QUIET_WARN_LINE}" and nothing else.`,
@@ -488,7 +511,9 @@ export function sessionConfig(model: string, instructions: string = voiceInstruc
         input: {
           transcription: { model: TRANSCRIBE_MODEL },
           noise_reduction: { type: "near_field" },
-          turn_detection: { type: "server_vad", silence_duration_ms: 600, create_response: true, interrupt_response: true },
+          // semantic, low eagerness(his call_a3e08f34: "If I speak, you listen, please, always. Don't speak over
+          // me, ever"): the voice answers when he has finished his thought, not at the first pause.
+          turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true },
         },
         output: { voice: DEFAULT_VOICE },
       },
@@ -970,7 +995,13 @@ export function createVoice(d: VoiceDeps) {
       if (step.file) console.log(`[voice] ${id} files his words on his yes: objective ${step.file.id}`);
       return step;
     }
-    if (!isInboxTool(name)) throw new VoiceError(404, "unknown_tool", `no console tool ${name}`);
+    // the page's own checks (never the voice's tools): his yes on a card, and whether a press has landed.
+    if (name === "press_landing") {
+      const cardId = String(args.cardId ?? "");
+      const since = typeof args.since === "string" && args.since ? args.since : (db.prepare("SELECT started_at FROM voice_calls WHERE id = ?").get(id) as { started_at: string }).started_at;
+      return pressLanding(db, cardId, since) as never;
+    }
+    if (!isInboxTool(name) && name !== "yes_check") throw new VoiceError(404, "unknown_tool", `no console tool ${name}`);
     const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number };
     if (!r.inbox) throw new VoiceError(409, "no_inbox", "this call started without his inbox");
     let cards: InboxCard[];
@@ -979,9 +1010,18 @@ export function createVoice(d: VoiceDeps) {
     } catch {
       throw new VoiceError(409, "no_inbox", "this call's inbox could not be read");
     }
+    const pressed = (): string[] => {
+      try {
+        return JSON.parse((db.prepare("SELECT pressed FROM voice_calls WHERE id = ?").get(id) as { pressed: string | null }).pressed ?? "[]");
+      } catch {
+        return [];
+      }
+    };
+    if (name === "yes_check") return yesCheck(cards, String(args.cardId ?? ""), String(args.words ?? ""), pressed()) as never;
     if (name === "press_card") {
       const p = pressStep(cards, r.inbox_pos ?? 0, args);
       db.prepare("UPDATE voice_calls SET inbox_pos = ? WHERE id = ?").run(p.pos, id);
+      if (p.press) db.prepare("UPDATE voice_calls SET pressed = ? WHERE id = ?").run(JSON.stringify([...new Set([...pressed(), p.press.id])]), id);
       if (p.press) console.log(`[voice] ${id} press on his yes: ${p.press.button} on ${p.press.kind} ${p.press.id}`);
       return p;
     }
@@ -1036,21 +1076,54 @@ export function createVoice(d: VoiceDeps) {
 
 export type Voice = ReturnType<typeof createVoice>;
 
-/** In the desk view: the question by its head, then the desk's messages after it (up to the owner's next message). */
+/**
+ * the desk's tag on its reply to a call question(his calls of 18 Nov: q1 of call_c83e51e8 got no answer, q7 of
+ * call_a3e08f34 was answered inside the q8 reply, q6 took a half sentence the desk wrote between tool calls): the desk
+ * starts each reply with `↩ <ask id>:` (several: `↩ <id>, <id>:`), so an answer lands on the question it answers.
+ */
+export const ANSWER_TAG = "↩";
+const ASK_ID_IN_HEAD = /\(([^()\s]+-q\d+)\)\s*$/;
+const TAG_LINE = /^\s*↩[^\n:]*:\s*/;
+/** the ask ids a reply's tag names (its first line, `↩ id, id:`). */
+export function taggedIds(text: string): string[] {
+  const m = /^\s*↩([^\n:]*):/.exec(text);
+  return m ? (m[1].match(/[^\s,;]+-q\d+/g) ?? []) : [];
+}
+/** a reply without its tag, as the voice says it. */
+export const untag = (text: string) => text.replace(TAG_LINE, "").trim();
+
+/**
+ * In the desk view: the question by its head, then its answer. First the desk's reply tagged with the question's id
+ * (anywhere after it: a reply that answers two questions lands on both); with no tag, the desk's messages after it up to
+ * his next message, the last one once the desk's turn is over (a reply tagged only for another question is not this one's).
+ */
 export function answerIn(v: Pick<DeskView, "messages" | "working">, head: string): { state: "queued" | "working" | "answered"; answer?: string; partial?: string } {
   const msgs: DeskMessage[] = v.messages;
   const i = msgs.findIndex((m) => m.role === "user" && m.text.startsWith(head));
   if (i < 0) return { state: "queued" };
+  const askId = ASK_ID_IN_HEAD.exec(head)?.[1];
+  if (askId) {
+    const t = msgs.findIndex((m, k) => k > i && m.role === "assistant" && taggedIds(m.text).includes(askId));
+    if (t >= 0) {
+      // the tagged reply is the answer (its final words for that question), once the desk has finished writing it.
+      const m = msgs[t];
+      const nextAny = msgs.length > t + 1;
+      if ((!v.working || nextAny) && m.status === "completed") return { state: "answered", answer: untag(m.text) };
+      return { state: "working", partial: untag(m.text).slice(0, 600) };
+    }
+  }
   const after: DeskMessage[] = [];
   for (const m of msgs.slice(i + 1)) {
     if (m.role === "user") break;
     after.push(m);
   }
   const last = after.filter((m) => m.text.trim()).at(-1);
-  const nextUser = msgs.slice(i + 1).some((m) => m.role === "user");
-  // The desk's turn is over when the thread is idle, or when it already moved on to a later message.
-  const done = (!v.working || nextUser) && !!last && last.status === "completed";
-  if (done) return { state: "answered", answer: last!.text.trim() };
+  // a reply tagged for other questions only answers those: this one still waits for its own.
+  if (askId && last && taggedIds(last.text).length) return { state: "working" };
+  // with no tag the desk's turn must be over (the thread idle): a later question steered into a running turn (q7 at
+  // 04:26:08 in call_a3e08f34) no longer makes a half sentence the desk wrote between tool calls the answer.
+  const done = !v.working && !!last && last.status === "completed";
+  if (done) return { state: "answered", answer: untag(last!.text) };
   return { state: "working", ...(last ? { partial: last.text.trim().slice(0, 600) } : {}) };
 }
 

@@ -218,8 +218,34 @@ export const LISTEN_QUIET_S = 180;
 export const LISTEN_WARN_S = 60;
 /** A longer pause ends one of his turns in listen mode, so a breath mid-sentence is not a turn. */
 export const LISTEN_SILENCE_MS = 1200;
-/** The session's turn detection when the console sends none (voice.ts sessionConfig). */
-export const NORMAL_TURN = { type: "server_vad", silence_duration_ms: 600, create_response: true, interrupt_response: true };
+/**
+ * The session's turn detection when the console sends none (voice.ts sessionConfig). Semantic, low eagerness
+ * (his call_a3e08f34: "Can you not interrupt me? ... If I speak, you listen, please, always. Don't speak over me, ever"):
+ * the voice answers when he has finished his thought, not at the first 600 ms pause.
+ */
+export const NORMAL_TURN = { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true };
+/** listen mode's own turn detection: no automatic replies, a longer pause per turn (semantic_vad has no silence setting). */
+export const LISTEN_TURN = { type: "server_vad", silence_duration_ms: LISTEN_SILENCE_MS, create_response: false, interrupt_response: true };
+/** A desk answer or note waits until he has been quiet this long, so nothing is said into his breath. */
+export const HOLD_AFTER_HIM_MS = 1_500;
+/**
+ * He wants to give feedback or not be interrupted: listen mode on at once, by the console itself (it no longer waits for the
+ * voice to call listen_for_feedback; on call_a3e08f34 "just pass the feedback, please don't interrupt me" got a reply).
+ */
+export const FEEDBACK_CUE = /\b(?:(?:i (?:want|would like|'d like|need) to |let me |can i |i'm going to |i'll )give (?:you )?(?:some |my )?feedback|feedback time|just listen|listen to me|(?:don'?t|do not|stop|never) (?:interrupt(?:ing)?|talk(?:ing)? over|speak(?:ing)? over)(?: me)?|let me finish|quiero darte (?:un )?feedback|no me interrumpas|esc[uú]chame)\b/i;
+/** After his line on a card, this long without a press before the console checks whether it was his yes. */
+export const YES_PROBE_MS = 2_500;
+/** After a press, at most this long waiting for its commit before the voice says it is still saving. */
+export const LANDING_WAIT_MS = 20_000;
+/** A press still saving is followed this long; the voice tells him when it lands. */
+export const LANDING_FOLLOW_MS = 10 * 60_000;
+const COMMIT_IN = /\blanded ([0-9a-f]{7,40})\b/;
+/** what the voice is told after a press: "pressed, it landed" only with the commit; still saving says so. */
+export function pressNote(result: string): string {
+  if (result.startsWith("not pressed")) return "It did not go through: tell him in one line and offer to pass it to the desk.";
+  if (COMMIT_IN.test(result)) return "Pressed and landed: its commit is in the repo. Say plainly: pressed, it landed. Then offer the next card.";
+  return "Pressed and saved, but its commit is not in the repo yet. Say exactly: \"Pressed, it's still saving. I'll tell you when it lands.\" Never say it landed. Then offer the next card.";
+}
 /** He is done: his turn ends with "done" / "finished" (alone, or as the last sentence), optionally "thanks". */
 export const LISTEN_DONE = /(?:^|[.!?,;]\s*)(?:(?:ok(?:ay)?|right|so|and|that's it|that is it|that's all|that is all|vale|bueno)[,.]?\s*)*(?:(?:i'm|im|i am)\s+|(?:he|ya he)\s+)?(?:all\s+)?(?:done|finished|terminado|acabado|listo|ya está)[.!]*(?:\s*,?\s*(?:thanks|thank you|gracias)[.!]*)?\s*$/i;
 /** He asks the voice to say more (read back, expand): the one time it says more than the acknowledgement. */
@@ -271,6 +297,10 @@ export class CallEngine {
   /** Turns he started whose transcription has not come yet (item ids). */
   private pendingItems = new Set<string>();
   private turnDetection: Record<string, unknown> = NORMAL_TURN;
+  /** the wait between two looks at the press log (tests move their clock instead). */
+  pause = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
+  /** his last line on a card, until a press or the console's yes check. */
+  private yesProbe?: { cardId: string; text: string; at: number };
   /** A listen-mode line asked for while a response runs: said when it ends (a second response.create would be refused). */
   private queuedSpeak?: Speak;
   /** the word count of the fixed line the next response / the running response must say (ad-lib guard). */
@@ -408,6 +438,12 @@ export class CallEngine {
       if ((!this.responding && !this.playing) || now - this.byeAt >= BYE_MAX_MS) void this.hangup("bye");
       return;
     }
+    if (this.nudges.length && !this.responding) this.flush();
+    if (this.yesProbe && !this.responding && !this.userSpeaking && !this.listen && now - this.yesProbe.at >= YES_PROBE_MS) {
+      const p = this.yesProbe;
+      this.yesProbe = undefined;
+      void this.probeYes(p);
+    }
     // the phone is locked; his silence is the lock. The quiet timers wait for the page to be back.
     if (this.away !== undefined) return;
     if (this.listen) {
@@ -482,6 +518,8 @@ export class CallEngine {
   private flush() {
     // Listen mode reads nothing out: desk answers and notes wait until he says "done".
     if (this.responding || this.userSpeaking || this.listen || this.v.phase !== "live") return;
+    // never into his breath: a desk answer waits until he has been quiet HOLD_AFTER_HIM_MS (the tick tries again).
+    if (this.nudges.length && this.lastOwnerAt && this.clock.now() - this.lastOwnerAt < HOLD_AFTER_HIM_MS) return;
     const n = this.nudges.shift();
     if (!n) return;
     this.send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text: n.text }] } });
@@ -522,7 +560,10 @@ export class CallEngine {
         this.pendingItems.delete(ev.item_id);
         this.line("owner", ev.transcript ?? "");
         if (ev.usage && this.v.callId) void this.meter({ eventId: `tr-${ev.item_id}-${ev.content_index ?? 0}`, kind: "transcription", usage: ev.usage });
-        if (this.listen && !pre) this.heard(String(ev.transcript ?? "").trim());
+        const said = String(ev.transcript ?? "").trim();
+        if (this.listen && !pre) this.heard(said);
+        else if (!this.listen && said && FEEDBACK_CUE.test(said) && this.greet?.done !== false) this.listenNow(said);
+        else if (!this.listen && said && this.v.onCard && this.api.tool) this.yesProbe = { cardId: this.v.onCard.id, text: said, at: now };
         break;
       }
       case "response.created":
@@ -603,6 +644,7 @@ export class CallEngine {
         }
         if (r.usage && this.v.callId) void this.meter({ eventId: r.id ?? `resp-${now}`, kind: "response", usage: r.usage });
         const calls = this.pendingCalls.splice(0);
+        if (calls.some((c) => c.name === "press_card")) this.yesProbe = undefined;
         const bye = calls.find((c) => c.name === "hang_up");
         if (this.queuedSpeak !== undefined && !bye && !calls.length) {
           const q = this.queuedSpeak;
@@ -647,6 +689,9 @@ export class CallEngine {
         if (c.name === "quick_status") {
           this.line("tool", "quick status");
           output = (await this.api.status(id)).text;
+        } else if (c.name === "ask_the_desk" && this.listen) {
+          // listen mode holds his words: nothing goes to the desk until he says done.
+          output = { status: "held", note: "Listen mode is on: his words are held and go to the desk in one go when he says done. Say nothing." };
         } else if (c.name === "ask_the_desk") {
           const a = JSON.parse(c.arguments || "{}") as { request?: string; confirmed?: boolean };
           const req = String(a.request ?? "").trim();
@@ -716,8 +761,12 @@ export class CallEngine {
             } catch (e) {
               done = `not pressed: ${(e as Error).message}`;
             }
-            this.line("tool", `pressed ${r.press.button} on ${r.place ?? "the card"}: ${done}`);
-            output = { ...r, result: done, note: done.startsWith("not pressed") ? "It did not go through: tell him in one line and offer to pass it to the desk." : "Pressed and landed. Say plainly: pressed, it landed. Then offer the next card." };
+            const failed = done.startsWith("not pressed");
+            const land = failed ? undefined : await this.landing(r.press.id, done);
+            const result = land?.state === "landed" ? `${done}, landed ${land.sha}` : land?.state === "failed" ? `not pressed: ${land.reason ?? "it could not land"}` : land ? `${done}, still saving` : done;
+            this.line("tool", `pressed ${r.press.button} on ${r.place ?? "the card"}: ${result}`);
+            output = { ...r, result, note: pressNote(result) };
+            if (land?.state === "landing") this.followLanding(r.press.id, r.press.button, r.place ?? "the card");
           } else {
             this.line("tool", `${c.name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
             output = r;
@@ -735,6 +784,71 @@ export class CallEngine {
     }
     this.send({ type: "response.create" });
     this.responding = true;
+  }
+
+  /** the console's yes check on his line on a card: a yes the voice did not press is pressed now. */
+  private async probeYes(p: { cardId: string; text: string }) {
+    const id = this.v.callId;
+    if (!id || !this.api.tool || this.v.phase !== "live") return;
+    const r = (await this.api.tool(id, "yes_check", { cardId: p.cardId, words: p.text }).catch(() => undefined)) as { place?: string; button?: string; note?: string } | undefined;
+    if (!r?.note) return;
+    this.line("tool", `his yes on ${r.place ?? "the card"}: press ${r.button}`);
+    this.nudge(r.note);
+  }
+
+  /** where a press is, from the press log: its commit within LANDING_WAIT_MS, or still saving, or failed. */
+  private async landing(cardId: string, done: string): Promise<{ state: "landed" | "landing" | "failed"; sha?: string; reason?: string }> {
+    const sha = COMMIT_IN.exec(done)?.[1];
+    if (sha) return { state: "landed", sha: sha.slice(0, 9) };
+    const id = this.v.callId;
+    if (!id || !this.api.tool) return { state: "landing" };
+    const since = new Date(this.clock.now() - 5 * 60_000).toISOString();
+    const t0 = this.clock.now();
+    for (let i = 0; ; i++) {
+      const r = (await this.api.tool(id, "press_landing", { cardId, since }).catch(() => undefined)) as { state?: string; sha?: string; reason?: string } | undefined;
+      if (r?.state === "landed" && r.sha) return { state: "landed", sha: r.sha };
+      if (r?.state === "failed") return { state: "failed", ...(r.reason ? { reason: r.reason } : {}) };
+      if (!r?.state || this.clock.now() - t0 >= LANDING_WAIT_MS || i >= 40 || this.v.phase !== "live") return { state: "landing" };
+      await this.pause(1_000);
+    }
+  }
+
+  /** a press still saving: followed until its commit shows, then he is told in a few words (never before). */
+  private followLanding(cardId: string, button: string, place: string) {
+    const id = this.v.callId;
+    if (!id || !this.api.tool) return;
+    const since = new Date(this.clock.now() - 5 * 60_000).toISOString();
+    const t0 = this.clock.now();
+    let busy = false;
+    const t = this.clock.every(async () => {
+      if (busy) return;
+      if (this.v.phase !== "live" || this.clock.now() - t0 > LANDING_FOLLOW_MS) return this.clock.stop(t);
+      busy = true;
+      const r = (await this.api.tool!(id, "press_landing", { cardId, since }).catch(() => undefined)) as { state?: string; sha?: string; reason?: string } | undefined;
+      busy = false;
+      if (r?.state === "landed" && r.sha) {
+        this.clock.stop(t);
+        this.line("tool", `landed ${r.sha}: ${button} on ${place}`);
+        this.nudge(`The press of "${button}" on ${place} has landed now: its commit is in the repo. Tell him in one short line: "${button} landed." Nothing else.`, undefined, "none");
+      } else if (r?.state === "failed") {
+        this.clock.stop(t);
+        this.line("tool", `not landed: ${button} on ${place}: ${r.reason ?? "failed"}`);
+        this.nudge(`The press of "${button}" on ${place} did not land (${r.reason ?? "failed"}). Tell him in one line and offer to pass it to the desk.`, undefined, "none");
+      }
+    }, 5_000);
+    this.timers.push(t);
+  }
+
+  /** he wants to give feedback or not be interrupted: the voice stops, listen mode on, his line is the first part held. */
+  private listenNow(said: string) {
+    if (this.responding) {
+      this.send({ type: "response.cancel" });
+      this.send({ type: "output_audio_buffer.clear" });
+    }
+    this.yesProbe = undefined;
+    this.startListening();
+    this.listen!.held.push({ text: said, line: this.v.lines.length - 1 });
+    this.speak(LISTEN_START_LINE);
   }
 
   /** the greeting response is the first one of the call (no automatic replies until it has played). */
@@ -783,7 +897,7 @@ export class CallEngine {
     if (this.listen) return true;
     this.listen = { since: this.clock.now(), held: [], warned: false, pre: new Set(this.pendingItems), acks: 0 };
     this.quietWarnAt = undefined;
-    this.setTurns({ ...this.turnDetection, silence_duration_ms: LISTEN_SILENCE_MS, create_response: false, interrupt_response: true });
+    this.setTurns(LISTEN_TURN);
     this.line("tool", "listen mode on");
     this.set({ listening: true });
     return true;

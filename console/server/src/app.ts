@@ -4322,7 +4322,7 @@ export function createApp(
   api.route("/", spinesRoutes({ reposRoot: read.reposRoot, store, run: read.spines, treeFor: (m) => treeFor(m) }));
 
   // read adapters: repos/docs pickers, backlog, threads, tickets, seats
-  api.route("/", readRoutes(read, store, () => cycle.hostEnvironment(mainHost())));
+  api.route("/", readRoutes(read, store, () => cycle.hostEnvironment(mainHost()), db));
 
   // M4 browser auth (hosted/browser.ts): forwarded to the Team Browser service, one instance per world.
   browserArea?.mount({ auth, onSitesChanged: testerWorlds?.onSitesChanged });

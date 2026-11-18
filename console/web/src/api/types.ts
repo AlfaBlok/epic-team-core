@@ -535,6 +535,37 @@ export interface Seat {
   modelWeekly?: { model: string; pct?: number; resetsAt?: string }[];
 }
 
+/** One persona on a seat (GET /api/seats/board): `world` is the product it works for; absent = a customer's agent. */
+export interface BoardPersona {
+  name: string;
+  world?: string;
+  runs: number;
+}
+/** One AI subscription on the Seats screen: its persona now, the last 24 h and its load. */
+export interface BoardSeat {
+  id: string;
+  plan?: string;
+  state: "working" | "free" | "limited" | "signed_out" | "unknown";
+  usage5h?: number;
+  usageWeekly?: number;
+  limitedUntil?: string;
+  running: number;
+  now: BoardPersona[];
+  day: BoardPersona[];
+  runs24h: number;
+  lastUsed?: string;
+}
+/** GET /api/seats/board: every seat in seats.json, never padded to `target`. */
+export interface SeatBoard {
+  seats: BoardSeat[];
+  target: number;
+  signedIn: number;
+  workingNow: number;
+  personas: number;
+  runs24h: number;
+  readAt?: string;
+}
+
 /** A git checkout under REPOS_ROOT on the main server (GET /api/repos). */
 export interface Repo {
   name: string;

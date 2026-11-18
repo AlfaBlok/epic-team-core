@@ -6,6 +6,9 @@ import { ghOpenIssues, type IssueLister } from "../adapters/github.js";
 import { backlogFor, deriveMilestone, locate, openTicketFiles, type Ticket } from "../adapters/milestone.js";
 import { listRepos, repoForDir, resolveRepo, type Repo } from "../adapters/repos.js";
 import { readSeats } from "../adapters/seats.js";
+import { seatBoard } from "../adapters/seatBoard.js";
+import fs from "node:fs";
+import type { DB } from "../db.js";
 import { packPyRunner, resolvePackSkillDir, type PackRunner } from "../packRunner.js";
 import { cachedRunner, fixtureRunner, pickerDocs, rescanGapMs, resolveSkillDir, spinesPyRunner, type SpinesRunner } from "../adapters/spines.js";
 import { t3UrlResolver } from "../t3/url.js";
@@ -100,7 +103,7 @@ const THREADS_TTL_MS = 15_000;
 /** one collator for the ticket sort (`localeCompare` with options builds one per comparison). */
 const NUMERIC = new Intl.Collator(undefined, { numeric: true });
 
-export function readRoutes(cfg: ReadConfig, store: Store, threadsEnvironment?: () => string | undefined) {
+export function readRoutes(cfg: ReadConfig, store: Store, threadsEnvironment?: () => string | undefined, db?: DB) {
   const r = new Hono();
   const notFound = (what: string) => ({ error: { code: "not_found", message: `${what} not found` } });
 
@@ -180,6 +183,15 @@ export function readRoutes(cfg: ReadConfig, store: Store, threadsEnvironment?: (
   r.get("/seats", (c) => {
     try {
       return c.json(readSeats(cfg.seatsFile));
+    } catch (e) {
+      return c.json({ error: { code: "seats_unavailable", message: `seats.json unreadable: ${(e as Error).message}` } }, 503);
+    }
+  });
+
+  // every AI subscription with the personas on it and its load (adapters/seatBoard.ts); read-only.
+  r.get("/seats/board", (c) => {
+    try {
+      return c.json(seatBoard(JSON.parse(fs.readFileSync(cfg.seatsFile, "utf8")), db));
     } catch (e) {
       return c.json({ error: { code: "seats_unavailable", message: `seats.json unreadable: ${(e as Error).message}` } }, 503);
     }

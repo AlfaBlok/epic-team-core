@@ -1,6 +1,6 @@
 import type { DB } from "../db.js";
 import { isOwnerWho, memoryName, ownerName } from "../identity.js";
-import type { InboxCard } from "./inbox.js";
+import { saidYes, type InboxCard } from "./inbox.js";
 import { answerIn, type DeskPort } from "./voice.js";
 
 /**
@@ -24,6 +24,8 @@ export const AFTER_CHECK_MEMORY_WAIT_MS = 15 * 60_000;
 export const AFTER_CHECK_SINCE = "2026-11-18T03:30:00.000Z";
 /** a press his own button made after the call is still his answer to that card for this long. */
 const OWN_PRESS_AFTER_MS = 30 * 60_000;
+/** a desk answer that comes after the check still lands on its call question for this long after the call. */
+export const LATE_ANSWER_MS = 6 * 60 * 60_000;
 
 /** One transcript line as the page stores it. */
 export interface CallLine {
@@ -46,8 +48,6 @@ export interface CallCheck {
 /** Where a call's transcript is in the memory service (the hosted forward), when it knows. */
 export type MemoryKept = (callId: string) => { state: string; ref?: string; url?: string; error?: string } | undefined;
 
-const YES = /^\W*(?:yes|yeah|yep|yup|sure|ok(?:ay)?,? go|go for it|go ahead|do it|press it)\b|\b(?:go for it|my answer is yes|press it)\b/i;
-const NO = /\b(?:no|not yet|don't|do not|wait|park it|skip)\b/i;
 const REQUEST = /\b(?:can you|could you|would you|will you|please|pass (?:this|that|it|on)|give (?:the |that |this )?feedback|tell (?:the|them|him)|send (?:it|this|that)|i want|i'd like|i would like)\b/i;
 const PLACE = /\bcard (\d+) of (\d+)\b/;
 
@@ -129,7 +129,7 @@ export function checkCall(db: DB, callId: string, o: { now?: () => number; answe
       continue;
     }
     if (!isOwnerWho(l.who)) continue;
-    if (pos && YES.test(text) && !NO.test(text.replace(/\b(?:don't need|no need)\b.*/i, ""))) {
+    if (pos && saidYes(text)) {
       const k = onCard.get(pos) ?? {};
       if (!k.yes) onCard.set(pos, { ...k, yes: text });
     }
@@ -176,6 +176,8 @@ export function checkCall(db: DB, callId: string, o: { now?: () => number; answe
       continue;
     }
     const answer = a.answer ?? o.answerOf?.(a.head);
+    // the desk's answer lands on the call question it answers, even when it came after the call ended.
+    if (answer && !a.answer) db.prepare("UPDATE voice_asks SET answer = ?, answered_at = ? WHERE id = ? AND answer IS NULL").run(answer, new Date(o.now?.() ?? Date.now()).toISOString(), a.id);
     did.push(`${what}: ${answer ? `answered "${clip(answer, 160)}"` : "no answer yet"}`);
     if (!answer) gaps.push(`${a.id}: the desk has not answered it`);
   }
@@ -258,6 +260,25 @@ export function createAfterCall(o: { db: DB; deskOf: (call: { tenant_id: string 
         db.prepare("UPDATE voice_calls SET after_check_at = ? WHERE id = ?").run(new Date(now()).toISOString(), r.id);
         console.log(`[voice] ${r.id} checked after the call: ${ch.gaps.length} gap(s)`);
         n++;
+      }
+      // a question the desk answered after the check ran: its answer lands on the question and the kept check is
+      // refreshed (no second desk line), for calls ended in the last LATE_ANSWER_MS.
+      const late = db
+        .prepare(
+          `SELECT DISTINCT c.id, c.tenant_id, c.milestone_id FROM voice_calls c JOIN voice_asks a ON a.call_id = c.id
+             WHERE c.after_check_at IS NOT NULL AND c.ended_at >= ? AND a.answer IS NULL AND a.send_error IS NULL LIMIT 5`,
+        )
+        .all(new Date(now() - LATE_ANSWER_MS).toISOString()) as { id: string; tenant_id: string | null; milestone_id: string | null }[];
+      for (const r of late) {
+        let view: Awaited<ReturnType<DeskPort["view"]>> | undefined;
+        try {
+          view = await o.deskOf(r)?.view();
+        } catch {
+          continue;
+        }
+        if (!view) continue;
+        const ch = checkCall(db, r.id, { now, kept: o.kept, answerOf: (head) => answerIn(view!, head).answer });
+        if (ch) db.prepare("UPDATE voice_calls SET after_check = ? WHERE id = ?").run(JSON.stringify(ch), r.id);
       }
     } finally {
       running = false;
