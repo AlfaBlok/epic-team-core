@@ -859,6 +859,17 @@ const mockMail = () => ({
       } else body.inactive = (body.inactive ?? []).filter((x) => x.id !== id);
       return ok({ ok: true as const });
     },
+    async setPursuitDone(id: string, done: boolean) {
+      const body = SAMPLE_PURSUITS;
+      if (done) {
+        const p = body.pursuits.find((x) => x.id === id);
+        if (p) {
+          body.pursuits = body.pursuits.filter((x) => x.id !== id);
+          body.done = [...(body.done ?? []), { id, name: p.name, since: new Date().toISOString().slice(0, 10) }];
+        }
+      } else body.done = (body.done ?? []).filter((x) => x.id !== id);
+      return ok({ ok: true as const });
+    },
     async parkPursuit(id: string, parked: boolean) {
       const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
       if (p) p.parked = parked;

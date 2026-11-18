@@ -273,6 +273,8 @@ export interface ApiClient {
   parkPursuit(id: string, parked: boolean): Promise<{ ok: true; sha?: string }>;
   /** his On/Off switch on an objective (off: kept in docs/pursuits.json, out of every list). */
   setPursuitActive(id: string, active: boolean): Promise<{ ok: true; sha?: string }>;
+  /** Mark done (true) or undo (false) on an objective (done: kept in docs/pursuits.json, out of every list, under Done). */
+  setPursuitDone(id: string, done: boolean): Promise<{ ok: true; sha?: string }>;
   /** single jobs outside every pursuit, by stage (rows titled `One-off:` and docs/spines/one-offs.md). */
   listOneOffs(): Promise<OneOffsBody>;
   /** the outcome log: one line per real outcome every persona logged at the end of a wake, filtered. */

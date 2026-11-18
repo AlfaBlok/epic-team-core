@@ -120,6 +120,8 @@ export interface PursuitsBody {
   retired?: { repo: string; path: string }[];
   /** the objectives he switched off (`"active": false` in the file): kept, out of every list, shown greyed. */
   inactive?: InactivePursuit[];
+  /** the objectives he marked done (`"active": false` and `"doneOn"` in the file): kept, out of every list, under Done. */
+  done?: InactivePursuit[];
 }
 
 /**
@@ -191,6 +193,7 @@ export interface PursuitsDoc {
   checks: Record<string, Check>;
   retired?: { repo: string; path: string }[];
   inactive?: InactivePursuit[];
+  done?: InactivePursuit[];
 }
 
 /** false only when the file says `"active": false` (no field: active). */
@@ -212,6 +215,7 @@ export function parsePursuits(text: string): PursuitsDoc {
   const staleDays = typeof doc.staleDays === "number" && doc.staleDays > 0 ? doc.staleDays : 3;
   const seen = new Set<string>();
   const inactive: InactivePursuit[] = [];
+  const done: InactivePursuit[] = [];
   const pursuits: Declared[] = (Array.isArray(doc.pursuits) ? doc.pursuits : []).flatMap((p) => {
     const o = obj(p);
     const id = str(o.id);
@@ -220,8 +224,11 @@ export function parsePursuits(text: string): PursuitsDoc {
     if (!id || !name || !greenWhen || seen.has(id)) return [];
     seen.add(id);
     if (!isActive(o)) {
-      const since = str(o.inactiveSince);
-      inactive.push({ id, name, ...(since ? { since } : {}) });
+      // marked done (the owner on the same call: "this one we can mark as complete"): `"active": false` plus `"doneOn"`,
+      // so every reader that drops an inactive one drops a done one too; it is listed under Done, not Inactive.
+      const doneOn = str(o.doneOn);
+      const since = doneOn ?? str(o.inactiveSince);
+      (doneOn ? done : inactive).push({ id, name, ...(since ? { since } : {}) });
       return [];
     }
     const watch = (Array.isArray(o.watch) ? o.watch : []).flatMap((w) => {
@@ -278,6 +285,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     checks,
     ...(retired.length ? { retired } : {}),
     ...(inactive.length ? { inactive } : {}),
+    ...(done.length ? { done } : {}),
   };
 }
 
@@ -424,12 +432,33 @@ export function activeText(text: string, id: string, active: boolean, day: strin
   const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
   const p = list.find((x) => str(obj(x).id) === id);
   if (!p) return null;
+  delete p.doneOn;
   if (active) {
     delete p.active;
     delete p.inactiveSince;
   } else {
     p.active = false;
     p.inactiveSince = day;
+  }
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/**
+ * marks one objective done (`"active": false`, `"doneOn": <day>`: kept, out of every list like an inactive one, shown
+ * under Done) or undoes it (back on, both fields gone); null when no such objective.
+ */
+export function doneText(text: string, id: string, done: boolean, day: string): string | null {
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const p = list.find((x) => str(obj(x).id) === id);
+  if (!p) return null;
+  delete p.inactiveSince;
+  if (done) {
+    p.active = false;
+    p.doneOn = day;
+  } else {
+    delete p.active;
+    delete p.doneOn;
   }
   return JSON.stringify(doc, null, 2) + "\n";
 }
@@ -454,7 +483,7 @@ export function objectiveIds(homeDir: string | undefined): { live: string[]; off
     const mtime = fs.statSync(file).mtimeMs;
     if (idsMemo?.file === file && idsMemo.mtime === mtime) return idsMemo.v;
     const doc = parsePursuits(fs.readFileSync(file, "utf8"));
-    const v = { live: doc.pursuits.map((p) => p.id), off: (doc.inactive ?? []).map((p) => p.id) };
+    const v = { live: doc.pursuits.map((p) => p.id), off: [...(doc.inactive ?? []), ...(doc.done ?? [])].map((p) => p.id) };
     idsMemo = { file, mtime, v };
     return v;
   } catch {
@@ -605,7 +634,7 @@ export async function buildPursuits(
   }
   // parked pursuits sit after the ranked ones, in file order.
   pursuits.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
-  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null, ...(doc.retired?.length ? { retired: doc.retired } : {}), ...(doc.inactive?.length ? { inactive: doc.inactive } : {}) };
+  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null, ...(doc.retired?.length ? { retired: doc.retired } : {}), ...(doc.inactive?.length ? { inactive: doc.inactive } : {}), ...(doc.done?.length ? { done: doc.done } : {}) };
 }
 
 /** Reads the home repo's file and every spine it names; kept a few minutes (git log per watched repo). */

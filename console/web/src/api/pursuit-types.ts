@@ -110,6 +110,8 @@ export interface PursuitsBody {
   boardAt?: string | null;
   /** the objectives he switched off: kept in the file, out of every list, shown greyed under Inactive. */
   inactive?: { id: string; name: string; since?: string }[];
+  /** the objectives he marked done: kept in the file, out of every list, shown under Done with an undo. */
+  done?: { id: string; name: string; since?: string }[];
 }
 
 /** GET /api/scorecards: every pursuit a scorecard, the epics that carry it scorecards inside it. */

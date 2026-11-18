@@ -188,10 +188,15 @@ export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: st
   const dir = path.join(reposRoot, world);
   let starterMovedTo: string | undefined;
   if (fs.existsSync(path.join(dir, ".git"))) {
-    // only the starter a payment made may be moved aside: one commit, no remote. Anything else is someone's work.
-    const n = await git(dir, ["rev-list", "--count", "HEAD"], 30_000);
+    // only the starter a payment made may be moved aside: no remote, and nothing in it but what the starter holds (its
+    // readme, its agent notes and its root spine, whose first objective the console itself rewrites and ticks). Anything
+    // else (a goal the owner added) is someone's work.
+    const files = await git(dir, ["log", "--format=", "--name-only", "HEAD"], 30_000);
     const remotes = await git(dir, ["remote"], 30_000);
-    if (n.code !== 0 || n.stdout.trim() !== "1" || remotes.stdout.trim()) throw new ConnectError(409, "repo_has_work", "this workspace's repo already holds work; it was not replaced");
+    const own = new Set(["AGENTS.md", "README.md", ROOT_SPINE]);
+    const touched = files.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (files.code !== 0 || !touched.length || remotes.stdout.trim() || touched.some((f) => !own.has(f)))
+      throw new ConnectError(409, "repo_has_work", "this workspace already holds goals of its own, so it was not replaced. Make a new repo for it, or open a new workspace for that repo");
     starterMovedTo = path.join(reposRoot, `.${world}-starter-${now().toISOString().replace(/[:.]/g, "").slice(0, 15)}`);
     fs.renameSync(dir, starterMovedTo);
   } else if (fs.existsSync(dir) && fs.readdirSync(dir).length) throw new ConnectError(409, "repo_taken", `${dir} exists and is not a checkout`);

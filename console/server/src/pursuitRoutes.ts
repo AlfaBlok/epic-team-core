@@ -5,7 +5,7 @@ import { credentialWorld } from "./auth/identity.js";
 import { DEFAULT_TENANT } from "./db.js";
 import type { Cadence } from "./schemas.js";
 import type { Milestone, Store } from "./store.js";
-import { PURSUITS_FILE, activeText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
+import { PURSUITS_FILE, activeText, doneText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
 
 /**
  * The navigable scorecard's links and the owner's two switches:
@@ -15,6 +15,8 @@ import { PURSUITS_FILE, activeText, parkText, reorderText, scaleCadence, type Pu
  *   docs/pursuits.json of the code repo, the record (root L-45). The scheduler and the stall watch read the file.
  * - POST /api/pursuits/:id/active {active}: his On/Off switch; off keeps the objective in the file with
  *   `"active": false` and the day, out of Goals to set, the counts, the inbox and the wake prompts, greyed on the screen.
+ * - POST /api/pursuits/:id/done {done}: Mark done (true) or undo (false); done keeps it in the file with `"active": false`
+ *   and `"doneOn"`, out of every list like an inactive one, shown under Done.
  */
 
 export interface PursuitTeam {
@@ -147,6 +149,17 @@ export function mountPursuitWrites(api: Hono, o: { writer?: SpineWriter; repo: (
     const active = body.active;
     const day = new Date().toISOString().slice(0, 10);
     const r = await write(`objective ${id}`, (t) => activeText(t, id, active, day), `${active ? "switch on" : "switch off"} objective ${id}`, active ? `switched the objective ${id} back on` : `switched the objective ${id} off (inactive since ${day})`);
+    return c.json(r.body, r.status as 200);
+  });
+
+  api.post("/pursuits/:id/done", async (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found", message: "no pursuits here" } }, 404);
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { done?: unknown };
+    if (!/^[\w-]{1,80}$/.test(id) || typeof body.done !== "boolean") return c.json({ error: { code: "bad_done", message: "done is true or false" } }, 400);
+    const done = body.done;
+    const day = new Date().toISOString().slice(0, 10);
+    const r = await write(`objective ${id}`, (t) => doneText(t, id, done, day), `${done ? "mark done" : "undo done"} objective ${id}`, done ? `marked the objective ${id} done (${day})` : `undid done on the objective ${id}: live again`);
     return c.json(r.body, r.status as 200);
   });
 
