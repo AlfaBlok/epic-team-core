@@ -105,6 +105,8 @@ export interface XStatsTotals {
 }
 export interface XStatsAccount {
   handle: string;
+  /** x, reddit or tiktok (older days have none: x). */
+  platform?: string;
   product: string;
   state: string;
   listedBy: string | null;

@@ -19,6 +19,10 @@ const when = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 };
+/** The channel's name and a stable anchor (X and TikTok handles can match). */
+const PLATFORM: Record<string, string> = { x: "X", reddit: "Reddit", tiktok: "TikTok" };
+const channel = (a: XStatsAccount) => PLATFORM[a.platform ?? "x"] ?? a.platform ?? "X";
+const anchor = (a: XStatsAccount) => `${a.platform ?? "x"}-${a.handle.replace(/[^A-Za-z0-9_]/g, "")}`;
 const sum = (accs: XStatsAccount[], k: keyof XStatsTotals) => accs.reduce((a, x) => a + (x.totals[k] ?? 0), 0);
 
 function delta(now: number, before: number | undefined) {
@@ -31,17 +35,19 @@ function AccountBox({ a, before }: { a: XStatsAccount; before?: XStatsTotals }) 
   const read = a.state === "read";
   return (
     <a
-      href={`#${a.handle.slice(1)}`}
+      href={`#${anchor(a)}`}
       className="grid gap-2 rounded-md border border-border p-3 hover:bg-accent/40"
       data-testid="x-stats-account"
       data-state={a.state}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate font-medium">{a.handle}</span>
+        <span className="truncate font-medium">
+          {channel(a)} {a.handle}
+        </span>
         <span className={cn("shrink-0 text-xs", read ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>{read ? "✓ read" : `✗ ${a.state}`}</span>
       </div>
       <div className="text-xs text-muted-foreground">
-        {a.product} · {a.count} posts in the window · {n(a.followers)} followers
+        {a.product} · {a.count} posts in the window{a.followers !== null ? ` · ${n(a.followers)} followers` : ""}
       </div>
       <dl className="grid grid-cols-4 gap-1 text-center">
         {KEYS.map((k) => (
@@ -60,9 +66,9 @@ function AccountBox({ a, before }: { a: XStatsAccount; before?: XStatsTotals }) 
 
 function Posts({ a }: { a: XStatsAccount }) {
   return (
-    <section id={a.handle.slice(1)} className="grid gap-1" data-testid="x-stats-posts">
+    <section id={anchor(a)} className="grid gap-1" data-testid="x-stats-posts">
       <h2 className="text-sm font-medium">
-        {a.handle} <span className="font-normal text-muted-foreground">· {a.count} posts{a.postsAllTime !== null ? ` · ${a.postsAllTime} ever` : ""}</span>
+        {channel(a)} {a.handle} <span className="font-normal text-muted-foreground">· {a.count} posts{a.postsAllTime !== null ? ` · ${a.postsAllTime} ever` : ""}</span>
       </h2>
       {a.notes.length > 0 && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{a.notes.join(" · ")}</p>}
       {a.posts.length === 0 ? (
@@ -105,7 +111,7 @@ export function XStatsPage() {
   const posts = accs.reduce((a, x) => a + x.count, 0);
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4" data-testid="x-stats-page">
-      <PageHeader title="X stats" description="Likes, replies, reposts and views on every post of the team's X accounts, read once a day." />
+      <PageHeader title="Post stats" description="Likes, replies, reposts and views on every post on X, Reddit and TikTok, read once a day." />
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the X stats…</div>}
       {error && <div className="text-sm text-destructive">Could not read the X stats: {error.message}</div>}
       {data && !day && <div className="text-sm text-muted-foreground">No X stats stored yet.</div>}
@@ -122,7 +128,7 @@ export function XStatsPage() {
           </div>
           <div className="grid gap-2 sm:grid-cols-2" data-testid="x-stats-accounts">
             {accs.map((a) => (
-              <AccountBox key={a.handle} a={a} before={prev?.accounts[a.handle]} />
+              <AccountBox key={anchor(a)} a={a} before={prev?.accounts[a.handle]} />
             ))}
           </div>
           {data!.dates.length > 1 && (
@@ -142,11 +148,12 @@ export function XStatsPage() {
             </div>
           )}
           {accs.map((a) => (
-            <Posts key={a.handle} a={a} />
+            <Posts key={anchor(a)} a={a} />
           ))}
           <p className="text-xs text-muted-foreground" data-testid="x-stats-rule">
-            Read only, never posts or likes. The post list comes from each profile (through the Team Browser when the laptop is online, else the public
-            fxtwitter read), each post's counts from fxtwitter. Totals are as read at that moment, so a day's change is today minus the day before.
+            Read only, never posts or likes. X: the post list comes from each profile (through the Team Browser when the laptop is online, else the public
+            fxtwitter read), each post's counts from fxtwitter. Reddit and TikTok: every post with a live link in the campaign posts ledgers, read from
+            its own page; Reddit shows views only to the author. Totals are as read at that moment, so a day's change is today minus the day before.
           </p>
         </>
       )}

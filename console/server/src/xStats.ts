@@ -33,6 +33,8 @@ export interface XStatsTotals {
 }
 export interface XStatsAccount {
   handle: string;
+  /** x (default), reddit or tiktok: the same day file carries every channel's posts. */
+  platform: string;
   product: string;
   state: string;
   listedBy: string | null;
@@ -77,7 +79,7 @@ export function parseXStatsDay(text: string): XStatsDay {
         }));
       const t = (a.totals ?? {}) as Record<string, unknown>;
       return {
-        handle: str(a.handle), product: str(a.product), state: str(a.state) || "not read", listedBy: str(a.listedBy) || null,
+        handle: str(a.handle), platform: str(a.platform) || "x", product: str(a.product), state: str(a.state) || "not read", listedBy: str(a.listedBy) || null,
         followers: num(a.followers), postsAllTime: num(a.postsAllTime), posts, count: posts.length,
         totals: Object.fromEntries(TOTALS.map((k) => [k, num(t[k]) ?? 0])) as unknown as XStatsTotals,
         notes: Array.isArray(a.notes) ? a.notes.filter((n): n is string => typeof n === "string") : [],

@@ -1346,7 +1346,7 @@ export function morePages(shows: (s: ScreenId) => boolean, socialSkin: boolean, 
     { to: `/${OUTCOMES_PATH}`, label: "Outcomes", icon: ListChecks, testId: "nav-outcomes" },
     { to: `/${PAGES_PATH}`, label: "Pages", icon: Files, testId: "nav-pages-list" },
     { to: `/${VOICE_NOTES_PATH}`, label: "Voice notes", icon: Mic, testId: "nav-voice-notes" },
-    { to: `/${X_STATS_PATH}`, label: "X stats", icon: BarChart3, testId: "nav-x-stats" },
+    { to: `/${X_STATS_PATH}`, label: "Post stats", icon: BarChart3, testId: "nav-x-stats" },
     ...gap,
   ];
 }

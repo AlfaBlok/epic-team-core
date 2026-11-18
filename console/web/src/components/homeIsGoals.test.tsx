@@ -120,7 +120,7 @@ describe("Home is the goals view, the Inbox one tap away", () => {
       ["One-offs", "/one-offs"],
       ["Outcomes", "/outcomes"],
       ["Daily reports", "/daily"],
-      ["X stats", "/x-stats"],
+      ["Post stats", "/x-stats"],
     ]);
     // below the objectives
     const goal = document.querySelector("[data-testid='sidebar-goal-sets']");
