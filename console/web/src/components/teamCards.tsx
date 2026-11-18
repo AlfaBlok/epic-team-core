@@ -15,6 +15,7 @@ import { CARD_LINK, CardButton } from "@/components/ui/cardButton";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { useSlotReady } from "@/components/slot";
 import { useGoalTalk } from "@/components/campaignGoals";
+import { askCard, SectionCallButton, teamCard } from "@/voice/SectionCall";
 import { cn } from "@/lib/utils";
 
 /**
@@ -663,7 +664,15 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
   const rows = useKeepSent(cards, teamSlot, "inbox-goals");
   if (!count && !rows.length) return null;
   return (
-    <FoldSection title={INBOX_SECTION_TITLE.goal} count={count} tone="needs-you" testId="inbox-goals-to-set" open={open || !!needle} onToggle={setOpen}>
+    <FoldSection
+      title={INBOX_SECTION_TITLE.goal}
+      count={count}
+      tone="needs-you"
+      testId="inbox-goals-to-set"
+      open={open || !!needle}
+      onToggle={setOpen}
+      call={count > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.goal} testId="inbox-goals-to-set" cards={() => [...lines.map((t) => askCard({ id: t.openUrl, title: `${t.name}: ${t.text}`, where: t.name })), ...cards.map(teamCard)]} />}
+    >
       {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="team-cards-goal-list">
         {lines.map((t) => (
@@ -706,7 +715,15 @@ export function InboxIdeasAndDigests({ kinds = TEAM_GROUP_KINDS, scorecard }: { 
   const rows = useKeepSent(cards, teamSlot, "inbox-team");
   if (!rows.length) return null;
   return (
-    <FoldSection title={INBOX_SECTION_TITLE.team} count={cards.length} tone="review" testId="inbox-team-cards" open={open || !!q} onToggle={setOpen}>
+    <FoldSection
+      title={INBOX_SECTION_TITLE.team}
+      count={cards.length}
+      tone="review"
+      testId="inbox-team-cards"
+      open={open || !!q}
+      onToggle={setOpen}
+      call={cards.length > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.team} testId="inbox-team-cards" cards={() => cards.map(teamCard)} />}
+    >
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="inbox-team-cards-list">
         <TeamCardRows rows={rows} onAnswered={(x) => setGone((s) => new Set(s).add(x.id))} />
       </ul>

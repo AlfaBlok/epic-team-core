@@ -138,6 +138,22 @@ describe("T42-S5 call engine", () => {
     expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "read card: card 2 of 5")).toBe(true);
   });
 
+  it("a section call starts with its cards; press_card on his yes is pressed by the page, the result said back", async () => {
+    const f = fakes();
+    const press = vi.fn(async () => "done: marked complete");
+    await f.engine.startFocused({ section: "Decisions waiting on you", cards: [{ kind: "review", id: "ri_1", title: "A card", buttons: ["Mark complete"] }], press });
+    f.dc.onopen();
+    await f.emit({ type: "response.done", response: { id: "resp_open" } });
+    f.sent.length = 0;
+    expect(f.api.start).toHaveBeenCalledWith({ section: "Decisions waiting on you", cards: [{ kind: "review", id: "ri_1", title: "A card", buttons: ["Mark complete"] }] });
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 1 of 1", pos: 1, total: 1, press: { id: "ri_1", kind: "review", button: "Mark complete", title: "A card" } }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Mark complete", confirmed: true }) });
+    await f.emit({ type: "response.done", response: { id: "resp_p" } });
+    expect(press).toHaveBeenCalledWith({ id: "ri_1", kind: "review", button: "Mark complete", title: "A card" });
+    expect(JSON.parse(f.sent[0].item.output)).toMatchObject({ result: "done: marked complete" });
+    expect(f.engine.view().lines.some((l: { who: string; text: string }) => l.who === "tool" && l.text === "pressed Mark complete on card 1 of 1: done: marked complete")).toBe(true);
+  });
+
   it("ask the desk: sent at once, no spoken updates while it works (T42-S31), the answer said at once (T42-S33)", async () => {
     const f = fakes();
     await f.open();

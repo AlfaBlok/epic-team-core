@@ -75,8 +75,18 @@ export interface EngineView {
 }
 
 /** The console calls this engine makes (fetch by default; tests fake them). */
+/**
+ * a call started from one inbox section (its phone button): the section, its cards as the page shows them, and
+ * how the page presses his own button on one of them (the same calls its buttons make) once he said yes.
+ */
+export interface CallFocus {
+  section: string;
+  cards: Record<string, unknown>[];
+  press?: (p: { id: string; kind: string; button: string; words?: string }) => Promise<string>;
+}
+
 export interface VoiceApi {
-  start(): Promise<StartAnswer>;
+  start(focus?: { section: string; cards: Record<string, unknown>[] }): Promise<StartAnswer>;
   beat(id: string): Promise<{ call: CallInfo; monthUsd: number; stop?: string }>;
   usage(id: string, ev: { eventId: string; kind: "response" | "transcription"; usage: unknown }): Promise<{ call: CallInfo; monthUsd: number; stop?: string }>;
   end(id: string, body: { reason: string; transcript: Line[] }, beacon?: boolean): Promise<unknown>;
@@ -171,7 +181,7 @@ export const BYE_MAX_MS = 8_000;
 /** listen mode (call_bfdb5e0f): the tool the voice calls when he wants to give feedback, and every word it says in it. */
 export const LISTEN_TOOL = "listen_for_feedback";
 /** the tools the console answers itself (POST …/calls/:cid/tool): the inbox walk. */
-export const CONSOLE_TOOLS = new Set(["next_card", "read_card"]);
+export const CONSOLE_TOOLS = new Set(["next_card", "read_card", "press_card"]);
 export const LISTEN_START_LINE = "I'm listening. Take your time, and say done when you're finished.";
 /**
  * a few very
@@ -291,14 +301,24 @@ export class CallEngine {
     if (t) this.set({ lines: [...this.v.lines, { who, text: t, at: iso() }] });
   }
 
-  async start(o: { notice?: string; resumed?: boolean } = {}): Promise<void> {
+  /** the section the next call starts with (kept for a reconnect of that call; cleared by a plain start). */
+  private focus?: CallFocus;
+  /** start a call holding one inbox section's cards (its phone button). */
+  startFocused(focus: CallFocus): Promise<void> {
+    if (this.v.phase === "starting" || this.v.phase === "connecting" || this.v.phase === "live") return Promise.resolve();
+    this.focus = focus;
+    return this.start({ focused: true });
+  }
+
+  async start(o: { notice?: string; resumed?: boolean; focused?: boolean } = {}): Promise<void> {
     if (this.v.phase === "starting" || this.v.phase === "connecting" || this.v.phase === "live") return;
+    if (!o.focused && !o.resumed) this.focus = undefined;
     this.droppedAway = this.away = undefined;
     this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice });
     try {
       // Microphone first: a refused permission costs nothing (no key minted, no call row).
       this.mic = await this.media.microphone();
-      const s = await this.api.start();
+      const s = this.focus ? await this.api.start({ section: this.focus.section, cards: this.focus.cards }) : await this.api.start();
       this.limits = s.limits;
       this.turnDetection = s.turnDetection ?? NORMAL_TURN;
       this.greeting = o.resumed ? RESUME_GREETING : s.greeting?.trim() || undefined;
@@ -629,9 +649,22 @@ export class CallEngine {
         } else if (CONSOLE_TOOLS.has(c.name) && this.api.tool) {
           // the inbox walk; the console keeps which card he is on.
           const args = JSON.parse(c.arguments || "{}") as Record<string, unknown>;
-          const r = (await this.api.tool(id, c.name, args)) as { place?: string };
-          this.line("tool", `${c.name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
-          output = r;
+          const r = (await this.api.tool(id, c.name, args)) as { place?: string; press?: { id: string; kind: string; button: string; words?: string; title?: string } };
+          if (r?.press) {
+            // the console checked his yes and the button; the page presses it as his own button would.
+            const press = this.focus?.press;
+            let done: string;
+            try {
+              done = press ? await press(r.press) : "not pressed: this page cannot press it";
+            } catch (e) {
+              done = `not pressed: ${(e as Error).message}`;
+            }
+            this.line("tool", `pressed ${r.press.button} on ${r.place ?? "the card"}: ${done}`);
+            output = { ...r, result: done, note: done.startsWith("not pressed") ? "It did not go through: tell him in one line and offer to pass it to the desk." : "Pressed. Say it is done in a few words, then offer the next card." };
+          } else {
+            this.line("tool", `${c.name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
+            output = r;
+          }
         } else output = { error: `unknown tool ${c.name}` };
       } catch (e) {
         output = { error: `the console did not answer: ${(e as Error).message}` };
@@ -991,7 +1024,7 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
     return j as T;
   };
   return {
-    start: () => call("POST", "/calls"),
+    start: (focus) => call("POST", "/calls", focus ? { focus } : undefined),
     beat: (id) => call("POST", `/calls/${id}/beat`),
     usage: (id, ev) => call("POST", `/calls/${id}/usage`, ev),
     end: (id, body, beacon) => {

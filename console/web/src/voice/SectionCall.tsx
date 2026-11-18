@@ -1,0 +1,186 @@
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useInRouterContext, useLocation } from "react-router-dom";
+import { Phone } from "lucide-react";
+import { api, type ReviewItem } from "@/api";
+import type { TeamCard } from "@/api/teamcard-types";
+import { mutate } from "@/lib/data";
+import { isDecisionCard } from "@/lib/cardKind";
+import { decisionChoices } from "@/components/review";
+import { cn } from "@/lib/utils";
+import { busy, useCallTab } from "./CallProvider";
+import type { CallFocus } from "./engine";
+
+/**
+ * A phone button next to each inbox section ("Goals to set (14 cards)") starts the same Team desk call (one voice, one
+ * call code), already holding
+ * that section's cards and a briefing for them. It goes one by one to clear the board, answers fast, and hands other work
+ * to the desk. On his spoken yes (read back once) the call presses his own button on a card through the same calls the
+ * card's button makes (never a card closed or hidden any other way); a card with no button it may press, or a
+ * choice it cannot make the way the card does, goes to the desk.
+ */
+
+/** One card as the call gets it, with how the page presses each button it lists. */
+export interface SectionCard {
+  kind: "review" | "ask" | "goal" | "team";
+  id: string;
+  code?: string;
+  title: string;
+  where?: string;
+  source?: string;
+  goal?: string;
+  delivered?: string[];
+  evidence?: string;
+  decision?: string;
+  options?: string[];
+  question?: string;
+  recommend?: string;
+  /** the buttons the call may press for him (see engine `press_card`); a label ending in "…" takes his words. */
+  buttons?: string[];
+}
+type Press = (button: string, words?: string) => Promise<string>;
+export type PressableCard = SectionCard & { press?: Press };
+
+export const MARK_COMPLETE = "Mark complete";
+export const CHANGES_WANTED = "Changes wanted…";
+export const ANSWER_IN_WORDS = "Answer in words…";
+
+const done = (what: string) => `done: ${what}`;
+
+/** A review card (Decisions, Done, waiting for your review): Mark complete, his decision's own choices, Changes wanted. */
+export function reviewCard(i: ReviewItem & { milestoneTitle?: string }): PressableCard {
+  const f = i.face;
+  const choices = f && isDecisionCard(f) ? (decisionChoices(f) ?? []) : [];
+  const next = f?.next ?? [];
+  // Mark complete as the card's own button does with his switches untouched: the team's recommendation for each next step.
+  const complete = () =>
+    api.completeReviewItem(i.id, {
+      start: next.flatMap((s, n) => (s.recommend === "start" ? [n] : [])),
+      park: next.flatMap((s, n) => (s.recommend === "start" ? [] : [n])),
+      ...(next.some((s) => s.target) ? { why: next.map(() => "") } : {}),
+    });
+  const choose = (label: string) => {
+    const c = choices.find((x) => x.label === label)!;
+    const idx = next.map((_, n) => n);
+    const plain = (f?.decision ?? "").split("?")[0].replace(/^(?:do|should|shall|will|can|would) (?:we|the team|i)\s+/i, "").trim();
+    const plan = !next.length && c.start && plain ? `${/:\s*plan\b/i.test(c.label) ? "Plan" : "Do"}: ${plain}` : undefined;
+    const switches = next.some((s) => s.target);
+    return api.completeReviewItem(i.id, { ...(c.start ? { start: idx, park: [] } : { park: idx }), ...(switches && c.start ? { why: next.map(() => "") } : {}), choice: c.label, ...(plan ? { plan } : {}) });
+  };
+  const buttons = choices.length ? [...choices.map((c) => c.label), CHANGES_WANTED] : [MARK_COMPLETE, CHANGES_WANTED];
+  return {
+    kind: "review",
+    id: i.id,
+    ...(i.ref ? { code: i.ref } : {}),
+    title: f?.title || i.title,
+    ...(i.milestoneTitle ? { where: i.milestoneTitle } : {}),
+    ...(f?.source ? { source: f.source } : {}),
+    ...(f?.taskGoal ? { goal: f.taskGoal } : {}),
+    ...(f?.delivered?.length ? { delivered: f.delivered.map((d) => `${d.ok === false ? "✗" : "✓"} ${d.text}`) } : {}),
+    ...(f?.evidence?.label ? { evidence: f.evidence.label } : {}),
+    ...(f?.decision ? { decision: f.decision } : {}),
+    ...(f?.options?.length ? { options: f.options } : {}),
+    buttons,
+    press: async (button, words) => {
+      if (button === CHANGES_WANTED) {
+        await mutate(() => api.relaunchReviewItem(i.id, words ?? ""), "inbox");
+        return done("his words went to the team as Changes wanted");
+      }
+      if (button === MARK_COMPLETE) {
+        await mutate(complete, "inbox");
+        return done("marked complete");
+      }
+      await mutate(() => choose(button), "inbox");
+      return done(`chose ${button}`);
+    },
+  };
+}
+
+/** A team card (Goals to set: pick one of its goals; ideas and digests: answer in words), through its own answer route. */
+export function teamCard(c: TeamCard): PressableCard {
+  const goals = c.goal?.options ?? [];
+  const label = (g: { goal: string; number: string }) => `${g.goal}${g.number ? ` (${g.number})` : ""}`.slice(0, 110);
+  return {
+    kind: c.kind === "goal" ? "goal" : "team",
+    id: c.id,
+    title: c.title,
+    ...(c.scorecardName ? { where: c.scorecardName } : {}),
+    ...(c.source ? { source: c.source } : {}),
+    ...(c.goal ? { question: `${c.goal.unset}. Options: ${goals.map((g, n) => `${n + 1}) ${label(g)}`).join("; ")}` } : {}),
+    ...(c.goal?.recommend !== undefined && goals[c.goal.recommend] ? { recommend: label(goals[c.goal.recommend]) } : {}),
+    ...(c.idea ? { question: c.idea.gain, recommend: c.idea.recommend } : {}),
+    ...(c.digest ? { question: `${c.digest.greens} of ${c.digest.total} green. ${c.digest.reasons.map((r) => r.text).join(" ")}`.slice(0, 1800) } : {}),
+    buttons: [...goals.map(label), ANSWER_IN_WORDS],
+    press: async (button, words) => {
+      const pick = goals.findIndex((g) => label(g) === button);
+      await mutate(() => api.answerTeamCard(c.id, pick >= 0 ? { pick, via: "voice" } : { text: words ?? "", via: "voice" }), "inbox");
+      return done(pick >= 0 ? `picked ${button}` : "his answer was sent");
+    },
+  };
+}
+
+/** A question or block waiting on him: its answer goes to the desk (the voice presses nothing). */
+export function askCard(a: { id: string; code?: string; title: string; question?: string; where?: string }): PressableCard {
+  return { kind: "ask", id: a.id, ...(a.code ? { code: a.code } : {}), title: a.title, ...(a.question && a.question !== a.title ? { question: a.question } : {}), ...(a.where ? { where: a.where } : {}), buttons: [] };
+}
+
+/** the Team desk's voice is on here (his own console, voice switched on): the section buttons show. One read per page. */
+let stateRead: Promise<boolean> | undefined;
+function useVoiceOn(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    stateRead ??= fetch("/api/voice/state")
+      .then(async (r) => (r.ok ? !!((await r.json()) as { available?: boolean }).available : false))
+      .catch(() => false);
+    void stateRead.then((v) => live && setOn(v));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return on;
+}
+
+/**
+ * The phone button beside a section's name. Pressing it starts the Team desk call holding `cards()` (the cards the section
+ * shows now, in its order); the call floats on every page (CallWidget) with Mute and Hang up.
+ */
+export function SectionCallButton({ section, cards, testId }: { section: string; cards: () => PressableCard[]; testId: string }) {
+  const on = useVoiceOn();
+  const tab = useCallTab();
+  useSyncExternalStore(tab.subscribe, tab.snapshot, tab.snapshot);
+  const loc = useInRouterContext() ? useLocation() : undefined; // eslint-disable-line react-hooks/rules-of-hooks
+  if (!on) return null;
+  const h = tab.call("/api/voice", { callee: "the desk" });
+  const live = busy(h.engine.view().phase);
+  const start = () => {
+    const list = cards();
+    const presses = new Map(list.map((c) => [c.id, c.press]));
+    const focus: CallFocus = {
+      section,
+      cards: list.slice(0, 60).map(({ press: _p, ...c }) => c as unknown as Record<string, unknown>),
+      press: async (p) => {
+        const f = presses.get(p.id);
+        if (!f) return "not pressed: this card has no button the call may press";
+        return f(p.button, p.words);
+      },
+    };
+    tab.started(h, loc ? `${loc.pathname}${loc.search}` : undefined);
+    void h.engine.startFocused(focus);
+  };
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        start();
+      }}
+      disabled={live}
+      title={live ? "A call is on" : `Call about ${section}: the voice goes through these cards with you`}
+      aria-label={`Call about ${section}`}
+      data-testid={`${testId}-call`}
+      className={cn("inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40")}
+    >
+      <Phone className="size-4" aria-hidden />
+    </button>
+  );
+}

@@ -6,7 +6,7 @@ import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
-import { INBOX_WALK_MAX, inboxPack, isInboxTool, walk, type InboxCard, type WalkStep } from "./inbox.js";
+import { FOCUS_MAX, INBOX_WALK_MAX, focusGreeting, focusPack, inboxPack, isInboxTool, pressStep, walk, type InboxCard, type InboxFocus, type PressStep, type WalkStep } from "./inbox.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -312,6 +312,11 @@ export interface VoiceDeps {
   inbox?: () => Promise<InboxCard[]> | InboxCard[];
   /** his objectives in his order, one per line, loaded with the inbox. */
   objectives?: () => Promise<string> | string;
+  /**
+   * what this call knows before it starts, besides the briefing (a social world's call: every campaign, its key
+   * results and the newest daily briefing). Read at each call's start, inside the same context wait.
+   */
+  context?: () => Promise<string> | string;
 }
 
 /**
@@ -359,6 +364,24 @@ export const INBOX_TOOLS = [
     parameters: { type: "object", properties: { number: { type: "integer", description: "The card's number in his inbox list (1 = first), or -1 to go back one. Leave out for the card he is on." } }, additionalProperties: false },
   },
 ];
+
+/** on a call started from an inbox section, the voice presses his own button on a card after his spoken yes. */
+export const PRESS_TOOL = {
+  type: "function",
+  name: "press_card",
+  description: `Press one of ${ownerName()}'s own buttons on a card (only a button the card lists as yours to press), ONLY after you said back what you will press and he said yes. The page presses it as he would. Leave number out for the card he is on.`,
+  parameters: {
+    type: "object",
+    properties: {
+      button: { type: "string", description: "The button's label exactly as the card lists it." },
+      words: { type: "string", description: "His words, for a button ending in … (Changes wanted…, Answer in words…)." },
+      number: { type: "integer", description: "The card's number in the list; leave out for the card he is on." },
+      confirmed: { type: "boolean", description: "true only after his spoken yes to what you said back." },
+    },
+    required: ["button", "confirmed"],
+    additionalProperties: false,
+  },
+};
 
 export const VOICE_TOOLS = [
   {
@@ -629,22 +652,25 @@ export function createVoice(d: VoiceDeps) {
     return recallBlock(lines, { now: iso() });
   }
 
-  async function start(): Promise<CallStart> {
+  async function start(focus?: InboxFocus): Promise<CallStart> {
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
-    const [brief, recall, cards, objectives] = await Promise.all([
+    // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
+    const [brief, recall, cards, objectives, context] = await Promise.all([
       briefNow(),
       recallNow().catch(() => ""),
-      d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
+      focus ? focus.cards.slice(0, FOCUS_MAX) : d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
       d.objectives ? inTime("objectives", d.objectives, "") : "",
+      d.context ? inTime("context", d.context, "") : "",
     ]);
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
     const walkCards = cards?.slice(0, INBOX_WALK_MAX);
-    const pack = walkCards ? inboxPack(walkCards, objectives) : "";
-    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
+    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
-    const cfg = sessionConfig(mdl, instructions, walkCards ? ([...tools, ...INBOX_TOOLS] as unknown as typeof VOICE_TOOLS) : tools, historyTokens());
+    const walkTools = walkCards ? (focus ? [...INBOX_TOOLS, PRESS_TOOL] : INBOX_TOOLS) : [];
+    const cfg = sessionConfig(mdl, instructions, [...tools, ...walkTools] as unknown as typeof VOICE_TOOLS, historyTokens());
     const key = await d.mint(cfg);
     const id = `call_${crypto.randomBytes(4).toString("hex")}`;
     const t = iso();
@@ -653,10 +679,11 @@ export function createVoice(d: VoiceDeps) {
     db.prepare("INSERT INTO voice_calls (id, started_at, last_beat_at, model, session_id, tenant_id, milestone_id, brief_tokens, recall_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, t, t, mdl, key.session?.id ?? null, world, ms, brief ? tokensOf(brief) : null, recall ? tokensOf(recall) : null);
     if (walkCards) {
       db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
-      console.log(`[voice] ${id} starts with his inbox: ${walkCards.length} cards (~${tokensOf(pack)} tokens with the objectives)`);
+      console.log(`[voice] ${id} starts with ${focus ? `the section "${focus.section}"` : "his inbox"}: ${walkCards.length} cards (~${tokensOf(pack)} tokens with the objectives)`);
     }
+    if (context) console.log(`[voice] ${id} starts with its context (~${tokensOf(context)} tokens)`);
     if (recall) console.log(`[voice] ${id} starts with ${recall.split("\n").length - 1} lines of earlier conversation (~${tokensOf(recall)} tokens)`);
-    return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting: greetingOf(instructions) };
+    return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting: focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions) };
   }
 
   /** Recompute a call's totals from its stored usage events (each counted once by event id). */
@@ -874,7 +901,7 @@ export function createVoice(d: VoiceDeps) {
    * a tool the console answers itself (the inbox walk). The call's inbox is the one it started with; the card he
    * is on is kept on the call row, so the voice never has to count.
    */
-  function tool(id: string, name: string, args: Record<string, unknown> = {}): WalkStep {
+  function tool(id: string, name: string, args: Record<string, unknown> = {}): WalkStep & { press?: PressStep["press"] } {
     open(id);
     if (!isInboxTool(name)) throw new VoiceError(404, "unknown_tool", `no console tool ${name}`);
     const r = db.prepare("SELECT inbox, inbox_pos FROM voice_calls WHERE id = ?").get(id) as { inbox: string | null; inbox_pos: number };
@@ -884,6 +911,12 @@ export function createVoice(d: VoiceDeps) {
       cards = JSON.parse(r.inbox);
     } catch {
       throw new VoiceError(409, "no_inbox", "this call's inbox could not be read");
+    }
+    if (name === "press_card") {
+      const p = pressStep(cards, r.inbox_pos ?? 0, args);
+      db.prepare("UPDATE voice_calls SET inbox_pos = ? WHERE id = ?").run(p.pos, id);
+      if (p.press) console.log(`[voice] ${id} press on his yes: ${p.press.button} on ${p.press.kind} ${p.press.id}`);
+      return p;
     }
     const step = walk(cards, r.inbox_pos ?? 0, name, args);
     db.prepare("UPDATE voice_calls SET inbox_pos = ? WHERE id = ?").run(step.pos, id);

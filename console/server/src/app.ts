@@ -150,6 +150,7 @@ import { createStatus, mountStatus, coverOfIn, statusRows } from "./status/route
 import { createAlertHandBack } from "./status/alertHandBack.js";
 import type { PendingItem } from "./status/compute.js";
 import type { InboxCard } from "./voice/inbox.js";
+import { worldCallContext } from "./voice/worldContext.js";
 import { createInboxSearch, SEARCH_MAX_CHARS } from "./inbox/search.js";
 import { mountAlertActions } from "./status/alertActions.js";
 import { mountMorningRead } from "./desk/morning.js";
@@ -2701,10 +2702,36 @@ export function createApp(
                 desk: { send: (t, page, crid) => worldDesks.send(world, t, page, crid), view: () => worldDesks.view(world) },
                 quickStatus: () => worldDeskStatus(world),
                 brief: () => briefing([treeBrief(worldTree(null, world), { who: "this world's", noun: "campaigns" })], "campaigns"),
+                context: () => worldCallKnows(world),
               })),
       );
     }
     return v;
+  };
+  /**
+   * what a social world's call (its world desk's or one campaign's) knows before it starts: every campaign of the
+   * world with its plan's key results, the newest daily briefing and the Strategist's daily lines, read from its repo.
+   */
+  const worldCallKnows = (world: string) => {
+    const dirOf = worldRepoDir(read.reposRoot, db, world);
+    const dir = (name?: string | null) => (name ? (dirOf(name) ?? resolveRepo(read.reposRoot, name)?.path) : undefined);
+    const ranks = milestoneRanks(store.listMilestones());
+    const mine = store
+      .listMilestones()
+      .filter((m) => milestoneWorld(db, m.id) === world)
+      .sort((a, b) => (ranks.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    const campaigns = mine.map((m) => {
+      const d = dir(m.repo);
+      let spine: string | undefined;
+      try {
+        if (d && m.path) spine = fs.readFileSync(path.join(d, m.path), "utf8");
+      } catch {
+        /* unreadable spine: the campaign is still named */
+      }
+      return { title: m.title, ...(spine ? { spine } : {}) };
+    });
+    const repoDir = dir(world) ?? dir(mine.find((m) => m.repo)?.repo);
+    return worldCallContext({ world: store.getTenant(world)?.name || world, campaigns, ...(repoDir ? { repoDir } : {}) });
   };
   /** quick status for a world desk's Call: the world's campaigns and jobs (pinned first), what waits, what is stuck. */
   const worldDeskStatus = async (world: string) => {
@@ -2774,6 +2801,7 @@ export function createApp(
         desk: { send: (t, page, crid) => milestoneChats.send(m.id, t, page, crid), view: () => milestoneChats.view(m.id) },
         quickStatus: () => campaignStatus(world, m.id, world === DEFAULT_TENANT ? "milestone" : "campaign"),
         brief: () => milestoneBrief(m.id, world),
+        ...(world === DEFAULT_TENANT ? {} : { context: () => worldCallKnows(world) }),
       });
       campaignVoices.set(m.id, v);
     }

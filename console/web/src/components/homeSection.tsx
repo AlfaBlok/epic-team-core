@@ -173,6 +173,7 @@ export function FoldSection({
   onToggle,
   hideZero,
   meta,
+  call,
   actions,
   bodyClassName,
   bodyTestId,
@@ -188,6 +189,8 @@ export function FoldSection({
   /** No pill at 0 (the milestone pages' rule). */
   hideZero?: boolean;
   meta?: ReactNode;
+  /** the section's phone button (a call about its cards), shown open or folded. */
+  call?: ReactNode;
   actions?: ReactNode;
   bodyClassName?: string;
   bodyTestId?: string;
@@ -223,6 +226,7 @@ export function FoldSection({
           )}
         </h2>
         {meta}
+        {call}
         {open && actions}
       </div>
       {open && children !== undefined && children !== null && children !== false && (

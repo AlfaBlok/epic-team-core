@@ -10,6 +10,24 @@ const endIn = z.object({
   transcript: z.array(z.object({ who: z.string().max(10), text: z.string().max(4000), at: z.string().max(40).optional(), feedback: z.string().max(80).optional() })).max(600).optional(),
 });
 const askIn = z.object({ request: z.string().min(1).max(4000), confirmed: z.boolean().optional(), words: z.string().max(20000).optional(), kind: z.literal("feedback").optional() });
+/** a call started from an inbox section brings that section's cards (as the page shows them). */
+const cardIn = z.object({
+  kind: z.enum(["review", "ask", "goal", "team"]),
+  id: z.string().min(1).max(200),
+  code: z.string().max(80).optional(),
+  title: z.string().min(1).max(600),
+  where: z.string().max(300).optional(),
+  source: z.string().max(1200).optional(),
+  goal: z.string().max(600).optional(),
+  delivered: z.array(z.string().max(600)).max(8).optional(),
+  evidence: z.string().max(600).optional(),
+  decision: z.string().max(1200).optional(),
+  options: z.array(z.string().max(300)).max(8).optional(),
+  question: z.string().max(2000).optional(),
+  recommend: z.string().max(600).optional(),
+  buttons: z.array(z.string().min(1).max(120)).max(10).optional(),
+});
+const startIn = z.object({ focus: z.object({ section: z.string().trim().min(1).max(120), cards: z.array(cardIn).max(60) }).optional() });
 const toolIn = z.object({ name: z.string().min(1).max(60), args: z.record(z.unknown()).optional() });
 const settingsIn = z.object({
   enabled: z.boolean().optional(),
@@ -149,7 +167,14 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
         return v instanceof Response ? v : c.json({ calls: v.list(Number(c.req.query("limit")) || 50), state: v.state() });
       }),
     );
-  api.post(`${prefix}/calls`, ownerOnly(async (c, voice) => c.json(await voice.start(), 201)));
+  api.post(
+    `${prefix}/calls`,
+    ownerOnly(async (c, voice) => {
+      const p = startIn.safeParse((await body(c)) ?? {});
+      if (!p.success) return bad(c, "focus is optional: { section, cards: [{ kind, id, title, … }] } (at most 60 cards)");
+      return c.json(await voice.start(p.data.focus), 201);
+    }),
+  );
   api.post(`${prefix}/calls/:cid/beat`, ownerOnly((c, voice) => c.json(voice.beat(c.req.param("cid") ?? ""))));
   api.post(
     `${prefix}/calls/:cid/usage`,

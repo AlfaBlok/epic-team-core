@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { askCard as voiceAsk, SectionCallButton } from "@/voice/SectionCall";
 import { ParkButton, parkAsk } from "@/components/parkButton";
 import { useSlotReady } from "@/components/slot";
 import { OwnerPriorityTag } from "./ownerPriority";
@@ -1839,6 +1840,20 @@ export function WaitingOnYou({
         testId="waiting-on-you"
         open={sectionOpen || searching}
         onToggle={fold ? setSectionOpen : undefined}
+        call={
+          fold &&
+          !milestoneId &&
+          keptBlocking.length + keptRows.length > 0 && (
+            <SectionCallButton
+              section={title}
+              testId="waiting-on-you"
+              cards={() => [
+                ...blocking.map((i) => voiceAsk({ id: i.id, code: i.code, title: i.title, question: i.question, where: i.milestoneTitle })),
+                ...openRows.map((r) => (r.card ? voiceAsk({ id: r.card.id, code: r.card.code, title: r.card.title, question: r.card.question, where: r.card.milestoneTitle }) : voiceAsk({ id: r.status!.id, code: r.status!.code, title: r.status!.title }))),
+              ]}
+            />
+          )
+        }
         meta={
           <>
             {scopeLabel && <span className="text-xs text-muted-foreground">from {scopeLabel} down</span>}

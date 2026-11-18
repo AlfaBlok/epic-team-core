@@ -29,6 +29,7 @@ import { cardPage, shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
 import { CardFeedback, FeedbackBlock, RowPair } from "@/components/cardFeedback";
+import { reviewCard, SectionCallButton } from "@/voice/SectionCall";
 import { CARD_FRAME, CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 
 /** A voice note's press the card did not take (the card says why). */
@@ -168,6 +169,7 @@ export function WaitingForReview({
         testId={testId}
         open={open || !!hits}
         onToggle={fold ? setOpen : undefined}
+        call={fold && items.length > 0 && <SectionCallButton section={title} testId={testId} cards={() => items.map(reviewCard)} />}
         actions={fold && <SortControl value={sort} onChange={setSort} testId={testId} />}
       >
         <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
