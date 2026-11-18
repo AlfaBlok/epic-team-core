@@ -46,6 +46,8 @@ describe("the product map", () => {
     expect(productFor(maps, { objective: "beta-live", repo: "w" })?.product).toBe("beta");
     expect(productFor(maps, { repo: "w" })?.product).toBe("alpha");
     expect(productFor(maps, { repo: "nowhere" })).toBeUndefined();
+    // a milestone carries the full name; the map files carry the short one
+    expect(productFor(maps, { repo: "Owner/w" })?.product).toBe("alpha");
   });
   it("the wake section names each totem, where it lives, read first and write back last", () => {
     const s = mapSection(maps, productFor(maps, { objective: "alpha-live" }));

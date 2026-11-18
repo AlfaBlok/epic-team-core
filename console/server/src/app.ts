@@ -71,7 +71,7 @@ import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./i
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, parsePursuits, priorityLines } from "./pursuits.js";
-import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
+import { mapSection, productFor, readMaps, sameRepoName, totemView } from "./totemMap.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
@@ -998,7 +998,7 @@ export function createApp(
   const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => {
     try {
       const doc = parsePursuits(fs.readFileSync(path.join(totemHome() ?? "", "docs/pursuits.json"), "utf8"));
-      return doc.pursuits.find((p) => p.epics.some((e) => e.repo === m.repo && e.path === m.path) || (p.plan?.repo === m.repo && p.plan?.path === m.path))?.id;
+      return doc.pursuits.find((p) => p.epics.some((e) => !!m.repo && sameRepoName(e.repo, m.repo) && e.path === m.path) || (!!m.repo && !!p.plan && sameRepoName(p.plan.repo, m.repo) && p.plan.path === m.path))?.id;
     } catch {
       return undefined;
     }

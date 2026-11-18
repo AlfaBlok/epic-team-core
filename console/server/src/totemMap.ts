@@ -1,3 +1,4 @@
+import { repoKey } from "./adapters/repoNames.js";
 import fs from "node:fs";
 import path from "node:path";
 import { homeRepo } from "./identity.js";
@@ -171,7 +172,13 @@ export function readMaps(homeDir: string | undefined): TotemMaps {
 
 /** the product whose map holds this objective, else the first whose repos hold the milestone's repo. */
 export function productFor(maps: TotemMaps, o: { objective?: string; repo?: string }): ProductMap | undefined {
-  return (o.objective ? maps.products.find((p) => p.objectives.includes(o.objective!)) : undefined) ?? (o.repo ? maps.products.find((p) => p.repos.includes(o.repo!)) : undefined);
+  return (o.objective ? maps.products.find((p) => p.objectives.includes(o.objective!)) : undefined) ?? (o.repo ? maps.products.find((p) => p.repos.some((r) => sameRepoName(r, o.repo!))) : undefined);
+}
+
+/** a milestone names its repo in full (`Owner/name`, the renamed name too), the map files and the objectives
+ * file by its short name: the same repo either way. Compared letter for letter, no wake prompt ever got its map. */
+export function sameRepoName(a: string, b: string): boolean {
+  return repoKey(a.split("/").pop()!) === repoKey(b.split("/").pop()!);
 }
 
 const whereOf = (t: Totem): string =>
