@@ -16,6 +16,7 @@ import { objectiveOf } from "@/lib/scorecards";
 import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { Button } from "@/components/ui/button";
+import { BackArrow } from "@/components/backArrow";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { MILESTONE_PAGE, milestoneWheelRows, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
@@ -1173,6 +1174,8 @@ export function Layout() {
         {/* in the installed app the status bar is see-through: the bar pads under it (safe-area), so the clock sits on the
             bar's own background and nothing scrolls under it. */}
         <header className="sticky top-0 z-40 flex h-[calc(52px+env(safe-area-inset-top))] items-center gap-2 border-b bg-background px-3 max-[379px]:gap-1 max-[379px]:px-1.5 pt-[env(safe-area-inset-top)] md:h-[calc(2.75rem+env(safe-area-inset-top))] md:px-4" data-testid="topbar">
+          {/* the installed app has no browser back, so a back arrow leads the bar (not on the first screen). */}
+          <BackArrow />
           <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu" onClick={() => setMobileOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
