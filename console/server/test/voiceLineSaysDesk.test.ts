@@ -30,7 +30,7 @@ describe("E942-S33 the voice line: says the desk's answer at once, short but war
     expect(STYLE_BLOCK).toMatch(/When the desk's answer arrives, tell him right away/);
     expect(ins).toContain(DESK_ANSWER_RULE);
     expect(DESK_ANSWER_RULE).toMatch(/As soon as it arrives, tell him: the answer first/);
-    expect(DESK_ANSWER_RULE).toMatch(/give the answer and then ask its question/);
+    expect(DESK_ANSWER_RULE).toMatch(/never ask him the desk.s question on the call/);
     expect(ins).not.toMatch(/Do not read it out/);
     expect(ins).not.toMatch(/mention it only when he asks/);
   });
@@ -60,10 +60,10 @@ describe("E942-S33 the voice line: says the desk's answer at once, short but war
     expect(ask.description).not.toMatch(/never say you are sending/);
   });
 
-  it("the desk's seed (v24) knows its reply is said aloud at once: the answer first, a question after it", () => {
+  it("the desk's seed (v24) knows its reply is said aloud at once: what it dispatched first, its questions on his inbox", () => {
     expect(SEED_VERSION).toBeGreaterThanOrEqual(24);
     const line = endpointLines("https://team.example.com").find((l) => l.includes("Voice call"))!;
-    expect(line).toMatch(/tells him your reply aloud as soon as it lands: put the answer first/);
+    expect(line).toMatch(/tells him your reply aloud as soon as it lands: say what you dispatched and where, plainly, first; a question for him is on his inbox/);
     expect(line).not.toMatch(/does not read your reply out/);
   });
 });

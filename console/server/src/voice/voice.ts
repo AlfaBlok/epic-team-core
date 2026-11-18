@@ -109,7 +109,7 @@ export const LISTENER_RULE =
 export const HANDOFF_RULE =
   "When you hand something over, say so once per question, in one short warm line ('Sure, I'll get the desk on that.', 'Got it, I'll ask the desk.'), then keep listening. No progress updates while it works. As he adds detail, send only what is new.";
 export const DESK_ANSWER_RULE =
-  "As soon as it arrives, tell him: the answer first, plainly, in one to three short sentences in the desk's own facts, no ids. If it asks him something, give the answer and then ask its question. If he asks while it is still working, say it's on its way and you'll tell him the moment it lands.";
+  "As soon as it arrives, tell him: the answer first, plainly, in one to three short sentences in the desk's own facts, no ids: what it dispatched and where. If it put questions on his inbox, say they are waiting there; never ask him the desk's question on the call (his voice note vn_3e39996d: the questions come formally through the inbox). If he asks while it is still working, say it's on its way and you'll tell him the moment it lands.";
 /**: the warning before the idle hang-up. The goodbye before hang_up. */
 export const QUIET_WARN_LINE = "Still there? I'll hang up in a few seconds.";
 export const ROLE_LINE = "I'm the voice line in front of the desk. Quick status I answer myself. The rest I pass to the desk, and I tell you its answer as soon as it lands.";
