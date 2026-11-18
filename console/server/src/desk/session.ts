@@ -866,6 +866,14 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   // ---- sends in flight ----
   let sending = 0;
   let sendError: { text: string; at: string; clientRequestId?: string } | undefined;
+  /** the words of the message `sendError` is about: once they show in the thread, it was no failure and the error goes. */
+  let sendErrorFor: string | undefined;
+  /**
+   * T3 did not answer the send in time: it may well have taken it (his message, 18 Nov 18:1xZ, said "Not sent: The
+   * operation was aborted due to timeout" while the desk had it). Such a send is queued and sent again with the same
+   * request id (T3 drops a copy it already took), never shown as a failure.
+   */
+  const timedOut = (e: unknown) => (e as Error)?.name === "TimeoutError" || /aborted due to timeout|timed? ?out/i.test(errorText(e));
   /** the owner's sends reach T3 one at a time, in the order he wrote them. */
   let sendChain: Promise<unknown> = Promise.resolve();
 
@@ -940,9 +948,10 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
           console.log(`desk ${p.key}: queued send ${r.client_request_id} delivered to ${s.threadId}`);
           n++;
         } catch (e) {
-          if (isT3Unavailable(e)) break; // still down: the next read or tick tries again
+          if (isT3Unavailable(e) || timedOut(e)) break; // still down, or no answer in time: the next read or tick tries again (same request id)
           d.db.prepare("UPDATE desk_outbox SET failed_at = ?, error = ? WHERE seq = ?").run(iso(), errorText(e), r.seq);
           sendError = { text: errorText(e), at: iso() };
+          sendErrorFor = r.text;
         }
       }
       return n;
@@ -1140,13 +1149,14 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
         try {
           await client(s).sendToThread(s.threadId, message, crid, "auto");
         } catch (e) {
-          if (isT3Unavailable(e)) {
+          if (isT3Unavailable(e) || timedOut(e)) {
             enqueue(crid, body, page, message);
             return "queued";
           }
           throw e;
         }
         sendError = undefined;
+        sendErrorFor = undefined;
         return "done";
       };
       const job = sendChain.then(run, run);
@@ -1154,6 +1164,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
       const settled = job
         .catch((e) => {
           sendError = { text: errorText(e), at: iso(), clientRequestId: crid };
+          sendErrorFor = body;
           throw e;
         })
         .finally(() => {
@@ -1242,6 +1253,12 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     const items = await refresh(s.threadId, { tailOf: Number.isFinite(count) && count > 0 ? count : 0 });
     const nth = ordinal(s.seq);
     const all = visible([...items.values()].sort((a, b) => a.position - b.position)).map((m) => present(m, nth, { rowSeq: s.seq }));
+    // a send shown as failed whose message is in the thread after all was no failure: the error goes.
+    const said = sendErrorFor?.trim().slice(0, 120);
+    if (sendError && said && all.some((m) => m.role === "user" && m.text.includes(said))) {
+      sendError = undefined;
+      sendErrorFor = undefined;
+    }
     let tail = all.slice(-TAIL_MESSAGES);
     let earlierMore = false;
     // a live thread that holds less than a screen (a new session after a host move) shows the earlier session above it

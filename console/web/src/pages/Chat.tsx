@@ -360,14 +360,17 @@ export const T3_DOWN_MESSAGE = {
 } as const;
 /** the text of the files sent just before a voice note (the note follows in the next message). */
 export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the next message: read both, then answer once.";
-/** under a send the console stored while T3 was down. */
-export const QUEUED_NOTE = "queued, sends when T3 is back";
+/**
+ * under a send the console holds while T3 is down or slow: it is sent (the console has it and delivers it by itself),
+ * never worded as a doubt (the owner, 18 Nov: "queued" read as not sent while the desk had his message).
+ */
+export const QUEUED_NOTE = "✓ Sent · the desk reads it as soon as T3 answers";
 /** his voice note the desk does not have yet: said plainly on the note itself. */
 export const NOTE_RETRYING = "Voice note not delivered yet, retrying";
 export const NOTE_NOT_DELIVERED = "Voice note not delivered. Its words are kept and the team has been told";
 /** the same quiet lines in a customer's workspace, which never names our T3. */
 export const CUSTOMER_T3_DOWN_MESSAGE = { restarting: "The chat is reconnecting…", maintenance: "The chat is down for planned maintenance, reconnecting…" } as const;
-export const CUSTOMER_QUEUED_NOTE = "queued, sends when the chat is back";
+export const CUSTOMER_QUEUED_NOTE = "✓ Sent · the team reads it as soon as the chat is back";
 
 /**
  * a message he sent that the transcript does not show yet. It shows at once ("sending…"), the console's reply
@@ -913,7 +916,7 @@ export function ChatView({
                     </div>
                   ) : (
                     <p className="mt-1 text-[11px] opacity-80" data-testid="chat-posting-state">
-                      {o.state === "sent" ? "sent" : o.ids?.length ? `sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "sending…"}
+                      {o.state === "sent" ? "✓ Sent" : o.ids?.length ? `sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "sending…"}
                     </p>
                   )}
                 </div>
