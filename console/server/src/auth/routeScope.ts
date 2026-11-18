@@ -211,6 +211,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/totems$`)],
   // the campaign's Plan tab reads its marketing plan (the spine's Plan section) through the same campaignMilestone.
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/plan$`)],
+  // the campaign's daily briefings (the morning talk kept on its campaign), through the same campaignMilestone;
+  // only records naming that campaign's repo and remote are read (social/dailyBriefing.ts). dailyBriefing.test.ts
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/briefings$`)],
   // the owner writes the Plan's eight sections (the campaign's own spine, through the same campaignMilestone).
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/plan/sections$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/(slide|slide/keep|slide/undo|observation|product-note)$`)], // product-note, a Product tab slide note

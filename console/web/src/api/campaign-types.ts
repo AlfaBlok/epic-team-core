@@ -215,3 +215,18 @@ export interface MarketingPlan {
   sections: MarketingPlanSection[];
   missing: string[];
 }
+
+/** one morning briefing kept on its campaign (GET …/campaigns/:mid/briefings; server social/dailyBriefing.ts). */
+export interface CampaignBriefing {
+  day: string;
+  code: string | null;
+  yesterday: string | null;
+  today: string | null;
+  questions: string[];
+  text: string;
+  answers: { when: string; text: string }[];
+}
+export interface CampaignBriefings {
+  latest: CampaignBriefing | null;
+  older: CampaignBriefing[];
+}

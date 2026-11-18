@@ -9,6 +9,7 @@ import { inline } from "@/lib/chatMarkdown";
 import { mutate, useQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
 import { cn } from "@/lib/utils";
+import { DailyBriefingPanel } from "./DailyBriefing";
 
 /**
  * The owner: "for any campaign ... this type of marketing plan needs to be there ... a normal web page with fixed
@@ -23,7 +24,13 @@ export function PlanTab({ m }: { m: Milestone }) {
   if (error) return <ErrorBox error={error} />;
   if (loading || !data) return <Loading />;
   if (editing) return <PlanEditor plan={data} onSave={async (w) => api.saveCampaignPlan(await worldId(), m.id, w)} onDone={() => setEditing(false)} />;
-  return <PlanView plan={data} onEdit={() => setEditing(true)} />;
+  // the campaign's latest morning briefing first, then its Plan (its key results sit above the tabs).
+  return (
+    <div className="grid gap-6">
+      <DailyBriefingPanel m={m} />
+      <PlanView plan={data} onEdit={() => setEditing(true)} />
+    </div>
+  );
 }
 
 /** what each section holds, in the owner's words, with the line shape the Plan tab draws (docs/campaign-plan.md). */

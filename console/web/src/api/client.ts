@@ -119,7 +119,7 @@ import type {
   ChatAttachment,
   ChatHistory,
   MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
-import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate, MarketingPlan, MarketingPlanWrite } from "./campaign-types";
+import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate, MarketingPlan, MarketingPlanWrite, CampaignBriefings } from "./campaign-types";
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult, SpokenRead } from "./inbox-types";
 
 /** GET /api/push. */
@@ -525,6 +525,8 @@ export interface ApiClient {
   getCampaignTotems(tenantId: string, milestoneId: string): Promise<CampaignTotems>;
   /** the campaign's Plan tab: its marketing plan from the spine's `## Plan` section (docs/campaign-plan.md). */
   getCampaignPlan(tenantId: string, milestoneId: string): Promise<MarketingPlan>;
+  /** the campaign's daily briefings, the morning talk kept on it (latest, then older ones). */
+  getCampaignBriefings(tenantId: string, milestoneId: string): Promise<CampaignBriefings>;
   /** the owner writes the Plan's line and eight sections into the campaign spine (one commit). */
   saveCampaignPlan(tenantId: string, milestoneId: string, input: MarketingPlanWrite): Promise<MarketingPlan>;
   /** an objective's Plan tab: the same eight sections, read from the campaign spine the objective names. */

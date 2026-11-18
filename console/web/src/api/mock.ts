@@ -1401,6 +1401,9 @@ const mockMail = () => ({
     async getCampaignPlan() {
       return ok(unwrittenPlan());
     },
+    async getCampaignBriefings() {
+      return ok({ latest: null, older: [] });
+    },
     async saveCampaignPlan(_t: string, _m: string, input: { line?: string; sections: Record<string, string | undefined> }) {
       const p = unwrittenPlan();
       return ok({ ...p, source: "spine" as const, line: input.line ?? null, missing: [], sections: p.sections.map((s) => (input.sections[s.key]?.trim() ? { ...s, written: true, lead: input.sections[s.key]!.trim(), raw: input.sections[s.key]!.trim() } : s)) });
