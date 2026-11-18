@@ -11,7 +11,7 @@ import { useQuery, useWaitingList } from "@/lib/data";
 import { dodCount, milestoneName } from "@/lib/format";
 import { milestoneTiming } from "@/lib/derive";
 import { milestoneState, openAskCodes, statusOf } from "@/lib/status";
-import { blockedItems, useReviewCards, useStatusBatch } from "@/lib/inbox";
+import { blockedItems, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
 import { liveWorkers, OpenAsksContext, StateWord, stripLines, WORD_TONE } from "@/components/status";
 import { cn } from "@/lib/utils";
@@ -100,11 +100,9 @@ export function TeamPage({
   // the shared fetch the pills and Blocked read; each card's count is its blocked list's length (lib/inbox).
   const { data: statuses } = useStatusBatch();
   const { entries: snoozing } = useSnoozes();
-  // the owner: what he was frustrated about or asked for again leads his inbox until answered.
-  // No section of its own: each list puts it first (the server's order), and when only a review card is pressing,
-  // the review list moves above Blocked so that card is the first thing he sees.
-  const { cards: reviewNow } = useReviewCards({ keep: project.keep });
-  const reviewFirst = pressingInReviewOnly(reviewNow, waiting, blockedItems(statuses, { keep: project.keep, snoozing }));
+  // the owner: what he was frustrated about or asked for again leads his inbox until answered, inside its own section
+  // (each list puts it first, the server's order). The owner, 18 Nov: the sections never change places:
+  // Blocked on you, Decisions waiting on you, then Done waiting for your review (the old pressing flip is gone).
   const [newOpen, setNewOpen] = useState(false);
   // E948-S66: the inbox shows all, or one kind (Blocked, Digests, Ideas, Goals, Review), kept in the address as ?show=.
   const [show, setShow] = useInboxShow();
@@ -489,16 +487,6 @@ export function TeamPage({
           <InboxShowFilter show={show} onChange={setShow} />
           <SlotStack name="inbox">
             {/* E948-S103 (vn_a8293638): cards that wait on his choice sit in their own bucket, above finished work */}
-            {reviewFirst && keeps.review && (
-              <Slot name="decisions" fallback={420}>
-                <InboxDecisions />
-              </Slot>
-            )}
-            {reviewFirst && keeps.review && (
-              <Slot name="review" fallback={420}>
-                <InboxDoneForReview />
-              </Slot>
-            )}
             {keeps.blocked && (
               <Slot name="blocked" fallback={420}>
                 <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" connects />
@@ -508,7 +496,7 @@ export function TeamPage({
                 one list and waits on him (red); then finished work and the team's ideas and digests for his review (green);
                 the rest of his inbox's history (closed goals, Mac agent, snoozed, decided for you, coming up, answered) is
                 one folded line. His goals and their numbers live on the objectives screen, not here. */}
-            {!reviewFirst && keeps.review && (
+            {keeps.review && (
               <Slot name="decisions" fallback={420}>
                 <InboxDecisions />
               </Slot>
@@ -518,7 +506,7 @@ export function TeamPage({
                 <InboxGoalsToSet scorecard={scorecardId} />
               </Slot>
             )}
-            {!reviewFirst && keeps.review && (
+            {keeps.review && (
               <Slot name="review" fallback={420}>
                 <InboxDoneForReview />
               </Slot>
