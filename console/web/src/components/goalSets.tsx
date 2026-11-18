@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ObjectiveName } from "@/components/objectiveName";
+import { ObjectiveName, productText, splitObjectiveName } from "@/components/objectiveName";
 import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -821,35 +821,52 @@ export const topObjectives = (nodes: ScorecardNode[] | undefined) => (nodes ?? [
  * One objective in the sidebar: only its name, its inbox pills and its colour circle (the owner 2026-11-13 20:03Z:
  * "Too much info on sidebar - we only need name, inbox and circle"); the strip and the child epics live on its page. The open one adds
  * nothing under its name: its Board, Inbox, Chat desk and Social kit are the tabs on its page (card check 2026-11-13).
+ * Option A, the owner's pick of three mock-ups (vn_40ab2ea9: "avoid this effect where they're not in line ... lose the one, two, three"):
+ * no numbers; the ring, then the product word over the goal, both on one left edge; the product word is coloured text with
+ * no box (its padding broke the edge), the pills sit at the right of the product line and the goal may run under them.
  */
-function SidebarObjective({ n, nr, countFor, onNavigate, activeId }: { n: ScorecardNode; nr?: number; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
+function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardNode; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
   const c = countFor(n.id);
   const krs = keyResultsOf(n);
   const active = activeId === n.id;
+  const { product, goal } = splitObjectiveName(titleOf(n));
   return (
-    <li className="grid min-w-0 gap-0.5" data-testid="sidebar-set" data-set={n.id} data-depth={0}>
+    <li className="grid min-w-0" data-testid="sidebar-set" data-set={n.id} data-depth={0}>
       <Link
         to={scorecardHref(n.id)}
         onClick={onNavigate}
-        className={cn("grid min-w-0 gap-1.5 rounded-md border-l-[3px] px-2.5 py-2", active ? "border-l-foreground bg-card shadow-sm ring-1 ring-border" : "border-l-transparent hover:bg-accent/60")}
+        className={cn(
+          "grid min-w-0 grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-2.5 gap-y-0.5 rounded-md border-l-[3px] py-2 pl-2 pr-2.5",
+          active ? "border-l-foreground bg-card shadow-sm ring-1 ring-border" : "border-l-transparent hover:bg-accent/60",
+        )}
         title={`${titleOf(n)}: ${krs.filter((r) => r.state === "green").length} of ${krs.length} key results green`}
         aria-current={active ? "page" : undefined}
         data-testid="sidebar-set-link"
       >
-        <span className="flex min-w-0 items-start gap-2">
-          {/* his order, numbered (vn_15aa4467: "number these guys, 1, 2, 3 ... an ordered list"). */}
-          {nr ? (
-            <span className="w-4 shrink-0 pt-px text-right text-xs tabular-nums text-muted-foreground" data-testid="sidebar-set-nr">
-              {nr}
-            </span>
-          ) : null}
-          <SetWheel rows={krs} size={20} testId="sidebar-set-wheel" />
-          <ObjectiveName name={titleOf(n)} className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground" />
-          <span className="flex shrink-0 items-center gap-1">
-            <IdlePill n={n} testId="sidebar-set-idle" />
-            <GoalPills c={c} to={scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
-          </span>
+        <span className="col-start-1 row-start-1 flex h-[18px] items-center" data-testid="sidebar-set-ring">
+          <SetWheel rows={krs} size={18} testId="sidebar-set-wheel" />
         </span>
+        <span className="col-start-2 row-start-1 min-w-0" data-testid="objective-name" data-layout="sidebar">
+          {product ? (
+            <span className={cn("block truncate text-[12px] font-semibold leading-[18px]", productText(product))} data-testid="objective-product" data-product={product}>
+              {product}
+              <span className="sr-only">: </span>
+            </span>
+          ) : (
+            <span className="block text-[14px] font-medium leading-[18px] text-foreground [overflow-wrap:anywhere]" data-testid="objective-goal">
+              {goal}
+            </span>
+          )}
+        </span>
+        <span className="col-start-3 row-start-1 flex h-[18px] shrink-0 items-center gap-1">
+          <IdlePill n={n} testId="sidebar-set-idle" />
+          <GoalPills c={c} to={scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
+        </span>
+        {product ? (
+          <span className="col-span-2 col-start-2 row-start-2 min-w-0 text-[14px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="objective-goal">
+            {goal}
+          </span>
+        ) : null}
       </Link>
     </li>
   );
@@ -921,9 +938,9 @@ export function SidebarGoalSetsOf({
         </span>
       </NavLink>
       <ul className="grid min-w-0 gap-1" data-testid="sidebar-pinned-objectives">
-        {/* numbered 1, 2, 3 down the pinned list, with no gap where an unpinned one sits in his order */}
-        {pinned.map((n, i) => (
-          <SidebarObjective key={n.id} n={n} nr={i + 1} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+        {/* his order, unnumbered (the owner picked A, "lose the one, two, three") */}
+        {pinned.map((n) => (
+          <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
       {moreCount > 0 && (

@@ -1,6 +1,6 @@
 import { ownerName, ownerPattern, socialProduct } from "../identity.js";
 import { phantomRefProblem } from "./phantomRefs.js";
-import { decideButtonsProblem } from "./decideChoices.js";
+import { decideButtonsProblem, decideChoices } from "./decideChoices.js";
 import { untappableProblem } from "./untappable.js";
 /**
  * the gate every ask to the owner passes, where it is
@@ -36,6 +36,12 @@ import { untappableProblem } from "./untappable.js";
  *    a spine on GitHub does not count: that is where the team writes, not where he acts (inbox/askGate.ts linkProblem).
  * 12. (E948-S129, asks raised from 2026-11-17) Every address it shows is one he can tap: never localhost or a server's own
  *    address, an IP or short name with a port and no http://, or a link cut by a space (inbox/untappable.ts).
+ * 13. (E948-S151, open decide asks raised from 2026-11-18) A choice shows its options: a decide ask whose buttons pick among
+ *    things he has to see (options that are only a letter, A, B or C, or a choice of mockups, layouts, designs, logos, screens, versions,
+ *    drafts) links the page or picture of those options, which the card shows on its face above the buttons (web
+ *    lib/faceLink.ts). A choice said wholly in words (start them or keep waiting) has its options on its face already: its
+ *    buttons; a bare yes or no is not a choice. The owner on E940-A10 (vn_b2c9395c): "If you don't give me a
+ *    link, how the fuck do you expect me to choose?" A spine on GitHub does not count.
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -71,6 +77,8 @@ export const DECIDE_BUTTONS_FROM = "2026-11-13";
 export const TAPPABLE_FROM = "2026-11-17";
 /** the day rule 5 started (the owner's voice note of 2026-11-12 02:01Z). */
 export const HANDS_WHY_FROM = "2026-11-12";
+/** the day rule 13 started (E948-S151, his voice note vn_b2c9395c of 2026-11-18). */
+export const CHOICE_LINK_FROM = "2026-11-18";
 /** A why that rests on his own machine or sign-in; it must then name the team's own browsers (rule 5). */
 const HIS_MACHINE = /\b(?:mac|macbook|chrome|laptop|signed[ -]in|sign[ -]ins?|logged[ -]in)\b/i;
 const OUR_BROWSERS = /\b(?:team(?:'s)? browser|server browser)\b/i;
@@ -119,7 +127,38 @@ const text = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join("
 export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
   // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
-  return wordsOrButtonsProblem(a) ?? linkProblem(a) ?? tappableProblem(a);
+  return wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a);
+}
+
+/** A button that is only a yes or a no (with its next step: "Yes, build it", "No: drop it"). */
+const YES_NO_OPTION = /^\s*(?:yes|no)\b/i;
+/** An option that is only a letter or number he must look up elsewhere: "A", "Pick B", "Option 2", "(c)", "Pick A: build A". */
+const LETTERED_OPTION = /^\s*(?:(?:pick|option|choose|version|go with|build)\s+)?\(?([A-F]|[1-6])\)?\s*(?:[:.\-–—]\s*(?:(?:pick|option|choose|build|go with|use)\s+)?\(?\1\)?\s*\.?)?\s*$/i;
+/** Words that say the options are things to see. */
+const SEEN_THINGS = /\b(?:mock-?ups?|layouts?|designs?|logos?|looks?|screens?|screenshots?|pictures?|images?|sidebars?|versions?|drafts?|styles?|colou?rs?|themes?|icons?|banners?|thumbnails?|covers?|variants?|wireframes?|templates?|shapes?|diagrams?|clips?|videos?)\b/i;
+
+/**
+ * 13. Why this choice shows none of its options to look at (E948-S151, vn_b2c9395c); undefined when it links or pictures them,
+ * or when it is not a choice among things (a yes or no question, fewer than two options).
+ */
+export function choiceLinkProblem(a: GateAsk): string | undefined {
+  if (a.state && a.state !== "open") return undefined;
+  if (a.ask.toLowerCase() !== "decide") return undefined;
+  if (a.since !== undefined && (!a.since || a.since < CHOICE_LINK_FROM)) return undefined;
+  const choices = decideChoices({ ask: "decide", question: a.question, options: a.options, recommend: a.recommend }).options.filter((o) => !YES_NO_OPTION.test(o));
+  if (choices.length < 2) return undefined;
+  // things he has to see: lettered options, or a choice of mockups, layouts, designs… (a choice in words shows itself)
+  const toSee = choices.filter((o) => LETTERED_OPTION.test(o)).length >= 2 || SEEN_THINGS.test(text(a.question, ...(a.options ?? [])));
+  if (!toSee) return undefined;
+  if (webLinks(a).length) return undefined;
+  // a picture or page path the card shows as a link (`context: docs/status/options.webp`), never a spine
+  const mdTargets = [...text(a.question, a.contextText, a.recommend, ...(a.options ?? [])).matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]);
+  if ([a.context, ...mdTargets].some((p) => !!p && DOC_PATH.test(p) && !SPINE_PATH.test(p))) return undefined;
+  return (
+    `it asks ${ownerName()} to choose between ${choices.slice(0, 4).join(", ")} but shows none of them: link the page or picture of the options ` +
+    `(a full https link in the question, \`context:\` or each option; the card shows it on its face, above the buttons; a spine does not count) ` +
+    `(his voice note vn_b2c9395c on E940-A10: "If you don't give me a link, how the fuck do you expect me to choose?")`
+  );
 }
 
 /** 12. an address he cannot tap (E948-S129). */
@@ -233,7 +272,7 @@ export const ASK_GATE_RULE =
   "The console refuses (422 ask_not_his, or holds back from his inbox and lists to the Delivery Manager) any approve or decide ask that does not name " +
   `what of ${ownerName()}'s it answers (his ask: his words in quotes, a voice note or log id; or a \`why ${ownerName()}:\` that is money, publishing or contacting others, access, ` +
   "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, and any ask carrying a go-live date he did not set (a dated opening, " +
-  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56).";
+  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56).";
 
 export interface HeldAsk {
   code?: string;

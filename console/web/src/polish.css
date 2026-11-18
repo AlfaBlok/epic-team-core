@@ -103,7 +103,6 @@ main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12
 [data-testid="history-row"] { padding-top: 10px !important; padding-bottom: 10px !important; }
 [data-testid="history-row"] button { height: 28px !important; min-height: 28px !important; padding: 0 8px !important; font-size: 12px !important; }
 [data-testid="history-row"] button svg { width: 14px !important; height: 14px !important; }
-[data-testid="history-row"] a.underline { text-decoration: none !important; color: hsl(var(--foreground)) !important; }
 
 /* R1-11 + R2-6. Chat: one bubble radius, the owner's messages in a soft tint (not a black slab), a 44 px composer. */
 [data-testid="chat-user"] > div, [data-testid="chat-assistant"] > div { border-radius: 16px !important; }
@@ -117,9 +116,20 @@ main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12
 [data-testid="words-field"]:focus-within { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
 [data-testid="chat-dock"] [data-testid="words-tools"] button { height: 44px !important; border-radius: 12px !important; }
 
-/* R2-3. Links: a thin underline that darkens on hover; breadcrumbs in grey, not blue. */
-main a.underline, main a.text-blue-600 { text-decoration-thickness: 1px !important; text-underline-offset: 3px !important; text-decoration-color: hsl(var(--foreground) / 0.25) !important; }
-main a.underline:hover, main a.text-blue-600:hover { text-decoration-color: currentColor !important; }
+/* R2-3, E948-S151 (the owner 2026-11-18: "MAKE LINKS CLEARLY DISTINGUISHABLE MAKE MY LIFE EASY"): every link in a card or
+   a page's words is the one link colour and underlined, at a glance, never plain text. Navigation (menus, tabs, crumbs,
+   the tree of rows) and links drawn as buttons or pictures keep their own look. */
+:is(main, [role="dialog"], [data-card-shell], [data-inbox-card]) :is(
+  :is(p, li, dd, dt, td, th, span, label, small, blockquote, figcaption) > a[href],
+  a.underline, a.text-blue-600, a[class*="hover:underline"], a[data-testid="card-go"], a[data-testid="ask-set-open"]
+):not(:is(nav, aside, header, [role="tablist"], [role="menu"], [data-testid="review-crumb"], [data-testid="review-tree"], [data-sidebar]) *):not([role="button"], [role="tab"], [data-slot="button"], .no-link-look):not(:has(img, > svg:only-child)) {
+  color: hsl(var(--link)) !important;
+  text-decoration-line: underline !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 3px !important;
+  text-decoration-color: hsl(var(--link) / 0.55) !important;
+}
+:is(main, [role="dialog"], [data-card-shell], [data-inbox-card]) a[href]:hover { text-decoration-color: currentColor !important; }
 [data-testid="review-tree"] a { color: hsl(var(--foreground)) !important; }
 [data-testid="review-crumb"] a { color: hsl(var(--muted-foreground)) !important; text-decoration: none !important; }
 [data-testid="review-crumb"] a:hover { color: hsl(var(--foreground)) !important; text-decoration: underline !important; }

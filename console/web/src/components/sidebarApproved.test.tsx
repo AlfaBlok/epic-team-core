@@ -32,8 +32,16 @@ describe("the sidebar he approved", () => {
     );
     const pinned = await screen.findByTestId("sidebar-pinned-objectives");
     expect(within(pinned).getAllByTestId("sidebar-set").map((x) => x.dataset.set)).toEqual(["launch", "servers"]);
-    // numbered down the pinned list, no gap where the unpinned one sits in his order
-    expect(within(pinned).getAllByTestId("sidebar-set-nr").map((x) => x.textContent)).toEqual(["1", "2"]);
+    // option A (the owner's pick): no numbers; the ring, then the product word over the goal on one left edge, no box
+    expect(within(pinned).queryAllByTestId("sidebar-set-nr")).toEqual([]);
+    for (const li of within(pinned).getAllByTestId("sidebar-set")) {
+      expect(within(li).getByTestId("sidebar-set-link").className).toContain("grid-cols-[18px_minmax(0,1fr)_auto]");
+      const product = within(li).queryByTestId("objective-product");
+      if (product) {
+        expect(product.className).not.toMatch(/(^| )(px-|rounded|bg-)/);
+        expect(within(li).getByTestId("objective-goal").className).toContain("col-start-2");
+      }
+    }
     expect(screen.getByTestId("sidebar-goal-sets-all").textContent).toMatch(/^Objectives/);
     expect(screen.queryByTestId("sidebar-products")).toBeNull();
     expect(screen.getByTestId("add-milestone").textContent).toBe("Add objective");

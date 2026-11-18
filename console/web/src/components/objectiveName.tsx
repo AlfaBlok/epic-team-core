@@ -20,6 +20,13 @@ const MUTED = "text-muted-foreground bg-muted/70";
 
 export const productInk = (product: string, inks: Record<string, string> = HOSTED_PRODUCT_INK) => inks[product.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? MUTED;
 
+/** the product's own text colour alone, no soft box (the sidebar, the owner's pick A: the box's padding broke its one left edge). */
+export const productText = (product: string, inks: Record<string, string> = HOSTED_PRODUCT_INK) =>
+  productInk(product, inks)
+    .split(/\s+/)
+    .filter((c) => !/(^|:)bg-/.test(c))
+    .join(" ");
+
 /** `Acme: 5 testers` → product `Acme`, goal `5 testers`; a name with no product part keeps it whole. */
 export function splitObjectiveName(name: string): { product?: string; goal: string } {
   const m = /^([^:]{1,32}):\s+(\S[\s\S]*)$/.exec(name.trim());

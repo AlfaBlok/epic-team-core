@@ -24,6 +24,8 @@
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
     --radius: 0.5rem;
+    /* E948-S151: the one link colour (the card's green link), so every link reads as a link at a glance */
+    --link: 163 94% 24%;
   }
   .dark {
     --background: 240 10% 3.9%;
@@ -45,17 +47,20 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
+    --link: 158 64% 52%;
   }
   /* social skin: only applies under <html data-skin="social">; the console skin sets no attribute. */
   [data-skin="social"] {
     --primary: 262 83% 58%;
     --primary-foreground: 0 0% 100%;
     --ring: 262 83% 58%;
+    --link: 262 83% 50%;
   }
   [data-skin="social"].dark {
     --primary: 263 90% 72%;
     --primary-foreground: 240 10% 3.9%;
     --ring: 263 90% 72%;
+    --link: 263 90% 76%;
   }
   * { @apply border-border; }
   /* the page's own colour under the phone's bars, the home indicator and an overscroll bounce (never white in dark). */

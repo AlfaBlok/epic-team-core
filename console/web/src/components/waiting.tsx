@@ -46,6 +46,7 @@ import { AskSet, askSets } from "@/components/askSet";
 import { ownYesNo } from "@/lib/oneDecision";
 import { AskVerdictTap } from "@/components/askLog";
 import { askLead, askLeadUrl, cardBody, cardHeading, KIND_WORD, projectLabel, splitSteps } from "@/lib/askLead";
+import { faceLabel, faceLinks, IMAGE_URL, isChoice } from "@/lib/faceLink";
 import { deployerName, sites } from "@/lib/identity";
 
 /** the Mac list (tailnet, scripts/laptop_ticket.py --list): every needs-Mac-agent ticket with its one command. */
@@ -1452,6 +1453,11 @@ function WaitingCardBody({
               </div>
             )}
             {/* the link to check sits above the buttons, so he sees the thing before he answers. */}
+            {go?.image && (
+              <a className="mt-3 block w-fit max-w-full" href={go.href} target="_blank" rel="noreferrer" data-testid="card-go-picture">
+                <img src={go.href} alt={go.label} loading="lazy" className="max-h-56 max-w-full rounded-md border object-contain" />
+              </a>
+            )}
             {go && (
               <a className={CARD_LINK} href={go.href} target="_blank" rel="noreferrer" data-testid="card-go">
                 {go.label} ↗
@@ -1552,19 +1558,22 @@ export function askTarget(item: WaitingItem): FeedbackTarget {
   return { kind: "desk", page: cardPage(item.code ?? item.id, item.question || item.title) };
 }
 
-/** the card's one green link: the page the ask opens with, its steps page, or its first link that is not a spine line. */
-export function goLink(item: WaitingItem): { href: string; label: string } | undefined {
+/**
+ * the card's one green link, above its buttons: the page the ask opens with, its steps page, its first link that is not a
+ * spine line, else the first link anywhere in its words (context, options, recommendation: E948-S151, E940-A10's mockups
+ * sat only in its collapsed context). A choice (A, B or C) labels it "See the options".
+ */
+export function goLink(item: WaitingItem): { href: string; label: string; image?: boolean } | undefined {
   const lead = askLeadUrl(item);
-  if (lead) return { href: lead, label: item.ask === "do" ? "Open the steps" : "Open" };
+  const choice = isChoice(item);
+  if (lead) return { href: lead, label: item.ask === "do" ? "Open the steps" : choice ? faceLabel(item, lead) : "Open", ...(IMAGE_URL.test(lead) ? { image: true } : {}) };
   if (item.stepsLink) return { href: item.stepsLink.url, label: "Open the steps" };
   const l = (item.contextLinks ?? []).find((x) => !x.threadId && !/github\.com\/.+\/blob\//.test(x.url));
-  if (l) return { href: l.url, label: "Open" };
-  // a link inside a short question (the heading is plain text): the first one is the card's green link
-  const any = /https?:\/\/[^\s<>"')\]]+/.exec(item.question || "")?.[0]?.replace(/[.,;:]+$/, "");
+  if (l) return { href: l.url, label: choice ? faceLabel(item, l.url) : "Open", ...(IMAGE_URL.test(l.url) ? { image: true } : {}) };
+  // a link in the ask's words (its question, context prose, options, recommendation): on the face, never only in "more"
+  const any = faceLinks(item)[0];
   if (!any) return undefined;
-  // a server's own address (a tailnet name, an IP, a port) says nothing to him: those say Open the page
-  const host = any.replace(/^https?:\/\//, "").split(/[/?#]/)[0];
-  return { href: any, label: /:\d+$|\.ts\.net$|^\d+\.\d+\.\d+\.\d+|^localhost/i.test(host) ? "Open the page" : `Open ${host}` };
+  return { href: any, label: faceLabel(item, any), ...(IMAGE_URL.test(any) ? { image: true } : {}) };
 }
 
 const linkHref = (l: WaitingItem["contextLinks"][number]) => (l.threadId ? threadHref(l.threadId, l.environmentId) : l.url);
