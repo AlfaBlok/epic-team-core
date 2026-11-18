@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { api } from "@/api";
 import type { CampaignCard } from "@/api/campaign-types";
-import { useQuery } from "@/lib/data";
+import { useSharedQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
 
 /**
@@ -31,7 +31,7 @@ export const useCampaignScope = () => useContext(CampaignContext);
 
 /** The world's campaign cards (GET /api/tenants/:id/campaigns): one per repo with `Pack: social`, with its milestone. */
 export function useCampaigns() {
-  return useQuery(async () => api.listCampaigns(await worldId()), []);
+  return useSharedQuery("sb:campaigns", async () => api.listCampaigns(await worldId()));
 }
 
 /** the cards the owner works with (retired ones hidden); repoCards: one per repo that has a live campaign (its repo card, retired or not), for repo-wide lists (job repo picker, drafts). */

@@ -7,6 +7,7 @@ import "./polish.css"; // the approved polish layer (both skins)
 import { installKeepPlace } from "./lib/keepPlace";
 import { installChunkReload } from "./lib/lazyPage";
 import "./lib/countCheck"; // E948-S141: window.inboxCountCheck(), read by the live inbox count check after each release
+import "./lib/inboxOnly"; // root L-87: window.inboxOnlyCheck(), read by the live inbox load check after each release
 
 // the service worker that shows phone notifications (no caching); the Chat page's "Turn on notifications" subscribes.
 if (import.meta.env.PROD && "serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js").catch(() => undefined);

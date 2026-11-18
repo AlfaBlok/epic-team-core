@@ -84,7 +84,7 @@ describe("Campaigns list", () => {
     at("/"); // the Layout renders the sidebar
     // no menu entry (Home's own "Campaigns" tab is not the menu)
     expect(screen.queryAllByRole("link", { name: "Campaigns" }).filter((a) => !a.closest('[data-testid="set-tabs"]'))).toEqual([]);
-    fireEvent.click(screen.getAllByRole("button", { name: "Add campaign or job" })[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Add campaign or job" }))[0]); // the menu draws at once, when its lists are in
     fireEvent.click(await screen.findByTestId("choose-campaign"));
     expect(await screen.findByRole("heading", { name: "New campaign" })).toBeTruthy();
   });

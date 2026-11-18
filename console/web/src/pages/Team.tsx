@@ -1,6 +1,5 @@
 import { MilestonePath } from "@/components/bootstrap";
-import { AsksThisWeek } from "@/components/askLog";
-import { Slot, SlotStack } from "@/components/slot";
+import { Slot, SlotStack, useSlotReady } from "@/components/slot";
 import { RedLineBand } from "@/components/ownerPriority";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { InboxLine } from "@/components/inboxLine";
@@ -22,7 +21,7 @@ import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
-import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview } from "@/components/review";
+import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews } from "@/components/review";
 import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
@@ -55,7 +54,6 @@ import { useFocusSave } from "@/lib/useFocusSave";
 import { RecentlyClosed } from "@/components/afterClose";
 import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
-import { SETTINGS_PATH } from "@/lib/settingsPath";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
@@ -351,18 +349,16 @@ export function TeamPage({
       </Button>
     </>
   );
+  // root L-87 (vn_5025a4c5, "The inbox only have sections and cards. Nothing else"): on the Inbox page only the title,
+  // the filters on top and the sections with their cards; nothing else is added unless he asks for it.
+  const inboxPage = only === "inbox" || (!campaigns && !settings);
   return (
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
       {!settings && (
         <PageHeader
           title={campaigns && only !== "inbox" ? "Home" : campaigns ? "Inbox" : w.team}
-          description={
-            campaigns && only === "goals"
-              ? undefined
-              : campaigns && only !== "inbox"
-                ? "Your campaigns, then what waits on you."
-                : "What waits on you: blocked first, then goals to set, then finished work and the team's ideas to review."}
-          actions={only === "inbox" ? <AsksThisWeek /> : campaigns && only !== "goals" ? actions : undefined}
+          description={inboxPage || only === "goals" ? undefined : "Your campaigns, then what waits on you."}
+          actions={!inboxPage && campaigns && only !== "goals" ? actions : undefined}
         />
       )}
       {campaigns ? (
@@ -446,8 +442,13 @@ export function TeamPage({
                 <EverythingElse />
               </Slot>
             )}
+            {keeps.review && (
+              <Slot name="social-snoozed">
+                <InboxSnoozedReviews />
+              </Slot>
+            )}
           </SlotStack></LandFolded.Provider>}
-          {only !== "goals" && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
+          {only !== "goals" && !inboxPage && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
           {only !== "inbox" && only !== "goals" && <NewApplications />}
           {/* the phone Home (the owner, "on the mobile, it's just a total mess"): Home is the
               campaigns and what waits on him, like EpicTeam's quiet Inbox; the widgets (red lines, scorecard, recently
@@ -521,18 +522,12 @@ export function TeamPage({
                 <EverythingElse />
               </Slot>
             )}
-            {/* the line after the lists keeps its place in the order too (nothing to load). */}
-            <Slot name="after" ready>
-              {shows("settings") && (
-                <p className="mt-6 text-xs text-muted-foreground" data-testid="inbox-rest-moved">
-                  Red lines moved to{" "}
-                  <Link to={`/${SETTINGS_PATH}`} className="text-foreground underline decoration-foreground/25 underline-offset-[3px] hover:decoration-current">
-                    Settings
-                  </Link>
-                  . Projects open from the menu.
-                </p>
-              )}
-            </Slot>
+            {/* every snoozed card, last, below every section (vn_303babf4). */}
+            {keeps.review && (
+              <Slot name="snoozed">
+                <InboxSnoozedReviews />
+              </Slot>
+            )}
           </SlotStack>
           </LandFolded.Provider>
           </InboxSearchProvider>
@@ -600,7 +595,7 @@ export function TeamPage({
       {settings && board && shownPersonas.length > 0 && personasList(shownPersonas)}
       {settings && board && <WakesDidSomething counts={runStats?.wakes24h} />}
       {/* a read-only line, so never on Settings (root L-80: Settings is only what he changes). */}
-      {!(settings && !board) && <SyncFooter />}
+      {!(settings && !board) && !inboxPage && <SyncFooter />}
       <MilestoneDialog open={newOpen} onOpenChange={setNewOpen} job={campaigns} />
       <MilestoneDialog open={focusOpen} onOpenChange={setFocusOpen} focusAt={nextFocusPosition(list)} />
     </OpenAsksContext.Provider>
@@ -896,6 +891,8 @@ export function pressingInReviewOnly(review: Leading[] | undefined, asks: ({ id:
 function EverythingElse() {
   const [open, setOpen] = useSectionOpen("inbox-everything-else", false);
   const search = useInboxSearch();
+  // a folded line with no count: nothing to wait for before the inbox draws (it held every section 10 s when they drew at once).
+  useSlotReady(true);
   return (
     <FoldSection title="Everything else" count={0} hideZero testId="inbox-everything-else" open={open || search.active} onToggle={setOpen}>
       <ClosedGoalsFold />

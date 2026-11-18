@@ -90,7 +90,7 @@ export function sortRows(t: Pick<TrackerTable, "columns" | "statuses" | "rows" |
     .sort((a, b) => {
       const [ga, ka] = key(a.r[col] ?? ""), [gb, kb] = key(b.r[col] ?? "");
       if (ga === 2 || gb === 2) return ga - gb || a.i - b.i; // empty cells last either way
-      if (ga !== gb) return (ga - gb) * dir;
+      if (ga !== gb) return ga - gb; // sizes before words either way
       const c = typeof ka === "number" && typeof kb === "number" ? ka - kb : String(ka).localeCompare(String(kb));
       return c * dir || a.i - b.i;
     })

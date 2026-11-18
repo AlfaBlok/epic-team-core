@@ -245,7 +245,48 @@ export function InboxDecisions() {
 }
 /** E948-S103: Done, waiting for your review keeps only finished work he marks done (a ready or deadline card leads it,). */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="all" />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="none" />;
+}
+
+/**
+ * The Inbox's Snoozed reviews, every snoozed card (decisions too), as the last fold below every section (the owner
+ * vn_303babf4, 18 Nov: it hung under Done for review and pushed Blocked on you down the page).
+ */
+export function InboxSnoozedReviews() {
+  const project = useProject();
+  const { data: fetchedAll, error } = useReviewCards({ keep: project.keep });
+  const { data: fetchedSnoozedAll, error: snoozedError } = useQuery(() => api.listReviewItems({ state: "snoozed" }) as Promise<Listed[]>, [], { tag: "inbox" });
+  useSlotReady((!!fetchedAll || !!error) && (!!fetchedSnoozedAll || !!snoozedError));
+  const { entries: snoozing, back } = useSnoozes();
+  const search = useInboxSearch();
+  const hits = search.active ? search.hits : undefined;
+  const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useListLimit("review-snoozed");
+  const from = (fetchedAll as Listed[] | undefined)?.filter((i) => project.keep(i.milestoneId));
+  const all = [
+    ...(from ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
+    ...(fetchedSnoozedAll ?? []).filter((i) => project.keep(i.milestoneId) && !back.has(i.id) && !from?.some((x) => x.id === i.id)),
+  ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
+  const snoozed = hits ? all.filter((i) => hits.has(i.id)) : all;
+  if (!snoozed.length) return null;
+  return (
+    <FoldSection
+      title="Snoozed reviews"
+      count={snoozed.length}
+      testId="review-snoozed"
+      bodyTestId="review-snoozed-section"
+      open={open || !!hits}
+      onToggle={setOpen}
+      actions={<LimitControl limit={limit} onChange={setLimit} total={snoozed.length} testId="review-snoozed" />}
+    >
+      <p className="mb-2 text-xs text-muted-foreground">Done, waiting for your review, hidden until the time shown.</p>
+      <ListPane shown={limitList(snoozed, limit).length} total={snoozed.length} testId="review-snoozed" className="grid-cols-1">
+        {limitList(snoozed, limit).map((i) => (
+          <SnoozedReviewRow key={i.id} item={i} />
+        ))}
+      </ListPane>
+    </FoldSection>
+  );
 }
 
 /**

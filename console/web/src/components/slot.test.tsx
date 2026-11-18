@@ -4,8 +4,9 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Slot, SLOT_GIVE_UP_MS, SlotStack, useSlotReady } from "./slot";
 
-// The owner said the inbox "jumps". every section fetches at once, shows top to bottom, and the
-// next one holds its place, so a section that lands late never pushes one already on screen.
+// The owner 18 Nov, vn_6fc46536: "The page needs to load up with everything"): every section fetches
+// at once and they all show in the same frame once every one is in; one skeleton holds the place before, never a few
+// sections with more arriving below.
 function Section({ ready, label }: { ready: boolean; label: string }) {
   useSlotReady(ready);
   return <div>{ready ? label : `${label} loading`}</div>;
@@ -19,12 +20,9 @@ afterEach(() => {
 
 const slot = (name: string) => document.querySelector(`[data-slot="${name}"]`) as HTMLElement;
 const content = (name: string) => slot(name).querySelector(":scope > div:last-child") as HTMLElement;
-const placeholder = (name: string) => slot(name).querySelector('[data-testid="slot-placeholder"]') as HTMLElement | null;
 
 describe("SlotStack", () => {
-  it("a section that is in early waits, hidden, for the ones above; the next one holds its remembered height", () => {
-    window.localStorage.setItem("inbox.slot.h.top", "255");
-    window.localStorage.setItem("inbox.slot.h.below", "600");
+  it("no section shows until every section is in, then all show in one frame", () => {
     let setTop!: (b: boolean) => void;
     function Host() {
       const [top, set] = useState(false);
@@ -34,33 +32,48 @@ describe("SlotStack", () => {
           <Slot name="top">
             <Section ready={top} label="top" />
           </Slot>
-          <Slot name="below" fallback={420}>
+          <Slot name="mid">
+            <Section ready label="mid" />
+          </Slot>
+          <Slot name="below">
             <Section ready label="below" />
           </Slot>
         </SlotStack>
       );
     }
     render(<Host />);
-    // below is in, but top is not: below stays out of sight (mounted, so it fetched), no placeholder for it yet.
-    expect(slot("top").dataset.ready).toBe("no");
-    expect(placeholder("top")?.style.height).toBe("255px");
-    expect(content("top").hidden).toBe(true);
-    expect(slot("below").dataset.ready).toBe("no");
-    expect(content("below").hidden).toBe(true);
-    expect(placeholder("below")).toBeNull();
-    // the stack holds one screen (first visit) so a footer below it never slides while the sections come in.
-    expect(screen.getByTestId("inbox-stack").style.minHeight).toBe(`${window.innerHeight}px`);
+    // two of three are in: still nothing drawn but the skeleton
+    expect(["top", "mid", "below"].map((n) => slot(n).dataset.ready)).toEqual(["no", "no", "no"]);
+    expect(content("mid").hidden).toBe(true);
+    expect(screen.getByTestId("inbox-skeleton")).toBeTruthy();
     act(() => setTop(true));
-    expect(screen.getByTestId("inbox-stack").style.minHeight).toBe("");
-    // top shows, and below (already in) shows right after it: no placeholder left anywhere.
-    expect(slot("top").dataset.ready).toBe("yes");
-    expect(content("top").hidden).toBe(false);
-    expect(placeholder("top")).toBeNull();
-    expect(slot("below").dataset.ready).toBe("yes");
-    expect(screen.getByText("below")).toBeTruthy();
+    expect(["top", "mid", "below"].map((n) => slot(n).dataset.ready)).toEqual(["yes", "yes", "yes"]);
+    expect(screen.queryByTestId("inbox-skeleton")).toBeNull();
+    expect(screen.queryAllByTestId("slot-placeholder")).toHaveLength(0);
+    // once drawn it stays drawn, even if a section goes back to loading
+    act(() => setTop(false));
+    expect(slot("mid").dataset.ready).toBe("yes");
   });
 
-  it("a first visit holds the fallback; a section that never says ready shows after the give-up time; `ready` needs nothing", () => {
+  it("the skeleton has one bar per section and the height the stack had last time", () => {
+    window.localStorage.setItem("inbox.slot.h.inbox", "640");
+    render(
+      <SlotStack name="inbox">
+        <Slot name="a">
+          <Section ready={false} label="a" />
+        </Slot>
+        <Slot name="b">
+          <Section ready={false} label="b" />
+        </Slot>
+      </SlotStack>,
+    );
+    const sk = screen.getByTestId("inbox-skeleton");
+    expect(sk.style.minHeight).toBe("640px");
+    expect(sk.children).toHaveLength(2);
+    expect(sk.textContent).toBe("");
+  });
+
+  it("a section that never says ready shows with the rest after the give-up time; `ready` needs nothing", () => {
     vi.useFakeTimers();
     render(
       <SlotStack>
@@ -72,7 +85,6 @@ describe("SlotStack", () => {
         </Slot>
       </SlotStack>,
     );
-    expect(placeholder("blocked")?.style.height).toBe("420px");
     expect(slot("after").dataset.ready).toBe("no");
     act(() => vi.advanceTimersByTime(SLOT_GIVE_UP_MS));
     expect(slot("blocked").dataset.ready).toBe("yes");

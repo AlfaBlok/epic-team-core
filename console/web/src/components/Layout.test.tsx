@@ -41,12 +41,16 @@ describe("Sidebar (M2-7: long titles stay inside the sidebar)", () => {
   });
 
   it("labels the button 'Add milestone'", async () => {
+    // with no objective the goals list stands alone and ends with its Add button (with objectives it is in their fold)
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never);
     render(
       <MemoryRouter>
         <SidebarNav />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("button", { name: "Add project" })).toBeTruthy();
+    // the menu draws at once, when its lists are in
+    await waitFor(() => expect(document.querySelector("[data-waiting-on]")?.getAttribute("data-waiting-on") ?? "").toBe(""), { timeout: 3000 });
+    expect(await screen.findByRole("button", { name: "Add project" })).toBeTruthy();
   });
 });
 

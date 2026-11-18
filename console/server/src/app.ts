@@ -714,6 +714,8 @@ export function createApp(
   let ownerObjectivesInput: (() => Promise<ObjectivesInput>) | undefined;
   // set below, once the WhatsApp alert path exists.
   let hostDisk: DiskWatch | undefined;
+  // what an outside probe last said about the console's answer times (POST /health/answer-speed; off until one reports).
+  let answerSpeed: { state: "off" | "ok" | "slow"; at?: string; since?: string; worstMs?: number; page?: string } = { state: "off" };
   let t3Tokens: TokenWatch | undefined;
   let jobServers: JobServers | undefined;
   // set below, once the review buttons and the spine writer exist.
@@ -742,7 +744,7 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null };
-    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
@@ -2486,6 +2488,30 @@ export function createApp(
     if (opts.jobServers.everyMs) jobServers.start(opts.jobServers.everyMs);
   }
   mountJobServers(api, () => jobServers);
+  // an outside probe (the worker server, every minute) reports whether the console's answers stayed over its bar for its
+  // hold time: `slow` starts one episode (log, /api/health `answerSpeed`, in production one WhatsApp alarm per episode,
+  // capped by the notifier), `ok` ends it. Home world and host only, like every route not on the tenant-safe list.
+  api.post("/health/answer-speed", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { state?: unknown; worstMs?: unknown; minutes?: unknown; page?: unknown };
+    if (b.state !== "slow" && b.state !== "ok") throw new ApiError(400, "validation_error", "state must be slow or ok");
+    const at = new Date().toISOString();
+    const worstMs = Math.max(0, Math.round(Number(b.worstMs) || 0));
+    const minutes = Math.max(0, Math.round(Number(b.minutes) || 0));
+    const page = typeof b.page === "string" && /^https?:\/\//.test(b.page) ? b.page.slice(0, 200) : undefined;
+    const was = answerSpeed.state;
+    if (b.state === "slow") {
+      answerSpeed = { state: "slow", at, since: was === "slow" ? answerSpeed.since : at, worstMs: Math.max(worstMs, was === "slow" ? (answerSpeed.worstMs ?? 0) : 0), ...(page ? { page } : {}) };
+      if (was !== "slow") {
+        const text = `The team console is slow: its answers took over 5 s for ${minutes || 5} minutes (worst ${(worstMs / 1000).toFixed(1)} s).${page ? ` Live probe: ${page}` : ""}`;
+        console.warn(`answer speed: ${text}`);
+        if (opts.readModel?.drift?.alert) void whatsapp.alert("console-slow", `${text}\nDetails: ${teamLink()}/api/health`);
+      }
+    } else {
+      if (was === "slow") console.warn(`answer speed: back under the bar (slow since ${answerSpeed.since})`);
+      answerSpeed = { state: "ok", at };
+    }
+    return c.json({ ok: true, answerSpeed });
+  });
   // the daily press test presses every review button kind on TEST rows (dailyTest.ts), as the console host
   // through the app's own routes, so each press goes through the press log, the clone writer and the outbox like the owner's.
   {

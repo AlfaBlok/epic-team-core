@@ -12,7 +12,7 @@ import { epicDeckHref } from "@/components/pursuitsMap";
 import { usePursuits } from "@/components/pursuits";
 import { InactiveObjectives, ObjectiveOffButton } from "@/components/objectiveSwitch";
 import { SET_KIT_TAB, SocialKitView, kitPursuitOf, setKitHref } from "@/components/socialKit";
-import { useQuery } from "@/lib/data";
+import { useQuery, useSharedQuery } from "@/lib/data";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import {
@@ -58,7 +58,7 @@ const ObjectiveApprovals = lazyPage(() => import("@/components/objectivePersonas
  */
 
 export function useGoalSets() {
-  return useQuery<ScorecardsBody>(() => api.listScorecards(), [], { tag: "inbox" });
+  return useSharedQuery<ScorecardsBody>("sb:scorecards", () => api.listScorecards(), { tag: "inbox" });
 }
 
 /** the whole inbox (open asks of the status batch, review cards), each line placed in its goal set. */

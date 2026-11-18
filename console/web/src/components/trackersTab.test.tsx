@@ -27,6 +27,8 @@ describe("sortRows", () => {
     expect(sortRows(tb, { col: 2, dir: 1 }).map((r) => r[0])).toEqual(["Ana", "Di", "Bo", "Cy"]);
     expect(sortRows(tb, { col: 2, dir: -1 }).map((r) => r[0])).toEqual(["Bo", "Di", "Ana", "Cy"]);
     expect(sortRows(tb, { col: 3, dir: 1 }).map((r) => r[0])).toEqual(["Bo", "Di", "Ana", "Cy"]);
+    const mixed = { ...tb, rows: [...tb.rows, ["Ed", "no", "Followers not read", "candidate"]] };
+    expect(sortRows(mixed, { col: 2, dir: -1 }).map((r) => r[0])).toEqual(["Bo", "Di", "Ana", "Ed", "Cy"]);
     expect(sortRows(tb, { col: 0, dir: -1 }).map((r) => r[0])).toEqual(["Di", "Cy", "Bo", "Ana"]);
   });
   it("reads sizes and colours statuses", () => {

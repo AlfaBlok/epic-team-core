@@ -5,7 +5,7 @@ import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
 import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
-import { useQuery } from "@/lib/data";
+import { useQuery, useSharedQuery } from "@/lib/data";
 import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
@@ -203,7 +203,7 @@ export const MORE_GOALS = "More goals";
 const reviewOf = (cards: { milestoneId?: string }[] | undefined, id: string) => (cards ?? []).filter((c) => c.milestoneId === id).length;
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { data: allMilestones } = useQuery(() => api.listMilestones(), []);
+  const { data: allMilestones } = useSharedQuery("sb:milestones", () => api.listMilestones());
   // the social skin shows one project (repo) at a time: its milestones, its asks, its review cards.
   const project = useProject();
   // the social skin lists every project's campaigns, each under its project (byProject below); the console skin narrows.
@@ -279,7 +279,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const operatorPages = useOperatorPages();
   // read-only pages (Seats, Hosts, Applications, Voice feedback, Dashboard) sit with the console's pages, never under Settings (settings are only what he changes).
   const toolPages = useToolPages();
-  const pinnedPages = useQuery(() => api.listPinnedPages(), []);
+  const pinnedPages = useSharedQuery("sb:pinned", () => api.listPinnedPages());
   // the owner, 12 Nov 16:02Z: "I just want to see the thing that I put there": the social skin shows Home, Inbox, Chat
   // and his pinned campaigns; everything else folds into More (default folded). The console skin draws it all, unfolded.
   const [moreOpen, setMoreOpen] = useStoredFlag(MORE_STORE);
@@ -390,8 +390,19 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     </>
   );
 
+  // drawn at once (the owner 18 Nov, vn_1dcd875a: "Fix the loading of the fucking sidebar"): one quiet skeleton until
+  // every list the menu shows is in, then the whole menu in one frame, never entries arriving one under another.
+  const waitingOn = [
+    !allMilestones && "milestones",
+    !sets.data && !sets.error && "scorecards",
+    (!statuses || statuses.loading) && "status",
+    allCards === undefined && "review-items",
+    !pinnedPages.data && !pinnedPages.error && "pinned",
+    campaigns && camps === undefined && "campaigns",
+  ].filter((x): x is string => !!x);
   return (
     <div className="flex h-full min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden p-3">
+    <AtOnce waitingOn={waitingOn}>
       {/* in the console skin the name at the top opens Home (the Home entry left the list). */}
       <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 rounded-md px-2 pt-1" data-testid="brand" aria-label={`${w.appName}: Home`}>
         <BrandMark brand={brandOf(w.appName)} />
@@ -617,8 +628,59 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           navigate(`/milestones/${m.id}`);
         }}
       />}
+    </AtOnce>
     </div>
   );
+}
+
+/** a phone reads the menu's lists this long after the page opens, once the page's own lists had their turn. */
+export const WARM_AFTER_MS = 1_500;
+/** a menu that never says ready shows anyway after this (an error path). */
+export const SIDEBAR_GIVE_UP_MS = 8_000;
+/** the menu's lists, mounted (they fetch) but out of sight under one skeleton until `ready`; once shown it stays shown. */
+export function AtOnce({ waitingOn, children }: { waitingOn: string[]; children: ReactNode }) {
+  const ready = waitingOn.length === 0;
+  const [shown, setShown] = useState(ready);
+  useEffect(() => {
+    if (ready) setShown(true);
+  }, [ready]);
+  useEffect(() => {
+    const t = setTimeout(() => setShown(true), SIDEBAR_GIVE_UP_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const on = shown || ready;
+  return (
+    <>
+      {!on && (
+        <div className="flex min-w-0 flex-col gap-3" data-testid="sidebar-skeleton" data-waiting-on={waitingOn.join(" ")} aria-label="Loading" aria-busy>
+          <div className="mb-2 h-7 w-32 animate-pulse rounded-md bg-muted/60" />
+          {Array.from({ length: 9 }, (_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded-md bg-muted/50" />
+          ))}
+        </div>
+      )}
+      <div className={on ? "contents" : undefined} hidden={!on} data-testid="sidebar-body">
+        {children}
+      </div>
+    </>
+  );
+}
+
+/**
+ * the menu's lists, read ahead and kept fresh while the menu is shut (a phone mounts the menu only when opened): opened,
+ * it draws at once from what is already here. Started once the page's own lists had their turn, so the Inbox comes first.
+ */
+export function SidebarWarm() {
+  useSharedQuery("sb:milestones", () => api.listMilestones());
+  useSharedQuery("sb:pinned", () => api.listPinnedPages());
+  useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
+  useSharedQuery("sb:world-counts", () => (api.getWorldCounts ? api.getWorldCounts() : Promise.resolve(undefined)), { tag: "counts" });
+  useGoalSets();
+  useStatusBatch();
+  useReviewCards();
+  useMessages();
+  useCampaigns();
+  return null;
 }
 
 /** the read-only pages' icons in the menu's tools list (lib/settingsPath useToolPages). */
@@ -727,7 +789,7 @@ function SetupLink({ onNavigate }: { onNavigate?: () => void }) {
  */
 export function AccountBlock() {
   const w = useWords();
-  const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
+  const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
   const [busy, setBusy] = useState<"logout">();
   const [err, setErr] = useState<string>();
   if (!me) return null;
@@ -920,13 +982,13 @@ export function ProjectSwitcher({ statuses, cards, onNavigate }: { statuses: Sta
  */
 export function WorldSwitcher() {
   const hasProjects = useProject().projects.length > 1;
-  const { data } = useQuery(() => (api.getWorldCounts ? api.getWorldCounts() : Promise.resolve(undefined)), [], { tag: "counts" });
+  const { data } = useSharedQuery("sb:world-counts", () => (api.getWorldCounts ? api.getWorldCounts() : Promise.resolve(undefined)), { tag: "counts" });
   const [busy, setBusy] = useState<string>();
   const [err, setErr] = useState<string>();
   // the owner 17 Nov (vn_c149df3a): in a customer EpicTeam workspace the account can make a new
   // workspace (it opens clean, no Get set up), so its workspaces show here even while it has one
   const campaigns = !!useSkin().campaigns;
-  const here = useQuery(() => worldId(), []).data ?? knownWorld();
+  const here = useSharedQuery("sb:world", () => worldId()).data ?? knownWorld();
   const customer = !campaigns && !!here && here !== homeWorld() && !knownDoor() && !!api.newWorkspace;
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -1072,7 +1134,7 @@ export function Reconnecting() {
  * (the hosted checkout, a monthly plan; its paid event clears this note). Back from Stripe it says the payment is on its way.
  */
 export function BillingNote() {
-  const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
+  const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   if (me?.billing !== "awaiting_payment") return null;
@@ -1153,6 +1215,13 @@ export function Layout() {
   // the console skin only: the social skin's worlds keep their menu as it was.
   const showsRuns = useShows()("runs") && !useSkin().campaigns;
   const wide = useWide();
+  // a phone mounts its menu only when opened: its lists are read ahead (after the page's own first lists) so it opens at once.
+  const [warm, setWarm] = useState(false);
+  useEffect(() => {
+    if (wide) return;
+    const t = setTimeout(() => setWarm(true), WARM_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [wide]);
 
   return (
     <CountsCtx.Provider value={{ counts }}>
@@ -1162,6 +1231,7 @@ export function Layout() {
       {/* the desktop sidebar exists only at md and up: on a phone it was hidden by CSS yet mounted, so a first visit read
           (and every 30 s re-read) ~150 KB of lists nobody saw, beside the screen's own data. The phone menu
           mounts its own SidebarNav when opened. */}
+      {!wide && warm && <SidebarWarm />}
       {wide && (
         <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 overflow-hidden border-r bg-muted/30 pt-[env(safe-area-inset-top)] md:block" data-testid="desktop-sidebar">
           <SidebarNav />
@@ -1188,7 +1258,8 @@ export function Layout() {
           <TopBarPills counts={counts} />
         </header>
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetContent aria-describedby={undefined} className="overflow-hidden">
+          {/* data-sidebar: the phone's menu is a dialog, and navigation keeps its own look (no link underline, polish.css) */}
+          <SheetContent aria-describedby={undefined} className="overflow-hidden" data-sidebar="">
             <SheetTitle className="sr-only">Navigation</SheetTitle>
             <SidebarNav onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
@@ -1232,7 +1303,7 @@ export function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   const review = reviewCardsNow && split.review.length;
   const unread = counts?.chat ?? 0;
   // the same desk Chat opens (pages/Chat ChatPage): the home world's Team desk, or the world's own desk in its skin.
-  const world = useQuery(() => worldId(), []);
+  const world = useSharedQuery("sb:world", () => worldId());
   const link = ({ isActive }: { isActive: boolean }) =>
     cn("flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground max-[379px]:gap-1 max-[379px]:px-1.5 md:min-h-0", isActive && "bg-accent text-foreground");
   return (
@@ -1284,7 +1355,7 @@ export function morePages(shows: (s: ScreenId) => boolean, socialSkin: boolean, 
  * one tap each: the link is the page's short address on the console (the console/scorecard), which opens the page.
  */
 function SidebarPinnedPages({ onNavigate }: { onNavigate?: () => void }) {
-  const { data } = useQuery(() => api.listPinnedPages(), []);
+  const { data } = useSharedQuery("sb:pinned", () => api.listPinnedPages());
   const pinned = data?.pinned ?? [];
   if (!pinned.length) return null;
   return (

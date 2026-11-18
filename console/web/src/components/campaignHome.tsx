@@ -10,7 +10,7 @@ import { CountPill, PILL_TITLES } from "@/components/homeSection";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { campaignMilestones, campaignsByMilestone, useCampaigns } from "@/lib/campaign";
 import { splitBigRoots } from "@/lib/bigRoots";
-import { useQuery } from "@/lib/data";
+import { useSharedQuery } from "@/lib/data";
 import { blockedItems, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { milestoneName } from "@/lib/format";
 import { useSnoozes } from "@/lib/snooze";
@@ -82,7 +82,7 @@ export function campaignNode(m: Pick<Milestone, "id" | "title" | "docTitle" | "t
  * campaign. `all` is every campaign of the world (the More fold lists them).
  */
 export function useCampaignHome() {
-  const ms = useQuery(() => api.listMilestones(), []);
+  const ms = useSharedQuery("sb:milestones", () => api.listMilestones());
   const camps = useCampaigns();
   const { data: statuses } = useStatusBatch();
   const { entries: snoozing } = useSnoozes();

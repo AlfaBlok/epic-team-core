@@ -1,10 +1,9 @@
 import { Children, createContext, isValidElement, useContext, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 /**
- * The owner said "the inbox takes about 10 s and jumps". The Inbox's sections load on their own and
- * never jump. Every section fetches at once; a section shows only when it is in AND every section above it is shown,
- * so a section that grows never moves one already on screen. The next section to come holds its place with a shimmer
- * of the height it had last time in this browser (capped at one screen). Measured on production 20:52Z: the other
+ * The owner said "the inbox takes about 10 s and jumps". Every section fetches at once and the stack shows them all in
+ * one frame once every one is in (SlotStack); before, sections showed top to bottom one by one, which he saw as the
+ * page loading in steps. Measured on production 20:52Z: the other
  * world's band landed at 3.7 s and pushed the inbox down 255 px; on a first visit the Blocked cards (2,400 px on a
  * phone) pushed the Review section that was already showing (CLS 0.43 to 0.80).
  */
@@ -45,8 +44,11 @@ export function SlotMarker(_: SlotProps): ReactElement | null {
 }
 
 /**
- * the sections in page order: each shows once it and all above it are in. The stack as a whole holds its last height
- * (one screen on a first visit) until every section is in, so what sits below it (a footer) never slides down.
+ * the sections in page order, drawn all at once (the owner 18 Nov, vn_6fc46536: "The page needs to load up with everything
+ * ... we cannot have the page look like it's loaded with only two sections and then sections kind of showing up as
+ * they go"). Every section mounts at once and fetches; until every one of them is in, one skeleton shaped like the
+ * sections holds the place (a bar per section, the height they had last time in this browser); then every section shows
+ * in the same frame. A section that never says ready shows with the rest after SLOT_GIVE_UP_MS.
  */
 export function SlotStack({ children, name = "stack" }: { children: ReactNode; name?: string }) {
   const items = Children.toArray(children).filter((c): c is ReactElement<SlotProps> => isValidElement(c) && (c.type === SlotMarker || c.type === Slot));
@@ -57,20 +59,32 @@ export function SlotStack({ children, name = "stack" }: { children: ReactNode; n
     if (!m) marks.set(name, (m = () => setReady((r) => (r[name] ? r : { ...r, [name]: true }))));
     return m;
   };
-  let above = true;
   const all = items.every((el) => ready[el.props.name]);
-  const [held] = useState(() => rememberedHeight(name, typeof window === "undefined" ? 0 : window.innerHeight));
-  const ref = useRemember(name, all);
+  // once drawn, a stack stays drawn: a section added later (a filter turned on) never hides the rest again
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    if (all) setDrawn(true);
+  }, [all]);
+  const shown = all || drawn;
+  const [held] = useState(() => rememberedHeight(name, typeof window === "undefined" ? 0 : Math.round(window.innerHeight * 0.8)));
+  const ref = useRemember(name, shown);
   return (
-    <div ref={ref} data-testid="inbox-stack" style={all || items.length < 2 ? undefined : { minHeight: held }}>
-      {items.map((el) => {
-        const { name } = el.props;
-        const isReady = !!ready[name];
-        const shown = above && isReady;
-        const next = above && !isReady;
-        above = shown;
-        return <SlotView key={name} {...el.props} shown={shown} next={next} done={markOf(name)} />;
-      })}
+    <div ref={ref} data-testid="inbox-stack" data-ready={shown ? "yes" : "no"} aria-busy={!shown || undefined}>
+      {!shown && items.length > 0 && <StackSkeleton count={items.length} height={held} />}
+      {items.map((el) => (
+        <SlotView key={el.props.name} {...el.props} shown={shown} isIn={!!ready[el.props.name]} next={false} done={markOf(el.props.name)} />
+      ))}
+    </div>
+  );
+}
+
+/** the inbox while its sections load: one quiet bar per section (a header's height), nothing else, no text. */
+function StackSkeleton({ count, height }: { count: number; height: number }) {
+  return (
+    <div data-testid="inbox-skeleton" aria-label="Loading" style={{ minHeight: height || undefined }}>
+      {Array.from({ length: Math.min(count, 7) }, (_, i) => (
+        <div key={i} className="mb-7 h-11 animate-pulse rounded-lg bg-muted/50" />
+      ))}
     </div>
   );
 }
@@ -97,7 +111,7 @@ function useRemember(name: string, shown: boolean) {
   return ref;
 }
 
-function SlotView({ name, fallback = 0, ready, children, shown, next, done }: SlotProps & { shown: boolean; next: boolean; done: () => void }) {
+function SlotView({ name, fallback = 0, ready, children, shown, isIn, next, done }: SlotProps & { shown: boolean; isIn?: boolean; next: boolean; done: () => void }) {
   const [held] = useState(() => rememberedHeight(name, fallback));
   const ref = useRemember(name, shown);
   useEffect(() => {
@@ -109,7 +123,7 @@ function SlotView({ name, fallback = 0, ready, children, shown, next, done }: Sl
   }, [done]);
   return (
     <SlotReady.Provider value={done}>
-      <div data-testid="inbox-slot" data-slot={name} data-ready={shown ? "yes" : "no"} aria-busy={!shown || undefined}>
+      <div data-testid="inbox-slot" data-slot={name} data-ready={shown ? "yes" : "no"} data-in={isIn ? "yes" : "no"} aria-busy={!shown || undefined}>
         {next && held > 0 && <div className="mb-6 animate-pulse rounded-lg bg-muted/50" style={{ height: held }} data-testid="slot-placeholder" aria-label="Loading" />}
         {/* mounted (it fetches and says when it is in) but out of sight until it shows. */}
         <div ref={ref} hidden={!shown}>

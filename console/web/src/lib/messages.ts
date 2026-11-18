@@ -1,6 +1,6 @@
 import { api } from "@/api";
 import type { ChatStatus, MessagesView, SocialChat, SocialMessage } from "@/api/types";
-import { useQuery } from "@/lib/data";
+import { useSharedQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
 
 /**
@@ -15,7 +15,7 @@ export async function loadMessages(): Promise<MessagesView> {
 
 /** The world's chats; `tag: "inbox"` so the menu pill and Team home refresh with the other inbox reads. */
 export function useMessages() {
-  return useQuery(loadMessages, [], { tag: "inbox" });
+  return useSharedQuery("sb:messages", loadMessages, { tag: "inbox" });
 }
 
 /** The conversation page's address: chat ids repeat across repos. */
