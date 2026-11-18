@@ -17,6 +17,8 @@ import { DeskError, TAIL_MESSAGES, type DeskMessage, type DeskView, type Earlier
 export const JOB_CHAT_HISTORY = 40;
 const HISTORY_CHARS = 30_000;
 const REPLY_MAX = 20_000;
+const WAITING_CHARS = 20_000;
+const LINE_CHARS = 4_000;
 /** no answer this long after his last line, nothing running: the chat says the reply was lost. */
 const LOST_AFTER_MS = 90_000;
 
@@ -91,7 +93,7 @@ export function createJobChat(db: DB, route: JobRoute, p: JobChatProfile) {
     const hist: string[] = [];
     let size = 0;
     for (const r of rows(JOB_CHAT_HISTORY, upto + 1).reverse()) {
-      const line = `[${r.role === "user" ? "owner" : "you"} · ${r.at.slice(0, 16).replace("T", " ")}Z${r.page ? ` · page: ${r.page}` : ""}]\n${r.text}`;
+      const line = `[${r.role === "user" ? "owner" : "you"} · ${r.at.slice(0, 16).replace("T", " ")}Z${r.page ? ` · page: ${r.page}` : ""}]\n${r.text.length > LINE_CHARS ? `${r.text.slice(0, LINE_CHARS)}…` : r.text}`;
       if (size + line.length > HISTORY_CHARS && hist.length) break;
       hist.unshift(line);
       size += line.length;
@@ -107,7 +109,11 @@ export function createJobChat(db: DB, route: JobRoute, p: JobChatProfile) {
       hist.join("\n\n"),
       "",
       `## Waiting for your answer now (${waiting.length === 1 ? "the owner's newest line" : `the owner's ${waiting.length} newest lines`})`,
-      waiting.map((r) => r.text).join("\n\n"),
+      // the newest of what waits, capped (lines left by failed turns pile up here)
+      (() => {
+        const all = waiting.map((r) => r.text).join("\n\n");
+        return all.length > WAITING_CHARS ? `…${all.slice(-WAITING_CHARS)}` : all;
+      })(),
     ].join("\n");
   }
 

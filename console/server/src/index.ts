@@ -1,3 +1,4 @@
+import "./fetchSafeInstall.js"; // first: every outgoing answer is read in full (fetchSafe.ts)
 import { timerPhasesOn } from "./timerPhase.js";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
