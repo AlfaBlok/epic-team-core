@@ -41,7 +41,7 @@ export function planOf(spine: string): { line?: string; numbers?: string } {
     .find((l) => l && !l.startsWith("#") && !l.startsWith("|") && !l.startsWith(">"));
   const g = /^### Goal and numbers\s*$([\s\S]*?)(?=^###? |(?![\s\S]))/m.exec(body);
   const numbers = g ? plain(g[1]) : "";
-  return { ...(line ? { line: plain(line) } : {}), ...(numbers && !/^not written yet$/i.test(numbers) ? { numbers } : {}) };
+  return { ...(line ? { line: plain(line) } : {}), ...(numbers && !/^not written yet\.?$/i.test(numbers) ? { numbers } : {}) };
 }
 
 /** Each campaign folder's newest Strategist daily line (`docs/campaigns/<c>/strategist-daily.md`, its table's last row). */
@@ -78,7 +78,7 @@ export function worldCallContext(o: { world: string; campaigns: WorldCampaign[];
   const who = ownerName();
   const lines: string[] = [
     `# What you already know on this call`,
-    `You are ${who}'s telephony helper for this workspace's campaigns, with good context: when he calls he wants to get updated fast and maybe make suggestions. Answer from what is below at once, in short spoken sentences, numbers first, with no tool call. His suggestions and anything that needs work go to the desk with ask_the_desk (his words, which campaign); you do not do the work on the call.`,
+    `You are ${who}'s telephony helper for this workspace's campaigns, with good context: when he calls he wants to get updated fast and maybe make suggestions. Answer from what is below at once, in short spoken sentences, numbers first, with no tool call. Everything below is yours to say as well as what your tools return. 'How are the campaigns doing', 'give me the update', 'how is <campaign> going' is each campaign's key results below (today against goal), said from here without quick_status; quick_status is only for what waits on him or is stuck right now. His suggestions and anything that needs work go to the desk with ask_the_desk (his words, which campaign); you do not do the work on the call.`,
   ];
   const cs = o.campaigns.slice(0, 12);
   lines.push("", `## The campaigns (${o.campaigns.length}) and their key results`);
