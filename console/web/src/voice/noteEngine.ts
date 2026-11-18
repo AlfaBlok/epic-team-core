@@ -42,6 +42,18 @@ export interface SentNote {
 }
 
 /** The console's note routes (fetch by default; tests fake them). */
+/** where tap stop to Sent went (ms; bytes of the last upload), reported with the timing so a slow one names its step. */
+export interface SendParts {
+  /** tap stop to the recorder handing over the last part. */
+  stopMs?: number;
+  /** waiting for a part of it still going up while he talked. */
+  earlyWaitMs?: number;
+  /** the last upload, to the console's answer. */
+  uploadMs?: number;
+  tailBytes?: number;
+  earlyBytes?: number;
+}
+
 export interface NotesApi {
   /** `clientId`: the note's name in this browser; the console opens one note per clientId, so a retry never makes two. */
   start(page?: string, clientId?: string): Promise<NoteStartInfo>;
@@ -63,7 +75,7 @@ export interface NotesApi {
   /** `skip`: part numbers with no audio (an empty part, or one lost when the phone threw the page away). */
   finish(id: string, segments: number, page?: string, skip?: number[]): Promise<{ note: SentNote; audio?: string; accepted?: boolean }>;
   /** how long tap stop to Sent took (ms), for the console's 3-second check. */
-  timing?(id: string, sentMs: number): Promise<unknown>;
+  timing?(id: string, sentMs: number, parts?: SendParts): Promise<unknown>;
   discard(id: string): Promise<unknown>;
   /** The note's state on the console (a reloaded page checks its kept note is still open). */
   state?(id: string): Promise<string | undefined>;
@@ -264,6 +276,7 @@ export class NoteEngine {
   /** Send was tapped: the last part asks for Sent with its upload; its answer, when it did. */
   private acceptWith?: { segments: number; page?: string };
   private accepted?: { note: SentNote; audio?: string; accepted: true };
+  private sendParts: SendParts = {};
   /** Parts uploaded, parts that had no audio (kept with the note). */
   private done = new Set<number>();
   private empty = new Set<number>();
@@ -661,7 +674,9 @@ export class NoteEngine {
           // the start's timings go with the parts until one is in (the console keeps the first).
           const sm = this.startMs.rec !== undefined && !this.done.size ? JSON.stringify(this.startMs) : undefined;
           // what went up while he talked is not sent again: only the tail.
+          const waitFrom = this.clock.now();
           await this.earlyBusy.get(n);
+          const earlyWaitMs = this.clock.now() - waitFrom;
           const eb = this.earlyOff.has(n) ? 0 : (this.earlySent.get(n) ?? 0);
           const earlyBytes = eb > 0 && eb <= blob.size ? eb : 0;
           // Send was tapped and this is the last part: it asks for Sent in the same request.
@@ -669,7 +684,9 @@ export class NoteEngine {
           const accept = last ? { segments: last.segments, skip: [...Array(n).keys()].filter((x) => !this.done.has(x)), ...(last.page ? { page: last.page } : {}) } : undefined;
           const more = earlyBytes || accept ? { ...(earlyBytes ? { earlyBytes } : {}), ...(accept ? { accept } : {}) } : undefined;
           const body = earlyBytes ? blob.slice(earlyBytes, blob.size, blob.type) : blob;
+          const upFrom = this.clock.now();
           const r = await (more ? this.api.segment(id, n, body, seconds, sm, more) : sm ? this.api.segment(id, n, body, seconds, sm) : this.api.segment(id, n, body, seconds));
+          if (this.acceptWith && n === this.acceptWith.segments - 1) this.sendParts = { ...this.sendParts, earlyWaitMs, uploadMs: this.clock.now() - upFrom, tailBytes: body.size, earlyBytes };
           if (r.accepted && r.note.id) this.accepted = { note: r.note as SentNote, accepted: true };
           this.failed.delete(n);
           this.done.add(n);
@@ -839,6 +856,7 @@ export class NoteEngine {
     // the last part asks for Sent with its own upload (no second round trip); a "Send again" uses the finish.
     this.acceptWith = stopAt !== undefined && this.v.phase === "recording" ? { segments: this.segN, ...(this.page ? { page: this.page } : {}) } : undefined;
     if (this.v.phase === "recording") await this.closeSegment();
+    if (stopAt !== undefined) this.sendParts = { ...this.sendParts, stopMs: this.clock.now() - stopAt };
     this.releaseMic();
     clearTimeout(this.recoverTimer);
     this.set({ phase: "sending", level: 0, elapsedS: Math.floor(this.closedS), error: undefined, ...(this.out ? { info: KEPT_TEXT } : {}) });
@@ -865,7 +883,7 @@ export class NoteEngine {
       this.retries = 0;
       this.outDone(true);
       this.set({ phase: "sent", note: r.audio ? { ...r.note, audio: r.audio } : r.note, costUsd: r.note.costUsd, info: r.note.state === "empty" ? "Nothing was heard in that note, so nothing was posted." : this.stopWhy });
-      if (r.accepted && stopAt !== undefined) void this.api.timing?.(id, Math.max(0, this.clock.now() - stopAt))?.catch(() => undefined);
+      if (r.accepted && stopAt !== undefined) void this.api.timing?.(id, Math.max(0, this.clock.now() - stopAt), this.sendParts)?.catch(() => undefined);
     } catch (e) {
       this.set({ phase: "failed", error: `Not sent: ${(e as Error).message}`, ...(this.out ? { info: KEPT_FAILED_TEXT } : {}) }), void this.retryLater();
     }
@@ -940,6 +958,7 @@ export class NoteEngine {
     this.earlyOff.clear();
     this.acceptWith = undefined;
     this.accepted = undefined;
+    this.sendParts = {};
     this.pendingStops = [];
     this.done.clear();
     this.empty.clear();
@@ -998,7 +1017,7 @@ export function fetchNotesApi(base = "/api/voice", f: typeof fetch = (...a) => f
     },
     // a chat note is Sent once its audio is safe on the console (quick); a card's answer waits for its words.
     finish: (id, segments, page, skip) => call("POST", `/notes/${id}/finish`, { segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}), ...(o.fill ? { fill: true } : { quick: true }) }),
-    timing: (id, sentMs) => call("POST", `/notes/${id}/timing`, { sentMs: Math.round(sentMs) }),
+    timing: (id, sentMs, parts) => call("POST", `/notes/${id}/timing`, { sentMs: Math.round(sentMs), ...(parts && Object.keys(parts).length ? { parts } : {}) }),
     early: async (id, n, offset, bytes) => {
       const r = await f(`${base}/notes/${id}/segments/${n}/early`, { method: "POST", headers: { "content-type": bytes.type || "audio/webm", "x-offset": String(offset) }, body: bytes });
       const j = (await r.json().catch(() => ({}))) as any;

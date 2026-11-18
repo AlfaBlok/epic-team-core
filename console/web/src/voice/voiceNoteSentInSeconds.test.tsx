@@ -94,7 +94,7 @@ describe("a voice note is Sent in seconds", () => {
     expect(screen.getByTestId("chat-voice-posting-state").textContent).toContain("✓ Sent");
     expect(screen.queryByTestId("chat-voice-posting-words")).toBeNull();
     expect(screen.getByTestId("note-sent").textContent).toContain("✓ Voice note sent");
-    expect(f.api.timing).toHaveBeenCalledWith("vn_1", expect.any(Number));
+    expect(f.api.timing).toHaveBeenCalledWith("vn_1", expect.any(Number), expect.objectContaining({ stopMs: expect.any(Number), uploadMs: expect.any(Number) }));
     // the console posts his words: the transcript holds the note and the bubble goes
     messages = [{ id: "m1", role: "user", text: "🎙 Voice note (Chat), 2026-11-18 18:00Z · 0 min 07 s · $0.0004 (gpt-4o-mini-transcribe) · vn_1\nAudio: /api/voice/notes/vn_1/audio\n\nhello desk", at: new Date().toISOString(), status: "completed" }] as DeskChat["messages"];
     await act(async () => void (await load()));
@@ -137,7 +137,8 @@ describe("a voice note is Sent in seconds", () => {
     expect(more).toMatchObject({ earlyBytes: 39_000, accept: { segments: 1, skip: [] } });
     expect(tail.size).toBe(4); // only what was not up yet ("part")
     expect(api.finish).not.toHaveBeenCalled();
-    expect(api.timing).toHaveBeenCalledWith("vn_1", expect.any(Number));
+    // where the time went is reported with it: the tail's and the early bytes, the upload, the wait for an early part
+    expect(api.timing).toHaveBeenCalledWith("vn_1", expect.any(Number), expect.objectContaining({ tailBytes: 4, earlyBytes: 39_000, earlyWaitMs: expect.any(Number), uploadMs: expect.any(Number), stopMs: expect.any(Number) }));
   });
 
   it("an accepted note without words is the safe bubble; one with words is sent", () => {
@@ -153,12 +154,14 @@ describe("a voice note is Sent in seconds", () => {
     await chatApi.segment("vn_3", 0, new Blob(["a"], { type: "audio/webm" }), 3);
     await chatApi.finish("vn_3", 1);
     await chatApi.timing!("vn_3", 812.4);
+    await chatApi.timing!("vn_3", 900, { uploadMs: 700, tailBytes: 4000 });
     expect((calls[0].init.headers as Record<string, string>)["x-quick"]).toBe("1");
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ segments: 1, quick: true });
     expect(calls[2].url).toBe("/api/voice/notes/vn_3/timing");
     expect(JSON.parse(String(calls[2].init.body))).toEqual({ sentMs: 812 });
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ sentMs: 900, parts: { uploadMs: 700, tailBytes: 4000 } });
     const cardApi = fetchNotesApi("/api/voice", f, { fill: true });
     await cardApi.finish("vn_3", 1);
-    expect(JSON.parse(String(calls[3].init.body))).toEqual({ segments: 1, fill: true });
+    expect(JSON.parse(String(calls[4].init.body))).toEqual({ segments: 1, fill: true });
   });
 });

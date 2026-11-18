@@ -44,8 +44,8 @@ function setup(o: { slowWordsMs?: number; deskFails?: number } = {}) {
     if (o.slowWordsMs) await wordsGate;
     return { text: "hello desk" };
   });
-  const slow: { kind: string; ms: number }[] = [];
-  const notes = createVoiceNotes({ db, voice, desk, transcribe, dir: path.join(dir, "notes"), now: () => t, onSlow: (x) => slow.push({ kind: x.kind, ms: x.ms }) });
+  const slow: { kind: string; ms: number; parts?: Record<string, number> }[] = [];
+  const notes = createVoiceNotes({ db, voice, desk, transcribe, dir: path.join(dir, "notes"), now: () => t, onSlow: (x) => slow.push({ kind: x.kind, ms: x.ms, ...(x.parts ? { parts: x.parts } : {}) }) });
   return { db, notes, sent, transcribe, release, slow, desk, tick: (ms: number) => (t += ms), now: () => t };
 }
 const audio = () => new Uint8Array(1500).fill(7);
@@ -113,13 +113,15 @@ describe("a voice note is Sent the moment its audio is safe", () => {
     const slowId = s.notes.start().note.id;
     await s.notes.segment(slowId, 0, audio(), "audio/webm", 10, undefined, true);
     s.notes.accept(slowId, { segments: 1, audioBase: "x" });
-    s.notes.timing(slowId, SEND_SLOW_MS + 1200);
+    s.notes.timing(slowId, SEND_SLOW_MS + 1200, { stopMs: 40, earlyWaitMs: 0, uploadMs: 4100.4, tailBytes: 9000, earlyBytes: 60000, junk: 5 } as never);
     s.notes.timing(slowId, 100); // a second report never rewrites it
-    expect(s.notes.get(slowId)?.sendMs).toEqual({ sent: SEND_SLOW_MS + 1200 });
-    expect(s.slow).toEqual([{ kind: "slow", ms: SEND_SLOW_MS + 1200 }]);
+    expect(s.notes.get(slowId)?.sendMs).toEqual({ sent: SEND_SLOW_MS + 1200, stopMs: 40, earlyWaitMs: 0, uploadMs: 4100, tailBytes: 9000, earlyBytes: 60000 });
+    // the alert names where the time went
+    expect(s.slow).toEqual([{ kind: "slow", ms: SEND_SLOW_MS + 1200, parts: { stopMs: 40, earlyWaitMs: 0, uploadMs: 4100, tailBytes: 9000, earlyBytes: 60000 } }]);
     const h = voiceSendHealth(s.db, s.now());
     expect(h).toMatchObject({ state: "alert", limitMs: 3000, notes: 2, slow: 1, medianMs: 900, slowestMs: 4200 });
     expect(h.last?.id).toBe(slowId);
+    expect(h.slowNotes?.[0]).toContain("uploadMs 4100");
   });
 
   it("routes: the finish with quick accepts a chat note; a card's answer (fill) still waits for its words; timing is checked", async () => {

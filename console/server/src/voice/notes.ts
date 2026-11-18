@@ -235,7 +235,7 @@ export interface NotesDeps {
    */
   onFiled?: (f: { id: string; world: string; milestoneId?: string; fill: boolean; page?: string; words: string; audio: string }) => void;
   /** a note took over SEND_SLOW_MS from tap stop to Sent, or an accepted note is still not posted (alert). */
-  onSlow?: (s: { id: string; world: string; kind: "slow" | "stuck"; ms: number }) => void;
+  onSlow?: (s: { id: string; world: string; kind: "slow" | "stuck"; ms: number; parts?: Record<string, number> }) => void;
   /**
    * is the note in its chat's thread now (its head line carries the note id)? undefined = cannot tell. A
    * posted note it does not find DELIVER_CHECK_MS after the post is re-sent.
@@ -626,13 +626,19 @@ export function createVoiceNotes(d: NotesDeps) {
   }
 
   /** the page's tap stop to Sent (ms); a slow one is an alert. Words: Sent plus the console's accept to post. */
-  function timing(id: string, sentMs: number) {
+  function timing(id: string, sentMs: number, parts: Partial<Record<(typeof SEND_PARTS)[number], number>> = {}) {
     const n = must(id);
     if (!Number.isFinite(sentMs) || sentMs < 0 || sentMs > 3_600_000) throw new VoiceError(400, "validation_error", "sentMs is the ms from tap stop to Sent");
     const had = n.sendMs ?? {};
     if (had.sent === undefined) {
-      db.prepare("UPDATE voice_notes SET send_ms = ? WHERE id = ?").run(JSON.stringify({ ...had, sent: Math.round(sentMs) }), id);
-      if (sentMs > SEND_SLOW_MS) d.onSlow?.({ id, world, kind: "slow", ms: Math.round(sentMs) });
+      // where the time went on the page, so a slow one names its step: the recorder's stop, a part still going up, the last upload
+      const p: Record<string, number> = {};
+      for (const k of SEND_PARTS) {
+        const v = parts[k];
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 1e9) p[k] = Math.round(v);
+      }
+      db.prepare("UPDATE voice_notes SET send_ms = ? WHERE id = ?").run(JSON.stringify({ ...had, sent: Math.round(sentMs), ...p }), id);
+      if (sentMs > SEND_SLOW_MS) d.onSlow?.({ id, world, kind: "slow", ms: Math.round(sentMs), ...(Object.keys(p).length ? { parts: p } : {}) });
     }
     return { note: must(id) };
   }
@@ -680,7 +686,9 @@ export function notesMonthUsd(db: DB, world: string, since: string): { usd: numb
 }
 
 const finishIn = z.object({ segments: z.number().int().min(1).max(NOTE_MAX_PARTS), page: z.string().max(200).optional(), skip: z.array(z.number().int().min(0).max(NOTE_MAX_PARTS)).max(NOTE_MAX_PARTS).optional(), fill: z.boolean().optional(), quick: z.boolean().optional() });
-const timingIn = z.object({ sentMs: z.number().min(0).max(3_600_000) });
+/** the steps of tap stop to Sent the page reports (ms, and the bytes of the last upload). */
+export const SEND_PARTS = ["stopMs", "earlyWaitMs", "uploadMs", "tailBytes", "earlyBytes"] as const;
+const timingIn = z.object({ sentMs: z.number().min(0).max(3_600_000), parts: z.record(z.string(), z.number()).optional() });
 const startIn = z.object({ page: z.string().max(200).optional(), clientId: z.string().regex(/^[\w-]{8,64}$/).optional() });
 
 /** Where the page reached the console (the link in the chat message opens the audio there). */
@@ -774,7 +782,7 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
     guard(async (c, n) => {
       const p = timingIn.safeParse(await json(c));
       if (!p.success) return bad(c, "sentMs (ms from tap stop to Sent) is required");
-      return c.json(n.timing(c.req.param("nid") ?? "", p.data.sentMs));
+      return c.json(n.timing(c.req.param("nid") ?? "", p.data.sentMs, p.data.parts ?? {}));
     }),
   );
   api.post(
@@ -804,11 +812,12 @@ export function voiceSendHealth(db: DB, nowMs = Date.now()) {
   ensureVoiceNoteRecTables(db);
   const since = new Date(nowMs - 24 * 3600_000).toISOString();
   const rows = db.prepare("SELECT id, send_ms, accepted_at, posted_at FROM voice_notes WHERE started_at >= ? AND send_ms IS NOT NULL ORDER BY started_at").all(since) as { id: string; send_ms: string; accepted_at: string | null; posted_at: string | null }[];
-  const sent: { id: string; ms: number; words?: number }[] = [];
+  const sent: { id: string; ms: number; words?: number; parts?: string }[] = [];
   for (const r of rows) {
     const j = JSON.parse(r.send_ms) as Record<string, number>;
     if (typeof j.sent !== "number") continue;
-    sent.push({ id: r.id, ms: j.sent, ...(r.accepted_at && r.posted_at ? { words: j.sent + Date.parse(r.posted_at) - Date.parse(r.accepted_at) } : {}) });
+    const parts = SEND_PARTS.filter((k) => typeof j[k] === "number").map((k) => `${k} ${j[k]}`).join(", ");
+    sent.push({ id: r.id, ms: j.sent, ...(parts ? { parts } : {}), ...(r.accepted_at && r.posted_at ? { words: j.sent + Date.parse(r.posted_at) - Date.parse(r.accepted_at) } : {}) });
   }
   const ms = sent.map((x) => x.ms).sort((a, b) => a - b);
   const slow = sent.filter((x) => x.ms > SEND_SLOW_MS);
@@ -820,7 +829,7 @@ export function voiceSendHealth(db: DB, nowMs = Date.now()) {
     notes: sent.length,
     ...(ms.length ? { medianMs: ms[Math.floor((ms.length - 1) / 2)], slowestMs: ms.at(-1) } : {}),
     slow: slow.length,
-    ...(slow.length ? { slowNotes: slow.slice(-5).map((x) => `${x.id} ${x.ms} ms`) } : {}),
+    ...(slow.length ? { slowNotes: slow.slice(-5).map((x) => `${x.id} ${x.ms} ms${x.parts ? ` (${x.parts})` : ""}`) } : {}),
     stuck,
     ...(last ? { last: { id: last.id, sentMs: last.ms, ...(last.words !== undefined ? { wordsMs: last.words } : {}) } } : {}),
   };

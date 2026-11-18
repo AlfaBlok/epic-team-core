@@ -3042,7 +3042,8 @@ export function createApp(
           // tap stop to Sent over 3 s, or an accepted note still not posted: a log line, /api/health `voiceSend`
           // and, in production, one WhatsApp per episode (the notifier's per-kind gap).
           onSlow: (x) => {
-            const text = x.kind === "slow" ? `Voice note ${x.id} took ${(x.ms / 1000).toFixed(1)} s from tap stop to Sent (the limit is 3 s).` : `Voice note ${x.id} was Sent ${Math.round(x.ms / 60_000)} min ago but is not in the chat yet; the console keeps retrying it.`;
+            const where = x.parts ? ` Where it went: ${Object.entries(x.parts).map(([k, v]) => `${k} ${v}`).join(", ")}.` : "";
+            const text = x.kind === "slow" ? `Voice note ${x.id} took ${(x.ms / 1000).toFixed(1)} s from tap stop to Sent (the limit is 3 s).${where}` : `Voice note ${x.id} was Sent ${Math.round(x.ms / 60_000)} min ago but is not in the chat yet; the console keeps retrying it.`;
             console.warn(`[voice] ${text}`);
             if (opts.readModel?.drift?.alert) void whatsapp.alert(`voice-send-${x.kind}`, `${text}\nDetails: ${teamLink()}/api/health`);
           },
