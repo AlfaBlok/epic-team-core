@@ -847,6 +847,17 @@ const mockMail = () => ({
       SAMPLE_PURSUITS.pursuits.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
       return ok({ ok: true as const });
     },
+    async setPursuitActive(id: string, active: boolean) {
+      const body = SAMPLE_PURSUITS;
+      if (!active) {
+        const p = body.pursuits.find((x) => x.id === id);
+        if (p) {
+          body.pursuits = body.pursuits.filter((x) => x.id !== id);
+          body.inactive = [...(body.inactive ?? []), { id, name: p.name, since: new Date().toISOString().slice(0, 10) }];
+        }
+      } else body.inactive = (body.inactive ?? []).filter((x) => x.id !== id);
+      return ok({ ok: true as const });
+    },
     async parkPursuit(id: string, parked: boolean) {
       const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
       if (p) p.parked = parked;

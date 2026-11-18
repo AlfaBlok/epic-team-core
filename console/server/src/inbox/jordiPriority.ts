@@ -358,7 +358,8 @@ export function parseObjectives(pursuitsText: string | undefined, wordsText?: st
   let ps: Obj[];
   try {
     const p = JSON.parse(pursuitsText ?? "") as Obj;
-    ps = (Array.isArray(p.pursuits) ? (p.pursuits as unknown[]) : []).filter((x): x is Obj => isObj(x) && !!str(x, "id"));
+    // an objective he switched inactive (`"active": false`) orders nothing.
+    ps = (Array.isArray(p.pursuits) ? (p.pursuits as unknown[]) : []).filter((x): x is Obj => isObj(x) && !!str(x, "id") && x.active !== false);
   } catch {
     return [];
   }

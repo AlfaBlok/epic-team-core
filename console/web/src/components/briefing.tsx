@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
-import { TrafficLight, keyResultsOf, krMeasured, lightOf, titleOf } from "@/components/goalSets";
+import { KrEvidence, TrafficLight, keyResultsOf, krMeasured, lightOf, titleOf } from "@/components/goalSets";
 import { splitVoiceReply } from "@/components/ownerPriority";
 import { shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { ReplyPlay } from "@/voice/ReplyVoice";
@@ -177,6 +177,7 @@ function BriefingStep({ n, place, kind, filed, onBack, onNext }: { n: ScorecardN
                   <span className={cn("text-sm [overflow-wrap:anywhere]", stale ? "italic text-muted-foreground/70" : "text-muted-foreground")} data-testid="briefing-kr-now">
                     {b}
                   </span>
+                  <KrEvidence r={r} />
                 </span>
               </li>
             );

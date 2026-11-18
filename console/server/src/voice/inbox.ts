@@ -275,7 +275,8 @@ export interface ObjectiveCard {
   light: string;
   /** "4 of 8 key results green". */
   krs: string;
-  keyResults: { label: string; state?: string; value?: string; target?: string }[];
+  /** `evidence`: what shows its colour; absent: no evidence yet, said plainly. */
+  keyResults: { label: string; state?: string; value?: string; target?: string; evidence?: string }[];
   /** where it stands: moved today, or what moves it next (a worker, his answer, a check). */
   stands: string;
   /** his newest words on it, whole, and when he said them. */
@@ -292,7 +293,7 @@ const FILE_WORDS_MAX = 2000;
 /** One objective as the voice gets it: its place, light, key results, where it stands, his newest words. */
 export function objectiveText(o: ObjectiveCard, n: number, total: number): string {
   const out = [`Objective ${n} of ${total} in ${ownerName()}'s order: ${o.name}. Light: ${o.light}. ${o.krs}.`];
-  for (const k of o.keyResults.slice(0, 12)) out.push(`- ${words(k.label, 140)} (${k.state ?? "no light"}): ${k.value ? `now ${words(k.value, 60)}` : "no number yet"}${k.target ? `, target ${words(k.target, 60)}` : ""}`);
+  for (const k of o.keyResults.slice(0, 12)) out.push(`- ${words(k.label, 140)} (${k.state ?? "no light"}): ${k.value ? `now ${words(k.value, 60)}` : "no number yet"}${k.target ? `, target ${words(k.target, 60)}` : ""}; evidence: ${k.evidence ? words(k.evidence, 80) : "none yet"}`);
   if (!o.keyResults.length) out.push("It has no key results yet.");
   out.push(`Where it stands: ${words(o.stands, 220)}`);
   if (o.words) out.push(`His newest words on it${o.said ? ` (${o.said.slice(0, 10)})` : ""}: "${words(o.words, 600)}"`);

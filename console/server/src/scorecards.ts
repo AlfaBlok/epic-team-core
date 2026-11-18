@@ -68,6 +68,22 @@ export interface ScorecardRow {
   /** when its value was last measured: the daily measure's stamp in the file, or now for a value read live
    * (a live source, a ticked Done-means box). Absent: nothing measures it; the screen says so. Older than a day: stale. */
   measuredAt?: string;
+  /** the evidence behind its colour (the owner: "I want to see a link to the evidence for the color"): what the check
+   * reads and where the owner opens it, named at the source in its set's file. Absent: nothing readable shows this
+   * colour yet; the screen says so and the hosted check lists it for the next wake. */
+  evidence?: KrEvidence;
+}
+/** one link to the evidence behind a key result's colour. `url` is absolute, or a console path ("/sets/…"). */
+export interface KrEvidence {
+  what: string;
+  url: string;
+}
+/** the file's `evidence`, kept only when it names something to open; anything else reads as no evidence. */
+export function krEvidence(e: unknown): KrEvidence | undefined {
+  if (!e || typeof e !== "object") return undefined;
+  const { what, url } = e as Record<string, unknown>;
+  if (typeof url !== "string" || !/^(https?:\/\/|\/)\S+$/.test(url.trim())) return undefined;
+  return { what: typeof what === "string" && what.trim() ? what.trim() : "the evidence", url: url.trim() };
 }
 
 /** a key result's `live` spec in its set's file: `kind` names the source, the rest is the source's own settings. */
@@ -267,7 +283,7 @@ export interface ScorecardFile {
   /** where the shape came from. */
   proposal?: string;
   /** the key results: label, the Done-means id it measures, value, note (due date, aim), colour, work codes. */
-  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string }[];
+  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string; evidence?: unknown }[];
   /** "repo CODE" of the epic whose Goal sentence is the objective. */
   spine?: string;
   /** the child epics the sidebar shows, short names: { epic: "EPIC-907" or a spine path, name }. */
@@ -513,6 +529,7 @@ export function buildScorecards(
         ...(!ticked && k.live && typeof k.live === "object" && typeof k.live.kind === "string" ? { live: k.live } : {}),
         // a ticked box is read from its spine now; otherwise the daily measure's stamp, none when nothing measures it
         ...(ticked ? { measuredAt: new Date().toISOString() } : typeof k.measuredAt === "string" && k.measuredAt ? { measuredAt: k.measuredAt } : {}),
+        ...(krEvidence(k.evidence) ? { evidence: krEvidence(k.evidence) } : {}),
         work,
       };
     });

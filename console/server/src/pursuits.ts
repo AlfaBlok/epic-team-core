@@ -118,6 +118,21 @@ export interface PursuitsBody {
   boardAt?: string | null;
   /** the milestones he retired (`retired.milestones` in the file): out of his list of goals, their pages kept. */
   retired?: { repo: string; path: string }[];
+  /** the objectives he switched off (`"active": false` in the file): kept, out of every list, shown greyed. */
+  inactive?: InactivePursuit[];
+}
+
+/**
+ * The owner, on a live call: "I don't want to do anything hacky. We need this to be a standard
+ * feature that an objective can be switched off." An objective he switched off stays in docs/pursuits.json with
+ * `"active": false` and `"inactiveSince"`, and the parser leaves it out of `pursuits`, so every reader of the parsed list
+ * (the scorecards and sidebar count, Goals to set, the inbox, the wake prompts' His objectives, the desk) drops it at once.
+ */
+export interface InactivePursuit {
+  id: string;
+  name: string;
+  /** the day he switched it off (YYYY-MM-DD), when the file says. */
+  since?: string;
 }
 
 /** The part of the launch board this reads: each product's lights. */
@@ -175,7 +190,11 @@ export interface PursuitsDoc {
   pursuits: Declared[];
   checks: Record<string, Check>;
   retired?: { repo: string; path: string }[];
+  inactive?: InactivePursuit[];
 }
+
+/** false only when the file says `"active": false` (no field: active). */
+export const isActive = (o: unknown) => !(o && typeof o === "object" && (o as { active?: unknown }).active === false);
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 const strs = (v: unknown) => (Array.isArray(v) ? v.flatMap((x) => (str(x) ? [str(x)!] : [])) : []);
@@ -192,6 +211,7 @@ export function parsePursuits(text: string): PursuitsDoc {
   }
   const staleDays = typeof doc.staleDays === "number" && doc.staleDays > 0 ? doc.staleDays : 3;
   const seen = new Set<string>();
+  const inactive: InactivePursuit[] = [];
   const pursuits: Declared[] = (Array.isArray(doc.pursuits) ? doc.pursuits : []).flatMap((p) => {
     const o = obj(p);
     const id = str(o.id);
@@ -199,6 +219,11 @@ export function parsePursuits(text: string): PursuitsDoc {
     const greenWhen = str(o.greenWhen);
     if (!id || !name || !greenWhen || seen.has(id)) return [];
     seen.add(id);
+    if (!isActive(o)) {
+      const since = str(o.inactiveSince);
+      inactive.push({ id, name, ...(since ? { since } : {}) });
+      return [];
+    }
     const watch = (Array.isArray(o.watch) ? o.watch : []).flatMap((w) => {
       const r = str(obj(w).repo);
       const paths = strs(obj(w).paths).filter((x) => !x.startsWith("-") && !x.includes(".."));
@@ -252,6 +277,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     pursuits,
     checks,
     ...(retired.length ? { retired } : {}),
+    ...(inactive.length ? { inactive } : {}),
   };
 }
 
@@ -384,8 +410,27 @@ export function reorderText(text: string, ids: string[]): string | null {
   const doc = obj(JSON.parse(text));
   const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
   const have = list.map((p) => str(obj(p).id) ?? "");
-  if (ids.length !== have.length || new Set(ids).size !== ids.length || !ids.every((id) => have.includes(id))) return null;
-  doc.pursuits = ids.map((id) => list[have.indexOf(id)]);
+  // the screen orders the active ones; an inactive one he left out keeps its place after them.
+  const off = list.filter((p) => !isActive(p) && !ids.includes(str(obj(p).id) ?? "")).map((p) => str(obj(p).id) ?? "");
+  const all = [...ids, ...off];
+  if (all.length !== have.length || new Set(all).size !== all.length || !all.every((id) => have.includes(id))) return null;
+  doc.pursuits = all.map((id) => list[have.indexOf(id)]);
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/** switches one objective off (`"active": false`, `"inactiveSince": <day>`) or back on (both fields gone); null when no such objective. */
+export function activeText(text: string, id: string, active: boolean, day: string): string | null {
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const p = list.find((x) => str(obj(x).id) === id);
+  if (!p) return null;
+  if (active) {
+    delete p.active;
+    delete p.inactiveSince;
+  } else {
+    p.active = false;
+    p.inactiveSince = day;
+  }
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
@@ -398,6 +443,23 @@ export function parkText(text: string, id: string, parked: boolean): string | nu
   if (parked) p.parked = true;
   else delete p.parked;
   return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/** his active and inactive objective ids from the home repo's file (kept while its mtime holds); no file: undefined. */
+let idsMemo: { file: string; mtime: number; v: { live: string[]; off: string[] } } | undefined;
+export function objectiveIds(homeDir: string | undefined): { live: string[]; off: string[] } | undefined {
+  if (!homeDir) return undefined;
+  const file = path.join(homeDir, PURSUITS_FILE);
+  try {
+    const mtime = fs.statSync(file).mtimeMs;
+    if (idsMemo?.file === file && idsMemo.mtime === mtime) return idsMemo.v;
+    const doc = parsePursuits(fs.readFileSync(file, "utf8"));
+    const v = { live: doc.pursuits.map((p) => p.id), off: (doc.inactive ?? []).map((p) => p.id) };
+    idsMemo = { file, mtime, v };
+    return v;
+  } catch {
+    return undefined;
+  }
 }
 
 /** `# EPIC-946: Social launch` → code and title. */
@@ -543,7 +605,7 @@ export async function buildPursuits(
   }
   // parked pursuits sit after the ranked ones, in file order.
   pursuits.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
-  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null, ...(doc.retired?.length ? { retired: doc.retired } : {}) };
+  return { pursuits, effort: doc.effort, staleDays: doc.staleDays, ...(doc.said ? { said: doc.said } : {}), boardAt: o.board?.checkedAt ?? null, ...(doc.retired?.length ? { retired: doc.retired } : {}), ...(doc.inactive?.length ? { inactive: doc.inactive } : {}) };
 }
 
 /** Reads the home repo's file and every spine it names; kept a few minutes (git log per watched repo). */

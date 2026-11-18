@@ -10,6 +10,7 @@ import { InboxSearchBox } from "@/components/inboxSearch";
 import { TeamCardsSections } from "@/components/teamCards";
 import { epicDeckHref } from "@/components/pursuitsMap";
 import { usePursuits } from "@/components/pursuits";
+import { InactiveObjectives, ObjectiveOffButton } from "@/components/objectiveSwitch";
 import { SET_KIT_TAB, SocialKitView, kitPursuitOf, setKitHref } from "@/components/socialKit";
 import { useQuery } from "@/lib/data";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
@@ -527,6 +528,43 @@ function KrWhen({ r }: { r: ScorecardRow }) {
   );
 }
 
+/** when a key result's evidence was last read, in words ("read 3 h ago"), from its measured stamp. */
+export function krEvidenceRead(r: Pick<ScorecardRow, "measuredAt">, now = Date.now()): string {
+  const m = krMeasured(r, now);
+  return m.never ? "not read yet" : m.words.replace(/measured /, "read ");
+}
+/**
+ * one link to the evidence behind its colour, with when it was last read (the owner, on a live call: "When I click on
+ * here, I just want to see a link to the evidence for why this color is this color"). None named at its
+ * source: it says so plainly, in grey.
+ */
+export function KrEvidence({ r }: { r: ScorecardRow }) {
+  const e = r.evidence;
+  if (!e)
+    return (
+      <span className="text-xs text-muted-foreground/70" data-testid="kr-evidence-none">
+        Evidence: no evidence yet. Nothing we can open shows why it is this colour.
+      </span>
+    );
+  const outside = /^https?:\/\//.test(e.url);
+  const cls = "font-medium text-foreground underline underline-offset-2 [overflow-wrap:anywhere] hover:text-primary";
+  return (
+    <span className="text-xs text-muted-foreground" data-testid="kr-evidence">
+      Evidence:{" "}
+      {outside ? (
+        <a href={e.url} target="_blank" rel="noreferrer" className={cls} data-testid="kr-evidence-link">
+          {e.what} ↗
+        </a>
+      ) : (
+        <Link to={e.url} className={cls} data-testid="kr-evidence-link">
+          {e.what}
+        </Link>
+      )}
+      <span data-testid="kr-evidence-read"> · {krEvidenceRead(r)}</span>
+    </span>
+  );
+}
+
 /**
  * the key results as the mock-up drew them: a colour bar, the name, how much work is under it, the value; one opens its work.
  * `plain` (a new workspace's Get set up): each key result's name, target and light stacked in one column, nothing to
@@ -609,6 +647,7 @@ export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { kr
                         Target <KrTarget r={r} full />
                       </span>
                     )}
+                    <KrEvidence r={r} />
                   </div>
                   <p className="text-sm text-foreground">Work under this key result</p>
                   {!all.length && <p className="text-xs text-muted-foreground">Nothing is working on this yet. The Delivery Manager opens a row for it on the next wake.</p>}
@@ -1421,6 +1460,7 @@ export function GoalSetPage() {
                 )}
               </p>
             )}
+            <ObjectiveOffButton id={node.id} />
           </GoalHeader>
           <TabStrip tabs={tabs} tab={tab} pills={{ inbox: counts }} counts={{ kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
           {tab === "table" && (
@@ -1621,6 +1661,7 @@ export function GoalSetsPage() {
       {tab === "table" && (
         <WheelsTable nodes={sets.map((x) => x.n)} countFor={inbox.countFor} />
       )}
+      {tab === "table" && <InactiveObjectives />}
       {tab === "inbox" && (
         <InboxSearchProvider>
           <InboxSearchBox />

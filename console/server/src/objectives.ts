@@ -28,7 +28,7 @@ export interface ObjectiveNode {
   objective?: string;
   greens: number;
   total: number;
-  keyResults?: { label?: string; state?: string; value?: string; target?: string }[];
+  keyResults?: { label?: string; state?: string; value?: string; target?: string; evidence?: { what: string; url: string } }[];
   /** another objective's page shows this one inside it: listed with that one, not on its own. */
   foldedInto?: string;
   /** the screen's own colour (the worst key result); read first. */
@@ -149,7 +149,7 @@ export function objectiveCards(input: ObjectivesInput | undefined, plot?: HisWor
       name: l.name,
       light: l.light,
       krs: l.krs,
-      keyResults: (n?.keyResults ?? []).map((k) => ({ label: k.label ?? "", ...(k.state ? { state: k.state } : {}), ...(k.value ? { value: k.value } : {}), ...(k.target ? { target: k.target } : {}) })),
+      keyResults: (n?.keyResults ?? []).map((k) => ({ label: k.label ?? "", ...(k.state ? { state: k.state } : {}), ...(k.value ? { value: k.value } : {}), ...(k.target ? { target: k.target } : {}), ...(k.evidence ? { evidence: k.evidence.what } : {}) })),
       stands,
       ...(w ? { words: w.words, ...(w.said ? { said: w.said } : {}) } : {}),
     };

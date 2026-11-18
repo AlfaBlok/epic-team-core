@@ -5,7 +5,7 @@ import { credentialWorld } from "./auth/identity.js";
 import { DEFAULT_TENANT } from "./db.js";
 import type { Cadence } from "./schemas.js";
 import type { Milestone, Store } from "./store.js";
-import { PURSUITS_FILE, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
+import { PURSUITS_FILE, activeText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
 
 /**
  * The navigable scorecard's links and the owner's two switches:
@@ -13,6 +13,8 @@ import { PURSUITS_FILE, parkText, reorderText, scaleCadence, type PursuitsBody }
  *   pace as set and as its rank makes it), so every line of the scorecard drills down to a deck and a milestone;
  * - POST /api/pursuits/order {ids} (his drag or arrows) and POST /api/pursuits/:id/park {parked}: one commit each in
  *   docs/pursuits.json of the code repo, the record (root L-45). The scheduler and the stall watch read the file.
+ * - POST /api/pursuits/:id/active {active}: his On/Off switch; off keeps the objective in the file with
+ *   `"active": false` and the day, out of Goals to set, the counts, the inbox and the wake prompts, greyed on the screen.
  */
 
 export interface PursuitTeam {
@@ -134,6 +136,17 @@ export function mountPursuitWrites(api: Hono, o: { writer?: SpineWriter; repo: (
     const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === "string" && /^[\w-]{1,80}$/.test(x)) : [];
     if (!ids.length || ids.length !== (body.ids as unknown[]).length) return c.json({ error: { code: "bad_ids", message: "ids is the list of every pursuit id in the new order" } }, 400);
     const r = await write("pursuits order", (t) => reorderText(t, ids), `pursuits in order ${ids.join(", ")}`, `put the pursuits in the order ${ids.join(", ")}`);
+    return c.json(r.body, r.status as 200);
+  });
+
+  api.post("/pursuits/:id/active", async (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found", message: "no pursuits here" } }, 404);
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { active?: unknown };
+    if (!/^[\w-]{1,80}$/.test(id) || typeof body.active !== "boolean") return c.json({ error: { code: "bad_active", message: "active is true or false" } }, 400);
+    const active = body.active;
+    const day = new Date().toISOString().slice(0, 10);
+    const r = await write(`objective ${id}`, (t) => activeText(t, id, active, day), `${active ? "switch on" : "switch off"} objective ${id}`, active ? `switched the objective ${id} back on` : `switched the objective ${id} off (inactive since ${day})`);
     return c.json(r.body, r.status as 200);
   });
 

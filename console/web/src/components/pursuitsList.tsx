@@ -1,3 +1,4 @@
+import { InactiveObjectives } from "@/components/objectiveSwitch";
 import { AnswerBox, WheelsTable, keyResultsOf, lightOf, useGoalSets, useSetInbox } from "@/components/goalSets";
 
 /**
@@ -21,6 +22,7 @@ export function PursuitsListPage() {
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the pursuits…</div>}
       {error && <div className="text-sm text-destructive">Could not read the pursuits: {error.message}</div>}
       {nodes.length > 0 && <WheelsTable nodes={nodes} countFor={inbox.countFor} />}
+      <InactiveObjectives />
     </div>
   );
 }

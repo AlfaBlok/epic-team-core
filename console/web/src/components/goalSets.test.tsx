@@ -33,7 +33,7 @@ const BODY: ScorecardsBody = {
       // the objective's key results, as its file gives them (the mock-up's shape)
       keyResults: [
         { label: "Testers apply", state: "red", value: "0 of 5", note: "read 13 Nov", target: "5 by 17 Nov", kind: "key-result", doneMeans: "E901-1", work: [{ code: "E901-S1", repo: "app", title: "Build the page", status: "ready", kind: "ticket", epicCode: "EPIC-901" }, { code: "E901-S9", repo: "app", status: "done", kind: "ticket" }] },
-        { label: "Site answers", state: "green", value: "yes", kind: "key-result", work: [] },
+        { label: "Site answers", state: "green", value: "yes", kind: "key-result", work: [], evidence: { what: "the site itself", url: "https://app.example/" } },
         { label: "Most of your time goes here", state: "red", value: "14%", note: "aim 80%", kind: "key-result", work: [] },
       ],
       sidebar: [{ id: "launch~app:docs/e1.md", name: "Launch it", greens: 1, total: 2 }],
@@ -214,7 +214,10 @@ describe("goal sets: the screens", () => {
     // ...and a tap opens the whole status and target, uncut, above its work
     const whole = within(screen.getAllByTestId("kr-item")[0]).getByTestId("kr-detail-status");
     expect(within(whole).getByTestId("kr-now-full").className).not.toContain("line-clamp");
-    expect(whole.textContent).toBe("Status nowBehind: 0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 Nov");
+    expect(whole.textContent).toBe("Status nowBehind: 0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 NovEvidence: no evidence yet. Nothing we can open shows why it is this colour.");
+    // the owner: "I want to see a link to the evidence for the color"; none named reads plainly, in grey
+    expect(within(whole).getByTestId("kr-evidence-none").className).toContain("text-muted-foreground");
+    expect(within(whole).queryByTestId("kr-evidence-link")).toBeNull();
     const items = within(screen.getAllByTestId("kr-item")[0]).getAllByTestId("kr-work-item");
     expect(items.map((x) => [x.textContent, x.dataset.state])).toEqual([
       ["E901-S1Build the pageready", "amber"],
@@ -365,6 +368,25 @@ describe("goal sets: the screens", () => {
     expect(tabs.className).not.toContain("grid-cols");
     expect(screen.getByTestId("set-tab-inbox").className).toContain("min-h-11");
     expect(screen.getByTestId("spine-line-work").textContent).toContain("2 things");
+  });
+
+  it("an opened key result links to the evidence behind its colour, with when it was read", async () => {
+    const at = new Date(Date.now() - 3 * 3600000).toISOString();
+    const body = structuredClone(BODY);
+    body.nodes[0].keyResults![1].measuredAt = at;
+    vi.spyOn(api, "listScorecards").mockResolvedValue(body);
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?kr=Site%20answers"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const ev = await screen.findByTestId("kr-evidence");
+    const a = within(ev).getByTestId("kr-evidence-link");
+    expect(a.getAttribute("href")).toBe("https://app.example/");
+    expect(a.getAttribute("target")).toBe("_blank");
+    expect(ev.textContent).toBe("Evidence: the site itself ↗ · read 3 h ago");
   });
 
   it("a link to one key result opens it", async () => {

@@ -649,6 +649,18 @@ function KindSection({ kind, cards, onAnswered }: { kind: TeamCardKind; cards: T
 export const INBOX_SECTION_TITLE = { goal: "Goals to set", team: "Ideas and digests from the team" } as const;
 export const TEAM_GROUP_KINDS: TeamCardKind[] = ["advisor", "idea", "digest"];
 
+/**
+ * what Goals to set's count is made of, in his words: "7 of your 13 objectives still need a goal, and 8 campaigns
+ * need a number." `obj` (the server's goalObjectives) gives how many active objectives he has; absent, the cards alone.
+ */
+export function goalsSplit(objectiveCards: number, campaignLines: number, obj?: { active: number; needGoal: number }): string {
+  const n = obj?.needGoal ?? objectiveCards;
+  const objs = obj ? `${n} of your ${obj.active} objectives ${n === 1 ? "still needs" : "still need"} a goal` : `${n} ${n === 1 ? "objective needs" : "objectives need"} a goal`;
+  if (!campaignLines) return `${objs}.`;
+  const camps = `${campaignLines} ${campaignLines === 1 ? "campaign needs" : "campaigns need"} a number`;
+  return n || obj ? `${objs}, and ${camps}.` : `${camps[0].toUpperCase()}${camps.slice(1)}.`;
+}
+
 export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
   const { data, error } = useTeamCards(scorecard);
   const { talk, ready, needle } = useGoalTalk();
@@ -673,6 +685,9 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
       onToggle={setOpen}
       call={count > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.goal} testId="inbox-goals-to-set" onOpen={() => setOpen(true)} cards={() => [...lines.map((t) => askCard({ id: t.openUrl, title: `${t.name}: ${t.text}`, where: t.name, url: t.openUrl })), ...cards.map(teamCard)]} />}
     >
+      {/* The owner on a call ("is there a relation between these 15 numbers?"): the count is two kinds of goal,
+          said on the section, so it is never read as his objectives: his objectives still needing a goal, then his campaigns. */}
+      {!scorecard && <p className="mb-2 text-xs text-muted-foreground" data-testid="goals-to-set-split">{goalsSplit(cards.length, lines.length, data?.goalObjectives)}</p>}
       {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="team-cards-goal-list">
         {lines.map((t) => (

@@ -313,6 +313,7 @@ export function createRealClient(): ApiClient {
     personaGaps: () => call("GET", "/persona-gaps"),
     reorderPursuits: (ids) => call("POST", "/pursuits/order", { ids }),
     parkPursuit: (id, parked) => call("POST", `/pursuits/${encodeURIComponent(id)}/park`, { parked }),
+    setPursuitActive: (id, active) => call("POST", `/pursuits/${encodeURIComponent(id)}/active`, { active }),
     listOneOffs: () => call("GET", "/one-offs"),
     listOutcomes: (f) => {
       const q = new URLSearchParams(Object.entries(f ?? {}).filter((e): e is [string, string] => !!e[1])).toString();

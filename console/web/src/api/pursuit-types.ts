@@ -108,6 +108,8 @@ export interface PursuitsBody {
   staleDays: number;
   said?: { source: string; words: string };
   boardAt?: string | null;
+  /** the objectives he switched off: kept in the file, out of every list, shown greyed under Inactive. */
+  inactive?: { id: string; name: string; since?: string }[];
 }
 
 /** GET /api/scorecards: every pursuit a scorecard, the epics that carry it scorecards inside it. */
@@ -151,6 +153,8 @@ export interface ScorecardRow {
   doneMeans?: string;
   /** when its value was last measured; absent: nothing measures it. Older than a day reads stale. */
   measuredAt?: string;
+  /** the evidence behind its colour: what the check reads and the link; absent: no evidence yet. */
+  evidence?: { what: string; url: string };
 }
 export interface ScorecardWork {
   code: string;

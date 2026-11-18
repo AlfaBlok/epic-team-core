@@ -70,7 +70,7 @@ import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } fr
 import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
-import { createPursuits, effortForSpine, epicHeading, parsePursuits, priorityLines } from "./pursuits.js";
+import { createPursuits, effortForSpine, epicHeading, objectiveIds, parsePursuits, priorityLines } from "./pursuits.js";
 import { mapSection, productFor, readMaps, sameRepoName, totemView } from "./totemMap.js";
 import { wheelTrackers } from "./trackers.js";
 import { createProducts } from "./products.js";
@@ -1907,7 +1907,7 @@ export function createApp(
   // a card world's (the social world's) idea cards live in one of its own repos; the world is already a card world's
   // (code-chosen), so its repos are looked up unscoped: the owner's inbox reads them from the home world.
   const cardStore = createStore(db);
-  mountTeamCards(api, { writer: spine, repo: () => pursuits.homeDir(), worldRepo: (w) => cardRepoOf(w, worldRepos(db, cardStore, read.reposRoot, w)) });
+  mountTeamCards(api, { writer: spine, repo: () => pursuits.homeDir(), objectives: () => objectiveIds(pursuits.homeDir()), worldRepo: (w) => cardRepoOf(w, worldRepos(db, cardStore, read.reposRoot, w)) });
   // every one-off page the team serves, grouped by repo and epic (docs/pages/registry.json, pagesIndex.ts).
   const pagesList = createPagesReader({ reposRoot: read.reposRoot });
   // a page on a steps page's host opens its secure copy, where Voice records at the first press
@@ -2667,7 +2667,7 @@ export function createApp(
     try {
       const dir = pursuits.homeDir();
       const doc = dir ? parseTeamCards(fs.readFileSync(path.join(dir, TEAM_CARDS_FILE), "utf8")) : undefined;
-      const open = doc ? listTeamCards(doc, { now: new Date().toISOString() }).open : [];
+      const open = doc ? listTeamCards(doc, { now: new Date().toISOString(), ...(objectiveIds(dir) ? { objectives: objectiveIds(dir)! } : {}) }).open : [];
       team = [...open.filter((c) => c.kind === "goal"), ...open.filter((c) => c.kind === "idea")].map((c) => {
         const goals = c.goal?.options ?? [];
         const links = c.goal?.links ?? c.idea?.links;

@@ -66,6 +66,8 @@ export interface TeamCardsBody {
   counts: Record<TeamCardKind, number>;
   limits: { digestPerScorecardPerDay: number; ideasPerDay: number; openGoalsPerScorecard: number; advisorSetsPerWeek?: number };
   today: string;
+  /** Goals to set's part that is his objectives: his active ones, and how many of them still need a goal. */
+  goalObjectives?: { active: number; needGoal: number };
 }
 export interface TeamCardAnswer {
   text?: string;

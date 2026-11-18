@@ -250,17 +250,37 @@ export const isOpen = (c: TeamCard) => (c.kind === "advisor" ? advisorOpen(c.adv
  * What the inbox lists: open cards (digests: only each scorecard's newest, an older one is replaced by it), then
  * answered ones of the last ANSWERED_DAYS; digests first, then ideas, then goal conversations, newest first in each.
  */
-export function listCards(doc: TeamCardsDoc, o: { now: string; scorecard?: string; kind?: TeamCardKind }): { open: TeamCard[]; answered: TeamCard[]; counts: Record<TeamCardKind, number>; limits: typeof LIMITS; today: string } {
+/**
+ * his objectives as the inbox counts them (docs/pursuits.json): `live` the active ones, `off` the ones he
+ * switched inactive. A card of an inactive objective leaves the inbox; a goal card whose objective is not live (inactive,
+ * retired, renamed) is not a goal to set, so Goals to set counts one card per active objective still needing its goal.
+ */
+export interface CardObjectives {
+  live: string[];
+  off: string[];
+}
+
+/** the part of Goals to set that is his objectives: how many active ones he has, how many still need a goal. */
+export interface GoalObjectives {
+  active: number;
+  needGoal: number;
+}
+
+export function listCards(doc: TeamCardsDoc, o: { now: string; scorecard?: string; kind?: TeamCardKind; objectives?: CardObjectives }): { open: TeamCard[]; answered: TeamCard[]; counts: Record<TeamCardKind, number>; limits: typeof LIMITS; today: string; goalObjectives?: GoalObjectives } {
   const cutoff = Date.parse(o.now) - ANSWERED_DAYS * 86_400_000;
   const newestDigest = new Map<string, string>();
   for (const c of doc.cards) if (c.kind === "digest" && c.scorecard && (newestDigest.get(c.scorecard) ?? "") < c.at) newestDigest.set(c.scorecard, c.at);
-  const keep = doc.cards.filter((c) => (!o.scorecard || c.scorecard === o.scorecard) && (!o.kind || c.kind === o.kind));
+  const live = o.objectives ? new Set(o.objectives.live) : undefined;
+  const off = new Set(o.objectives?.off ?? []);
+  const counted = (c: TeamCard) => !(c.scorecard && off.has(c.scorecard)) && !(live && c.kind === "goal" && !c.world && !(c.scorecard && live.has(c.scorecard)));
+  const keep = doc.cards.filter((c) => (!o.scorecard || c.scorecard === o.scorecard) && (!o.kind || c.kind === o.kind) && counted(c));
   const order = (a: TeamCard, b: TeamCard) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.at.localeCompare(a.at);
   const open = keep.filter((c) => isOpen(c) && (c.kind !== "digest" || newestDigest.get(c.scorecard!) === c.at)).sort(order);
   const answered = keep.filter((c) => !isOpen(c) && !!c.answer && Date.parse(c.answer.at) >= cutoff).sort((a, b) => b.answer!.at.localeCompare(a.answer!.at));
   const counts = { digest: 0, idea: 0, goal: 0, advisor: 0 } as Record<TeamCardKind, number>;
   for (const c of open) counts[c.kind]++;
-  return { open, answered, counts, limits: LIMITS, today: dayOf(o.now) };
+  const goalObjectives = live && !o.scorecard ? { active: live.size, needGoal: new Set(open.filter((c) => c.kind === "goal" && !c.world).map((c) => c.scorecard)).size } : undefined;
+  return { open, answered, counts, limits: LIMITS, today: dayOf(o.now), ...(goalObjectives ? { goalObjectives } : {}) };
 }
 
 export type AdvisorVerdict = "accept" | "decline" | "note";
@@ -311,6 +331,8 @@ export function mountTeamCards(
     worldRepo?: (world: string) => string | undefined;
     /** the card worlds (default cardWorlds()); tests pass their own. */
     worlds?: () => string[];
+    /** his active and inactive objectives (docs/pursuits.json); absent = every card counts. */
+    objectives?: () => CardObjectives | undefined;
   },
 ): void {
   const now = o.now ?? (() => new Date().toISOString());
@@ -401,7 +423,9 @@ export function mountTeamCards(
       const home = read();
       return { ...home, cards: [...home.cards, ...worldList().flatMap((w) => readWorld(w).cards)] };
     })();
-    return c.json(listCards(doc, { now: now(), scorecard, kind }));
+    // the home inbox counts only his active objectives' cards; a card world's file has no objectives of his.
+    const objectives = world || doorSession() ? undefined : o.objectives?.();
+    return c.json(listCards(doc, { now: now(), scorecard, kind, ...(objectives ? { objectives } : {}) }));
   });
 
   api.post("/inbox/team-cards", async (c) => {
