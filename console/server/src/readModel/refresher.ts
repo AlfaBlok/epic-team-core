@@ -19,6 +19,9 @@ import { computeReviewRows } from "../review/rows.js";
 import { deleteSnapshot, ensureReadModel, listSnapshotKeys, markChecked, readPayload, writeSnapshot } from "./table.js";
 import { viewDiff, type DriftDiff, type DriftResult } from "./drift.js";
 
+/** how long a pass keeps the checkouts each view reads (a new milestone's repo is seen within this). */
+export const DIRS_TTL_MS = 30_000;
+
 /**
  * the read model's refresher. Runs off the request path (a worker thread in production, see worker.ts) and
  * keeps one console.db row per view (views.ts) current:
@@ -186,6 +189,8 @@ export function createRefresher(o: RefresherOptions) {
 
   /** Repo dirs a view reads: its world's milestones' checkouts (references resolve across the world), or the ad hoc repo. */
   let dirsMemo = new Map<string, string[]>();
+  /** each pass (every 5 s) listed every milestone of every world and resolved its repo again: kept DIRS_TTL_MS instead. */
+  let dirsMemoAt = -Infinity;
   const dirsOf = (k: ViewKey): string[] => {
     const s = keyOf(k);
     if (!dirsMemo.has(s)) dirsMemo.set(s, dirsOfNow(k));
@@ -382,7 +387,10 @@ export function createRefresher(o: RefresherOptions) {
   };
 
   const pass = async () => {
-    dirsMemo = new Map();
+    if (now() - dirsMemoAt >= DIRS_TTL_MS) {
+      dirsMemo = new Map();
+      dirsMemoAt = now();
+    }
     defaults();
     loadStored();
     const t = now();
