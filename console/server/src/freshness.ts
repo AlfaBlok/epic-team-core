@@ -63,6 +63,9 @@ export interface FreshnessOptions {
   reopenWaitMs?: number;
   /** the poll skips a repo pulled less than this ago (default 0 = always ask; the console mounts its poll interval). */
   pollSkipMs?: number;
+  /** after a failed `ls-remote` the repo waits this long (default 10 min), doubling per failure up to pollBackoffMaxMs (6 h). */
+  pollBackoffMs?: number;
+  pollBackoffMaxMs?: number;
   /** Refresh at most once per this per repo (default 5 s). */
   refreshMinMs?: number;
   /** stale-lock self-heal (default on, false = off). */
@@ -88,6 +91,10 @@ export function createFreshness(o: FreshnessOptions = {}) {
   const reopenWaitMs = o.reopenWaitMs ?? openWaitMs;
   const refreshMinMs = o.refreshMinMs ?? 5_000;
   const pollSkipMs = o.pollSkipMs ?? 0;
+  const pollBackoffMs = o.pollBackoffMs ?? 10 * 60_000;
+  const pollBackoffMaxMs = o.pollBackoffMaxMs ?? 6 * 3600_000;
+  /** a repo whose `ls-remote` failed (no origin, a deleted test repo, a refused login) is asked again only after a growing wait. */
+  const pollFailed = new Map<string, { n: number; until: number }>();
   // the real git self-heals a stuck pull (a test's fake git does not)
   const puller = createRepoPuller({ git: (d, a) => git(d, a).then(() => undefined), log, now, healLock: o.healLock, recover: o.git ? false : git });
   const state = new Map<string, RepoState>();
@@ -215,15 +222,23 @@ export function createFreshness(o: FreshnessOptions = {}) {
     for (const dir of [...new Set(dirs)]) {
       const pulledAt = puller.lastPullAt(dir);
       if (pulledAt !== undefined && now() - pulledAt < pollSkipMs) continue;
+      const failed = pollFailed.get(dir);
+      if (failed && now() < failed.until) continue;
       try {
         const remote = (await git(dir, ["ls-remote", "origin", "refs/heads/main"])).trim().split(/\s+/)[0];
+        pollFailed.delete(dir);
         const local = await head(dir);
         if (!remote || !local || remote === local) continue;
         // Local is ahead (a console spine write not pushed yet): nothing to pull.
         const contained = await git(dir, ["merge-base", "--is-ancestor", remote, "HEAD"]).then(() => true, () => false);
         if (!contained) await pullAndDrop(dir);
       } catch (e) {
-        log(`freshness poll ${dir}: ${(e as Error).message}`);
+        // a checkout whose origin is gone (removed test worlds: thousands of failed git calls a day at 5 min) waits 10 min,
+        // then twice as long each time, up to 6 h; one answer from it clears the wait.
+        const n = (failed?.n ?? 0) + 1;
+        const wait = Math.min(pollBackoffMaxMs, pollBackoffMs * 2 ** (n - 1));
+        pollFailed.set(dir, { n, until: now() + wait });
+        log(`freshness poll ${dir}: ${(e as Error).message} (asked again in ${Math.round(wait / 60_000)} min)`);
       }
     }
   };

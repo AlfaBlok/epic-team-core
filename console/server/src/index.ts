@@ -89,7 +89,8 @@ const usage =
         }),
         prices: pricesFromEnv(),
         sweepMs: 5 * 60_000,
-        liveMs: Number(process.env.CONSOLE_USAGE_LIVE_MS || 2 * 60_000),
+        // running runs' tokens every 5 min, like the sweep (was 2 min)
+        liveMs: Number(process.env.CONSOLE_USAGE_LIVE_MS || 5 * 60_000),
       };
 // the answer jobs (spine write, push, wake after the click was answered), drained on SIGTERM.
 let answerJobs: AnswerJobs | undefined;
@@ -140,11 +141,11 @@ const app = createApp(db, {
   readModel: {
     mode: process.env.CONSOLE_READ_MODEL === "off" ? "none" : process.env.CONSOLE_READ_MODEL === "in-process" ? "in-process" : "worker",
     dbPath,
-    // every hour the cache is rebuilt off to the side from the repo and compared (first 10 min after start);
+    // every 6 hours (was hourly, about 4 min of work each) the cache is rebuilt off to the side from the repo and compared (first 10 min after start);
     // drift is logged, shown in /api/health and sent to the owner on WhatsApp (not from staging or a dev copy, or with
     // CONSOLE_WA_NOTIFY=0). CONSOLE_DRIFT_CHECK_MS sets the period, 0 turns it off.
     drift: {
-      everyMs: Number(process.env.CONSOLE_DRIFT_CHECK_MS ?? 3600_000),
+      everyMs: Number(process.env.CONSOLE_DRIFT_CHECK_MS ?? 6 * 3600_000),
       firstAfterMs: Number(process.env.CONSOLE_DRIFT_FIRST_MS ?? 10 * 60_000),
       alert: !staging && !devCopy && process.env.CONSOLE_WA_NOTIFY !== "0",
     },
@@ -204,8 +205,9 @@ const app = createApp(db, {
   },
   // every 5 min, a claim whose lease ran out (no commit naming the row) gives its row back to ready (spine writer).
   leases: { everyMs: process.env.CONSOLE_SCHEDULER === "0" || process.env.CONSOLE_LEASES === "0" ? 0 : 5 * 60_000 },
-  // every minute, every tracked checkout vs origin/main; out of sync over 5 min alerts.
-  checkoutSync: { everyMs: process.env.CONSOLE_CHECKOUT_SYNC === "0" ? 0 : 60_000 },
+  // every 5 min (was every minute; the freshness poll already asks GitHub every 5 min), every tracked checkout
+  // vs origin/main; out of sync over 5 min alerts.
+  checkoutSync: { everyMs: process.env.CONSOLE_CHECKOUT_SYNC === "0" ? 0 : 5 * 60_000 },
   // every 5 min, the worker server's home volume over the worker server ssh; under 15% free alerts. CONSOLE_HOST_DISK=0 turns it off.
   hostDisk: {
     everyMs: staging || devCopy || process.env.CONSOLE_HOST_DISK === "0" ? 0 : 5 * 60_000,

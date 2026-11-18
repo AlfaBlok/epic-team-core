@@ -44,7 +44,7 @@ export const indexerUnit = (port: string | number) => `agent-team-console-indexe
 
 /** The env the indexer gets: what spines.py, git and node need, never the console's secrets. */
 export function indexerEnv(c: IndexerConfig, parentPid: number, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const keep = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "XDG_RUNTIME_DIR", "NODE_ENV", "CONSOLE_RESCAN_GAP_MS", "CONSOLE_SPINES_CONCURRENCY", "CONSOLE_INDEX_REPOS", "TZ"];
+  const keep = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "XDG_RUNTIME_DIR", "NODE_ENV", "CONSOLE_RESCAN_GAP_MS", "CONSOLE_INDEXER_TICK_MS", "CONSOLE_SPINES_CONCURRENCY", "CONSOLE_INDEX_REPOS", "TZ"];
   const out: Record<string, string> = {};
   for (const k of keep) if (env[k] !== undefined) out[k] = env[k]!;
   // the console's identity travels in the config (E996-S29): main.ts sets it before the indexer's modules load.

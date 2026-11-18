@@ -21,6 +21,16 @@ import { remoteSpinesRunner } from "./remoteSpines.js";
  */
 import type { Identity } from "../identity.js";
 
+/**
+ * How often the read model's pass looks at every repo: 30 s (was 5 s, the biggest single CPU cost on the main
+ * server, 60% of a core). A console write, a pull and a new view still start a pass at once (refresher.dirty / register);
+ * only an edit nobody told the console about waits up to this long. CONSOLE_INDEXER_TICK_MS overrides.
+ */
+export function indexerTickMs(env: NodeJS.ProcessEnv = process.env): number {
+  const v = Number(env.CONSOLE_INDEXER_TICK_MS);
+  return Number.isFinite(v) && v >= 1_000 ? v : 30_000;
+}
+
 export interface IndexerConfig {
   dbPath: string;
   reposRoot: string;
@@ -30,7 +40,7 @@ export interface IndexerConfig {
   tenant?: string;
   authOn?: boolean;
   teamRepo?: string;
-  /** Read model refresher tick (default 5 s), queue poll (1 s), heartbeat (5 s), book check (2 min; 0 = no book). */
+  /** Read model refresher tick (default 30 s, indexerTickMs), queue poll (1 s), heartbeat (5 s), book check (2 min; 0 = no book). */
   tickMs?: number;
   pollMs?: number;
   beatMs?: number;
@@ -244,7 +254,7 @@ export function createIndexer(db: DB, c: IndexerConfig, d: IndexerDeps = {}) {
       beat();
       poll();
       void refresher.tick();
-      every(c.tickMs ?? 5_000, () => void refresher.tick());
+      every(c.tickMs ?? indexerTickMs(), () => void refresher.tick());
       every(c.pollMs ?? 1_000, poll);
       every(c.beatMs ?? 5_000, beat);
       every(c.keepFreshMs ?? 60_000, keepFresh);
