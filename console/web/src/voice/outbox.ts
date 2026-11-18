@@ -379,8 +379,9 @@ export function fetchDrainApi(f: typeof fetch = (...a) => fetch(...a)): DrainApi
   return {
     start: async (base, cid, page) => (await call<{ note: { id: string } }>(`${base}/notes`, json({ clientId: cid, ...(page ? { page } : {}) }))).note,
     segment: (base, id, n, blob, seconds) =>
-      call(`${base}/notes/${id}/segments/${n}`, { method: "POST", headers: { "content-type": blob.type || "audio/webm", "x-seconds": seconds.toFixed(2) }, body: blob }),
-    finish: async (base, id, segments, page, skip) => (await call<{ note: { state: string } }>(`${base}/notes/${id}/finish`, json({ segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}) }))).note,
+      call(`${base}/notes/${id}/segments/${n}`, { method: "POST", headers: { "content-type": blob.type || "audio/webm", "x-seconds": seconds.toFixed(2), "x-quick": "1" }, body: blob }),
+    // quick: confirmed once its audio is safe on the console; the console writes and posts it by itself.
+    finish: async (base, id, segments, page, skip) => (await call<{ note: { state: string } }>(`${base}/notes/${id}/finish`, json({ segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}), quick: true }))).note,
   };
 }
 

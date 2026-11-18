@@ -105,7 +105,7 @@ describe("a voice note shows in the chat the moment he taps Send", () => {
     const b = await screen.findByTestId("chat-voice-posting");
     expect(b.dataset.state).toBe("writing");
     expect(b.textContent).toContain("Voice note · 0:07");
-    expect(screen.getByTestId("chat-voice-posting-state").textContent).toBe("writing out your words…");
+    expect(screen.getByTestId("chat-voice-posting-state").textContent).toBe("sending…");
     expect(f.api.finish).not.toHaveBeenCalled();
     // the words come: they fill in on the same bubble
     await act(async () => release());

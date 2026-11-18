@@ -37,6 +37,8 @@ export interface SentNote {
   transcript?: string;
   /** the recording's link, when the note was an answer on a card (`fill`). */
   audio?: string;
+  /** its audio was safe on the console at this time (Sent); the words are written and posted after. */
+  acceptedAt?: string;
 }
 
 /** The console's note routes (fetch by default; tests fake them). */
@@ -46,7 +48,9 @@ export interface NotesApi {
   /** `startMs`: the start's timings (JSON), sent with the parts until one is in. */
   segment(id: string, n: number, audio: Blob, seconds: number, startMs?: string): Promise<{ segment: { n: number; text: string; costUsd: number }; note: { costUsd: number } }>;
   /** `skip`: part numbers with no audio (an empty part, or one lost when the phone threw the page away). */
-  finish(id: string, segments: number, page?: string, skip?: number[]): Promise<{ note: SentNote; audio?: string }>;
+  finish(id: string, segments: number, page?: string, skip?: number[]): Promise<{ note: SentNote; audio?: string; accepted?: boolean }>;
+  /** how long tap stop to Sent took (ms), for the console's 3-second check. */
+  timing?(id: string, sentMs: number): Promise<unknown>;
   discard(id: string): Promise<unknown>;
   /** The note's state on the console (a reloaded page checks its kept note is still open). */
   state?(id: string): Promise<string | undefined>;
@@ -780,6 +784,8 @@ export class NoteEngine {
   /** Tap 2: stop, wait for every part to upload, and post the note. Also "Send again" after a failure. */
   async finish() {
     if (!this.noteP || !(["recording", "paused", "failed"] as NotePhase[]).includes(this.v.phase)) return;
+    // tap stop to Sent is timed (only a first Send: a "Send again" after a failure is not his wait at stop).
+    const stopAt = this.v.phase === "failed" ? undefined : this.clock.now();
     if (this.v.phase === "recording") await this.closeSegment();
     this.releaseMic();
     clearTimeout(this.recoverTimer);
@@ -807,6 +813,7 @@ export class NoteEngine {
       this.retries = 0;
       this.outDone(true);
       this.set({ phase: "sent", note: r.audio ? { ...r.note, audio: r.audio } : r.note, costUsd: r.note.costUsd, info: r.note.state === "empty" ? "Nothing was heard in that note, so nothing was posted." : this.stopWhy });
+      if (r.accepted && stopAt !== undefined) void this.api.timing?.(id, Math.max(0, this.clock.now() - stopAt))?.catch(() => undefined);
     } catch (e) {
       this.set({ phase: "failed", error: `Not sent: ${(e as Error).message}`, ...(this.out ? { info: KEPT_FAILED_TEXT } : {}) }), void this.retryLater();
     }
@@ -917,13 +924,16 @@ export function fetchNotesApi(base = "/api/voice", f: typeof fetch = (...a) => f
   return {
     start: (page, clientId) => call("POST", "/notes", { ...(page ? { page } : {}), ...(clientId ? { clientId } : {}) }),
     segment: async (id, n, audio, seconds, startMs) => {
-      const headers: Record<string, string> = { "content-type": audio.type || "audio/webm", "x-seconds": seconds.toFixed(2), ...(startMs ? { "x-start-ms": startMs } : {}) };
+      // x-quick: the console answers once the part's audio is stored; its words follow in the background.
+      const headers: Record<string, string> = { "content-type": audio.type || "audio/webm", "x-seconds": seconds.toFixed(2), "x-quick": "1", ...(startMs ? { "x-start-ms": startMs } : {}) };
       const r = await f(`${base}/notes/${id}/segments/${n}`, { method: "POST", headers, body: audio });
       const j = (await r.json().catch(() => ({}))) as any;
       if (!r.ok) throw Object.assign(new Error(j?.error?.message ?? `console answered ${r.status}`), { status: r.status, code: j?.error?.code });
       return j;
     },
-    finish: (id, segments, page, skip) => call("POST", `/notes/${id}/finish`, { segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}), ...(o.fill ? { fill: true } : {}) }),
+    // a chat note is Sent once its audio is safe on the console (quick); a card's answer waits for its words.
+    finish: (id, segments, page, skip) => call("POST", `/notes/${id}/finish`, { segments, ...(page ? { page } : {}), ...(skip?.length ? { skip } : {}), ...(o.fill ? { fill: true } : { quick: true }) }),
+    timing: (id, sentMs) => call("POST", `/notes/${id}/timing`, { sentMs: Math.round(sentMs) }),
     discard: (id) => call("POST", `/notes/${id}/discard`, {}),
     state: async (id) => (await call<{ notes: { id: string; state: string }[] }>("GET", "/notes?limit=50")).notes.find((n) => n.id === id)?.state,
   };

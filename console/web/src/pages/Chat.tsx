@@ -761,7 +761,7 @@ export function ChatView({
   }, [chat, older, voicePosting?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // a posted note the transcript never shows back (another chat's wording) still leaves after two minutes
-    if (voicePosting?.state !== "sent") return;
+    if (voicePosting?.state !== "sent" && voicePosting?.state !== "safe") return;
     const t = setTimeout(() => note.landed(), POSTED_SHOW_MS);
     return () => clearTimeout(t);
   }, [voicePosting?.state]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1005,8 +1005,9 @@ function WorkingLine({ who, since }: { who: string; since?: string }) {
 
 /** what the bubble of a voice note on its way says under it. */
 export const POSTING_TEXT: Record<PostingNote["state"], string> = {
-  writing: "writing out your words…",
-  sent: "sent",
+  writing: "sending…",
+  safe: "✓ Sent · your words appear here in a few seconds",
+  sent: "✓ Sent",
   kept: "saved on this phone, sends by itself",
   failed: "not sent yet: Send again below",
 };

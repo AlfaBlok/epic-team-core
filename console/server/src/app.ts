@@ -201,7 +201,7 @@ import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcro
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
 import { anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchJudge, type NoteTouch, type TouchCard, type TouchJudge } from "./voice/touch.js";
 import { addMarks } from "./review/noteMarks.js";
-import { createVoiceNotes, mountVoiceNotesRec, openAiTranscriber, type Transcriber, type VoiceNotes } from "./voice/notes.js";
+import { createVoiceNotes, mountVoiceNotesRec, openAiTranscriber, voiceSendHealth, type Transcriber, type VoiceNotes } from "./voice/notes.js";
 import { campaignQuickStatus, milestoneInstructions, milestoneTools } from "./voice/milestoneCall.js";
 import { createChatUnread } from "./desk/unread.js";
 import { DeskError, TEAM_KEY, type DeskMessage } from "./desk/session.js";
@@ -520,7 +520,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -741,7 +741,7 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null };
-    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
@@ -2988,6 +2988,13 @@ export function createApp(
           transcribe,
           dir: notesDir,
           onPosted: (id) => void memoryForward?.enqueue(id),
+          // tap stop to Sent over 3 s, or an accepted note still not posted: a log line, /api/health `voiceSend`
+          // and, in production, one WhatsApp per episode (the notifier's per-kind gap).
+          onSlow: (x) => {
+            const text = x.kind === "slow" ? `Voice note ${x.id} took ${(x.ms / 1000).toFixed(1)} s from tap stop to Sent (the limit is 3 s).` : `Voice note ${x.id} was Sent ${Math.round(x.ms / 60_000)} min ago but is not in the chat yet; the console keeps retrying it.`;
+            console.warn(`[voice] ${text}`);
+            if (opts.readModel?.drift?.alert) void whatsapp.alert(`voice-send-${x.kind}`, `${text}\nDetails: ${teamLink()}/api/health`);
+          },
           ...(voiceSpill
             ? {
                 onFiled: (f) => {
@@ -3009,16 +3016,18 @@ export function createApp(
       );
     return n;
   };
+  const teamDeskNotes = () => notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk");
+  const worldDeskNotes = (w: string) => notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk");
   mountVoiceNotesRec(api, "/voice", (c) =>
     (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT
-      ? notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk")
+      ? teamDeskNotes()
       : c.json({ error: { code: "world_scope", message: `the Team desk is only on ${ownerName()}'s own console` } }, 403),
   );
   // voice notes in a world's team desk.
   mountVoiceNotesRec(api, "/tenants/:id/desk/voice", (c) => {
     const w = c.req.param("id") ?? "";
     if (w === DEFAULT_TENANT || !store.getTenant(w)) return c.json({ error: { code: "not_found", message: `no world desk ${w}` } }, 404);
-    return notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk");
+    return worldDeskNotes(w);
   });
   // every recording of his findable by note id, any world, for a video snippet later (voice/audioStore.ts).
   mountAudioStore(api, db);
@@ -3029,6 +3038,24 @@ export function createApp(
     const mid = v.scope.milestoneId!;
     return notesFor(v, { send: (t, page, crid) => milestoneChats.send(mid, t, page, crid) }, "milestone");
   });
+  // a note shown Sent (its audio safe here) whose words or post did not go (a failed post, a restart in
+  // between) is finished by the console itself, once a minute, in whichever chat it was recorded.
+  const resumeNotes = async () => {
+    const scopes = db
+      .prepare("SELECT DISTINCT tenant_id, milestone_id FROM voice_notes WHERE accepted_at IS NOT NULL AND state IN ('recording', 'failed') AND finish_tries < 30")
+      .all() as { tenant_id: string; milestone_id: string | null }[];
+    for (const sc of scopes) {
+      let n: VoiceNotes | undefined;
+      if (sc.milestone_id) {
+        const v = campaignVoice(sc.milestone_id);
+        if (v) n = notesFor(v, { send: (t, page, crid) => milestoneChats.send(v.scope.milestoneId!, t, page, crid) }, "milestone");
+      } else if (sc.tenant_id === DEFAULT_TENANT) n = (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT ? teamDeskNotes() : undefined;
+      else if (store.getTenant(sc.tenant_id)) n = worldDeskNotes(sc.tenant_id);
+      await n?.resume().catch((e) => console.error("[voice] resume notes:", e));
+    }
+  };
+  const resumeMs = opts.voice?.resumeNotesMs ?? (process.env.VITEST ? 0 : 60_000);
+  if (resumeMs > 0) setInterval(() => void resumeNotes().catch((e) => console.error("[voice] resume notes:", e)), resumeMs).unref();
   if (opts.whatsapp?.tickMs) setInterval(() => void whatsapp.tick(), opts.whatsapp.tickMs).unref();
   // a key result turning green or red is one WhatsApp line (the notifier keeps what he was told, its caps and
   // quiet hours); read every 10 min with the WhatsApp tick on, never on this thread in tests.

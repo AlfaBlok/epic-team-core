@@ -45,7 +45,8 @@ export interface PostingNote {
   /** when he tapped Send (ms). */
   at: number;
   seconds: number;
-  state: "writing" | "sent" | "kept" | "failed";
+  /** `safe`: Sent, its audio is on the console; his words are being written out and posted by the console. */
+  state: "writing" | "safe" | "sent" | "kept" | "failed";
   id?: string;
   words?: string;
 }
@@ -54,12 +55,13 @@ export interface PostingNote {
 export function postingFor(prev: PostingNote | undefined, v: Pick<NoteView, "phase" | "elapsedS" | "info" | "note">, now: number): PostingNote | undefined {
   if (v.phase === "sending") return { ...(prev ?? { at: now }), seconds: v.elapsedS, state: "writing" };
   if (v.phase === "sent") {
+    if (v.note?.acceptedAt && !v.note.transcript?.trim() && v.note.state !== "empty") return { at: prev?.at ?? now, seconds: v.note.seconds || v.elapsedS, state: "safe", id: v.note.id };
     if (!v.note || v.note.state === "empty" || !v.note.transcript?.trim()) return undefined;
     return { at: prev?.at ?? now, seconds: v.note.seconds, state: "sent", id: v.note.id, words: v.note.transcript.trim() };
   }
   if (v.phase === "failed") return prev && { ...prev, state: v.info === KEPT_FAILED_TEXT ? "kept" : "failed" };
   // a new note, or one he closed or threw away: a sent note's bubble stays until the chat shows it.
-  return prev?.state === "sent" ? prev : undefined;
+  return prev?.state === "sent" || prev?.state === "safe" ? prev : undefined;
 }
 
 export function useVoiceNote(props: {

@@ -279,10 +279,14 @@ export function useNote(props: {
           <span className="ml-auto">{held && <CancelNote engine={held.engine} elapsedS={v.elapsedS} />}</span>
         </>
       )}
-      {v.phase === "sending" && <span data-testid={`${tid}-sending`}>{card ? "Saved on this phone. Writing out what you said…" : `Saved on this phone, sending… transcribing the last part ${clockOf(v.elapsedS)}`}</span>}
+      {v.phase === "sending" && <span data-testid={`${tid}-sending`}>{card ? "Saved on this phone. Writing out what you said…" : `Saved on this phone, sending… ${clockOf(v.elapsedS)}`}</span>}
       {v.phase === "sent" && v.note && !card && (
         <span data-testid={`${tid}-sent`}>
-          {v.note.state === "empty" ? "Nothing was heard, so nothing was posted." : `✓ Voice note sent · ${clockOf(v.note.seconds)} · ${money(v.note.costUsd)}. The desk answers it like typed text.`}
+          {v.note.state === "empty"
+            ? "Nothing was heard, so nothing was posted."
+            : v.note.acceptedAt && !v.note.transcript
+              ? `✓ Voice note sent · ${clockOf(v.note.seconds || v.elapsedS)}. Your words appear in the chat in a few seconds.`
+              : `✓ Voice note sent · ${clockOf(v.note.seconds)} · ${money(v.note.costUsd)}. The desk answers it like typed text.`}
         </span>
       )}
       {out && (

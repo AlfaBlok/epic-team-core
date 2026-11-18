@@ -91,6 +91,12 @@ export function ensureVoiceNoteRecTables(db: DB): void {
   if (!cols.has("start_ms")) db.exec("ALTER TABLE voice_notes ADD COLUMN start_ms TEXT");
   // the browser's id for the note (its outbox key): a start with the same id opens the same note, never a second.
   if (!cols.has("client_id")) db.exec("ALTER TABLE voice_notes ADD COLUMN client_id TEXT");
+  // Sent the moment every part's audio is safe here (accepted_at; what the finish needs kept in accept_json, so
+  // a restart or a failed post finishes it by itself), the page's stop-to-Sent time (send_ms, JSON) and the sweeper's tries.
+  if (!cols.has("accepted_at")) db.exec("ALTER TABLE voice_notes ADD COLUMN accepted_at TEXT");
+  if (!cols.has("accept_json")) db.exec("ALTER TABLE voice_notes ADD COLUMN accept_json TEXT");
+  if (!cols.has("send_ms")) db.exec("ALTER TABLE voice_notes ADD COLUMN send_ms TEXT");
+  if (!cols.has("finish_tries")) db.exec("ALTER TABLE voice_notes ADD COLUMN finish_tries INTEGER NOT NULL DEFAULT 0");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS voice_notes_client ON voice_notes (tenant_id, client_id) WHERE client_id IS NOT NULL");
 }
 
@@ -162,7 +168,18 @@ export interface VoiceNote {
   postError?: string;
   /** the browser's start timings, ms after the press (note open, microphone open, recording; tries to open the note). */
   startMs?: Record<string, number>;
+  /** every part's audio was safe on the console at this time: the page showed Sent; words and post follow by themselves. */
+  acceptedAt?: string;
+  /** tap stop to Sent on the page (`sent`), and to his words in the chat (`words`), ms. */
+  sendMs?: Record<string, number>;
 }
+
+/** tap stop to Sent over this is slow: an alert (the owner: "why is it so slow to send"). */
+export const SEND_SLOW_MS = 3000;
+/** an accepted note not posted after this long is stuck: the sweeper retries it each minute and it is an alert. */
+export const SEND_STUCK_MS = 3 * 60_000;
+/** the sweeper's most tries of one accepted note (one a minute). */
+const FINISH_TRIES = 30;
 
 export interface NoteStart {
   note: VoiceNote;
@@ -194,6 +211,8 @@ export interface NotesDeps {
    * his words, so the rest of what he said reaches the Team desk (spill.ts); never awaited.
    */
   onFiled?: (f: { id: string; world: string; milestoneId?: string; fill: boolean; page?: string; words: string; audio: string }) => void;
+  /** a note took over SEND_SLOW_MS from tap stop to Sent, or an accepted note is still not posted (alert). */
+  onSlow?: (s: { id: string; world: string; kind: "slow" | "stuck"; ms: number }) => void;
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
@@ -201,6 +220,8 @@ const usd = (v: number) => `$${v < 0.01 ? v.toFixed(4) : v < 1 ? v.toFixed(3) : 
 
 /** one finish per note at a time (the tab and its outbox may both send it): a second waits for the first's answer. */
 const finishing = new Map<string, Promise<{ note: VoiceNote; audio?: string }>>();
+/** parts being turned into words after their audio was stored and answered (`<note>:<n>`). */
+const inflight = new Map<string, Promise<unknown>>();
 
 export function createVoiceNotes(d: NotesDeps) {
   const { db } = d;
@@ -225,6 +246,8 @@ export function createVoiceNotes(d: NotesDeps) {
       ...(r.posted_at ? { postedAt: r.posted_at } : {}),
       ...(r.post_error ? { postError: r.post_error } : {}),
       ...(r.start_ms ? { startMs: JSON.parse(r.start_ms) as Record<string, number> } : {}),
+      ...(r.accepted_at ? { acceptedAt: r.accepted_at } : {}),
+      ...(r.send_ms ? { sendMs: JSON.parse(r.send_ms) as Record<string, number> } : {}),
     };
   };
   const get = (id: string): VoiceNote | undefined => {
@@ -268,7 +291,7 @@ export function createVoiceNotes(d: NotesDeps) {
   const segRow = (id: string, n: number) => db.prepare("SELECT * FROM voice_note_segments WHERE note_id = ? AND n = ?").get(id, n) as any;
 
   /** One segment: kept on disk, transcribed once (a retry of a transcribed segment answers from the row). */
-  async function segment(id: string, n: number, audio: Uint8Array, mime: string, seconds: number, startMs?: string) {
+  async function segment(id: string, n: number, audio: Uint8Array, mime: string, seconds: number, startMs?: string, quick = false) {
     // a part the console already has answers from its row, even once the note is closed (a resend whose first
     // answer was lost in a restart): taken once, never transcribed or billed twice.
     const had = Number.isInteger(n) ? segRow(id, n) : undefined;
@@ -297,6 +320,17 @@ export function createVoiceNotes(d: NotesDeps) {
       `INSERT INTO voice_note_segments (note_id, n, at, mime, file, bytes, seconds) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (note_id, n) DO UPDATE SET at = excluded.at, mime = excluded.mime, file = excluded.file, bytes = excluded.bytes, seconds = excluded.seconds, error = NULL`,
     ).run(id, n, iso(), mime.slice(0, 80), file, audio.byteLength, sec);
+    // `quick`: the audio is safe on disk and in its row, so the page hears so now; its words come in the
+    // background (finish waits for them), never holding the upload, and so Sent, for the seconds OpenAI takes.
+    if (quick) {
+      retotal(id);
+      const key = `${id}:${n}`;
+      const p = transcribePart(id, n, audio, mime, sec)
+        .catch(() => undefined)
+        .finally(() => inflight.get(key) === p && inflight.delete(key));
+      inflight.set(key, p);
+      return { segment: { n, stored: true, costUsd: 0 }, note: must(id) };
+    }
     try {
       const text = await transcribePart(id, n, audio, mime, sec);
       return { segment: { n, text, costUsd: segRow(id, n)?.cost_usd as number }, note: must(id) };
@@ -354,12 +388,15 @@ export function createVoiceNotes(d: NotesDeps) {
     if (n0.state === "posted") return { note: n0 };
     if (n0.state === "transcribed") return { note: n0, audio: audioUrl };
     if (n0.state !== "recording" && n0.state !== "failed") throw new VoiceError(409, "note_closed", `voice note ${id} is ${n0.state}`);
+    // parts still being turned into words (quick uploads) are waited for, then read.
+    await Promise.all([...inflight].filter(([k]) => k.startsWith(`${id}:`)).map(([, p]) => p));
     const rows = db.prepare("SELECT n, text, error, file, mime, seconds FROM voice_note_segments WHERE note_id = ? ORDER BY n").all(id) as { n: number; text: string | null; error: string | null; file: string; mime: string; seconds: number }[];
     // a part whose audio is in but whose words failed gets one more try now; one that still fails is named in the
     // note with its audio link, so the rest of what he said is never held back by it.
     const unheard = new Set<number>();
     for (const r of rows) {
-      if (r.n >= o.segments || r.text != null || r.error == null || !fs.existsSync(r.file)) continue;
+      // (no words and no error: its background transcription was cut by a restart; tried now the same way.)
+      if (r.n >= o.segments || r.text != null || !fs.existsSync(r.file)) continue;
       const t = await transcribePart(id, r.n, new Uint8Array(fs.readFileSync(r.file)), r.mime, r.seconds).catch(() => undefined);
       if (t != null) r.text = t;
       else unheard.add(r.n);
@@ -411,6 +448,55 @@ export function createVoiceNotes(d: NotesDeps) {
     return { note: must(id) };
   }
 
+  /**
+   * Sent as soon as his audio is safe. Every part 0..segments-1 (bar `skip`) must be stored here; then the
+   * note is accepted (what the finish needs is kept with it) and its words and post run in the background: the page
+   * shows Sent now, not after OpenAI and the chat. A finish that fails or a restart is picked up by `resume`.
+   */
+  function accept(id: string, o: { segments: number; page?: string; audioBase: string; skip?: number[] }): { note: VoiceNote; accepted: true } {
+    const n0 = must(id);
+    if (n0.state === "posted") return { note: n0, accepted: true };
+    if (n0.state !== "recording" && n0.state !== "failed") throw new VoiceError(409, "note_closed", `voice note ${id} is ${n0.state}`);
+    const have = new Set((db.prepare("SELECT n, file FROM voice_note_segments WHERE note_id = ?").all(id) as { n: number; file: string }[]).filter((r) => fs.existsSync(r.file)).map((r) => r.n));
+    const skip = new Set(o.skip ?? []);
+    const missing: number[] = [];
+    for (let i = 0; i < o.segments; i++) if (!skip.has(i) && !have.has(i)) missing.push(i);
+    if (missing.length) throw new VoiceError(409, "segments_missing", `segments not in yet: ${missing.join(", ")}`);
+    db.prepare("UPDATE voice_notes SET accepted_at = COALESCE(accepted_at, ?), accept_json = ? WHERE id = ?").run(iso(), JSON.stringify({ segments: o.segments, page: o.page, audioBase: o.audioBase, skip: o.skip }), id);
+    void finish(id, o).catch((e) => console.error(`voice note ${id}: accepted, its post waits for the sweeper:`, (e as Error).message));
+    return { note: must(id), accepted: true };
+  }
+
+  /** accepted notes not posted yet (a failed post, a restart) are finished again, one try a minute each. */
+  async function resume(o: { minAgeMs?: number } = {}): Promise<number> {
+    const cut = iso(now() - (o.minAgeMs ?? 20_000));
+    const rows = db
+      .prepare("SELECT id, accepted_at, accept_json, finish_tries FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND accepted_at IS NOT NULL AND accepted_at <= @cut AND state IN ('recording', 'failed') AND finish_tries < @max")
+      .all({ ...sc, cut, max: FINISH_TRIES }) as { id: string; accepted_at: string; accept_json: string; finish_tries: number }[];
+    let n = 0;
+    for (const r of rows) {
+      if (finishing.has(r.id)) continue;
+      db.prepare("UPDATE voice_notes SET finish_tries = finish_tries + 1 WHERE id = ?").run(r.id);
+      const age = now() - Date.parse(r.accepted_at);
+      if (age >= SEND_STUCK_MS) d.onSlow?.({ id: r.id, world, kind: "stuck", ms: age });
+      n++;
+      await finish(r.id, JSON.parse(r.accept_json)).catch((e) => console.error(`voice note ${r.id}: retry ${r.finish_tries + 1} failed:`, (e as Error).message));
+    }
+    return n;
+  }
+
+  /** the page's tap stop to Sent (ms); a slow one is an alert. Words: Sent plus the console's accept to post. */
+  function timing(id: string, sentMs: number) {
+    const n = must(id);
+    if (!Number.isFinite(sentMs) || sentMs < 0 || sentMs > 3_600_000) throw new VoiceError(400, "validation_error", "sentMs is the ms from tap stop to Sent");
+    const had = n.sendMs ?? {};
+    if (had.sent === undefined) {
+      db.prepare("UPDATE voice_notes SET send_ms = ? WHERE id = ?").run(JSON.stringify({ ...had, sent: Math.round(sentMs) }), id);
+      if (sentMs > SEND_SLOW_MS) d.onSlow?.({ id, world, kind: "slow", ms: Math.round(sentMs) });
+    }
+    return { note: must(id) };
+  }
+
   /** hand a finished note (posted to the chat, or transcribed for a card) to the memory service outbox; never throws. */
   function forward(id: string) {
     try {
@@ -438,7 +524,7 @@ export function createVoiceNotes(d: NotesDeps) {
     return (db.prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m ORDER BY started_at DESC LIMIT @n").all({ ...sc, n: Math.min(200, Math.max(1, limit)) }) as any[]).map(rowTo);
   }
 
-  return { start, segment, finish, discard, audio, list, get };
+  return { start, segment, finish, accept, resume, timing, discard, audio, list, get };
 }
 export type VoiceNotes = ReturnType<typeof createVoiceNotes>;
 
@@ -453,7 +539,8 @@ export function notesMonthUsd(db: DB, world: string, since: string): { usd: numb
   return { usd: r.usd + fb.usd, notes: r.n + fb.n, seconds: r.s + fb.s };
 }
 
-const finishIn = z.object({ segments: z.number().int().min(1).max(NOTE_MAX_PARTS), page: z.string().max(200).optional(), skip: z.array(z.number().int().min(0).max(NOTE_MAX_PARTS)).max(NOTE_MAX_PARTS).optional(), fill: z.boolean().optional() });
+const finishIn = z.object({ segments: z.number().int().min(1).max(NOTE_MAX_PARTS), page: z.string().max(200).optional(), skip: z.array(z.number().int().min(0).max(NOTE_MAX_PARTS)).max(NOTE_MAX_PARTS).optional(), fill: z.boolean().optional(), quick: z.boolean().optional() });
+const timingIn = z.object({ sentMs: z.number().min(0).max(3_600_000) });
 const startIn = z.object({ page: z.string().max(200).optional(), clientId: z.string().regex(/^[\w-]{8,64}$/).optional() });
 
 /** Where the page reached the console (the link in the chat message opens the audio there). */
@@ -511,7 +598,7 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
     `${prefix}/notes/:nid/segments/:n`,
     guard(async (c, n) => {
       const buf = new Uint8Array(await c.req.arrayBuffer());
-      const r = await n.segment(c.req.param("nid") ?? "", Number(c.req.param("n")), buf, c.req.header("content-type") ?? "", Number(c.req.header("x-seconds")), c.req.header("x-start-ms"));
+      const r = await n.segment(c.req.param("nid") ?? "", Number(c.req.param("n")), buf, c.req.header("content-type") ?? "", Number(c.req.header("x-seconds")), c.req.header("x-start-ms"), c.req.header("x-quick") === "1");
       return c.json(r);
     }),
   );
@@ -520,7 +607,19 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
     guard(async (c, n) => {
       const p = finishIn.safeParse(await json(c));
       if (!p.success) return bad(c, "segments (how many were recorded, 1..300) is required; page (string), skip (part numbers with no audio) and fill (true: the words come back for a card's text box, nothing is posted) are optional");
-      return c.json(await n.finish(c.req.param("nid") ?? "", { ...p.data, ...(open ? { fill: true } : {}), audioBase: base(c) }));
+      const { quick, ...o } = p.data;
+      const fill = open ? true : o.fill;
+      // a chat note (not a card's answer, whose words must come back) is Sent once its audio is safe here.
+      if (quick && !fill) return c.json(n.accept(c.req.param("nid") ?? "", { ...o, audioBase: base(c) }));
+      return c.json(await n.finish(c.req.param("nid") ?? "", { ...o, ...(fill ? { fill: true } : {}), audioBase: base(c) }));
+    }),
+  );
+  api.post(
+    `${prefix}/notes/:nid/timing`,
+    guard(async (c, n) => {
+      const p = timingIn.safeParse(await json(c));
+      if (!p.success) return bad(c, "sentMs (ms from tap stop to Sent) is required");
+      return c.json(n.timing(c.req.param("nid") ?? "", p.data.sentMs));
     }),
   );
   api.post(`${prefix}/notes/:nid/discard`, guard((c, n) => c.json(n.discard(c.req.param("nid") ?? ""))));
@@ -533,4 +632,34 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
       return new Response(body, { headers: { "content-type": a.mime.split(";")[0], "content-length": String(body.byteLength), "cache-control": "private, max-age=86400" } });
     }, false),
   );
+}
+
+/**
+ * how fast his voice notes were Sent (tap stop to Sent, from the page) in the last day, every world: count,
+ * median, slowest, how many over SEND_SLOW_MS, and accepted notes not posted after SEND_STUCK_MS. /api/health `voiceSend`.
+ */
+export function voiceSendHealth(db: DB, nowMs = Date.now()) {
+  ensureVoiceNoteRecTables(db);
+  const since = new Date(nowMs - 24 * 3600_000).toISOString();
+  const rows = db.prepare("SELECT id, send_ms, accepted_at, posted_at FROM voice_notes WHERE started_at >= ? AND send_ms IS NOT NULL ORDER BY started_at").all(since) as { id: string; send_ms: string; accepted_at: string | null; posted_at: string | null }[];
+  const sent: { id: string; ms: number; words?: number }[] = [];
+  for (const r of rows) {
+    const j = JSON.parse(r.send_ms) as Record<string, number>;
+    if (typeof j.sent !== "number") continue;
+    sent.push({ id: r.id, ms: j.sent, ...(r.accepted_at && r.posted_at ? { words: j.sent + Date.parse(r.posted_at) - Date.parse(r.accepted_at) } : {}) });
+  }
+  const ms = sent.map((x) => x.ms).sort((a, b) => a - b);
+  const slow = sent.filter((x) => x.ms > SEND_SLOW_MS);
+  const stuck = (db.prepare("SELECT id FROM voice_notes WHERE accepted_at IS NOT NULL AND accepted_at < ? AND state IN ('recording', 'failed')").all(new Date(nowMs - SEND_STUCK_MS).toISOString()) as { id: string }[]).map((r) => r.id);
+  const last = sent.at(-1);
+  return {
+    state: stuck.length || slow.length ? "alert" : sent.length ? "ok" : "idle",
+    limitMs: SEND_SLOW_MS,
+    notes: sent.length,
+    ...(ms.length ? { medianMs: ms[Math.floor((ms.length - 1) / 2)], slowestMs: ms.at(-1) } : {}),
+    slow: slow.length,
+    ...(slow.length ? { slowNotes: slow.slice(-5).map((x) => `${x.id} ${x.ms} ms`) } : {}),
+    stuck,
+    ...(last ? { last: { id: last.id, sentMs: last.ms, ...(last.words !== undefined ? { wordsMs: last.words } : {}) } } : {}),
+  };
 }
