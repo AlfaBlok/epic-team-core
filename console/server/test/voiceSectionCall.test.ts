@@ -7,7 +7,7 @@ import { createApp } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import type { ReadConfig } from "../src/routes/read.js";
 import { focusGreeting, focusPack, pressStep, type InboxCard } from "../src/voice/inbox.js";
-import { newestBriefing, planOf, strategistLines, worldCallContext } from "../src/voice/worldContext.js";
+import { planOf, strategistLines, worldCallContext } from "../src/voice/worldContext.js";
 vi.hoisted(async () => (await import("../src/identity.js")).setIdentity({ owner: "Sam" }));
 
 // a phone button on an inbox section starts the call holding that section's cards, and presses his own
@@ -55,15 +55,15 @@ describe("a social world's call's context", () => {
   const spine = "# EPIC-906: Acme testers\n\n## Plan\n\nTen testers from people with the exact pain.\n\n### Goal and numbers\n\n| Step | Today | Goal |\n|---|---|---|\n| Testers | 1 | 10 |\n\n### Who\n\nPeople.\n\n## Issue Ledger\n";
   it("reads each campaign's plan line and key results, the newest briefing and the Strategist's newest line", () => {
     expect(planOf(spine)).toEqual({ line: "Ten testers from people with the exact pain.", numbers: "| Step | Today | Goal |\n| Testers | 1 | 10 |" });
-    expect(newestBriefing(dir)?.day).toBe("2026-11-17");
     expect(strategistLines(dir)[0]).toMatch(/2026-11-18: Worked: Shorts and Reddit \| Did not: X drew 27 views \| Next try: finish the 40 posts/);
-    const c = worldCallContext({ world: "Acme Social", campaigns: [{ title: "Acme testers", spine }, { title: "Day in the life" }], repoDir: dir });
+    const c = worldCallContext({ world: "Acme Social", campaigns: [{ title: "Acme testers", spine, briefing: { day: "2026-11-17", text: "Today: Brief me by voice" } }, { title: "Day in the life", briefing: { day: "2026-11-17", text: "Today: Brief me by voice" } }], repoDir: dir });
     expect(c).toMatch(/telephony helper for this workspace's campaigns/);
     expect(c).toMatch(/1\. Acme testers: Ten testers/);
     expect(c).toMatch(/Testers \| 1 \| 10/);
     expect(c).toMatch(/2\. Day in the life\nKey results: not written in its plan yet/);
-    expect(c).toMatch(/newest daily briefing \(2026-11-17\)[\s\S]*Brief me by voice/);
-    expect(c).not.toMatch(/Old one/);
+    expect(c).toMatch(/Acme testers, Day in the life, 2026-11-17 \(the morning briefing he received\):\nToday: Brief me by voice/);
+    expect(c.match(/Brief me by voice/g)).toHaveLength(1);
+    expect(worldCallContext({ world: "x", campaigns: [{ title: "A" }] })).toMatch(/No daily briefing is kept/);
   });
 });
 

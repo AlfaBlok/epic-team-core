@@ -101,6 +101,8 @@ export interface SocialArea {
   /** a campaign's Call, a world desk's. */
   campaignCall: CallScript;
   worldDeskCall: CallScript;
+  /** the newest daily briefing kept for one campaign (repo, its epic code; null = the repo-level campaign), for its call. */
+  callBriefing?(at: { repo: string; code: string | null }): { day: string; text: string } | undefined;
   /**..S27, the social routes and the writer (the wake gate moves late posts with it). */
   mountRoutes(o: { api: Hono; store: Store; skillDir?: string; wake?: (id: string, note: string) => Promise<unknown>; recordAssignments: (s: Store) => any; teamDir: () => string | undefined }): void;
   /** the site numbers and the hourly KPI read, held posts as cards, campaigns, the digest. */

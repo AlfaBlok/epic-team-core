@@ -11,6 +11,8 @@ import { ownerName } from "../identity.js";
 
 export interface WorldCampaign {
   title: string;
+  /** the newest daily briefing kept for this campaign (read where it is stored, never copied). */
+  briefing?: { day: string; text: string };
   /** the campaign spine's text (undefined: not readable). */
   spine?: string;
 }
@@ -40,25 +42,6 @@ export function planOf(spine: string): { line?: string; numbers?: string } {
   const g = /^### Goal and numbers\s*$([\s\S]*?)(?=^###? |(?![\s\S]))/m.exec(body);
   const numbers = g ? plain(g[1]) : "";
   return { ...(line ? { line: plain(line) } : {}), ...(numbers && !/^not written yet$/i.test(numbers) ? { numbers } : {}) };
-}
-
-/** The newest daily briefing note in a world repo's desk inbox (`desk/inbox/<date>-…-daily-briefing.md`), body only. */
-export function newestBriefing(repoDir: string | undefined): { day: string; text: string } | undefined {
-  if (!repoDir) return undefined;
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(path.join(repoDir, "desk", "inbox")).filter((n) => /^\d{4}-\d{2}-\d{2}-.*daily-briefing\.md$/.test(n));
-  } catch {
-    return undefined;
-  }
-  const name = names.sort().at(-1);
-  if (!name) return undefined;
-  try {
-    const raw = fs.readFileSync(path.join(repoDir, "desk", "inbox", name), "utf8");
-    return { day: name.slice(0, 10), text: plain(raw.replace(/^---\n[\s\S]*?\n---\n/, "")) };
-  } catch {
-    return undefined;
-  }
 }
 
 /** Each campaign folder's newest Strategist daily line (`docs/campaigns/<c>/strategist-daily.md`, its table's last row). */
@@ -105,9 +88,17 @@ export function worldCallContext(o: { world: string; campaigns: WorldCampaign[];
     lines.push(`${i + 1}. ${c.title}${p.line ? `: ${clip(p.line, 240)}` : ""}`);
     lines.push(p.numbers ? `Key results (today against goal): ${clip(p.numbers, 900)}` : "Key results: not written in its plan yet (say so if he asks).");
   });
-  const b = newestBriefing(o.repoDir);
-  lines.push("", "## Today's daily briefing");
-  lines.push(b ? `The newest daily briefing (${b.day}), what the team built and what to promote:\n${clip(b.text, 2400)}` : "No daily briefing has arrived yet (say so if he asks).");
+  // one briefing can cover several campaigns: each is said once, under the campaigns it is about.
+  const seen = new Map<string, { day: string; text: string; for: string[] }>();
+  for (const c of o.campaigns) if (c.briefing) {
+    const k = `${c.briefing.day}\n${c.briefing.text}`;
+    const e = seen.get(k) ?? { ...c.briefing, for: [] };
+    e.for.push(c.title);
+    seen.set(k, e);
+  }
+  lines.push("", "## The latest daily briefing");
+  if (!seen.size) lines.push("No daily briefing is kept for these campaigns yet (say so if he asks).");
+  for (const b of [...seen.values()].sort((x, y) => y.day.localeCompare(x.day)).slice(0, 3)) lines.push(`${b.for.join(", ")}, ${b.day} (the morning briefing he received):\n${clip(b.text, 2000)}`);
   const s = strategistLines(o.repoDir);
   if (s.length) lines.push("", "## The Strategist's newest daily line per campaign (what worked, what did not, the next try)", ...s.map((l) => clip(l, 900)));
   return lines.join("\n");

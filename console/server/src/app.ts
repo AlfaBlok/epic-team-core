@@ -2728,7 +2728,9 @@ export function createApp(
       } catch {
         /* unreadable spine: the campaign is still named */
       }
-      return { title: m.title, ...(spine ? { spine } : {}) };
+      const code = m.path === "docs/spines/root.md" ? null : (spine ? (/^#\s+(EPIC-\d+):/m.exec(spine)?.[1] ?? null) : null);
+      const briefing = m.repo ? socialArea?.callBriefing?.({ repo: m.repo, code }) : undefined;
+      return { title: m.title, ...(spine ? { spine } : {}), ...(briefing ? { briefing } : {}) };
     });
     const repoDir = dir(world) ?? dir(mine.find((m) => m.repo)?.repo);
     return worldCallContext({ world: store.getTenant(world)?.name || world, campaigns, ...(repoDir ? { repoDir } : {}) });
