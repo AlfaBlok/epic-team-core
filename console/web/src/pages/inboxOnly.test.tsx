@@ -9,7 +9,7 @@ import { sampleReview } from "@/components/cardInventory";
 import { forgetWorld } from "@/lib/useSocial";
 import { ProjectProvider } from "@/lib/project";
 import { SKINS, SkinProvider } from "@/lib/skin";
-import { inboxExtras } from "@/lib/inboxOnly";
+import { INBOX_ORDER, inboxExtras, inboxOrder } from "@/lib/inboxOnly";
 
 /**
  * Root L-87, the owner 18 Nov (vn_5025a4c5): "I want to have a clear rule that you never add anything to the inbox unless I
@@ -17,6 +17,11 @@ import { inboxExtras } from "@/lib/inboxOnly";
  * again". The Inbox page holds its title, the filters on top and the sections with their cards; this fails the moment
  * anything else (a counter box, a line of text, a footer, a band) is drawn on it, in either skin. The same rule runs on
  * his live inbox after every release (hosted/console/scripts/inbox-load-check.mjs).
+ *
+ * The sections keep one order whatever is pressing (the owner 18 Nov: "why did blocked on me in the sections in the inbox
+ * go down? Whose decision was it to make the blocked on you section in the middle"): a pressing card leads inside its own
+ * section, Blocked on you stays first, Snoozed reviews stays last. Both shipped once because no test said what the
+ * inbox holds; this is that test.
  */
 afterEach(() => {
   cleanup();
@@ -79,5 +84,25 @@ describe("root L-87: the Inbox holds only the filters on top and the sections wi
     );
     await drawn();
     expect(extras()).toEqual(["a[asks-this-week]: 33 asks to you this week", "p[sync-footer]: Oldest sync from GitHub: 14 min ago"]);
+  });
+
+  it("the sections keep one order, Blocked on you first, even when a pressing card waits for review", async () => {
+    const pressing = sampleReview({ id: "rv_pressing", ref: "E900-S5", ownerPriority: { pressing: { why: "said again" } } } as never);
+    vi.spyOn(api, "listReviewItems").mockImplementation(((q?: { state?: string }) =>
+      Promise.resolve(q?.state === "snoozed" ? [sampleReview({ id: "rv_snoozed", ref: "E900-S9", snoozedUntil: "2026-12-01" } as never)] : [pressing, sampleReview({ id: "rv_done", ref: "E900-S4" })])) as never);
+    inbox("console");
+    await drawn();
+    const { sections, ok } = inboxOrder(document.querySelector("main"));
+    expect(sections[0]).toBe("waiting-on-you");
+    expect(sections.indexOf("inbox-decisions")).toBeLessThan(sections.indexOf("waiting-for-review"));
+    expect(sections.filter((x) => (INBOX_ORDER as readonly string[]).includes(x))).toEqual(sections);
+    expect(ok).toBe(true);
+    expect(sections.at(-1)).toBe("review-snoozed");
+    expect(extras()).toEqual([]);
+  });
+
+  it("the order check fails a flipped inbox", () => {
+    document.body.innerHTML = '<main><section data-fold-section data-testid="waiting-for-review"></section><section data-fold-section data-testid="waiting-on-you"></section></main>';
+    expect(inboxOrder(document.querySelector("main")).ok).toBe(false);
   });
 });

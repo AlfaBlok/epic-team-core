@@ -8,3 +8,13 @@ globalThis.__IDENTITY__ = suiteIdentity();
 import { afterEach } from "vitest";
 import { resetSent } from "./lib/sentRows";
 afterEach(() => resetSent());
+
+// the Inbox's place (lib/inboxPlace.ts) is kept per history entry in sessionStorage, and every MemoryRouter starts on the
+// same entry ("default"), so each test starts with none, as a new browser tab does.
+afterEach(() => {
+  try {
+    sessionStorage.clear();
+  } catch {
+    /* node environment: no storage */
+  }
+});

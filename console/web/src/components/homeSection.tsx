@@ -19,20 +19,29 @@ function storedOpen(key: string): boolean | undefined {
  */
 export const LandFolded = createContext(false);
 /**
+ * the Inbox's place for one visit (the owner: the Inbox button lands folded at the top, Back returns to the same open
+ * sections and the same scroll place): `restored` is what was open when he left this visit (Back), `record` keeps each
+ * fold he opens or closes. Outside the Inbox there is none.
+ */
+export const InboxPlace = createContext<{ restored?: Record<string, boolean>; record: (key: string, open: boolean) => void } | undefined>(undefined);
+/**
  * `lead` (the owner 2026-11-16: "It should just be at the top on blocked waiting for me or top done waiting
  * for your review"): while a section holds something ready for him (a ready or deadline card, a priority ask) at its
  * top, it opens by itself, even where the Inbox lands folded, until he folds it himself.
  */
 export function useSectionOpen(key: string | undefined, byDefault = true, lead = false): [boolean, (open: boolean) => void] {
   const landFolded = useContext(LandFolded);
-  const [open, setOpen] = useState(() => lead || (landFolded ? false : key ? (storedOpen(key) ?? byDefault) : byDefault));
+  const place = useContext(InboxPlace);
+  const back = key && place?.restored && key in place.restored ? place.restored[key] : undefined;
+  const [open, setOpen] = useState(() => back ?? (lead || (landFolded ? false : key ? (storedOpen(key) ?? byDefault) : byDefault)));
   const touched = useRef(false);
   useEffect(() => {
-    if (lead && !touched.current) setOpen(true);
+    if (lead && !touched.current && back === undefined) setOpen(true);
   }, [lead]);
   const set = (o: boolean) => {
     touched.current = true;
     setOpen(o);
+    if (key) place?.record(key, o);
     if (!key || landFolded) return;
     try {
       window.localStorage.setItem(SECTION_STORE + key, o ? "open" : "closed");

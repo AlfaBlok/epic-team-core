@@ -22,7 +22,8 @@ import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime 
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews } from "@/components/review";
-import { FoldSection, LandFolded, useSectionOpen } from "@/components/homeSection";
+import { FoldSection, InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
+import { useInboxPlace } from "@/lib/inboxPlace";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
 import { SCORECARDS_PATH } from "@/lib/scorecards";
@@ -352,6 +353,8 @@ export function TeamPage({
   // root L-87 (vn_5025a4c5, "The inbox only have sections and cards. Nothing else"): on the Inbox page only the title,
   // the filters on top and the sections with their cards; nothing else is added unless he asks for it.
   const inboxPage = only === "inbox" || (!campaigns && !settings);
+  // the Inbox button lands folded at the top; Back returns to the same open sections and scroll place
+  const inboxPlace = useInboxPlace();
   return (
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
       {!settings && (
@@ -407,7 +410,7 @@ export function TeamPage({
               question on what comes first leads Blocked on you; no section of their own, every section folds alike. */}
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
           {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
-          {only !== "goals" && <LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
+          {only !== "goals" && <InboxPlace.Provider value={only === "inbox" ? inboxPlace.place : undefined} key={only === "inbox" ? inboxPlace.visit : undefined}><LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
             <Slot name="social-other-worlds">
               <OtherWorldsWaiting />
             </Slot>
@@ -447,7 +450,7 @@ export function TeamPage({
                 <InboxSnoozedReviews />
               </Slot>
             )}
-          </SlotStack></LandFolded.Provider>}
+          </SlotStack></LandFolded.Provider></InboxPlace.Provider>}
           {only !== "goals" && !inboxPage && <ChatsWaitingLine className="mb-3 rounded-lg border bg-card px-3 py-2 text-sm" />}
           {only !== "inbox" && only !== "goals" && <NewApplications />}
           {/* the phone Home (the owner, "on the mobile, it's just a total mess"): Home is the
@@ -476,6 +479,7 @@ export function TeamPage({
               next one holding its place with a shimmer), so one that lands late never pushes what is on screen. */}
           <InboxSearchProvider>
           {/* the owner ("land with everything collapsed, and then I expand where I want to look at"). */}
+          <InboxPlace.Provider value={inboxPlace.place} key={inboxPlace.visit}>
           <LandFolded.Provider value>
           {/* (the owner 16 Nov 20:27Z: "I don't want to add more sections!!! ... Inbox should have single pattern
               please - sections you can expand, all look the same"): what he waits on leads the section it belongs to
@@ -530,6 +534,7 @@ export function TeamPage({
             )}
           </SlotStack>
           </LandFolded.Provider>
+          </InboxPlace.Provider>
           </InboxSearchProvider>
         </>
       ) : (

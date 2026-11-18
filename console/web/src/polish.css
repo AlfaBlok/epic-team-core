@@ -122,7 +122,7 @@ main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12
 :is(main, [role="dialog"], [data-card-shell], [data-inbox-card]) :is(
   :is(p, li, dd, dt, td, th, span, label, small, blockquote, figcaption) > a[href],
   a.underline, a.text-blue-600, a[class*="hover:underline"], a[data-testid="card-go"], a[data-testid="ask-set-open"]
-):not(:is(nav, aside, header, [role="tablist"], [role="menu"], [data-testid="review-crumb"], [data-testid="review-tree"], [data-sidebar]) *):not([role="button"], [role="tab"], [data-slot="button"], .no-link-look):not(:has(img, > svg:only-child)) {
+):not(:is(nav, aside, header, [role="tablist"], [role="menu"], [data-testid="review-tree"], [data-sidebar]) *):not([role="button"], [role="tab"], [data-slot="button"], .no-link-look):not(:has(img, > svg:only-child)) {
   color: hsl(var(--link)) !important;
   text-decoration-line: underline !important;
   text-decoration-thickness: 1px !important;
@@ -131,8 +131,6 @@ main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12
 }
 :is(main, [role="dialog"], [data-card-shell], [data-inbox-card]) a[href]:hover { text-decoration-color: currentColor !important; }
 [data-testid="review-tree"] a { color: hsl(var(--foreground)) !important; }
-[data-testid="review-crumb"] a { color: hsl(var(--muted-foreground)) !important; text-decoration: none !important; }
-[data-testid="review-crumb"] a:hover { color: hsl(var(--foreground)) !important; text-decoration: underline !important; }
 
 /* R2-5. Review card: the evidence picture fades out at the cut, with its caption as a white label; the tree on a quiet tint. */
 [data-testid="review-evidence"] { border-radius: 12px !important; box-shadow: 0 1px 0 hsl(var(--border)); }

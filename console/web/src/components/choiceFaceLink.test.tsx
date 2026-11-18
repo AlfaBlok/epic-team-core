@@ -26,7 +26,7 @@ describe("a choice shows its options on its face (E948-S151)", () => {
     expect(container.querySelector("[data-testid='ask-more']")).toBeNull();
     const go = container.querySelector("a[data-testid='card-go']") as HTMLAnchorElement;
     expect(go?.textContent).toMatch(/See the options/);
-    expect(go.href).toBe("https://team.example.com/cards");
+    expect(go.href).toBe("https://example.com/");
     const first = container.querySelector("[data-testid='ask-option']")!;
     expect(go.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelectorAll("[data-testid='ask-option']").length).toBe(3);

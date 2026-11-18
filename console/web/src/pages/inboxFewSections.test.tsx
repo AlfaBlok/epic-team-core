@@ -86,6 +86,8 @@ describe("the Inbox has a few clear sections, all folded when it opens", () => {
     expect(screen.getByTestId("waiting-for-review-toggle").getAttribute("aria-expanded")).toBe("true");
     cleanup();
     forgetOtherWorlds();
+    // the next visit (a new tab; the Inbox button is lib/inboxPlace.test.tsx): a new browser session, folded again
+    sessionStorage.clear();
     inbox();
     await screen.findByTestId("waiting-for-review-toggle");
     expect(screen.getByTestId("waiting-for-review-toggle").getAttribute("aria-expanded")).toBe("false");

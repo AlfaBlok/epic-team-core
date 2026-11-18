@@ -15,6 +15,21 @@ export const INBOX_ALLOWED = [
   '[data-testid="inbox-skeleton"]', // the sections' place while they load
 ] as const;
 
+/**
+ * the Inbox's sections in their one fixed order (the owner, 18 Nov: Blocked on you first, then Decisions, then Done,
+ * waiting for your review; a pressing or ready card leads inside its own section and never moves a section). Snoozed
+ * reviews is the last fold, below every section. A section with nothing to show may be absent; the rest keep this order.
+ */
+export const INBOX_ORDER = ["waiting-on-you", "inbox-decisions", "inbox-goals-to-set", "waiting-for-review", "inbox-team-cards", "inbox-everything-else", "review-snoozed"] as const;
+
+/** the page's top-level sections by test id, top to bottom, and whether they keep INBOX_ORDER. */
+export function inboxOrder(root: Element | null = document.querySelector("main")): { sections: string[]; ok: boolean } {
+  const sections = root ? [...root.querySelectorAll("[data-fold-section]")].filter((s) => !s.parentElement?.closest("[data-fold-section]")).map((s) => s.getAttribute("data-testid") ?? "?") : [];
+  const known = sections.filter((s) => (INBOX_ORDER as readonly string[]).includes(s));
+  const ok = known.every((s, i) => i === 0 || INBOX_ORDER.indexOf(s as (typeof INBOX_ORDER)[number]) > INBOX_ORDER.indexOf(known[i - 1] as (typeof INBOX_ORDER)[number]));
+  return { sections, ok };
+}
+
 const LEAF_TAGS = new Set(["IMG", "SVG", "BUTTON", "INPUT", "A", "TEXTAREA", "SELECT", "VIDEO", "CANVAS"]);
 
 /** each visible thing inside `root` (the page's main) that is not inside an allowed part: "tag[testid]: text". */
@@ -47,6 +62,10 @@ function shownOnScreen(el: Element): boolean {
 declare global {
   interface Window {
     inboxOnlyCheck?: () => string[];
+    inboxOrderCheck?: () => { sections: string[]; ok: boolean };
   }
 }
-if (typeof window !== "undefined") window.inboxOnlyCheck = () => inboxExtras();
+if (typeof window !== "undefined") {
+  window.inboxOnlyCheck = () => inboxExtras();
+  window.inboxOrderCheck = () => inboxOrder();
+}
