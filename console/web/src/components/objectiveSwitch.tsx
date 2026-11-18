@@ -79,7 +79,6 @@ function KeptFold({ kind, items }: { kind: "done" | "inactive"; items: { id: str
         {items.map((p) => (
           <li key={p.id} className="flex min-w-0 flex-wrap items-center gap-2 text-sm" data-testid={`objective-${kind}-row`} data-objective={p.id}>
             <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-              {isDone && <span aria-hidden>✓ </span>}
               <ObjectiveName name={p.name} />
             </span>
             {p.since && <span className="text-xs">{isDone ? `done ${p.since}` : `off since ${p.since}`}</span>}
