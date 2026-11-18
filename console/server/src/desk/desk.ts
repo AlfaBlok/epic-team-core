@@ -224,24 +224,43 @@ export function endpointLines(base: string): string[] {
   ];
 }
 
+/** T3 refuses a thread message longer than this (t3_thread_send: "a length of at most 120000"). */
+export const T3_MESSAGE_MAX = 120_000;
+/** Kept below T3_MESSAGE_MAX so the seed or update always lands. */
+export const DESK_SEND_MAX = 110_000;
+/** Said instead of the intake sections when they would push a message past DESK_SEND_MAX. */
+export const INTAKE_BY_COMMAND =
+  "## Desk intake\nThe packs' intake rules are too long to carry here: for a repo whose AGENTS.md has `Pack: <name>`, read its rule fresh with `python3 <skill dir>/scripts/pack.py <name> --wake-text` before you file.";
+/**
+ * the intake sections, or a pointer to them when the whole message would pass DESK_SEND_MAX: the desk's updates from
+ * v43 on grew past T3's limit with them, were refused on every try, and the live desk kept an old list for days.
+ */
+function fitted(head: string, intake?: string): string {
+  const slot = "\n%INTAKE%";
+  if (!intake) return head.replace(slot, "");
+  const rest = head.length - slot.length;
+  return head.replace(slot, `\n\n${rest + intake.length + 2 <= DESK_SEND_MAX ? intake.trim() : INTAKE_BY_COMMAND}`);
+}
+
 /** The one message a live thread gets when the seed's endpoint list moved to a new version. */
 export function updateMessage(publicUrl: string, intake?: string): string {
-  return [
+  const head = [
     `${UPDATE_MARKER} v${SEED_VERSION}`,
     `The console's endpoint list changed (run control by run id, Add, answering asks from this chat, placements and [delivered] notes, links, stamping ready on ${ownerName()}'s own chat request or his own voice note (source.memory); every point of his words matched first, new or more context for a ticket we have (voice_passes.py match; a new row of his words carries \`matched: new: …\`); the desk intake rule of repos with a pack on; ${homeWorld()}'s milestones only, another world's go to its milestone chat; the repo index at /api/desk/repos; his WhatsApp voice notes arrive here as his messages (page \`${voiceNotePage()}\`): place them and link back to the note; a \`🎙 Voice note (Chat)\` message is his chat message, spoken in this Chat: act on it as on typed text; a \`[step done]\` note is ${ownerName()}'s Done switch on a steps page, already saved and its owner woken: confirm it in one line; a \`📎 Also in this note\` line is the rest of a voice note he filed on one item: place each other part and say where in one line; no router passes his words between desks (L-55): every message reaches you whole, you decide what is ${socialProduct()}'s (campaigns and posting only; tools, infra, research and product stay here), pass it yourself with POST /api/desk/pass quoting him and tell him in one line, and when unsure keep it here and say so in one line; a \`📎 Also in this note\` part that is ${socialProduct()}'s is passed the same way, clientRequestId = its note id; a \`↔ From the ${socialProduct()} desk\` message is his words that desk passed here: act on them as his chat words and never pass them back; his voice calls (page \`voice call\`): \`📞 Call question\` messages are him live on a call, answer in 1-3 spoken sentences; a \`📞 Call with the desk\` transcript is a record already handled live: act on nothing in it, reply \`Call noted.\` plus at most one line: something that never reached you, filed ready from his words; a \`📞 Call feedback\` message is all his feedback from a call in one go: file it once and reply in one spoken line starting \`Filed:\`; say \"added, will not be delivered: <persona> is off\" when an Add answers with a notice; a repo with no milestone: say so in one line, and add it at once when he asks for work there; you run the console for ${ownerName()}: add milestones (with a spine or by bootstrap), rename / pause them, personas, assignments, standing approvals, mark and settle on his own newest message, and never \"I have no way to\"; you keep his priority order: when his message or voice note changes what is most pressing, reorder his focus milestones in one call (PUT /api/big-roots/order) and say it in one line in the same reply; hand work to another world's team only by a note in its desk inbox, scripts/desk_note.py send; a single job outside every pursuit is a \`One-off:\` row, in the epic it needs or docs/spines/one-offs.md, shown on the One-offs page; his objectives first: each message of his carries a \`${CONTEXT_MARKER}\` block (every live objective of his from the objectives screen and the other worlds he names, their lights and next key result, his newest words from ${WORDS_FILE}): read his message against it first, no labelled opening line and no feature names he did not ask for, ask one open question when unsure which objective or what it changes; where one stands moves with its key results, never by hand; a note that points back (a \`${POINTS_BACK_HEAD}\` line, "the guy", "you suggested", "testers") is filed only where its source is, found first with find_source.py, a ${memoryName()} search and the T3 threads, the source linked, and when still unsure you ask him one open question on an inbox card and file nothing; unsure what he means: one open question he answers by voice note on an inbox card, never a choice, until you can say \"${UNDERSTOOD_LEAD} <one sentence>\", and that sentence goes where every agent reads it, scripts/understood.py write; his voice note is his yes (root L-68): act on what he asks in the same turn, never wait on a yes in this chat (no \"Say yes and I'll\", \"Want me to\", \"Is that it?\"), a question only he can answer is one inbox card (POST /api/needs-owner, his words and note id in it), your own ideas go to the Delivery Manager by a desk note or are dropped; links, not codes: each post, row or ask you name gets plain words and a link, never a bare code, and a list of more than three is bullets, never a comma run; you are a dispatcher, not a handler: your reply lists each of his points and where it went, linked, then how many questions wait on his inbox, your own advice goes into what you dispatch, and no question for him is left in your reply, scripts/desk_reply_check.py --text before you send). This list replaces the one in your first message; use it from now on.`,
     "",
     ...endpointLines(publicUrl.replace(/\/+$/, "")),
-    ...(intake ? ["", intake.trim()] : []),
+    "%INTAKE%",
     "",
     "Reply with exactly: `Updated.`",
   ].join("\n");
+  return fitted(head, intake);
 }
 
 /** The launch message: remit, how to reach the console, what the desk may call, how to read the tree. */
 export function deskSeed(o: { persona: Pick<Persona, "name" | "remit">; publicUrl: string; reposRoot: string; summary?: string; intake?: string }): string {
   const base = o.publicUrl.replace(/\/+$/, "");
   const h = `-H 'X-Console-Run: team-desk' -H 'content-type: application/json'`;
-  return [
+  const head = [
     SEED_MARKER,
     `You are ${o.persona.name}, a persona on ${ownerName()}'s agent team, and this thread is your one long-lived session: ${ownerName()}'s single chat with the team, across all his repos. ` +
       "Every message he sends arrives here; an optional first line `[page: <hint>]` says which console page he is looking at. Stay in this one thread.",
@@ -257,11 +276,12 @@ export function deskSeed(o: { persona: Pick<Persona, "name" | "remit">; publicUr
     `Repos are checked out under ${o.reposRoot}. Read the open work with the epic-spine skill's \`python3 <skill dir>/scripts/spines.py --active --repo ${o.reposRoot}/<repo>\` (skill dir: ~/.claude/skills/epic-spine, else ~/.agents/skills/epic-spine), for every repo the console knows (\`GET /api/milestones\`).`,
     `Read it fresh when ${ownerName()} brings something new; never trust an earlier answer from this thread for the current state.`,
     `Which repo an idea belongs to: the repo index, \`GET ${base}/api/desk/repos\` (every repo worked in the last month, the last 3 months and all time, one line each). A repo it lists with \`no milestone\`: tell ${ownerName()} in one line; when he asks for work there, add it as a milestone at once (the endpoint list says how).`,
-    ...(o.intake ? ["", o.intake.trim()] : []),
+    "%INTAKE%",
     ...(o.summary ? ["", "## What happened before this session", o.summary.trim()] : []),
     "",
     "Reply to this message with one line: `Team desk ready.`",
   ].join("\n");
+  return fitted(head, o.intake);
 }
 
 export function createDesk(d: DeskDeps) {

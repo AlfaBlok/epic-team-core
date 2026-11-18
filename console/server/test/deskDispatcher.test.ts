@@ -48,3 +48,23 @@ describe("the Team desk is a dispatcher: its reply lists what it dispatched, eve
     expect(update).toContain(`v${SEED_VERSION}`);
   });
 });
+
+describe("a seed or update always fits in one T3 message (the live desk kept v42: v43 on were refused as too long)", () => {
+  const big = "## Desk intake\n" + "x".repeat(150_000);
+  it("intake that would pass the limit becomes a pointer to pack.py; the rest stays whole", async () => {
+    const { DESK_SEND_MAX, T3_MESSAGE_MAX, INTAKE_BY_COMMAND } = await import("../src/desk/desk.js");
+    for (const m of [updateMessage("https://c.test", big), deskSeed({ persona: { name: "Team desk", remit: "r" }, publicUrl: "https://c.test", reposRoot: "/r", intake: big })]) {
+      expect(m.length).toBeLessThanOrEqual(DESK_SEND_MAX);
+      expect(m.length).toBeLessThan(T3_MESSAGE_MAX);
+      expect(m).toContain(INTAKE_BY_COMMAND);
+      expect(m).toContain("dispatcher, not a handler");
+    }
+    expect(updateMessage("https://c.test", big).endsWith("Reply with exactly: `Updated.`")).toBe(true);
+  });
+  it("small intake is carried whole, and no intake leaves no gap", () => {
+    const u = updateMessage("https://c.test", "## Desk intake\nfile posts as ideas");
+    expect(u).toContain("file posts as ideas");
+    expect(updateMessage("https://c.test")).not.toContain("%INTAKE%");
+    expect(updateMessage("https://c.test")).not.toContain("\n\n\n");
+  });
+});
