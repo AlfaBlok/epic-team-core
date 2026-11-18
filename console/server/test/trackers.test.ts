@@ -26,16 +26,16 @@ describe("wheelTrackers", () => {
     expect(inf.counts).toEqual([{ status: "contacted", n: 2 }, { status: "replied", n: 1 }]);
     expect(t.tables[1].rows).toEqual([]);
   });
-  it("carries a table's first column and its wave", () => {
+  it("keeps a Wave column as plain data and shows no wave file", () => {
     const h = fs.mkdtempSync(path.join(os.tmpdir(), "trackers-wave-"));
     const v = (f: string, x: unknown) => (fs.mkdirSync(path.dirname(path.join(h, f)), { recursive: true }), fs.writeFileSync(path.join(h, f), typeof x === "string" ? x : JSON.stringify(x)));
     v("docs/pursuits.json", { version: 1, pursuits: [{ id: "alpha-live", name: "Alpha: 5 testers", greenWhen: "five" }] });
-    v("docs/totems/every-product.json", { totems: [], trackers: { tables: [{ id: "influencers", name: "Influencers", columns: ["Name", "First", "Status"], first: "First" }] } });
-    v("docs/trackers/alpha-live/influencers.csv", "Name,First,Status\nAna,no,candidate\nBo,yes,candidate\n");
-    v("docs/trackers/alpha-live/influencers.wave.json", { name: "Wave 1", state: "Nothing sent.", missing: ["{apply link}"], messages: [{ name: "M", who: ["Bo"], text: "Hi" }, { name: "empty" }] });
+    v("docs/totems/every-product.json", { totems: [], trackers: { tables: [{ id: "influencers", name: "Influencers", columns: ["Name", "Wave", "Status"] }] } });
+    v("docs/trackers/alpha-live/influencers.csv", "Name,Wave,Status\nAna,,candidate\nBo,1,candidate\n");
+    v("docs/trackers/alpha-live/influencers.wave.json", { name: "Wave 1", messages: [{ name: "M", who: ["Bo"], text: "Hi" }] });
     const t = wheelTrackers(h, "alpha-live")!.tables[0];
-    expect(t.first).toBe("First");
-    expect(t.wave).toEqual({ name: "Wave 1", state: "Nothing sent.", missing: ["{apply link}"], messages: [{ name: "M", who: ["Bo"], text: "Hi" }] });
+    expect(t.rows).toEqual([["Ana", "", "candidate"], ["Bo", "1", "candidate"]]);
+    expect(Object.keys(t)).not.toContain("wave");
   });
   it("finds a product by the objective's declared product, and refuses an unknown wheel", () => {
     expect(wheelTrackers(home, "solo")!.tables.map((x) => x.id)).toEqual(["influencers", "venues"]);

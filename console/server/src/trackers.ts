@@ -15,24 +15,6 @@ import { parsePursuits, PURSUITS_FILE } from "./pursuits.js";
  */
 
 export const TRACKERS_DIR = "docs/trackers";
-/**
- * The owner 2026-11-18: "it needs to be sortable, and it needs to have clarity for which ones are the target
- * for wave 1 and which are not ... what is the wave 1 message?" and "one clear column, proposed for first message, yes or
- * no". A table may name its `first` column (yes or no); docs/trackers/<wheel>/<id>.wave.json holds that wave's messages.
- */
-export interface TrackerMessage {
-  name: string;
-  for?: string;
-  who: string[];
-  text: string;
-}
-export interface TrackerWave {
-  name: string;
-  state?: string;
-  missing: string[];
-  fill?: string;
-  messages: TrackerMessage[];
-}
 export interface TrackerTable {
   id: string;
   name: string;
@@ -44,9 +26,6 @@ export interface TrackerTable {
   open: boolean;
   yes?: string;
   rows: string[][];
-  /** the yes or no column whose yes entries go first. */
-  first?: string;
-  wave?: TrackerWave;
   /** entries per status, in the table's status order. */
   counts: { status: string; n: number }[];
   file: string;
@@ -62,16 +41,6 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object"
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 const strs = (v: unknown) => arr(v).flatMap((x) => (str(x) ? [str(x)!] : []));
-function waveOf(p: string): TrackerWave | undefined {
-  if (!fs.existsSync(p)) return undefined;
-  const o = readJson(p);
-  const messages = arr(o.messages).flatMap((m) => {
-    const x = obj(m), name = str(x.name), text = typeof x.text === "string" ? x.text.trim() : "";
-    return name && text ? [{ name, text, who: strs(x.who), ...(str(x.for) ? { for: str(x.for) } : {}) }] : [];
-  });
-  if (!messages.length) return undefined;
-  return { name: str(o.name) ?? "Wave 1", missing: strs(o.missing), messages, ...(str(o.state) ? { state: str(o.state) } : {}), ...(str(o.fill) ? { fill: str(o.fill) } : {}) };
-}
 const readJson = (p: string): Record<string, unknown> => {
   try {
     return obj(JSON.parse(fs.readFileSync(p, "utf8")));
@@ -80,13 +49,13 @@ const readJson = (p: string): Record<string, unknown> => {
   }
 };
 
-type Def = Omit<TrackerTable, "from" | "open" | "rows" | "counts" | "file" | "wave">;
+type Def = Omit<TrackerTable, "from" | "open" | "rows" | "counts" | "file">;
 function defs(v: unknown): Def[] {
   return arr(obj(v).tables).flatMap((t) => {
     const o = obj(t);
     const id = str(o.id), name = str(o.name), columns = strs(o.columns);
     if (!id || !/^[a-z0-9][a-z0-9-]*$/.test(id) || !name || columns.length < 2) return [];
-    return [{ id, name, columns, statuses: strs(o.statuses), ...(str(o.for) ? { for: str(o.for) } : {}), ...(str(o.yes) ? { yes: str(o.yes) } : {}), ...(str(o.first) && columns.includes(str(o.first)!) ? { first: str(o.first) } : {}) }];
+    return [{ id, name, columns, statuses: strs(o.statuses), ...(str(o.for) ? { for: str(o.for) } : {}), ...(str(o.yes) ? { yes: str(o.yes) } : {}) }];
   });
 }
 
@@ -135,8 +104,7 @@ export function wheelTrackers(home: string | undefined, wheel: string): WheelTra
       for (const r of rows) by.set(r[si] || "no status", (by.get(r[si] || "no status") ?? 0) + 1);
       const rank = (s: string) => (t.statuses.includes(s) ? t.statuses.indexOf(s) : 99);
       const counts = si < 0 ? [] : [...by].map(([status, n]) => ({ status, n })).sort((a, b) => rank(a.status) - rank(b.status));
-      const wave = t.first ? waveOf(path.join(home, TRACKERS_DIR, wheel, `${t.id}.wave.json`)) : undefined;
-      tables.push({ ...t, from, open: from !== "own" || !!t.yes, rows: rows.slice(0, 500), counts, file, ...(wave ? { wave } : {}) });
+      tables.push({ ...t, from, open: from !== "own" || !!t.yes, rows: rows.slice(0, 500), counts, file });
     }
   return { wheel, name: pursuit.name, ...(product ? { product } : {}), tables };
 }

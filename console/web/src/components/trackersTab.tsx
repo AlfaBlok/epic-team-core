@@ -1,5 +1,5 @@
 import { api } from "@/api";
-import type { TrackerTable, WheelTrackers } from "@/api/totem-types";
+import type { TrackerTable } from "@/api/totem-types";
 import { ErrorBox, Loading } from "@/components/common";
 import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
@@ -10,31 +10,19 @@ import { useMemo, useState } from "react";
  * objects inside of it ... a table with entries and status and whatever quality you can have at columns ... these tables
  * I want them to be accessible at the wheel level. What are the tables this wheel has attached to that? ... some tables
  * we pre-load ... we have the influencer table. So it ships empty."
- * The wheel's Trackers tab: the answer first (how many tables, how many entries), then each table, its counts by
- * status and its rows; an empty one says so, an asked-for one waits for his yes.
+ * The owner 2026-11-18 20:26Z (vn_1df1364f): "the tracker tab should have tables, no bullshit ... Give me a flag so that
+ * I can filter or wave one or whatever. Give me a filter ... Don't mess up the tracker, please."
+ * The wheel's Trackers tab holds only its tables: each with a filter on any column's value and a sort on every column.
+ * Who goes first is a plain column (Wave); a wave's messages live on their own page, never here.
  */
-
-const FROM: Record<TrackerTable["from"], string> = {
-  frame: "Comes with every wheel",
-  product: "Comes with this product",
-  own: "Asked for on this wheel",
-};
-
-export function trackersAnswer(t: WheelTrackers): string {
-  const entries = t.tables.reduce((n, x) => n + x.rows.length, 0);
-  const empty = t.tables.filter((x) => x.open && !x.rows.length).map((x) => x.name);
-  const waiting = t.tables.filter((x) => !x.open).length;
-  const head = `${t.tables.length} ${t.tables.length === 1 ? "table" : "tables"}, ${entries} ${entries === 1 ? "entry" : "entries"}.`;
-  return [head, empty.length ? `Still empty: ${empty.join(", ")}.` : "", waiting ? `${waiting} asked for, waiting for your yes.` : ""].filter(Boolean).join(" ");
-}
 
 function Cell({ v }: { v: string | undefined }) {
   return /^https?:\/\//.test(v ?? "") ? <a className="underline underline-offset-4" href={v} target="_blank" rel="noreferrer">link</a> : <>{v}</>;
 }
 
 /**
- * The owner 2026-11-18 (vn_7ae712dc): click a column to sort, a coloured status pill per row, one clear column
- * "proposed for first message: yes or no". Colour sits only on these two data cells; the rest stays ink and grey.
+ * The owner 2026-11-18 (vn_7ae712dc): click a column to sort, a coloured status pill per row. Colour sits only on the
+ * status cell; the rest stays ink and grey.
  */
 const TONES: [RegExp, string][] = [
   [/^(agreed|done|yes|won|paying|live)$/i, "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"],
@@ -49,11 +37,9 @@ function Pill({ v }: { v: string }) {
   return <span className={cn("inline-block whitespace-nowrap rounded-full px-2 py-px text-xs font-medium", pillTone(v))} data-testid="tracker-pill">{v}</span>;
 }
 
-/** a cell: the status and the first-message yes as pills (a plain grey "no"), the rest as text. */
+/** a cell: the status as a pill, the rest as text. */
 function Value({ t, j, v }: { t: TrackerTable; j: number; v: string | undefined }) {
-  const h = t.columns[j];
-  if (v && h === "Status") return <Pill v={v} />;
-  if (v && h === t.first) return v.toLowerCase() === "yes" ? <Pill v="yes" /> : <span className="text-muted-foreground">{v}</span>;
+  if (v && t.columns[j] === "Status") return <Pill v={v} />;
   return <Cell v={v} />;
 }
 
@@ -69,24 +55,21 @@ export function sizeOf(v: string): number | null {
 export type Sort = { col: number; dir: 1 | -1 } | null;
 
 /**
- * The table's order. No sort chosen: the first-message yes entries on top (wave 1), then the rest, each as written.
- * A column chosen: by that column (status in the table's status order, sizes as numbers, empty cells last).
+ * The table's order. No sort chosen: as written. A column chosen: by that column (status in the table's status order,
+ * sizes as numbers, empty cells last).
  */
-export function sortRows(t: Pick<TrackerTable, "columns" | "statuses" | "rows" | "first">, sort: Sort): string[][] {
-  const fi = t.first ? t.columns.indexOf(t.first) : -1;
-  const yes = (r: string[]) => (fi >= 0 && (r[fi] ?? "").toLowerCase() === "yes" ? 0 : 1);
-  const idx = t.rows.map((r, i) => ({ r, i }));
-  if (!sort) return idx.sort((a, b) => yes(a.r) - yes(b.r) || a.i - b.i).map((x) => x.r);
+export function sortRows(t: Pick<TrackerTable, "columns" | "statuses" | "rows">, sort: Sort): string[][] {
+  if (!sort) return t.rows;
   const { col, dir } = sort;
   const isStatus = t.columns[col] === "Status";
   const key = (v: string): [number, number | string] => {
     if (!v) return [2, ""];
-    if (col === fi) return [0, v.toLowerCase() === "yes" ? 0 : 1];
     if (isStatus) return [0, t.statuses.includes(v) ? t.statuses.indexOf(v) : 99];
     const n = sizeOf(v);
     return n === null ? [1, v.toLowerCase()] : [0, n];
   };
-  return idx
+  return t.rows
+    .map((r, i) => ({ r, i }))
     .sort((a, b) => {
       const [ga, ka] = key(a.r[col] ?? ""), [gb, kb] = key(b.r[col] ?? "");
       if (ga === 2 || gb === 2) return ga - gb || a.i - b.i; // empty cells last either way
@@ -95,6 +78,53 @@ export function sortRows(t: Pick<TrackerTable, "columns" | "statuses" | "rows" |
       return c * dir || a.i - b.i;
     })
     .map((x) => x.r);
+}
+
+/** a chosen value per column (EMPTY: the cell is blank). */
+export type Filters = Record<string, string>;
+export const EMPTY = "\u0000empty";
+
+/**
+ * The columns he can filter by a value: Wave and Status always (when the table has them), and every other column with a
+ * few short values (Where, Kind, Sent ...). Each with its values and how many entries hold each, in the table's order.
+ */
+export function filterColumns(t: Pick<TrackerTable, "columns" | "statuses" | "rows">): { col: string; values: { v: string; n: number }[] }[] {
+  return t.columns.flatMap((col, j) => {
+    if (j === 0) return [];
+    const by = new Map<string, number>();
+    for (const r of t.rows) by.set(r[j] ?? "", (by.get(r[j] ?? "") ?? 0) + 1);
+    const vals = [...by.keys()];
+    const always = col === "Status" || col === "Wave";
+    const filled = vals.filter(Boolean);
+    const unique = filled.length >= 3 && filled.every((v) => by.get(v) === 1); // one entry per value: a free-text column
+    if (!always && (by.size < 2 || by.size > 12 || unique || vals.some((v) => v.length > 40 || /^https?:\/\//.test(v)))) return [];
+    const rank = (v: string) => (v === "" ? 1e4 : col === "Status" && t.statuses.includes(v) ? t.statuses.indexOf(v) : 100);
+    const values = vals
+      .sort((a, b) => rank(a) - rank(b) || (sizeOf(a) ?? Infinity) - (sizeOf(b) ?? Infinity) || a.localeCompare(b))
+      .map((v) => ({ v: v === "" ? EMPTY : v, n: by.get(v)! }));
+    return [{ col, values }];
+  });
+}
+
+/** the rows that hold every chosen value, and the search words anywhere in the row. */
+export function filterRows(t: Pick<TrackerTable, "columns" | "rows">, f: Filters, q = ""): string[][] {
+  const on = Object.entries(f).filter(([c, v]) => v && t.columns.includes(c));
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return t.rows.filter(
+    (r) =>
+      on.every(([c, v]) => (r[t.columns.indexOf(c)] ?? "") === (v === EMPTY ? "" : v)) &&
+      words.every((w) => r.some((x) => x.toLowerCase().includes(w))),
+  );
+}
+
+/** a link's filters: ?filter=Wave:1&filter=Status:candidate opens the tab already filtered. */
+export function filtersFromSearch(search: string): Filters {
+  const out: Filters = {};
+  for (const x of new URLSearchParams(search).getAll("filter")) {
+    const i = x.indexOf(":");
+    if (i > 0) out[x.slice(0, i)] = x.slice(i + 1) || EMPTY;
+  }
+  return out;
 }
 
 /** On a phone each entry is one stacked block (its name, then each column as a label and value), never a squeezed table. */
@@ -106,79 +136,13 @@ function Entries({ t, rows }: { t: TrackerTable; rows: string[][] }) {
           <p className="font-medium text-foreground">{r[0]}</p>
           <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5">
             {t.columns.slice(1).map((h, j) => (r[j + 1] ? [
-              <dt key={`h${j}`} className="text-xs leading-5 text-muted-foreground">{h === t.first ? "First message" : h}</dt>,
+              <dt key={`h${j}`} className="text-xs leading-5 text-muted-foreground">{h}</dt>,
               <dd key={`v${j}`} className="min-w-0 [overflow-wrap:anywhere]"><Value t={t} j={j + 1} v={r[j + 1]} /></dd>,
             ] : null))}
           </dl>
         </li>
       ))}
     </ul>
-  );
-}
-
-/** a message's text with its {placeholders} marked: one still missing (like the apply link) says so in plain words. */
-function MessageText({ text, missing }: { text: string; missing: string[] }) {
-  return (
-    <div className="grid gap-2 text-sm leading-6 text-foreground" data-testid="wave-text">
-      {text.split(/\n\n+/).map((para, k) => (
-          <p key={k}>
-            {para.split(/(\{[^}]+\})/g).map((x, i) =>
-              /^\{[^}]+\}$/.test(x) ? (
-                missing.some((m) => m.startsWith(x)) ? (
-                  <span key={i} className="rounded bg-rose-100 px-1 font-medium text-rose-800 dark:bg-rose-950 dark:text-rose-300" data-testid="wave-missing">
-                    {x.slice(1, -1)}: missing
-                  </span>
-                ) : (
-                  <span key={i} className="rounded bg-muted px-1 text-muted-foreground">{x.slice(1, -1)}</span>
-                )
-              ) : (
-                <span key={i}>{x}</span>
-              ),
-            )}
-          </p>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The owner 2026-11-18 (vn_741d8adb): "Where are the 10 ones that got selected? ... I don't see
- * what message we're sending them ... what is the wave 1 message?" One box above the table: who gets which message, the
- * messages whole, what is still missing.
- */
-export function WaveBox({ wave }: { wave: NonNullable<TrackerTable["wave"]> }) {
-  const n = wave.messages.reduce((k, m) => k + m.who.length, 0);
-  return (
-    <div className="grid gap-3 rounded-lg border p-3" data-testid="tracker-wave" data-people={n}>
-      <p className="text-[15px] font-semibold text-foreground">
-        {wave.name}: {n} {n === 1 ? "person" : "people"}, {wave.messages.length} {wave.messages.length === 1 ? "message" : "messages"}.{" "}
-        <span className="font-normal text-muted-foreground">{wave.state}</span>
-      </p>
-      <div className="grid gap-3 lg:grid-cols-2">
-        {wave.messages.map((m) => (
-          <section key={m.name} className="grid content-start gap-2 rounded-md bg-muted/40 p-3" data-testid="wave-message">
-            <h4 className="text-sm font-semibold text-foreground">
-              {m.name}
-              {m.for && <span className="font-normal text-muted-foreground">, for {m.for}</span>}
-            </h4>
-            <ol className="flex flex-wrap gap-1.5" data-testid="wave-who">
-              {m.who.map((w) => (
-                <li key={w} className="rounded-full border bg-card px-2 py-0.5 text-xs text-foreground">{w}</li>
-              ))}
-            </ol>
-            <MessageText text={m.text} missing={wave.missing} />
-          </section>
-        ))}
-      </div>
-      {(wave.missing.length > 0 || wave.fill) && (
-        <ul className="grid gap-0.5 text-sm text-muted-foreground">
-          {wave.missing.map((m) => (
-            <li key={m}>Missing: {m.replace(/^\{[^}]+\}:\s*/, "")}</li>
-          ))}
-          {wave.fill && <li>{wave.fill.replace(/\{([^}]+)\}/g, "$1")}</li>}
-        </ul>
-      )}
-    </div>
   );
 }
 
@@ -196,7 +160,7 @@ function SortHead({ t, sort, setSort }: { t: TrackerTable; sort: Sort; setSort: 
               data-testid="tracker-sort"
               title={`Sort by ${h}`}
             >
-              {h === t.first ? "First message" : h}
+              {h}
               <span aria-hidden className={cn("w-2", !on && "opacity-0")}>{on && sort!.dir === -1 ? "↓" : "↑"}</span>
             </button>
           </th>
@@ -206,41 +170,73 @@ function SortHead({ t, sort, setSort }: { t: TrackerTable; sort: Sort; setSort: 
   );
 }
 
-function Table({ t }: { t: TrackerTable }) {
-  const [sort, setSort] = useState<Sort>(null);
-  const rows = useMemo(() => sortRows(t, sort), [t, sort]);
-  const fi = t.first ? t.columns.indexOf(t.first) : -1;
-  const nYes = fi < 0 ? 0 : t.rows.filter((r) => (r[fi] ?? "").toLowerCase() === "yes").length;
+function FilterBar({ t, f, setF, q, setQ }: { t: TrackerTable; f: Filters; setF: (f: Filters) => void; q: string; setQ: (q: string) => void }) {
+  const cols = useMemo(() => filterColumns(t), [t]);
+  const any = Object.values(f).some(Boolean) || !!q;
   return (
-    <section className="grid min-w-0 gap-2 rounded-xl border bg-card p-3" data-testid="tracker" data-tracker={t.id} data-rows={t.rows.length}>
+    <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="tracker-filters">
+      {cols.map(({ col, values }) => (
+        <select
+          key={col}
+          aria-label={`Filter by ${col}`}
+          className={cn("min-w-0 max-w-full rounded-md border bg-card px-2 py-1", f[col] ? "border-foreground text-foreground" : "text-muted-foreground")}
+          value={f[col] ?? ""}
+          onChange={(e) => setF({ ...f, [col]: e.target.value })}
+          data-testid="tracker-filter"
+          data-col={col}
+        >
+          <option value="">{col}: all</option>
+          {values.map(({ v, n }) => (
+            <option key={v} value={v}>
+              {col}: {v === EMPTY ? "empty" : v} ({n})
+            </option>
+          ))}
+        </select>
+      ))}
+      <input
+        type="search"
+        aria-label="Search this table"
+        placeholder="Search"
+        className="min-w-0 flex-1 basis-32 rounded-md border bg-card px-2 py-1 text-foreground placeholder:text-muted-foreground"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        data-testid="tracker-search"
+      />
+      {any && (
+        <button type="button" className="rounded-md px-2 py-1 text-muted-foreground underline underline-offset-4 hover:text-foreground" onClick={() => (setF({}), setQ(""))} data-testid="tracker-clear">
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Table({ t, initial }: { t: TrackerTable; initial: Filters }) {
+  const [sort, setSort] = useState<Sort>(null);
+  const [f, setF] = useState<Filters>(() => Object.fromEntries(Object.entries(initial).filter(([c]) => t.columns.includes(c))));
+  const [q, setQ] = useState("");
+  const shown = useMemo(() => filterRows(t, f, q), [t, f, q]);
+  const rows = useMemo(() => sortRows({ ...t, rows: shown }, sort), [t, shown, sort]);
+  const n = t.rows.length;
+  return (
+    <section className="grid min-w-0 gap-2 rounded-xl border bg-card p-3" data-testid="tracker" data-tracker={t.id} data-rows={n} data-shown={rows.length}>
       <header className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <h3 className="text-[15px] font-medium text-foreground">{t.name}</h3>
-        <span className="text-xs text-muted-foreground">
-          {FROM[t.from]} · {t.rows.length} {t.rows.length === 1 ? "entry" : "entries"}
-          {nYes > 0 && ` · ${nYes} proposed for the first message`}
+        <span className="text-xs tabular-nums text-muted-foreground" data-testid="tracker-count">
+          {rows.length === n ? `${n} ${n === 1 ? "entry" : "entries"}` : `${rows.length} of ${n} entries`}
         </span>
       </header>
-      {t.wave && <WaveBox wave={t.wave} />}
-      {t.for && <p className="text-sm text-muted-foreground">For {t.for}.</p>}
-      {t.counts.length > 0 && (
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="tracker-counts">
-          {t.counts.map((c) => (
-            <span key={c.status} className="inline-flex items-center gap-1">
-              <span className="font-semibold tabular-nums text-foreground">{c.n}</span> <Pill v={c.status} />
-            </span>
-          ))}
-        </p>
-      )}
       {!t.open ? (
         <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="tracker-asked">
           Asked for by the team, waiting for your yes. Columns: {t.columns.join(", ")}.
         </div>
-      ) : !t.rows.length ? (
+      ) : !n ? (
         <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="tracker-empty">
-          Empty. When the team shortlists someone, it is written here. Columns: {t.columns.join(", ")}.
+          Empty. Columns: {t.columns.join(", ")}.
         </div>
       ) : (
         <>
+          <FilterBar t={t} f={f} setF={setF} q={q} setQ={setQ} />
           <label className="flex items-center gap-2 text-sm text-muted-foreground sm:hidden">
             Sort by
             <select
@@ -252,30 +248,36 @@ function Table({ t }: { t: TrackerTable }) {
               }}
               data-testid="tracker-sort-select"
             >
-              <option value="">{nYes ? "First message on top" : "As written"}</option>
+              <option value="">As written</option>
               {t.columns.flatMap((h, j) => [
-                <option key={`${j}a`} value={`${j}:1`}>{h === t.first ? "First message" : h}, up</option>,
-                <option key={`${j}d`} value={`${j}:-1`}>{h === t.first ? "First message" : h}, down</option>,
+                <option key={`${j}a`} value={`${j}:1`}>{h}, up</option>,
+                <option key={`${j}d`} value={`${j}:-1`}>{h}, down</option>,
               ])}
             </select>
           </label>
-          <Entries t={t} rows={rows} />
-          <div className="hidden min-w-0 overflow-x-auto sm:block">
-            <table className="w-full text-sm">
-              <thead>
-                <SortHead t={t} sort={sort} setSort={setSort} />
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className={cn("border-b align-top last:border-0", fi >= 0 && (r[fi] ?? "").toLowerCase() === "yes" && "bg-muted/40")} data-first={fi >= 0 ? r[fi] : undefined}>
-                    {t.columns.map((_, j) => (
-                      <td key={j} className={cn("py-1.5 pr-3 [overflow-wrap:anywhere]", j === 0 && "min-w-[8rem] font-medium text-foreground")}><Value t={t} j={j} v={r[j]} /></td>
+          {!rows.length ? (
+            <p className="py-2 text-sm text-muted-foreground" data-testid="tracker-none">No entry matches this filter.</p>
+          ) : (
+            <>
+              <Entries t={t} rows={rows} />
+              <div className="hidden min-w-0 overflow-x-auto sm:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <SortHead t={t} sort={sort} setSort={setSort} />
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className="border-b align-top last:border-0">
+                        {t.columns.map((_, j) => (
+                          <td key={j} className={cn("py-1.5 pr-3 [overflow-wrap:anywhere]", j === 0 && "min-w-[8rem] font-medium text-foreground")}><Value t={t} j={j} v={r[j]} /></td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
     </section>
@@ -284,16 +286,13 @@ function Table({ t }: { t: TrackerTable }) {
 
 export function TrackersTab({ wheel }: { wheel: string }) {
   const { data, error, loading } = useQuery(() => api.getTrackers(wheel), [wheel]);
+  const initial = useMemo(() => filtersFromSearch(typeof window === "undefined" ? "" : window.location.search), []);
   if (error) return <ErrorBox error={error} />;
   if (loading || !data) return <Loading />;
   return (
     <section className="grid min-w-0 gap-3" data-testid="trackers-tab" data-wheel={wheel} data-tables={data.tables.length}>
-      <div className="grid gap-1 rounded-xl border border-l-[6px] bg-card p-3" style={{ borderLeftColor: "hsl(var(--foreground))" }} data-testid="trackers-answer">
-        <p className="text-[15px] font-semibold text-foreground">{trackersAnswer(data)}</p>
-        <p className="text-sm text-muted-foreground">This wheel's shortlists. The team writes only into these, and asks you before adding a new one.</p>
-      </div>
       {data.tables.map((t) => (
-        <Table key={t.id} t={t} />
+        <Table key={t.id} t={t} initial={initial} />
       ))}
     </section>
   );
