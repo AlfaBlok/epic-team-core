@@ -52,6 +52,17 @@ export interface TrackerTable {
   rows: string[][];
   counts: { status: string; n: number }[];
   file: string;
+  /** the yes or no column whose yes entries sit on top. */
+  first?: string;
+  wave?: TrackerWave;
+}
+/** one wave of first messages: who gets which message. */
+export interface TrackerWave {
+  name: string;
+  state?: string;
+  missing: string[];
+  fill?: string;
+  messages: { name: string; for?: string; who: string[]; text: string }[];
 }
 export interface WheelTrackers {
   wheel: string;
