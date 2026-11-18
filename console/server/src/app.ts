@@ -1,4 +1,5 @@
 import { leanJson } from "./leanJson.js";
+import { answerCache } from "./answerCache.js";
 import { productsAdded } from "./voice/productNamed.js";
 import { phased } from "./timerPhase.js";
 import fs from "node:fs";
@@ -1839,10 +1840,12 @@ export function createApp(
   });
   objectivesOf = (m) => idleWatch.forMilestone(m.id);
   idleWatch.mount(api);
+  // the home world's scorecards, read by every open tab, built once per 10 s (a stale one answers while it refreshes).
+  const homeScorecards = answerCache<unknown>({ ttlMs: 10_000, staleMs: 60_000 });
   api.get("/scorecards", async (c) => {
     const w = connectedWorld();
     if (w) return c.json(await worldScorecards(w));
-    return c.json(greenHistory(await idleWatch.decorate(await scorecardsNow())));
+    return c.json(await homeScorecards.get("home", async () => greenHistory(await idleWatch.decorate(await scorecardsNow()))));
   });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.

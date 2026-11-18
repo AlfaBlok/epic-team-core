@@ -16,6 +16,7 @@ import { movingLimit } from "../cycle/movement.js";
 import { errorText } from "../t3/client.js";
 import { t3ThreadLister, type Thread, type ThreadLister } from "../adapters/threads.js";
 import { seatDir } from "../identity.js";
+import { answerCache } from "../answerCache.js";
 
 /** read adapters. Everything here only reads target repos, T3 and seats.json. */
 export interface ReadConfig {
@@ -100,6 +101,8 @@ export function mapThreadsToMilestones(reposRoot: string, threads: Thread[], mil
 }
 
 const THREADS_TTL_MS = 15_000;
+const THREADS_STALE_MS = 10 * 60_000;
+const THREADS_WAIT_MS = 10_000;
 /** one collator for the ticket sort (`localeCompare` with options builds one per comparison). */
 const NUMERIC = new Intl.Collator(undefined, { numeric: true });
 
@@ -120,22 +123,26 @@ export function readRoutes(cfg: ReadConfig, store: Store, threadsEnvironment?: (
     return c.json(backlogFor(cfg.reposRoot, m));
   });
 
-  let threadsCache: { at: number; value: Thread[] } | undefined;
-  // requests that find the cache stale share one T3 read (after a restart every open tab asked T3 at once)
-  let threadsLoading: Promise<Thread[]> | undefined;
+  // one shared T3 read; a stale list answers at once while one read refreshes it behind (a loaded T3 can take tens of
+  // seconds, and every open tab waited on it), and a first read with no list waits at most THREADS_WAIT_MS.
+  const threadsCache = answerCache<Thread[]>({ ttlMs: THREADS_TTL_MS, staleMs: THREADS_STALE_MS });
   r.get("/threads", async (c) => {
+    let threadList: Thread[];
     try {
-      if (!threadsCache || Date.now() - threadsCache.at > THREADS_TTL_MS) {
-        threadsLoading ??= cfg.listThreads().finally(() => (threadsLoading = undefined));
-        threadsCache = { at: Date.now(), value: await threadsLoading };
-      }
+      const load = threadsCache.get("all", () => cfg.listThreads());
+      let timer: NodeJS.Timeout | undefined;
+      const slow = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer in ${THREADS_WAIT_MS / 1000} s; the list is still loading`)), THREADS_WAIT_MS);
+        timer.unref?.();
+      });
+      threadList = await Promise.race([load, slow]).finally(() => clearTimeout(timer));
     } catch (e) {
       console.error(`threads: ${errorText(e)}`);
       return c.json({ error: { code: "t3_unavailable", message: `T3 threads unavailable: ${errorText(e)}` } }, 503);
     }
     // these threads are on the console's own T3 (the main server): one environment for all of them, when known.
     const environmentId = threadsEnvironment?.();
-    const threads = mapThreadsToMilestones(cfg.reposRoot, threadsCache.value, store.listMilestones({ includeSettled: true }));
+    const threads = mapThreadsToMilestones(cfg.reposRoot, threadList, store.listMilestones({ includeSettled: true }));
     return c.json(environmentId ? threads.map((t) => ({ ...t, environmentId })) : threads);
   });
 
