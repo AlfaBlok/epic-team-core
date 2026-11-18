@@ -25,6 +25,7 @@ import type {
   SocialMetrics,
   SocialKpisBody,
   SiteKpisBody,
+  LaunchBody,
   MotionBody,
   PostHistory,
   SocialDigestView,
@@ -524,6 +525,8 @@ export interface ApiClient {
   getSocialKpis(tenantId: string, repo?: string): Promise<SocialKpisBody>;
   /** the Performance page's site numbers (page views, new users registered, code page views). */
   getSiteKpis(tenantId: string): Promise<SiteKpisBody>;
+  /** the launch block (channels live or not, daily calls today, the objective's key results). */
+  getSocialLaunch(tenantId: string): Promise<LaunchBody>;
   /** the product deck (data/product.md), the metrics catalog, each campaign's target and who moves what. */
   getSocialMotion(tenantId: string, repo?: string, campaign?: string): Promise<MotionBody>;
   /** one post's history (the posts ledger's git log) for its page. */

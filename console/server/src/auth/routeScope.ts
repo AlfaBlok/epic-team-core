@@ -250,6 +250,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/social/kpis$`)],
   // the site numbers (daily counts only, no email): the path world's plan decides; a tester's world gets shown: false.
   ["GET", new RegExp(`^/api/tenants/${ID}/site-kpis$`)],
+  // the launch block (channels, daily calls, key results), read from the team repo's checkout; only a world on plan internal sees it, others get shown: false.
+  ["GET", new RegExp(`^/api/tenants/${ID}/social/launch$`)],
   // the product deck, the metrics catalog and each campaign's target, read from the path world's social repo only (social/motion.ts worldRepos + socialRepo); the site numbers only for a world on plan internal.
   ["GET", new RegExp(`^/api/tenants/${ID}/social/motion$`)],
   // a post's page reads its history from the path world's social repo only (social/history.ts worldRepos + socialRepo).

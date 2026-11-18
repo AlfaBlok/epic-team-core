@@ -7,6 +7,7 @@ import type { PriorityModeView } from "./types";
 let mockPriority: PriorityModeView = { on: false, parked: [], log: [], focusRunning: [] };
 import { activeSeries, localDay } from "../../../server/src/activeAgents";
 import { hostSeries } from "../../../server/src/runHosts";
+import { computeLaunch } from "../../../server/src/social/launchCompute";
 import { milestoneRunStats, personaRunStats, runsForMilestone, wakesDidSomething } from "@/lib/derive";
 import { sampleSocialData } from "@/lib/social";
 import { computeKpis } from "../../../server/src/social/kpisCompute";
@@ -1312,6 +1313,35 @@ const mockMail = () => ({
       // the sample deck's `Features: social` part draws a sample list (the server reads the code repo's real one).
       const product = expandFeatures(parseProduct(withFeatures(sampleProduct)), (s) => (s === "socialapp" ? sampleFeatureList : undefined));
       return ok({ tenantId, repo: repo ?? "campaign-app", repos: ["campaign-app", socialWorld()], today, product, ...(campaign ? { campaignProduct } : {}), ...computeMotion(inp as never, sampleMotionSpines) });
+    },
+    /** a sample launch, run through the server's own compute. */
+    async getSocialLaunch(tenantId: string) {
+      const today = new Date().toISOString().slice(0, 10);
+      const cfg = {
+        pursuit: "sample-testers",
+        callsDir: "data/calls",
+        channels: [
+          { key: "x" as const, name: "X", account: "@sample", url: "https://x.com/sample" },
+          { key: "reddit" as const, name: "Reddit", account: "u/sam", url: null },
+          { key: "linkedin" as const, name: "LinkedIn", account: "sample", url: null, why: "no page yet" },
+          { key: "tiktok" as const, name: "TikTok", account: "@sample", url: null },
+          { key: "youtube" as const, name: "YouTube", account: "@sample", url: null },
+        ],
+      };
+      const pursuitsText = JSON.stringify({ pursuits: [{ id: "sample-testers", name: "SocialApp: 5 testers", numbers: { campaign: "campaign-app", site: "social.example" } }] });
+      const scorecardText = JSON.stringify({
+        keyResults: [
+          { label: "5 testers using SocialApp", value: "1 of 5", colour: "red", target: "5 testers by 8 Dec" },
+          { label: "Every day: 5 call posts on X, 5 on Reddit, 1 Short on YouTube and TikTok", value: "0 days in a row of 5", colour: "red", note: "today so far 2/5 X, 1/5 Reddit" },
+        ],
+      });
+      const callsText = JSON.stringify({
+        readAt: `${today}T05:30Z`,
+        target: { x: 5, reddit: 5, youtube: 1, tiktok: 1 },
+        reads: { x: { state: "read" }, reddit: { state: "read" }, youtube: { state: "no account", note: "no channel yet" }, tiktok: { state: "no account", note: "no account yet" } },
+        days: { [today]: { x: 2, reddit: 1, youtube: 0, tiktok: 0 } },
+      });
+      return ok(computeLaunch(cfg, { tenantId, shown: true, pursuitsText, scorecardText, callsText }));
     },
     async getSiteKpis(tenantId: string) {
       const today = new Date().toISOString().slice(0, 10);

@@ -1691,6 +1691,8 @@ export interface SocialLiveNumbers {
 export type { SocialKpisBody, PlatformKpis, KpiSeries, KpiPoint, BestPost, SeriesKey, KpiPlatform } from "../../../server/src/social/kpisCompute";
 /** GET /api/tenants/:id/site-kpis: page views, new users registered, code page views (server/src/siteKpisCompute.ts). */
 export type { SiteCount, SiteKpisBody, SiteSeries, SiteSeriesKey, SiteWhere } from "../../../server/src/siteKpisCompute";
+/** GET /api/tenants/:id/social/launch: the launch block of the Performance page (server/src/social/launchCompute.ts). */
+export type { LaunchBody, LaunchChannel, LaunchKeyResult, LaunchState } from "../../../server/src/social/launchCompute";
 // the product deck, the metrics catalog with each campaign's target, and one slide per role.
 export type { MotionBody, CatalogRow, TargetView, PersonaSlide, ProductSlide, MetricId } from "../../../server/src/social/motionCompute";
 

@@ -516,6 +516,7 @@ export function createRealClient(): ApiClient {
     getMessages: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/social/messages`),
     getChatHistory: (tenantId, repo, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/social/chats/${encodeURIComponent(id)}/history?repo=${encodeURIComponent(repo)}`),
     getSiteKpis: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/site-kpis`),
+    getSocialLaunch: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/social/launch`),
     getSocialMotion: (tenantId, repo, campaign) => {
       const q = new URLSearchParams({ ...(repo ? { repo } : {}), ...(campaign ? { campaign } : {}) }).toString();
       return call("GET", `/tenants/${encodeURIComponent(tenantId)}/social/motion${q ? `?${q}` : ""}`);
