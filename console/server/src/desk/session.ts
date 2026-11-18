@@ -807,19 +807,27 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
    * (version, session), and the version is recorded only after T3 took the message (a failure is retried by the next call).
    * Never launches a thread: with no live session there is nothing to update (a new one is seeded with the current list).
    */
+  /** why the update waits, logged once per reason (a desk once sat on an old list for days with nothing in the log). */
+  let lastSkip: string | undefined;
+  const skipped = (why: string) => {
+    if (why !== lastSkip) console.warn(`desk ${p.key}: endpoint update v${p.seedVersion} waits: ${why}`);
+    lastSkip = why;
+  };
   function syncSeed(): Promise<void> {
     syncing ??= (async () => {
       const s = current();
       if (!s || s.seedVersion >= p.seedVersion || !d.t3) return;
       // the seat is limited / logged out: the update waits for headroom (it never reaches the owner, so it never moves the
       // chat by itself; the next owner send or console note moves it, and a move seeds the new list)
-      if (blocked(s)) return;
+      const seat = blocked(s);
+      if (seat) return skipped(seat);
       // the main server at its session cap: the update waits (the next open of this chat tries again)
-      if (await capFull(s.host)) return;
+      const cap = await capFull(s.host);
+      if (cap) return skipped(cap);
       // one desk update per the main server session start gap (a deploy that raised the version updated 8 desks in 2 min); a later open sends it
       const gate = gateFor(s.host);
       const slot = gate?.take(`desk ${p.key} endpoint update v${p.seedVersion}`);
-      if (slot && !slot.ok) return;
+      if (slot && !slot.ok) return skipped("session start gap");
       try {
         const id = p.updateRequestId?.(s.seq) ?? `${p.key}-seed-v${p.seedVersion}-s${s.seq}`;
         await client(s).sendToThread(s.threadId, await p.update(), id, "auto").catch((e) => {
@@ -830,6 +838,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
         syncError = undefined;
       } catch (e) {
         syncError = errorText(e);
+        console.warn(`desk ${p.key}: endpoint update v${p.seedVersion} not delivered: ${syncError}`);
       }
     })().finally(() => {
       syncing = undefined;
@@ -1123,6 +1132,10 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
           throw e;
         }
         threadId = s.threadId;
+        // a thread behind the seed version takes the update first, then his message: his message starts a turn anyway, and
+        // an update fired beside it raced his turn, met a busy thread and gave up, again on every send (the desk sat 3 days on
+        // an old list). A failed update never holds his message.
+        if (current()?.seq === s.seq && (current()?.seedVersion ?? p.seedVersion) < p.seedVersion) await syncSeed().catch(() => undefined);
         gateFor(s.host)?.mark(`desk ${p.key} ${ownerName()}'s message`); // never waits, but the next automated start keeps its distance
         try {
           await client(s).sendToThread(s.threadId, message, crid, "auto");

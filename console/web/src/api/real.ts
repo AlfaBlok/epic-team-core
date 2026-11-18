@@ -276,6 +276,11 @@ export function createRealClient(): ApiClient {
     newWorkspace: (t, name) => call("POST", `/tenants/${encodeURIComponent(t)}/workspaces`, { name }),
     getWorldRepo: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/repo`),
     connectWorldRepo: (t, repo, code) => call("POST", `/tenants/${encodeURIComponent(t)}/repo/connect`, { repo, code }),
+    getWorldGithub: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/github`),
+    listGithubRepos: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/github/repos`),
+    checkGithubRepo: (t, repo) => call("GET", `/tenants/${encodeURIComponent(t)}/github/check?repo=${encodeURIComponent(repo)}`),
+    pickGithubRepo: (t, repo) => call("POST", `/tenants/${encodeURIComponent(t)}/github/repo`, { repo }),
+    newGithubRepo: (t, name) => call("POST", `/tenants/${encodeURIComponent(t)}/github/repo/new`, { name }),
     sendWorldDeskMessage: (t, text, page, clientRequestId, attachments) =>
       call("POST", `/tenants/${encodeURIComponent(t)}/desk/messages`, { text, page, clientRequestId, ...(attachments?.length ? { attachments } : {}) }),
     sendMilestoneChatMessage: (id, text, page, clientRequestId, attachments) =>

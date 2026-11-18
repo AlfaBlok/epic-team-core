@@ -134,12 +134,32 @@ export interface WorldRepoState {
   project?: { id: string; title: string };
 }
 
+/** Connect GitHub for a customer workspace (server tenancy/worldGithub.ts). */
+export interface WorldGithubState {
+  /** false: this console cannot connect GitHub (the older repo and code line shows instead) */
+  available: boolean;
+  /** the owner said yes on GitHub's page */
+  connected: boolean;
+  login?: string;
+  /** the one repo the workspace points at, once picked or made */
+  repo?: string;
+  made?: boolean;
+  startUrl: string;
+}
+export interface GithubRepoItem {
+  repo: string;
+  private: boolean;
+  pushedAt?: string;
+}
+
 export interface FirstObjective {
   milestoneId: string;
   name: string;
   /** what the owner typed at checkout, the first thing to make a project of */
   words?: string;
-  keyResults: { id: string; name: string; target: string; green: boolean; state: "green" | "amber" | "red"; note?: string; by?: "measured" | "ticked" }[];
+  keyResults: { id: string; name: string; target: string; green: boolean; state: "green" | "amber" | "red"; note?: string; by?: "measured" | "ticked"; optional?: boolean; action?: { label: string; href: string } }[];
+  /** what comes after these key results, one line */
+  later?: string;
   green: number;
   total: number;
   /** when the server read it (the lights are measured on each read) */
@@ -309,6 +329,12 @@ export interface ApiClient {
   /** the repo an EpicTeam workspace points at (one that already holds a workspace), and pointing it there. */
   getWorldRepo?(tenantId: string): Promise<WorldRepoState>;
   connectWorldRepo?(tenantId: string, repo: string, code: string): Promise<WorldRepoState>;
+  /** Connect GitHub: its state, the repos the owner may write, whether one holds a workspace, then pick one or make one. */
+  getWorldGithub?(tenantId: string): Promise<WorldGithubState>;
+  listGithubRepos?(tenantId: string): Promise<{ login: string; repos: GithubRepoItem[] }>;
+  checkGithubRepo?(tenantId: string, repo: string): Promise<{ repo: string; workspace: boolean; title?: string }>;
+  pickGithubRepo?(tenantId: string, repo: string): Promise<WorldRepoState & { workspace?: boolean }>;
+  newGithubRepo?(tenantId: string, name: string): Promise<WorldRepoState & { made?: boolean; url?: string }>;
   /** send the owner's message to the milestone's repo desk. */
   sendMilestoneChatMessage(milestoneId: string, text: string, page?: string, clientRequestId?: string, attachments?: string[]): Promise<{ threadId: string; pending: boolean; queued?: boolean }>;
 

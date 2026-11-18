@@ -228,6 +228,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // a workspace points at a repo that already holds a workspace (tenancy/worldRepo.ts; the POST owner only, below)
   ["GET", new RegExp(`^/api/tenants/${ID}/repo$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)],
+  // Connect GitHub (tenancy/worldGithub.ts): the path workspace's own grant and repos; start and the two POSTs owner only, below
+  ["GET", new RegExp(`^/api/tenants/${ID}/github(/start|/repos|/check)?$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/github/repo(/new)?$`)],
   // New workspace: the owner of the path workspace (its session, owner only below) makes a second one in their own name
   // (hosted testerWorld.ts makeAccountWorkspace; another world's id is a 404).
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)],
@@ -430,6 +433,8 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)], // New workspace: an owner login makes one in their own name
   ["PUT", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into the workspace's vault: the owner's login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
+  ["GET", new RegExp(`^/api/tenants/${ID}/github/(start|repos|check)$`)], // the owner's own GitHub: never an agent token
+  ["POST", new RegExp(`^/api/tenants/${ID}/github/repo(/new)?$`)],
   ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only
   ["PUT", new RegExp(`^/api/tenants/${ID}/provider$`)],
   ["POST", /^\/api\/team-skills(\/preview)?$/],

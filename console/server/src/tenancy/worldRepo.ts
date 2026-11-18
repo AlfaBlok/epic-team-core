@@ -36,6 +36,8 @@ export function ensureWorldRepos(db: DB): void {
     used_world TEXT, used_at TEXT)`);
   db.exec(`CREATE TABLE IF NOT EXISTS world_repos (
     world TEXT PRIMARY KEY, repo TEXT NOT NULL, dir TEXT NOT NULL, connected_at TEXT NOT NULL, starter_moved_to TEXT)`);
+  // made = 1 when the workspace's own starter repo was pushed to a new GitHub repo (it keeps Get set up)
+  if (!(db.prepare("PRAGMA table_info(world_repos)").all() as { name: string }[]).some((c) => c.name === "made")) db.exec("ALTER TABLE world_repos ADD COLUMN made INTEGER NOT NULL DEFAULT 0");
 }
 
 /** `owner/name` of a GitHub repo, lower-cased; undefined when it is not one. */
@@ -70,13 +72,15 @@ export interface WorldRepo {
   repo: string;
   dir: string;
   connectedAt: string;
+  /** true: a new GitHub repo made from the workspace's own starter (its Get set up stays); absent: a repo that already held a workspace */
+  made?: true;
 }
 
 export function connectedRepo(db: DB, world: string | undefined): WorldRepo | undefined {
   if (!world || world === DEFAULT_TENANT) return undefined;
   try {
-    const r = db.prepare("SELECT world, repo, dir, connected_at FROM world_repos WHERE world = ?").get(world) as { world: string; repo: string; dir: string; connected_at: string } | undefined;
-    return r ? { world: r.world, repo: r.repo, dir: r.dir, connectedAt: r.connected_at } : undefined;
+    const r = db.prepare("SELECT * FROM world_repos WHERE world = ?").get(world) as { world: string; repo: string; dir: string; connected_at: string; made?: number } | undefined;
+    return r ? { world: r.world, repo: r.repo, dir: r.dir, connectedAt: r.connected_at, ...(r.made ? { made: true as const } : {}) } : undefined;
   } catch {
     return undefined; // no table yet: nothing connected
   }
@@ -112,10 +116,10 @@ export function worldRepoDir(reposRoot: string, db: DB, world: string): (name: s
   };
 }
 
-type Git = (cwd: string, args: string[], timeoutMs?: number) => Promise<{ code: number; stdout: string; stderr: string }>;
-const defaultGit: Git = (cwd, args, timeoutMs = 600_000) =>
+export type Git = (cwd: string, args: string[], timeoutMs?: number, env?: Record<string, string>) => Promise<{ code: number; stdout: string; stderr: string }>;
+export const defaultGit: Git = (cwd, args, timeoutMs = 600_000, env = {}) =>
   new Promise((resolve) =>
-    execFile("git", args, { cwd, timeout: timeoutMs, maxBuffer: 8 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }, (e, stdout, stderr) =>
+    execFile("git", args, { cwd, timeout: timeoutMs, maxBuffer: 8 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } }, (e, stdout, stderr) =>
       resolve({ code: e ? (typeof (e as { code?: unknown }).code === "number" ? ((e as { code: number }).code as number) : 1) : 0, stdout: String(stdout), stderr: String(stderr) }),
     ),
   );
@@ -148,7 +152,14 @@ export function spineTitle(text: string): string | undefined {
   return h ? h.replace(/^EPIC(-[\w-]+)?:\s*/i, "").slice(0, 120) || undefined : undefined;
 }
 
-export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: string, codeIn: string): Promise<WorldRepo & { project: { id: string; title: string; state: "done" | "exists" }; starterMovedTo?: string }> {
+/**
+ * What lets a workspace point at a repo. A one-time code from the platform (iteration 5), or the
+ * owner's own GitHub grant (tenancy/worldGithub.ts): GitHub said this person may write the repo, and the clone runs with
+ * `gitEnv` (their grant, never an argument).
+ */
+export type ConnectProof = string | { github: true; gitEnv: Record<string, string> };
+
+export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: string, proof: ConnectProof): Promise<WorldRepo & { project: { id: string; title: string; state: "done" | "exists" }; starterMovedTo?: string }> {
   const { db, reposRoot } = d;
   const git = d.git ?? defaultGit;
   const now = d.now ?? (() => new Date());
@@ -164,12 +175,16 @@ export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: st
     if (same(had.repo, slug)) return { ...had, project: ensureProject(db, world, had.dir), };
     throw new ConnectError(409, "already_connected", `this workspace already points at ${had.repo}`);
   }
-  const row = db.prepare("SELECT * FROM repo_connect_codes WHERE code_hash = ?").get(sha(codeIn.toUpperCase())) as
-    | { repo: string; expires_at: string; used_world: string | null }
-    | undefined;
-  if (!row || !same(row.repo, slug)) throw new ConnectError(403, "bad_code", "that code does not open this repo; check both and try again");
-  if (row.used_world && row.used_world !== world) throw new ConnectError(403, "code_used", "that code was already used by another workspace");
-  if (row.expires_at < now().toISOString()) throw new ConnectError(403, "code_expired", "that code has expired; ask the team for a new one");
+  const codeIn = typeof proof === "string" ? proof : undefined;
+  if (codeIn !== undefined) {
+    const row = db.prepare("SELECT * FROM repo_connect_codes WHERE code_hash = ?").get(sha(codeIn.toUpperCase())) as
+      | { repo: string; expires_at: string; used_world: string | null }
+      | undefined;
+    if (!row || !same(row.repo, slug)) throw new ConnectError(403, "bad_code", "that code does not open this repo; check both and try again");
+    if (row.used_world && row.used_world !== world) throw new ConnectError(403, "code_used", "that code was already used by another workspace");
+    if (row.expires_at < now().toISOString()) throw new ConnectError(403, "code_expired", "that code has expired; ask the team for a new one");
+  }
+  const gitEnv = typeof proof === "string" ? undefined : proof.gitEnv;
   const dir = path.join(reposRoot, world);
   let starterMovedTo: string | undefined;
   if (fs.existsSync(path.join(dir, ".git"))) {
@@ -188,7 +203,7 @@ export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: st
     .find((p) => fs.existsSync(path.join(p, ".git", "config")) && same(originSlug(p), slug));
   const url = (d.cloneUrl ?? ((s: string) => `https://github.com/${s}.git`))(slug);
   const args = ["clone", "-q", ...(near ? ["--reference-if-able", near, "--dissociate"] : []), url, dir];
-  const cl = await git(reposRoot, args);
+  const cl = await git(reposRoot, args, undefined, gitEnv);
   if (cl.code !== 0) {
     fs.rmSync(dir, { recursive: true, force: true });
     if (starterMovedTo) fs.renameSync(starterMovedTo, dir);
@@ -198,7 +213,7 @@ export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: st
   const at = now().toISOString();
   db.transaction(() => {
     db.prepare("INSERT INTO world_repos (world, repo, dir, connected_at, starter_moved_to) VALUES (?, ?, ?, ?, ?)").run(world, slug, dir, at, starterMovedTo ?? null);
-    db.prepare("UPDATE repo_connect_codes SET used_world = ?, used_at = ? WHERE code_hash = ?").run(world, at, sha(codeIn.toUpperCase()));
+    if (codeIn !== undefined) db.prepare("UPDATE repo_connect_codes SET used_world = ?, used_at = ? WHERE code_hash = ?").run(world, at, sha(codeIn.toUpperCase()));
   })();
   resetRepoScans();
   return { world, repo: slug, dir, connectedAt: at, project: ensureProject(db, world, dir), ...(starterMovedTo ? { starterMovedTo } : {}) };

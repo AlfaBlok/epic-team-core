@@ -120,11 +120,26 @@ const KR_VALUE = { green: "Done", amber: "Not yet", red: "Waiting" } as const;
 /** the workspace's one first objective as the owner's objectives are drawn: its wheel, its name, its answer, its key results. */
 export function GetSetUp({ objective: o }: { objective: FirstObjective }) {
   const krs: ScorecardRow[] = o.keyResults.map((k) => ({ label: k.name, state: k.state, kind: "key-result", value: KR_VALUE[k.state], target: k.target, note: k.note, measuredAt: o.measuredAt }));
-  const next = o.keyResults.find((k) => k.state === "amber") ?? o.keyResults.find((k) => k.state !== "green");
+  // the optional step (Connect MCP for WhatsApp) never holds "you are set up" back, and is never the next step while another is open
+  const must = o.keyResults.filter((k) => !k.optional);
+  const next = must.find((k) => k.state === "amber") ?? must.find((k) => k.state !== "green");
+  const todo = o.keyResults.find((k) => k.state !== "green" && k.action);
   return (
     <section className="grid min-w-0 content-start gap-3" data-testid="get-set-up" aria-label={`${o.name}: ${o.green} of ${o.total} key results green`}>
-      <GoalHeader rows={krs} title={o.name} answer={next ? `${o.green} of ${o.total} key results are green. Next: ${next.name.toLowerCase()}.` : `All ${o.total} key results are green: you are set up.`} />
+      <GoalHeader rows={krs} title={o.name} answer={next ? `${o.green} of ${o.total} key results are green. Next: ${next.name}.` : o.green === o.total ? `All ${o.total} key results are green: you are set up.` : "You are set up. One optional step is left."} />
       <KeyResultSheet krs={krs} setId={o.milestoneId} plain />
+      {todo?.action && next && todo.id !== o.keyResults[0]?.id && (
+        <div>
+          <Button asChild size="sm" variant="outline" data-testid="get-set-up-action">
+            <a href={todo.action.href}>{todo.action.label}</a>
+          </Button>
+        </div>
+      )}
+      {o.later && (
+        <p className="text-xs text-muted-foreground" data-testid="get-set-up-later">
+          {o.later}
+        </p>
+      )}
     </section>
   );
 }

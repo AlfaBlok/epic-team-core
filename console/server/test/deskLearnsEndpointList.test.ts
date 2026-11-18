@@ -199,6 +199,21 @@ describe("T18-S4 the desk learns the new endpoint list once per seed version", (
     expect(t3.ops("launchThread")).toHaveLength(1); // no relaunch
   });
 
+  it("his send to a thread behind the version takes the update first, then his message (an update beside his turn met a busy thread)", async () => {
+    const a = boot();
+    await a.call("GET", "/api/desk/messages");
+    db.prepare("UPDATE desk_session SET seed_version = NULL").run();
+    await a.call("POST", "/api/desk/messages", { text: "file the dispatcher fix" }, PAGE);
+    await vi.waitFor(() => expect(t3.sent("thread_1").length).toBeGreaterThanOrEqual(2));
+    const msgs = t3.sent("thread_1").map((c) => c.args.message as string);
+    const upd = msgs.findIndex((m) => m.startsWith(UPDATE_MARKER));
+    const his = msgs.findIndex((m) => m.includes("file the dispatcher fix"));
+    expect(upd).toBeGreaterThanOrEqual(0);
+    expect(upd).toBeLessThan(his);
+    expect(msgs.filter((m) => m.startsWith(UPDATE_MARKER))).toHaveLength(1);
+    expect(db.prepare("SELECT seed_version v FROM desk_session").get()).toEqual({ v: SEED_VERSION });
+  });
+
   it("a failed send is retried by the next open, then recorded once (T6-S74: the sweep never sends it)", async () => {
     const a = boot();
     const open = async () => {

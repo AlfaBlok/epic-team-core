@@ -6,6 +6,7 @@ import { homeWorld } from "@/lib/identity";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GithubConnect } from "@/components/githubConnect";
 
 /**
  * The owner opens a new account and points it at the repo that already holds the workspace: an EpicTeam workspace that has not picked its repo shows one line on
@@ -19,11 +20,16 @@ export function HomeRepoLine() {
   const campaigns = !!useSkin().campaigns;
   const customer = !!w && w !== homeWorld() && !knownDoor() && !campaigns;
   const state = useQuery(() => (customer && api.getWorldRepo ? api.getWorldRepo(w!).catch(() => undefined) : Promise.resolve(undefined)), [customer, w]);
+  // where GitHub can be connected, Home shows Connect GitHub and the repo picker instead of the code line
+  const github = useQuery(() => (customer && api.getWorldGithub ? api.getWorldGithub(w!).catch(() => undefined) : Promise.resolve(undefined)), [customer, w]);
   const [repo, setRepo] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  if (!customer || !state.data || state.data.connected || !api.connectWorldRepo) return null;
+  if (!customer || !state.data || state.data.connected) return null;
+  if (github.loading && !github.data) return null;
+  if (github.data?.available || github.data?.connected) return <GithubConnect world={w!} state={github.data} where="home" />;
+  if (!api.connectWorldRepo) return null;
   const connect = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);

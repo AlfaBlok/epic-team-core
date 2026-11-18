@@ -32,11 +32,12 @@ const objective = {
   total: 5,
   measuredAt: new Date().toISOString(),
   keyResults: [
-    { id: "E0-1", name: "Workspace open", target: "You paid and your workspace opened.", green: true, state: "green" as const, by: "ticked" as const },
-    { id: "E0-2", name: "First chat answered", target: "Your team answered your first message in the chat.", green: true, state: "green" as const },
-    { id: "E0-3", name: "First project made", target: "A project from what you want done is on your list.", green: false, state: "amber" as const, note: "Tell the chat what you want done first." },
-    { id: "E0-4", name: "First teammate woke", target: "A teammate woke up, worked on your project and reported back.", green: false, state: "red" as const, note: "Your teammates start when your workspace's own server is ready." },
-    { id: "E0-5", name: "First result turned green", target: "One result of your first project is green.", green: false, state: "amber" as const },
+    // the owner 18 Nov: his five steps, in his order; the last is optional
+    { id: "E0-1", name: "Connect GitHub", target: "You allowed EpicTeam on GitHub and picked your repo: one you already have, or a new one.", green: true, state: "green" as const, by: "measured" as const },
+    { id: "E0-2", name: "Create a goal", target: "Your first goal is on your list with its key results. Type it, send a long voice note, or call to define them.", green: true, state: "green" as const },
+    { id: "E0-3", name: "Attach a persona", target: "A persona is attached to your goal.", green: false, state: "amber" as const, note: "Pick who works on your goal.", action: { label: "Open Personas", href: "/personas" } },
+    { id: "E0-4", name: "Run it", target: "The persona ran on your goal and reported back.", green: false, state: "red" as const, note: "Your personas run when your workspace's own server is ready." },
+    { id: "E0-5", name: "Connect MCP for WhatsApp", target: "Optional: connect MCP so your team reaches you on WhatsApp.", green: false, state: "amber" as const, optional: true },
   ],
 };
 const home = () =>
@@ -57,14 +58,15 @@ describe("Home opens on the chat in a paid team workspace", () => {
     await waitFor(() => expect(screen.getByTestId("get-set-up")).toBeTruthy());
     expect(fo).toHaveBeenCalledWith("et-dana");
     expect(screen.getByTestId("set-objective").textContent).toBe("Get set up");
-    expect(screen.getByTestId("set-answer").textContent).toBe("2 of 5 key results are green. Next: first project made.");
+    expect(screen.getByTestId("set-answer").textContent).toBe("2 of 5 key results are green. Next: Attach a persona.");
+    expect(screen.getByTestId("get-set-up-action").textContent).toBe("Open Personas"); // the open step's own button
     const items = screen.getAllByTestId("kr-item");
     expect(items.map((i) => [i.querySelector('[data-testid="kr-name"]')!.firstChild!.textContent, i.getAttribute("data-state")])).toEqual([
-      ["Workspace open", "green"],
-      ["First chat answered", "green"],
-      ["First project made", "amber"],
-      ["First teammate woke", "red"],
-      ["First result turned green", "amber"],
+      ["Connect GitHub", "green"],
+      ["Create a goal", "green"],
+      ["Attach a persona", "amber"],
+      ["Run it", "red"],
+      ["Connect MCP for WhatsApp", "amber"],
     ]);
     expect(screen.getAllByTestId("kr-light")).toHaveLength(5); // each key result its traffic light
     expect(screen.queryByText(/tap a key result/)).toBeNull(); // nothing to open: the chat works them

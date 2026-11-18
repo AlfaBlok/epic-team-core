@@ -186,7 +186,8 @@ import { noticeRef, parseNoticeRef } from "./plug/marks.js";
 import { ensureAuth } from "./auth/schema.js";
 import { authModeFromEnv, credentialWorld, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
 import { customerHosts, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
-import { mountOAuth } from "./auth/oauth.js";
+import { mountOAuth, storeCreds } from "./auth/oauth.js";
+import { mountWorldGithub } from "./tenancy/worldGithub.js";
 import { socialHead, TEAM_HEAD } from "./brand.js";
 import { requestScopedStore } from "./auth/scopedStore.js";
 import { createAttachments, mountAttachments } from "./desk/attachments.js";
@@ -218,7 +219,7 @@ import { driftLine, type DriftResult } from "./readModel/drift.js";
 import type { AnswerJobs } from "./inbox/answerJobs.js";
 import { viewWaiting, computeWaiting, computeStatus, type WaitingPayload } from "./readModel/views.js";
 import { sameRepo } from "./adapters/repoNames.js";
-import { homeRepo, homeWorld, type HostId, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, workerHost } from "./identity.js";
+import { homeRepo, homeWorld, type HostId, keyFile, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, workerHost } from "./identity.js";
 import { identityIndex, originFile } from "./identityPage.js";
 import { saidInAny, saidWords } from "./desk/said.js";
 
@@ -1754,7 +1755,8 @@ export function createApp(
   const worldGoals = new Map<string, { pursuits: ReturnType<typeof createPursuits>; at: number }>();
   const connectedWorld = () => {
     const w = credentialWorld();
-    return w && w !== DEFAULT_TENANT && connectedRepo(db, w) ? w : undefined;
+    const c = w && w !== DEFAULT_TENANT ? connectedRepo(db, w) : undefined;
+    return w && c && !c.made ? w : undefined; // a new repo made from the starter keeps Get set up
   };
   const worldPursuits = (w: string) => {
     let e = worldGoals.get(w);
@@ -1779,6 +1781,25 @@ export function createApp(
     return buildScorecards(withMilestones(await worldPursuits(w).get(), forTenant(db, w)), spine, { file, work: createWorkFinder(dirOf, spine), homeRepo: w });
   };
   mountWorldRepo(api, { db, reposRoot: read.reposRoot, worldOf: credentialWorld });
+  // Connect GitHub for a customer workspace (the owner allows the app on GitHub, then picks or makes
+  // one repo). Mounted before mountOAuth: both answer GitHub's one callback, this one only for a state it made.
+  const githubCreds = storeCreds({});
+  mountWorldGithub(api, {
+    db,
+    reposRoot: read.reposRoot,
+    worldOf: credentialWorld,
+    creds: () => githubCreds("github", "team"),
+    ...(secretsArea
+      ? {
+          storeKey: async (name: string, value: string, note: string) => {
+            const r = await secretsArea.addKey({ app: "agent-team-console", name, value, note, replace: true });
+            return r.ok ? { ok: true as const } : { ok: false as const, message: `${r.code}: ${r.message}` };
+          },
+          readKey: (name: string) => sudoRead(keyFile(name)),
+          keyFile,
+        }
+      : {}),
+  });
   api.get("/pursuits", async (c) => {
     const w = connectedWorld();
     if (w) return c.json(withMilestones(await worldPursuits(w).get(), forTenant(db, w)));

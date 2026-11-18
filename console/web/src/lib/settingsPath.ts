@@ -48,6 +48,10 @@ function usePages(input: boolean): Page[] {
   // Your AI is a customer workspace's: the home world's team still runs on the platform's seats.
   const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
   const customer = !!me?.tenant?.id && me.tenant.id !== homeWorld();
-  return all.filter((p) => p.input === input && shows(p.screen) && (p.screen !== "yourAi" || customer)).map(({ to, label, what, testId }) => ({ to, label, what, testId }));
+  // the owner 18 Nov ("I go in settings and I didn't have the ability there to connect GitHub"): a
+  // customer workspace connects GitHub on Connections, and the entry says so
+  return all
+    .filter((p) => p.input === input && shows(p.screen) && (p.screen !== "yourAi" || customer))
+    .map(({ to, label, what, testId }) => ({ to, label, what: customer && to === "/connections" ? "connect GitHub, MCP, email" : what, testId }));
 }
 
