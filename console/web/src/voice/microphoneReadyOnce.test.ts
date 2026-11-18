@@ -89,7 +89,8 @@ describe("T42-S43 the microphone is ready at once", () => {
     expect(f.api.segment).not.toHaveBeenCalled();
     h.ok(INFO);
     await sent;
-    expect(f.api.segment).toHaveBeenCalledWith("vn_1", 0, expect.any(Blob), 5, expect.any(String));
+    // (a sixth argument, when the last part also asks for Sent, is checked in voiceNoteSentInSeconds.test.tsx)
+    expect(f.api.segment.mock.calls[0].slice(0, 5)).toEqual(["vn_1", 0, expect.any(Blob), 5, expect.any(String)]);
     expect(e.view().phase).toBe("sent");
   });
 

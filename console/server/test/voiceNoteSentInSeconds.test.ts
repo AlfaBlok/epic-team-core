@@ -145,4 +145,47 @@ describe("a voice note is Sent the moment its audio is safe", () => {
     expect(fj.note.state).toBe("transcribed");
     expect(fj.note.transcript).toBe("hello desk");
   });
+
+  it("the part's start goes up while he talks: early bytes plus the tail at stop are the whole part, stored once", async () => {
+    const s = setup();
+    const id = s.notes.start().note.id;
+    const whole = new Uint8Array(3000).map((_, i) => i % 251);
+    expect(s.notes.early(id, 0, 0, whole.slice(0, 1000), "audio/webm")).toEqual({ have: 1000 });
+    expect(s.notes.early(id, 0, 1000, whole.slice(1000, 2000), "audio/webm")).toEqual({ have: 2000 });
+    // a resend from an earlier offset rewrites from there; a gap is refused
+    expect(s.notes.early(id, 0, 1000, whole.slice(1000, 2000), "audio/webm")).toEqual({ have: 2000 });
+    expect(() => s.notes.early(id, 0, 2500, whole.slice(0, 10), "audio/webm")).toThrow(/2000 bytes/);
+    await s.notes.segment(id, 0, whole.slice(2000), "audio/webm", 12, undefined, true, 2000);
+    const a = s.notes.audio(id, 0);
+    expect(new Uint8Array(fs.readFileSync(a.file))).toEqual(whole);
+    expect(fs.existsSync(path.join(path.dirname(a.file), "0.early"))).toBe(false);
+    // a part already in takes no more early bytes
+    expect(() => s.notes.early(id, 0, 0, whole.slice(0, 10), "audio/webm")).toThrow(/already in/);
+  });
+
+  it("a tail whose start the console lost (a restart) is refused, so the page sends the whole part", async () => {
+    const s = setup();
+    const id = s.notes.start().note.id;
+    await expect(s.notes.segment(id, 0, audio(), "audio/webm", 5, undefined, true, 900)).rejects.toMatchObject({ code: "early_missing" });
+    await s.notes.segment(id, 0, audio(), "audio/webm", 5, undefined, true);
+    expect(s.notes.get(id)?.segments).toBe(1);
+  });
+
+  it("route: the last part's upload with x-accept answers Sent in the same request", async () => {
+    const s = setup();
+    const api = new Hono();
+    mountVoiceNotesRec(api, "/voice", () => s.notes);
+    const id = s.notes.start().note.id;
+    const h = { "sec-fetch-site": "same-origin", "content-type": "audio/webm" };
+    const e = await api.request(`/voice/notes/${id}/segments/0/early`, { method: "POST", headers: { ...h, "x-offset": "0" }, body: audio().slice(0, 1000) });
+    expect(await e.json()).toEqual({ have: 1000 });
+    const r = await api.request(`/voice/notes/${id}/segments/0`, { method: "POST", headers: { ...h, "x-seconds": "5", "x-quick": "1", "x-early-bytes": "1000", "x-accept": JSON.stringify({ segments: 1, skip: [] }) }, body: audio().slice(1000) });
+    expect(r.status, await r.clone().text()).toBe(200);
+    const j = await r.json();
+    expect(j.accepted).toBe(true);
+    expect(j.note.acceptedAt).toBeTruthy();
+    await vi.waitFor(() => expect(s.notes.get(id)?.state).toBe("posted"));
+    const bad = await api.request(`/voice/notes/${s.notes.start().note.id}/segments/0`, { method: "POST", headers: { ...h, "x-seconds": "5", "x-quick": "1", "x-accept": "{nope" }, body: audio() });
+    expect(bad.status).toBe(400);
+  });
 });

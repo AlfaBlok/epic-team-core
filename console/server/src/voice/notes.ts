@@ -324,7 +324,27 @@ export function createVoiceNotes(d: NotesDeps) {
   const segRow = (id: string, n: number) => db.prepare("SELECT * FROM voice_note_segments WHERE note_id = ? AND n = ?").get(id, n) as any;
 
   /** One segment: kept on disk, transcribed once (a retry of a transcribed segment answers from the row). */
-  async function segment(id: string, n: number, audio: Uint8Array, mime: string, seconds: number, startMs?: string, quick = false) {
+  /**
+   * the part being recorded goes up while he talks (`<n>.early` beside its parts, appended at `offset`; a resend
+   * from an earlier offset rewrites from there), so at stop only its last seconds are left to send.
+   */
+  function early(id: string, n: number, offset: number, bytes: Uint8Array, mime: string): { have: number } {
+    recording(id);
+    if (!Number.isInteger(n) || n < 0 || n >= NOTE_MAX_PARTS) throw new VoiceError(400, "validation_error", `segment number ${n} is out of range`);
+    if (!audioExt(mime)) throw new VoiceError(400, "validation_error", `not audio this console takes: ${mime.slice(0, 60)}`);
+    if (segRow(id, n)) throw new VoiceError(409, "segment_in", `part ${n} is already in`);
+    const folder = path.join(d.dir, id);
+    fs.mkdirSync(folder, { recursive: true });
+    const file = path.join(folder, `${n}.early`);
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+    if (!Number.isInteger(offset) || offset < 0 || offset > size) throw new VoiceError(409, "early_gap", `the console has ${size} bytes of part ${n}, not ${offset}`);
+    if (offset + bytes.byteLength > NOTE_SEGMENT_MAX_BYTES) throw new VoiceError(400, "too_big", `a segment is at most ${NOTE_SEGMENT_MAX_BYTES / 1024 / 1024} MB`);
+    if (offset < size) fs.truncateSync(file, offset);
+    fs.appendFileSync(file, bytes);
+    return { have: offset + bytes.byteLength };
+  }
+
+  async function segment(id: string, n: number, audio: Uint8Array, mime: string, seconds: number, startMs?: string, quick = false, earlyBytes = 0) {
     // a part the console already has answers from its row, even once the note is closed (a resend whose first
     // answer was lost in a restart): taken once, never transcribed or billed twice.
     const had = Number.isInteger(n) ? segRow(id, n) : undefined;
@@ -335,6 +355,23 @@ export function createVoiceNotes(d: NotesDeps) {
     if (!Number.isInteger(n) || n < 0 || n >= NOTE_MAX_PARTS) throw new VoiceError(400, "validation_error", `segment number ${n} is out of range`);
     const ext = audioExt(mime);
     if (!ext) throw new VoiceError(400, "validation_error", `not audio this console takes: ${mime.slice(0, 60)}`);
+    // the part's start went up while he talked: this request carries only its tail.
+    const earlyFile = path.join(d.dir, id, `${n}.early`);
+    if (earlyBytes > 0) {
+      const size = fs.existsSync(earlyFile) ? fs.statSync(earlyFile).size : 0;
+      if (!Number.isInteger(earlyBytes) || size < earlyBytes) throw new VoiceError(409, "early_missing", `the console has ${size} bytes of part ${n}, not ${earlyBytes}: send the whole part`);
+      const head = new Uint8Array(earlyBytes);
+      const fd = fs.openSync(earlyFile, "r");
+      try {
+        fs.readSync(fd, head, 0, earlyBytes, 0);
+      } finally {
+        fs.closeSync(fd);
+      }
+      const all = new Uint8Array(earlyBytes + audio.byteLength);
+      all.set(head, 0);
+      all.set(audio, earlyBytes);
+      audio = all;
+    }
     if (!audio.byteLength) throw new VoiceError(400, "validation_error", "the segment is empty");
     if (audio.byteLength > NOTE_SEGMENT_MAX_BYTES) throw new VoiceError(400, "too_big", `a segment is at most ${NOTE_SEGMENT_MAX_BYTES / 1024 / 1024} MB`);
     const done = segRow(id, n);
@@ -353,6 +390,7 @@ export function createVoiceNotes(d: NotesDeps) {
       `INSERT INTO voice_note_segments (note_id, n, at, mime, file, bytes, seconds) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (note_id, n) DO UPDATE SET at = excluded.at, mime = excluded.mime, file = excluded.file, bytes = excluded.bytes, seconds = excluded.seconds, error = NULL`,
     ).run(id, n, iso(), mime.slice(0, 80), file, audio.byteLength, sec);
+    fs.rmSync(earlyFile, { force: true });
     // `quick`: the audio is safe on disk and in its row, so the page hears so now; its words come in the
     // background (finish waits for them), never holding the upload, and so Sent, for the seconds OpenAI takes.
     if (quick) {
@@ -626,7 +664,7 @@ export function createVoiceNotes(d: NotesDeps) {
     return (db.prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m ORDER BY started_at DESC LIMIT @n").all({ ...sc, n: Math.min(200, Math.max(1, limit)) }) as any[]).map(rowTo);
   }
 
-  return { start, segment, finish, accept, resume, deliverCheck, undelivered, timing, discard, audio, list, get };
+  return { start, early, segment, finish, accept, resume, deliverCheck, undelivered, timing, discard, audio, list, get };
 }
 export type VoiceNotes = ReturnType<typeof createVoiceNotes>;
 
@@ -700,7 +738,22 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
     `${prefix}/notes/:nid/segments/:n`,
     guard(async (c, n) => {
       const buf = new Uint8Array(await c.req.arrayBuffer());
-      const r = await n.segment(c.req.param("nid") ?? "", Number(c.req.param("n")), buf, c.req.header("content-type") ?? "", Number(c.req.header("x-seconds")), c.req.header("x-start-ms"), c.req.header("x-quick") === "1");
+      const nid = c.req.param("nid") ?? "";
+      const r = await n.segment(nid, Number(c.req.param("n")), buf, c.req.header("content-type") ?? "", Number(c.req.header("x-seconds")), c.req.header("x-start-ms"), c.req.header("x-quick") === "1", Number(c.req.header("x-early-bytes")) || 0);
+      // the last part of a chat note asks for Sent in the same request (`x-accept`: segments, skip, page), saving a round trip.
+      const acc = c.req.header("x-accept");
+      if (acc && !open) {
+        let a: unknown;
+        try {
+          a = JSON.parse(acc);
+        } catch {
+          return bad(c, "x-accept is JSON: segments, skip and page");
+        }
+        const p = finishIn.safeParse(a);
+        if (!p.success || p.data.fill) return bad(c, "x-accept is JSON: segments (1..300), skip and page");
+        const { quick: _q, fill: _f, ...o } = p.data;
+        return c.json({ ...r, ...n.accept(nid, { ...o, audioBase: base(c) }) });
+      }
       return c.json(r);
     }),
   );
@@ -722,6 +775,13 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
       const p = timingIn.safeParse(await json(c));
       if (!p.success) return bad(c, "sentMs (ms from tap stop to Sent) is required");
       return c.json(n.timing(c.req.param("nid") ?? "", p.data.sentMs));
+    }),
+  );
+  api.post(
+    `${prefix}/notes/:nid/segments/:n/early`,
+    guard(async (c, n) => {
+      const buf = new Uint8Array(await c.req.arrayBuffer());
+      return c.json(n.early(c.req.param("nid") ?? "", Number(c.req.param("n")), Number(c.req.header("x-offset")), buf, c.req.header("content-type") ?? ""));
     }),
   );
   api.post(`${prefix}/notes/:nid/discard`, guard((c, n) => c.json(n.discard(c.req.param("nid") ?? ""))));
