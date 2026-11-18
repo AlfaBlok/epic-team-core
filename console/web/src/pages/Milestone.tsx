@@ -1,4 +1,5 @@
 import { MilestonePath } from "@/components/bootstrap";
+import { useOwnCall } from "@/voice/OwnCall";
 import { NeverOnBadge } from "@/components/neverOn";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -660,7 +661,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
 /** The milestone's own chat: its repo desk's one long-lived T3 thread (the global Chat page stays the Team desk). */
 function MilestoneChat({ m }: { m: Milestone }) {
   const w = useWords();
-  const [thread, setThread] = useState<{ threadId?: string; environmentId?: string }>({});
+  const [thread, setThread] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});
   // a Discuss button (?about=<id>&title=&run=) makes the item the context: chip + `[page: <milestone> · <id>]` on the next message.
   const [params, setParams] = useSearchParams();
   const about = chatAboutFromParams(params);
@@ -697,6 +698,9 @@ function MilestoneChat({ m }: { m: Milestone }) {
         { replace: true },
       ),
   });
+  // a project of a workspace on its own server and AI calls with the browser's own speech (never our voice key)
+  const own = useOwnCall({ load: () => load(), send: (t, page, id) => send(t, page, id) });
+  const ownServer = !!thread.ownServer;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="milestone-chat">
       {/* on a phone the description folds away and this row holds Open in T3 and the compact Call (the idle call bar
@@ -708,13 +712,13 @@ function MilestoneChat({ m }: { m: Milestone }) {
             <ExternalLink className="h-3.5 w-3.5" /> Open in T3
           </ThreadLink>
         )}
-        {call.button}
+        {!ownServer && call.button}
       </div>
       <ChatView
-        voiceBase={`/api/milestones/${encodeURIComponent(m.id)}/voice`}
-        top={call.bar}
-        live={call.live}
-        liveKey={call.liveKey}
+        voiceBase={ownServer ? "" : `/api/milestones/${encodeURIComponent(m.id)}/voice`}
+        top={ownServer ? own.bar : call.bar}
+        live={ownServer ? undefined : call.live}
+        liveKey={ownServer ? own.phase : call.liveKey}
         who="Repo desk"
         load={load}
         cacheKey={`milestone:${m.id}`}

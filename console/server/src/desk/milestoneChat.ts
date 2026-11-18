@@ -4,7 +4,9 @@ import type { Milestone, Persona } from "../store.js";
 import { DEFAULT_DESK_REPO, readRemit } from "./desk.js";
 import { createChatSession, DeskError, migrateDeskSessions, type ChatSession, type SessionDeps } from "./session.js";
 import { milestoneWorld } from "../tenancy/world.js";
-import { hooks } from "../plug/hooks.js";
+import { hooks, type JobRoute } from "../plug/hooks.js";
+import { createJobChat, type JobChat } from "./jobChat.js";
+import { DEFAULT_TENANT } from "../db.js";
 import { listRepos } from "../adapters/repos.js";
 import { intakeSection, type IntakeRunner } from "./packIntake.js";
 import { homeRepo, homeWorld, ownerName } from "../identity.js";
@@ -48,6 +50,8 @@ const FALLBACK_REMIT =
 
 export interface MilestoneChatDeps extends SessionDeps {
   publicUrl: string;
+  /** the job route (a customer workspace on its own job servers chats there); default hooks.jobRoute. */
+  jobRoute?: JobRoute;
   reposRoot: string;
   /** Repo whose docs/personas/repo-desk.md seeds the persona (the console's own repo). */
   deskRepo?: string;
@@ -206,6 +210,36 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
     return chat;
   }
 
+  /**
+   * a project of a customer workspace whose jobs run on its own job servers chats there too (jobChat.ts: each turn
+   * a short job with the workspace's own AI), never on a T3 thread of ours. Undefined for every other milestone.
+   */
+  let route: JobRoute | undefined | null = null;
+  const jobChats = new Map<string, JobChat>();
+  function jobChatFor(id: string): JobChat | undefined {
+    const world = milestoneWorld(d.db, id);
+    if (!world || world === DEFAULT_TENANT) return undefined;
+    if (route === null) route = d.jobRoute ?? hooks.jobRoute(d.db);
+    if (!route?.chat || !route.handles(world)) return undefined;
+    let jc = jobChats.get(id);
+    if (!jc) {
+      const r = route;
+      jc = createJobChat(d.db, r, {
+        key: milestoneKey(id),
+        world,
+        personaId: () => get(id).persona().id,
+        seed: () => {
+          const m = d.milestone(id);
+          if (!m) throw new DeskError(404, "not_found", `no milestone ${id}`);
+          const per = get(id).persona();
+          return hooks.worldPrompt(milestoneSeed({ persona: per, milestone: m, publicUrl: r.base, world }), { tenant: world, personaId: per.id, consoleUrl: r.base, job: true });
+        },
+      });
+      jobChats.set(id, jc);
+    }
+    return jc;
+  }
+
   const get = (id: string): ChatSession => {
     const m = d.milestone(id);
     if (!m) throw new DeskError(404, "not_found", `no milestone ${id}`);
@@ -227,8 +261,13 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
 
   return {
     chatFor: get,
-    view: (id: string) => get(id).view(),
+    jobChatFor,
+    /** the chat a page reads: the job chat of a workspace on its own servers, else the T3 chat. */
+    reader: (id: string): Pick<ChatSession, "view" | "earlier"> => jobChatFor(id) ?? get(id),
+    view: (id: string) => (jobChatFor(id) ?? get(id)).view(),
     send: async (id: string, text: string, page?: string, clientRequestId?: string) => {
+      const own = jobChatFor(id);
+      if (own) return own.send(text, page, clientRequestId);
       // a customer workspace's project chat never starts an agent on our shared servers and seats (the shared-host
       // gate, as its Team desk: hosted desk/worldDesk.ts); it opens when its chat runs on the workspace's own servers.
       if (hooks.worldWakeGate()(milestoneWorld(d.db, id)))

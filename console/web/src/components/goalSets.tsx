@@ -37,6 +37,7 @@ import { useFold } from "@/lib/storedFlag";
 import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
 import { ObjectivePlanTab } from "@/pages/social/PlanTab";
 import { TotemTab, productOfObjective, totemTabs, useTotemMaps } from "@/components/totemTabs";
+import { TrackersTab } from "@/components/trackersTab";
 import { pagesOfObjective } from "@/lib/wheelPages";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
@@ -994,6 +995,8 @@ const TABS = [
   { id: "context", label: "Context" },
   // the pages made for it (vn_dad96778): pages live inside the wheel they belong to; the Pages list still shows all.
   { id: "pages", label: "Pages" },
+  // its tracker tables (the owner: "these tables I want them to be accessible at the wheel level"): every wheel has them.
+  { id: "trackers", label: "Trackers" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 /**
@@ -1465,6 +1468,7 @@ export function GoalSetPage() {
               {productMap && [...inProduct].sort((a, b) => IN_PRODUCT_TOTEMS.indexOf(b.tab) - IN_PRODUCT_TOTEMS.indexOf(a.tab)).map((t) => <TotemTab key={t.id} product={productMap.product} totem={t} />)}
             </div>
           )}
+          {tab === "trackers" && <TrackersTab wheel={pursuit.id} />}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
           {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
         </>

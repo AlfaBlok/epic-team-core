@@ -1847,6 +1847,7 @@ export function WaitingOnYou({
             <SectionCallButton
               section={title}
               testId="waiting-on-you"
+              onOpen={() => setSectionOpen(true)}
               cards={() => [
                 ...blocking.map((i) => voiceAsk({ id: i.id, code: i.code, title: i.title, question: i.question, where: i.milestoneTitle })),
                 ...openRows.map((r) => (r.card ? voiceAsk({ id: r.card.id, code: r.card.code, title: r.card.title, question: r.card.question, where: r.card.milestoneTitle }) : voiceAsk({ id: r.status!.id, code: r.status!.code, title: r.status!.title }))),

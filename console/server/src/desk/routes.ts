@@ -73,7 +73,7 @@ export function mountDesk(api: Hono, desk: Desk, milestoneChats?: MilestoneChats
 
   // the milestone page's Chat tab: same shape as the desk's, on that milestone's own repo-desk thread.
   if (milestoneChats) {
-    api.get("/milestones/:id/chat/messages", compress(), guard(async (c) => c.json(await readChat(milestoneChats.chatFor(c.req.param("id") ?? ""), viewOpts((n) => c.req.query(n))))));
+    api.get("/milestones/:id/chat/messages", compress(), guard(async (c) => c.json(await readChat(milestoneChats.reader(c.req.param("id") ?? ""), viewOpts((n) => c.req.query(n))))));
     api.post("/milestones/:id/chat/messages", jordiSend("a milestone chat", (c, m) => milestoneChats.send(c.req.param("id") ?? "", m.text, m.page, m.clientRequestId)));
   }
 

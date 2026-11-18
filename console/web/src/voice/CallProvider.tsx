@@ -176,7 +176,7 @@ function Floating({ h }: { h: HeldCall }) {
       aria-label={`Call with ${h.callee}`}
       data-testid="call-widget"
       data-base={h.base}
-      className="flex items-center gap-2 rounded-full border border-emerald-500/50 bg-card/95 py-1.5 pl-3 pr-1.5 text-sm shadow-lg backdrop-blur max-sm:flex-wrap phone:gap-x-3 phone:gap-y-3 phone:rounded-2xl phone:border-2 phone:p-3 phone:text-base"
+      className={cn("flex items-center gap-2 rounded-full border border-emerald-500/50 bg-card/95 py-1.5 pl-3 pr-1.5 text-sm shadow-lg backdrop-blur flex-wrap phone:gap-x-3 phone:gap-y-3 phone:rounded-2xl phone:border-2 phone:p-3 phone:text-base", v.onCard && v.phase === "live" && "rounded-2xl")}
     >
       <span className="relative flex size-2 shrink-0" aria-hidden>
         <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60 motion-reduce:animate-none" />
@@ -193,6 +193,20 @@ function Floating({ h }: { h: HeldCall }) {
         </Link>
       ) : (
         <span className="min-w-0 truncate phone:flex-1 phone:font-semibold">On call with {h.callee}</span>
+      )}
+      {/* a section call: the card the voice is on and its evidence, on his screen while they talk about it */}
+      {v.onCard && v.phase === "live" && (
+        <span className="order-last flex min-w-0 basis-full items-center gap-2 text-xs text-muted-foreground phone:text-sm" data-testid="call-widget-card">
+          <span className="min-w-0 truncate">
+            {v.onCard.place}
+            {v.onCard.title ? ` · ${v.onCard.title}` : ""}
+          </span>
+          {v.onCard.link && (
+            <a href={v.onCard.link.url} target="_blank" rel="noreferrer" className="shrink-0 font-medium text-foreground underline underline-offset-2" data-testid="call-widget-evidence">
+              Evidence ↗
+            </a>
+          )}
+        </span>
       )}
       <span className="shrink-0 tabular-nums text-muted-foreground" data-testid="call-widget-time">
         {v.phase === "live" ? clock(v.elapsedS) : v.phase === "ending" ? "Hanging up…" : "Connecting…"}

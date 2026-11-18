@@ -141,11 +141,18 @@ describe("T42-S5 call engine", () => {
   it("a section call starts with its cards; press_card on his yes is pressed by the page, the result said back", async () => {
     const f = fakes();
     const press = vi.fn(async () => "done: marked complete");
-    await f.engine.startFocused({ section: "Decisions waiting on you", cards: [{ kind: "review", id: "ri_1", title: "A card", buttons: ["Mark complete"] }], press });
+    const show = vi.fn();
+    await f.engine.startFocused({ section: "Decisions waiting on you", cards: [{ kind: "review", id: "ri_1", title: "A card", buttons: ["Mark complete"], link: { label: "The page", url: "https://example.com/p" } }], press, show });
     f.dc.onopen();
     await f.emit({ type: "response.done", response: { id: "resp_open" } });
     f.sent.length = 0;
-    expect(f.api.start).toHaveBeenCalledWith({ section: "Decisions waiting on you", cards: [{ kind: "review", id: "ri_1", title: "A card", buttons: ["Mark complete"] }] });
+    f.api.tool.mockImplementationOnce(async () => ({ place: "card 1 of 1", id: "ri_1", pos: 1, total: 1, card: "…" }) as any);
+    await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_n", name: "next_card", arguments: "{}" });
+    await f.emit({ type: "response.done", response: { id: "resp_n" } });
+    // the card he is on shows on his screen with its evidence
+    expect(show).toHaveBeenCalledWith("ri_1");
+    expect(f.engine.view().onCard).toEqual({ id: "ri_1", place: "card 1 of 1", title: "A card", link: { label: "The page", url: "https://example.com/p" } });
+    f.sent.length = 0;
     f.api.tool.mockImplementationOnce(async () => ({ place: "card 1 of 1", pos: 1, total: 1, press: { id: "ri_1", kind: "review", button: "Mark complete", title: "A card" } }) as any);
     await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_p", name: "press_card", arguments: JSON.stringify({ button: "Mark complete", confirmed: true }) });
     await f.emit({ type: "response.done", response: { id: "resp_p" } });

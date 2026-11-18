@@ -1204,6 +1204,8 @@ export interface DeskChat {
   t3?: "restarting" | "maintenance";
   /** a customer's workspace: the page shows no way into our T3 (no Open in T3). */
   customer?: boolean;
+  /** this chat runs on the workspace's own server and AI (its Call uses the browser's own speech). */
+  ownServer?: boolean;
   /** the owner's sends stored while T3 was down, oldest first; the console delivers them once T3 is back. */
   queued?: { id: string; text: string; page?: string; at: string }[];
   /** T3 was slow, so this is the console's last good read; a fresh one is under way (the page polls again soon). */

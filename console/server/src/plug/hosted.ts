@@ -1,3 +1,4 @@
+import type { JobRoute } from "./hooks.js";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -242,7 +243,7 @@ export interface TesterWorldsArea {
 /** Many worlds as core uses them (each made and mounted where app.ts did it). Opaque values (the social source,
  * the campaigns) pass from the social plug through core untouched. */
 export interface TenancyArea {
-  worldDesks(d: SessionDeps & { publicUrl: string; reposRoot: string; deskRepo?: string }): WorldDesksArea;
+  worldDesks(d: SessionDeps & { publicUrl: string; reposRoot: string; deskRepo?: string; jobRoute?: JobRoute }): WorldDesksArea;
   /**..S9 the Company view's reads (and's uptime checks every `uptimeEveryMs`). */
   mountCompanies(o: { api: Hono; db: DB; reposRoot: string; social: unknown; sitesDaily: (world: string) => unknown; spinesOf?: (dir: string) => Promise<unknown>; memberships: (userId: string) => any; get: (path: string) => Promise<Response>; uptimeEveryMs?: number }): void;
   /** companies set on screen and a wheel's notes; returns the wheel's voice note filer. */

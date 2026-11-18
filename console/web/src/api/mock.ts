@@ -1398,6 +1398,9 @@ const mockMail = () => ({
     async getTotem(product: string, id: string) {
       return ok({ product, id, name: id, shape: "page" as const, where: "not placed yet", empty: true });
     },
+    async getTrackers(wheel: string) {
+      return ok({ wheel, name: wheel, tables: [{ id: "influencers", name: "Influencers", for: "people to invite as testers", columns: ["Name", "Where", "Status", "Reply"], statuses: ["candidate", "contacted", "replied"], from: "frame" as const, open: true, rows: [], counts: [], file: `docs/trackers/${wheel}/influencers.csv` }] });
+    },
     async getCampaignPlan() {
       return ok(unwrittenPlan());
     },

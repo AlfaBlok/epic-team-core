@@ -671,12 +671,12 @@ export function InboxGoalsToSet({ scorecard }: { scorecard?: string }) {
       testId="inbox-goals-to-set"
       open={open || !!needle}
       onToggle={setOpen}
-      call={count > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.goal} testId="inbox-goals-to-set" cards={() => [...lines.map((t) => askCard({ id: t.openUrl, title: `${t.name}: ${t.text}`, where: t.name })), ...cards.map(teamCard)]} />}
+      call={count > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.goal} testId="inbox-goals-to-set" onOpen={() => setOpen(true)} cards={() => [...lines.map((t) => askCard({ id: t.openUrl, title: `${t.name}: ${t.text}`, where: t.name, url: t.openUrl })), ...cards.map(teamCard)]} />}
     >
       {/* E948-S110: every goal to set is one card, the campaigns' questions and the team's goal cards alike. */}
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="team-cards-goal-list">
         {lines.map((t) => (
-          <li key={t.openUrl} className="min-w-0">
+          <li key={t.openUrl} className="min-w-0" data-inbox-card={`goal-talk:${t.openUrl}`}>
             <CampaignGoalCard t={t} />
           </li>
         ))}
@@ -722,7 +722,7 @@ export function InboxIdeasAndDigests({ kinds = TEAM_GROUP_KINDS, scorecard }: { 
       testId="inbox-team-cards"
       open={open || !!q}
       onToggle={setOpen}
-      call={cards.length > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.team} testId="inbox-team-cards" cards={() => cards.map(teamCard)} />}
+      call={cards.length > 0 && <SectionCallButton section={INBOX_SECTION_TITLE.team} testId="inbox-team-cards" onOpen={() => setOpen(true)} cards={() => cards.map(teamCard)} />}
     >
       <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="inbox-team-cards-list">
         <TeamCardRows rows={rows} onAnswered={(x) => setGone((s) => new Set(s).add(x.id))} />

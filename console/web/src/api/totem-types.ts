@@ -39,3 +39,23 @@ export interface TotemView {
   rows?: string[][];
   tree?: { label: string; children: { id: string; label: string; status: string }[] }[];
 }
+/** a wheel's tracker tables (server trackers.ts). */
+export interface TrackerTable {
+  id: string;
+  name: string;
+  for?: string;
+  columns: string[];
+  statuses: string[];
+  from: "frame" | "product" | "own";
+  open: boolean;
+  yes?: string;
+  rows: string[][];
+  counts: { status: string; n: number }[];
+  file: string;
+}
+export interface WheelTrackers {
+  wheel: string;
+  name: string;
+  product?: string;
+  tables: TrackerTable[];
+}

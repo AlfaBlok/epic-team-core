@@ -252,7 +252,7 @@ export function tableOf(md: string): { headers: string[]; rows: string[][] } | u
   return { headers: cells(t[0]), rows: t.slice(2).map(cells) };
 }
 
-function csvOf(text: string): { headers: string[]; rows: string[][] } {
+export function csvOf(text: string): { headers: string[]; rows: string[][] } {
   const row = (l: string) => {
     const out: string[] = [];
     let cur = "", q = false;

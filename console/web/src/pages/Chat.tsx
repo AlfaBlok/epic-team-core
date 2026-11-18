@@ -3,6 +3,7 @@ import { useInRouterContext, useNavigate, useSearchParams } from "react-router-d
 import { briefingHref, isBriefMe } from "@/lib/briefing";
 import { ArrowDown, ExternalLink, Mic, Phone, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
+import { useOwnCall } from "@/voice/OwnCall";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, Loading, PHONE_TAP, RelTime, ThreadLink, threadHref } from "@/components/common";
@@ -292,8 +293,11 @@ export function DeskPage({
   /** marks this chat read (default: the world's desk). */
   markSeen?: () => Promise<unknown>;
 }) {
-  const [threadId, setThreadId] = useState<{ threadId?: string; environmentId?: string }>({});
+  const [threadId, setThreadId] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});
   const call = useCallDock(callBase ? { base: callBase } : {});
+  // a workspace on its own server and AI calls with the browser's own speech (never our voice key)
+  const own = useOwnCall({ load: () => load(), send: (t, page, id) => sendMessage(t, page, id) });
+  const ownServer = !!threadId.ownServer;
   const push = usePushToggle(); // phone notifications (the installed app)
   const vvh = useVisibleHeight();
   return (
@@ -324,16 +328,16 @@ export function DeskPage({
           )}
           {push.bell}
           <SpeakRepliesSwitch />
-          {call.button}
+          {!ownServer && call.button}
         </div>
       </div>
       {push.banner && <div className="mb-2">{push.banner}</div>}
       <ChatView
         panel
-        voiceBase={callBase ?? deskVoiceBase(undefined)}
-        top={call.bar}
-        live={call.live}
-        liveKey={call.liveKey}
+        voiceBase={ownServer ? "" : (callBase ?? deskVoiceBase(undefined))}
+        top={ownServer ? own.bar : call.bar}
+        live={ownServer ? undefined : call.live}
+        liveKey={ownServer ? own.phase : call.liveKey}
         who={who}
         load={load}
         cacheKey={callBase ?? deskVoiceBase(undefined)}
@@ -419,7 +423,7 @@ export function ChatView({
   hintLabel?: string;
   clearHint?: () => void;
   placeholder: string;
-  onThread?: (t: { threadId?: string; environmentId?: string }) => void;
+  onThread?: (t: { threadId?: string; environmentId?: string; ownServer?: boolean }) => void;
   /** the history scrolls inside its own panel and the composer docks under it (the Team desk page fills one screen). */
   panel?: boolean;
   /** rework: shown above the history panel (the Team desk's call bar). */
@@ -527,8 +531,8 @@ export function ChatView({
 
   useEffect(() => {
     // a customer's workspace shows no way into our T3 (no Open in T3)
-    onThread?.(chat?.customer ? {} : { threadId: chat?.threadId, environmentId: chat?.environmentId });
-  }, [chat?.threadId, chat?.environmentId, chat?.customer, onThread]);
+    onThread?.(chat?.customer ? (chat?.ownServer ? { ownServer: true } : {}) : { threadId: chat?.threadId, environmentId: chat?.environmentId });
+  }, [chat?.threadId, chat?.environmentId, chat?.customer, chat?.ownServer, onThread]);
 
   // the owner has this chat open, so what it shows is read: mark it on the first read, on every new or finished line,
   // and when the tab comes back into view; then the pills refresh.

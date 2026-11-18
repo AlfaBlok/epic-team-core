@@ -36,6 +36,8 @@ export interface SectionCard {
   recommend?: string;
   /** the buttons the call may press for him (see engine `press_card`); a label ending in "…" takes his words. */
   buttons?: string[];
+  /** the card's evidence, shown in the call bar while the voice is on this card (page only; the console drops it). */
+  link?: { label: string; url: string };
 }
 type Press = (button: string, words?: string) => Promise<string>;
 export type PressableCard = SectionCard & { press?: Press };
@@ -77,6 +79,7 @@ export function reviewCard(i: ReviewItem & { milestoneTitle?: string }): Pressab
     ...(f?.taskGoal ? { goal: f.taskGoal } : {}),
     ...(f?.delivered?.length ? { delivered: f.delivered.map((d) => `${d.ok === false ? "✗" : "✓"} ${d.text}`) } : {}),
     ...(f?.evidence?.label ? { evidence: f.evidence.label } : {}),
+    ...(f?.evidence?.url ? { link: { label: f.evidence.label || "Evidence", url: f.evidence.url } } : {}),
     ...(f?.decision ? { decision: f.decision } : {}),
     ...(f?.options?.length ? { options: f.options } : {}),
     buttons,
@@ -109,6 +112,7 @@ export function teamCard(c: TeamCard): PressableCard {
     ...(c.goal?.recommend !== undefined && goals[c.goal.recommend] ? { recommend: label(goals[c.goal.recommend]) } : {}),
     ...(c.idea ? { question: c.idea.gain, recommend: c.idea.recommend } : {}),
     ...(c.digest ? { question: `${c.digest.greens} of ${c.digest.total} green. ${c.digest.reasons.map((r) => r.text).join(" ")}`.slice(0, 1800) } : {}),
+    ...((c.goal?.links ?? c.idea?.links)?.length ? { evidence: (c.goal?.links ?? c.idea?.links)!.map((l) => l.label).join(", "), link: (c.goal?.links ?? c.idea?.links)![0] } : {}),
     buttons: [...goals.map(label), ANSWER_IN_WORDS],
     press: async (button, words) => {
       const pick = goals.findIndex((g) => label(g) === button);
@@ -119,8 +123,8 @@ export function teamCard(c: TeamCard): PressableCard {
 }
 
 /** A question or block waiting on him: its answer goes to the desk (the voice presses nothing). */
-export function askCard(a: { id: string; code?: string; title: string; question?: string; where?: string }): PressableCard {
-  return { kind: "ask", id: a.id, ...(a.code ? { code: a.code } : {}), title: a.title, ...(a.question && a.question !== a.title ? { question: a.question } : {}), ...(a.where ? { where: a.where } : {}), buttons: [] };
+export function askCard(a: { id: string; code?: string; title: string; question?: string; where?: string; url?: string }): PressableCard {
+  return { ...(a.url ? { link: { label: "Open it", url: a.url } } : {}), kind: "ask", id: a.id, ...(a.code ? { code: a.code } : {}), title: a.title, ...(a.question && a.question !== a.title ? { question: a.question } : {}), ...(a.where ? { where: a.where } : {}), buttons: [] };
 }
 
 /** the Team desk's voice is on here (his own console, voice switched on): the section buttons show. One read per page. */
@@ -144,7 +148,25 @@ function useVoiceOn(): boolean {
  * The phone button beside a section's name. Pressing it starts the Team desk call holding `cards()` (the cards the section
  * shows now, in its order); the call floats on every page (CallWidget) with Mute and Hang up.
  */
-export function SectionCallButton({ section, cards, testId }: { section: string; cards: () => PressableCard[]; testId: string }) {
+/** the card the voice is on, on his screen: its section open, scrolled to it, marked until the next one. */
+const ON_CALL = ["ring-2", "ring-emerald-600", "ring-offset-4", "rounded-lg"];
+export function showOnScreen(id: string, doc: Document = document) {
+  for (const el of doc.querySelectorAll("[data-on-call]")) {
+    el.classList.remove(...ON_CALL);
+    el.removeAttribute("data-on-call");
+  }
+  const el = [...doc.querySelectorAll<HTMLElement>("[data-inbox-card]")].find((x) => {
+    const v = x.getAttribute("data-inbox-card") ?? "";
+    return v === id || v.endsWith(`:${id}`);
+  });
+  if (!el) return false;
+  el.setAttribute("data-on-call", "");
+  el.classList.add(...ON_CALL);
+  el.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  return true;
+}
+
+export function SectionCallButton({ section, cards, testId, onOpen }: { section: string; cards: () => PressableCard[]; testId: string; /** opens the section, so the cards show while the call walks them */ onOpen?: () => void }) {
   const on = useVoiceOn();
   const tab = useCallTab();
   useSyncExternalStore(tab.subscribe, tab.snapshot, tab.snapshot);
@@ -158,12 +180,14 @@ export function SectionCallButton({ section, cards, testId }: { section: string;
     const focus: CallFocus = {
       section,
       cards: list.slice(0, 60).map(({ press: _p, ...c }) => c as unknown as Record<string, unknown>),
+      show: (id) => void showOnScreen(id),
       press: async (p) => {
         const f = presses.get(p.id);
         if (!f) return "not pressed: this card has no button the call may press";
         return f(p.button, p.words);
       },
     };
+    onOpen?.();
     tab.started(h, loc ? `${loc.pathname}${loc.search}` : undefined);
     void h.engine.startFocused(focus);
   };

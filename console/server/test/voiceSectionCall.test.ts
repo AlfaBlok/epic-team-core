@@ -25,6 +25,8 @@ describe("a section call", () => {
     expect(p).toMatch(/2\. Review \[E901-S2\]/);
     expect(p).toMatch(/3\. Question \[E901-A3\]/);
     expect(p).toMatch(/only after his spoken yes/);
+    expect(p).toMatch(/it's on your screen/);
+    expect(p).toMatch(/ask him what he wants/);
     expect(p).toMatch(/goes to the desk with ask_the_desk/);
     expect(p).toMatch(/Acme: 5 testers/);
     expect(focusGreeting({ section: "Goals to set", cards: [goal] })).toBe("Goals to set: 1 card. Shall we go through them one by one?");
@@ -108,7 +110,7 @@ describe("a section call through the API", () => {
     expect(sess.instructions).toMatch(/Goals to set \(2 cards\)/);
     expect(sess.instructions).not.toMatch(/His inbox now/);
     const id = started.json.call.id;
-    expect((await call("POST", `/api/voice/calls/${id}/tool`, { name: "next_card" })).json).toMatchObject({ place: "card 1 of 2" });
+    expect((await call("POST", `/api/voice/calls/${id}/tool`, { name: "next_card" })).json).toMatchObject({ place: "card 1 of 2", id: "tc_1" });
     const pressed = await call("POST", `/api/voice/calls/${id}/tool`, { name: "press_card", args: { button: "10 testers", confirmed: true } });
     expect(pressed.json.press).toMatchObject({ id: "tc_1", kind: "goal", button: "10 testers" });
     // a plain call (no focus) has no press tool

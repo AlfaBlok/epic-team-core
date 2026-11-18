@@ -158,6 +158,7 @@ export const DB_REGISTRY: Record<string, TableEntry> = {
   desk_note_cross_meta: { class: "ops", reason: "one-off markers of the desk note crossing between paired desks (backfill ran)", columns: "key value" },
   uptime_probes: { class: "ops", reason: "uptime probe log per address: time, ok, status, latency", columns: "at url ok status ms" },
   job_worlds: { class: "ops", reason: "routing switch: whether a paid world's wakes go to its own job server, who set it and why", columns: "tenant_id jobs why by at" },
+  job_chat_messages: { class: "ops", reason: "the chat of a customer workspace on its own job servers (its lines; each turn answered there by its own AI), runtime plumbing like a T3 thread's messages", columns: "id chat_key seq role text page crid answers at" },
   vault_approvals: { class: "ops", reason: "one-time vault unlock approvals per site and slot: token, state, expiry", columns: "id token at run_id persona_id site slot login task test state via sent expires_at answered_at unlock_until" },
   vault_events: { class: "ops", reason: "audit log of vault approvals and unlocks", columns: "id at approval_id run_id site slot event detail" },
   wa_pictures: { class: "ops", reason: "the newest pictures WhatsApp alerts linked, served behind the console login", columns: "id at png" },

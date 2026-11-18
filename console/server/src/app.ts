@@ -72,6 +72,7 @@ import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, parsePursuits, priorityLines } from "./pursuits.js";
 import { mapSection, productFor, readMaps, sameRepoName, totemView } from "./totemMap.js";
+import { wheelTrackers } from "./trackers.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
@@ -1274,6 +1275,7 @@ export function createApp(
   // one repo-desk thread per milestone (same engine, key milestone:<id>), in the milestone repo's T3 project.
   const milestoneChats = createMilestoneChats({
     db,
+    jobRoute, // a customer workspace on its own job servers chats there
     store,
     t3: cycleOpts.enabled ? cycleOpts.t3 : undefined,
     dispatcher: cycleOpts.dispatcher,
@@ -1415,6 +1417,7 @@ export function createApp(
   const tenancy = hostedPlugs.find((p) => p.tenancy)?.tenancy?.();
   const worldDesks: WorldDesksArea = tenancy?.worldDesks({
     db,
+    jobRoute, // a customer workspace on its own job servers chats there
     store,
     t3: cycleOpts.enabled ? cycleOpts.t3 : undefined,
     dispatcher: cycleOpts.dispatcher,
@@ -1922,6 +1925,11 @@ export function createApp(
   });
   api.get("/totems/:product/:totem", (c) => {
     const v = totemView({ maps: totemMaps(), product: c.req.param("product"), totem: c.req.param("totem"), repoDir: (r) => resolveRepo(read.reposRoot, r)?.path, board: () => launchBoard?.board() ?? null });
+    return v ? c.json(v) : c.json({ error: "not_found" }, 404);
+  });
+  // a wheel's tracker tables (shortlists: entries, status, columns), the frame's, its product's and its own.
+  api.get("/trackers/:wheel", (c) => {
+    const v = wheelTrackers(totemHome(), c.req.param("wheel"));
     return v ? c.json(v) : c.json({ error: "not_found" }, 404);
   });
   api.get("/worker-rules", async (c) => {
@@ -2809,6 +2817,12 @@ export function createApp(
     }
     return v;
   };
+  // a customer workspace on its own job servers never uses our voice key (OpenAI calls and note transcripts): its
+  // Call runs on the browser's own speech and its chat on its own AI (desk/jobChat.ts), so our call and note routes refuse it.
+  const ownVoice = (world: string | undefined) => !!world && world !== DEFAULT_TENANT && !!jobRoute?.handles(world);
+  const OWN_VOICE = { error: { code: "own_voice", message: "This workspace talks on its own server and AI: its Call uses your browser's own speech, on the Chat page." } };
+  api.use("/tenants/:id/desk/voice/*", async (c, next) => (c.req.method !== "GET" && ownVoice(c.req.param("id")) ? c.json(OWN_VOICE, 409) : next()));
+  api.use("/milestones/:id/voice/*", async (c, next) => (c.req.method !== "GET" && ownVoice(milestoneWorld(db, c.req.param("id") ?? "")) ? c.json(OWN_VOICE, 409) : next()));
   mountVoice(api, voice, { world: () => store.tenant, worldVoice });
   mountCampaignVoice(api, campaignVoice);
   // Play on a desk reply speaks it in the team's local voice on the worker server (free); down = the browser's best voice.

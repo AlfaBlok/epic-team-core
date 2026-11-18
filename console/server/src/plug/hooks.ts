@@ -33,6 +33,18 @@ export interface JobRoute {
   base: string;
   /** Hand one wake to a job server of the world; resolves when the job ended (never throws). */
   start(i: JobStart): Promise<JobEnd>;
+  /**
+   * one chat turn of the world on a job server of its own with its own AI (never our seats): the prompt is the
+   * desk's seed and the chat so far; resolves with the agent's reply text (never throws). None = this console has no chat route.
+   */
+  chat?(i: JobChatTurn): Promise<JobEnd & { reply?: string }>;
+}
+export interface JobChatTurn {
+  /** the turn's id (a safe name: letters, digits, `._-`). */
+  turnId: string;
+  world: string;
+  personaId: string;
+  prompt: string;
 }
 export interface JobStart {
   runId: string;

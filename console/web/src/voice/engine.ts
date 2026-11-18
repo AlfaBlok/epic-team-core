@@ -72,6 +72,8 @@ export interface EngineView {
   listening?: boolean;
   /** what happened while the phone was locked (line held, reconnected, or ended), said on the call screen. */
   notice?: string;
+  /** a section call: the card the voice is on ("card 3 of 14"), its title and its evidence link, shown on his screen. */
+  onCard?: { id: string; place: string; title?: string; link?: { label: string; url: string } };
 }
 
 /** The console calls this engine makes (fetch by default; tests fake them). */
@@ -83,6 +85,8 @@ export interface CallFocus {
   section: string;
   cards: Record<string, unknown>[];
   press?: (p: { id: string; kind: string; button: string; words?: string }) => Promise<string>;
+  /** show this card on his screen (scroll to it, mark it) while the voice talks about it. */
+  show?: (id: string) => void;
 }
 
 export interface VoiceApi {
@@ -313,6 +317,7 @@ export class CallEngine {
   async start(o: { notice?: string; resumed?: boolean; focused?: boolean } = {}): Promise<void> {
     if (this.v.phase === "starting" || this.v.phase === "connecting" || this.v.phase === "live") return;
     if (!o.focused && !o.resumed) this.focus = undefined;
+    this.set({ onCard: undefined });
     this.droppedAway = this.away = undefined;
     this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice });
     try {
@@ -649,7 +654,17 @@ export class CallEngine {
         } else if (CONSOLE_TOOLS.has(c.name) && this.api.tool) {
           // the inbox walk; the console keeps which card he is on.
           const args = JSON.parse(c.arguments || "{}") as Record<string, unknown>;
-          const r = (await this.api.tool(id, c.name, args)) as { place?: string; press?: { id: string; kind: string; button: string; words?: string; title?: string } };
+          const r = (await this.api.tool(id, c.name, args)) as { place?: string; id?: string; press?: { id: string; kind: string; button: string; words?: string; title?: string } };
+          if (r?.id && this.focus) {
+            // the card he is on shows on his screen, with its evidence, while the voice talks about it.
+            const card = this.focus.cards.find((x) => x.id === r.id) as { title?: string; link?: { label: string; url: string } } | undefined;
+            this.set({ onCard: { id: r.id, place: r.place ?? "", ...(card?.title ? { title: card.title } : {}), ...(card?.link ? { link: card.link } : {}) } });
+            try {
+              this.focus.show?.(r.id);
+            } catch {
+              /* the page is gone: the widget still shows the card */
+            }
+          }
           if (r?.press) {
             // the console checked his yes and the button; the page presses it as his own button would.
             const press = this.focus?.press;

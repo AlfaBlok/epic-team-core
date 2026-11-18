@@ -113,6 +113,8 @@ export function inboxPack(cards: InboxCard[], objectives?: string): string {
 /** Where the walk is: `pos` = the card he is on, 1-based (0 = not started). */
 export interface WalkStep {
   place: string;
+  /** the card's id, so the page shows that card (its evidence) while the voice talks about it. */
+  id?: string;
   pos: number;
   total: number;
   card?: string;
@@ -127,12 +129,12 @@ export function walk(cards: InboxCard[], pos: number, name: InboxToolName, args:
   if (name === "next_card") {
     const next = pos + 1;
     if (next > total) return { place: `past the last of ${total}`, pos: total, total, done: true, note: `That was the last card (${total} of ${total}). Say so in one line and ask if there is anything else.` };
-    return { place: `card ${next} of ${total}`, pos: next, total, card: cardText(cards[next - 1]), note: "Say its place, what it is and the one thing it asks him, in two or three short sentences, then stop." };
+    return { place: `card ${next} of ${total}`, id: cards[next - 1].id, pos: next, total, card: cardText(cards[next - 1]), note: "Say its place, what it is and the one thing it asks him, in two or three short sentences, then stop." };
   }
   const n = Number(args.number);
   const at = Number.isInteger(n) && n !== 0 ? (n < 0 ? Math.max(1, pos + n) : n) : Math.max(1, pos);
   if (at > total) return { place: `there is no card ${at}`, pos, total, note: `There are only ${total} cards. Tell him, and which card he is on${pos ? ` (${pos})` : ""}.` };
-  return { place: `card ${at} of ${total}`, pos: at, total, card: cardText(cards[at - 1]), note: "This is the whole card: say what he asked for from it, simply, without codes or links." };
+  return { place: `card ${at} of ${total}`, id: cards[at - 1].id, pos: at, total, card: cardText(cards[at - 1]), note: "This is the whole card: say what he asked for from it, simply, without codes or links." };
 }
 
 /** a section call's cards: at most this many (the section he pressed; the console checks them). */
@@ -149,7 +151,7 @@ export function focusRule(section: string, total: number): string {
   return [
     `# This call is about one part of ${who}'s inbox: ${section} (${total} card${total === 1 ? "" : "s"})`,
     `${who} pressed the phone button on "${section}" to clear it with you, one card at a time. The cards are listed below in the order he sees them. You already know them: answer about them at once, with no tool call, and keep every answer short.`,
-    `Go one by one: when he says go, next, start or yes at the start, call next_card and say the card in two or three short sentences (what it is, what it asks him, the team's recommendation when there is one); then stop and let him decide. read_card gives one card in full when he asks.`,
+    `Guide him one by one: when he says go, next, start or yes at the start, call next_card. The page shows that card on his screen with its evidence as you reach it, so he sees what you talk about: say "it's on your screen", then the card in two or three short sentences (what it is, the choices it gives him, the team's recommendation when there is one), then ask him what he wants and stop. When he has answered, offer the next one. read_card gives one card in full when he asks.`,
     `Pressing his buttons (press_card): only the buttons a card lists as yours to press. Before you press, say back in one line what you will press on which card ("Mark the voice call card complete?") and press only after his spoken yes; then call press_card with that button (and his words for a button ending in "…") and confirmed=true, say it is done in a few words, and offer the next card. Never press on a maybe, never on your own idea, never twice.`,
     `Anything else he asks for (a change, a question about the work, a card with no button for you, a new task) goes to the desk with ask_the_desk, naming the card's code from the list, then carry on with the cards. Do not do the desk's work on the call.`,
     `When the last card is done, say the section is clear in one line and ask if there is anything else.`,
@@ -177,6 +179,7 @@ export function focusGreeting(f: InboxFocus): string {
 /** What the voice gets back from press_card: the press for the page to make, or why not. Pure (the page presses). */
 export interface PressStep {
   place: string;
+  id?: string;
   pos: number;
   total: number;
   press?: { id: string; kind: InboxCard["kind"]; button: string; words?: string; title: string };
@@ -190,11 +193,12 @@ export function pressStep(cards: InboxCard[], pos: number, args: { number?: unkn
   const card = at >= 1 && at <= total ? cards[at - 1] : undefined;
   if (!card) return { place: "no card", pos, total, note: "No card is open. Say which card, or call next_card first." };
   const place = `card ${at} of ${total}`;
-  if (args.confirmed !== true) return { place, pos: at, total, note: "Not pressed: say back what you will press and press only after his spoken yes (confirmed=true)." };
+  const id = card.id;
+  if (args.confirmed !== true) return { place, id, pos: at, total, note: "Not pressed: say back what you will press and press only after his spoken yes (confirmed=true)." };
   const want = String(args.button ?? "").trim().toLowerCase().replace(/[….]+$/, "");
   const button = (card.buttons ?? []).find((b) => b.toLowerCase().replace(/[….]+$/, "") === want);
-  if (!button) return { place, pos: at, total, note: card.buttons?.length ? `Not pressed: that is not one of his buttons on this card (${card.buttons.join(" · ")}). Ask him which.` : "Not pressed: this card has no button you may press. Pass his answer to the desk with ask_the_desk." };
+  if (!button) return { place, id, pos: at, total, note: card.buttons?.length ? `Not pressed: that is not one of his buttons on this card (${card.buttons.join(" · ")}). Ask him which.` : "Not pressed: this card has no button you may press. Pass his answer to the desk with ask_the_desk." };
   const w = typeof args.words === "string" ? args.words.trim() : "";
-  if (takesWords(button) && !w) return { place, pos: at, total, note: `Not pressed: ${button} needs his words. Ask him what to say.` };
-  return { place, pos: at, total, press: { id: card.id, kind: card.kind, button, ...(takesWords(button) ? { words: w.slice(0, 4000) } : {}), title: card.title }, note: "The page presses it now; say it is done in a few words once the result says so." };
+  if (takesWords(button) && !w) return { place, id, pos: at, total, note: `Not pressed: ${button} needs his words. Ask him what to say.` };
+  return { place, id, pos: at, total, press: { id: card.id, kind: card.kind, button, ...(takesWords(button) ? { words: w.slice(0, 4000) } : {}), title: card.title }, note: "The page presses it now; say it is done in a few words once the result says so." };
 }
