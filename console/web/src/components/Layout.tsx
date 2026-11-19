@@ -350,9 +350,14 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // each fold opens by itself on one of its own pages, and a press always opens or folds it.
   const [toolsShown, toggleTools] = useFold(TOOLS_STORE, here(tools));
   const [settingsShown, toggleSettings] = useFold(SETTINGS_STORE, here(settings));
+  // his objectives' scores still on their way: the menu is drawn, only the objectives' place shows a quiet placeholder
+  // until they arrive (the menu never waits on GET /api/scorecards).
+  const objectivesLoading = shows("goalSets") && !sets.data && !sets.error;
   const consoleMenu = (
     <>
-      {hasObjectives ? (
+      {objectivesLoading ? (
+        <ObjectivesLoading />
+      ) : hasObjectives ? (
         <SidebarGoalSetsOf
           data={sets.data}
           onNavigate={onNavigate}
@@ -393,9 +398,10 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   // drawn at once (the owner 18 Nov, vn_1dcd875a: "Fix the loading of the fucking sidebar"): one quiet skeleton until
   // every list the menu shows is in, then the whole menu in one frame, never entries arriving one under another.
+  // The objectives' scores are not waited on (a slow /api/scorecards held the whole menu on the phone): their
+  // place keeps its own placeholder (ObjectivesLoading) and fills when they arrive.
   const waitingOn = [
     !allMilestones && "milestones",
-    !sets.data && !sets.error && "scorecards",
     (!statuses || statuses.loading) && "status",
     allCards === undefined && "review-items",
     !pinnedPages.data && !pinnedPages.error && "pinned",
@@ -483,7 +489,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
       {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
       {/* every sidebar entry is a goal set, nested, All goal sets on top; both skins. */}
-      {shows("goalSets") && <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />}
+      {shows("goalSets") && (objectivesLoading ? <ObjectivesLoading /> : <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />)}
 
       {/* the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
           microphone. The other things are in the sidebar." So every other page sits here, below the goal sets, in his
@@ -630,6 +636,17 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         }}
       />}
     </AtOnce>
+    </div>
+  );
+}
+
+/** the objectives' place in the menu while their scores are on their way: a few quiet lines, the same height as the list. */
+export function ObjectivesLoading() {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5" data-testid="sidebar-objectives-loading" aria-label="Loading objectives" aria-busy>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="h-8 animate-pulse rounded-md bg-muted/50" />
+      ))}
     </div>
   );
 }

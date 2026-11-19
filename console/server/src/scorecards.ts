@@ -569,7 +569,7 @@ export function buildScorecards(
 /** Reads spine files from the repos root (the same checkouts the pursuits read), cached by mtime. */
 export function createSpineFileReader(repoDir: (name: string) => string | undefined) {
   const cache = new Map<string, { mtime: number; text: string }>();
-  return (repo: string, rel: string): string | undefined => {
+  const read = (repo: string, rel: string): string | undefined => {
     const dir = repoDir(repo);
     // spines, and the repo's view-only folds file (the tree draws a folded epic inside its fold parent).
     if (!dir || rel.includes("..") || !(rel.endsWith(".md") || rel === FOLDS_FILE)) return undefined;
@@ -585,6 +585,19 @@ export function createSpineFileReader(repoDir: (name: string) => string | undefi
       return undefined;
     }
   };
+  /** every file read so far with its mtime now (a changed spine changes the line): the kept scorecards' change check. */
+  const signature = (): string => {
+    const out: string[] = [];
+    for (const abs of cache.keys()) {
+      try {
+        out.push(`${abs}@${fs.statSync(abs).mtimeMs}`);
+      } catch {
+        out.push(`${abs}@gone`);
+      }
+    }
+    return out.join("|");
+  };
+  return Object.assign(read, { signature });
 }
 
 /** a work item's colour: done (or finished, waiting for review) green, moving amber, stuck red, unknown grey. */

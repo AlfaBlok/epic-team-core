@@ -85,7 +85,8 @@ import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as par
 import { worldRepos } from "./worldRepos.js";
 import { readHisWords } from "./desk/hisObjectives.js";
 import { objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
-import { SCORECARD_DIR, applyLiveKeyResults, buildScorecards, createGreenHistory, createSpineFileReader, createWorkFinder } from "./scorecards.js";
+import { keptJson, sendPrepared } from "./keptJson.js";
+import { SCORECARD_DIR, type ScorecardsBody, applyLiveKeyResults, buildScorecards, createGreenHistory, createSpineFileReader, createWorkFinder } from "./scorecards.js";
 import { createOneOffs } from "./oneOffs.js";
 import { createOutcomes, mountOutcomes, outcomesIn, OutcomeError } from "./outcomes.js";
 import { setOutcomeDefsDir } from "./outcomeDefs.js";
@@ -1857,7 +1858,11 @@ export function createApp(
   const scorecardWork = createWorkFinder((name) => resolveRepo(read.reposRoot, name)?.path, scorecardSpine);
   // rows turned green today and this week: a small file beside the console's database (launch-board.json's folder).
   const greenHistory = createGreenHistory(process.env.CONSOLE_GOAL_SETS_HISTORY || (opts.launchBoard?.cacheFile ? path.join(path.dirname(opts.launchBoard.cacheFile), "goal-sets-history.json") : undefined));
-  const scorecardsNow = async () => applyLiveKeyResults(buildScorecards(withMilestones(await pursuits.get(), store, pursuitEffort), scorecardSpine, { file: scorecardFile, work: scorecardWork, homeRepo: homeRepo() }));
+  // one build shared by every reader for 20 s (the kept answer below, the idle marks, the objectives block, key results):
+  // each was its own full build, about 0.25 s of CPU on a quiet host, seconds on a busy one.
+  const scorecardsBuilt = answerCache<ScorecardsBody>({ ttlMs: 20_000 });
+  const scorecardsNow = () =>
+    scorecardsBuilt.get("home", async () => applyLiveKeyResults(buildScorecards(withMilestones(await pursuits.get(), store, pursuitEffort), scorecardSpine, { file: scorecardFile, work: scorecardWork, homeRepo: homeRepo() })));
   // objectives below green, idle or not: the idle pill, and the Delivery Manager's regular wake reads its milestone's.
   const idleWatch = createIdleWatch({
     scorecards: scorecardsNow,
@@ -1875,12 +1880,37 @@ export function createApp(
   });
   objectivesOf = (m) => idleWatch.forMilestone(m.id);
   idleWatch.mount(api);
-  // the home world's scorecards, read by every open tab, built once per 10 s (a stale one answers while it refreshes).
-  const homeScorecards = answerCache<unknown>({ ttlMs: 10_000, staleMs: 60_000 });
+  // the home world's scorecards, read by every open tab and the sidebar: kept ready in the background, so
+  // the request only sends bytes. Rebuilt when a spine, a scorecard file or the objectives file changes (checked every
+  // 15 s, at most one build a minute) and every 3 minutes whatever changed (milestones, asks, idle marks).
+  const keptScorecards = keptJson({
+    build: async () => greenHistory(await idleWatch.decorate(await scorecardsNow())),
+    checkMs: 15_000,
+    minGapMs: 60_000,
+    everyMs: 3 * 60_000,
+    signature: () => {
+      const home = pursuits.homeDir();
+      const inHome = (rel: string) => {
+        try {
+          return `${rel}@${fs.statSync(path.join(home ?? "", rel)).mtimeMs}`;
+        } catch {
+          return `${rel}@none`;
+        }
+      };
+      let cards: string[] = [];
+      try {
+        cards = home ? fs.readdirSync(path.join(home, SCORECARD_DIR)).sort().map((f) => inHome(`${SCORECARD_DIR}/${f}`)) : [];
+      } catch {
+        /* no scorecards folder */
+      }
+      return [inHome("docs/pursuits.json"), ...cards, scorecardSpine.signature()].join("|");
+    },
+    log: (m) => console.warn(m),
+  });
   api.get("/scorecards", async (c) => {
     const w = connectedWorld();
     if (w) return c.json(await worldScorecards(w));
-    return c.json(await homeScorecards.get("home", async () => greenHistory(await idleWatch.decorate(await scorecardsNow()))));
+    return sendPrepared(c, await keptScorecards.get());
   });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.
@@ -1940,7 +1970,7 @@ export function createApp(
       })),
     );
   // his order and his park switch, one commit each in the code repo (the file is the record, root L-45).
-  mountPursuitWrites(api, { writer: spine, repo: () => pursuits.homeDir(), who: () => ownerName(), wrote: (dir) => (pursuits.clear(), dropSpines(dir)) });
+  mountPursuitWrites(api, { writer: spine, repo: () => pursuits.homeDir(), who: () => ownerName(), wrote: (dir) => (pursuits.clear(), dropSpines(dir), scorecardsBuilt.clear(), void keptScorecards.refresh()) });
   // the team's own inbox cards (a digest per scorecard a day, strategic ideas, goal conversations), docs/inbox/cards.json.
   // a card world's (the social world's) idea cards live in one of its own repos; the world is already a card world's
   // (code-chosen), so its repos are looked up unscoped: the owner's inbox reads them from the home world.
@@ -2187,7 +2217,7 @@ export function createApp(
       const own = it.repo ? resolveRepo(read.reposRoot, it.repo)?.path : undefined;
       const dir = pursuitsDirFor(own, pursuits.homeDir());
       const h = await putFirst({ dir, objective: it.putFirst.objective, ...(it.code ? { code: it.code } : {}), by: ownerName(), words: r.text }, spine);
-      if (h.ok && dir) (pursuits.clear(), dropSpines(dir));
+      if (h.ok && dir) (pursuits.clear(), dropSpines(dir), scorecardsBuilt.clear(), void keptScorecards.refresh());
       return h;
     },
     invalidate: (dir) => dropSpines(dir), deskChat: {

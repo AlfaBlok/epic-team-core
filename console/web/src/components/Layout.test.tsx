@@ -54,6 +54,29 @@ describe("Sidebar (M2-7: long titles stay inside the sidebar)", () => {
   });
 });
 
+describe("Sidebar never waits on the objectives' scores", () => {
+  it("draws the menu while GET /api/scorecards has not answered, a placeholder in the objectives' place, then fills them", async () => {
+    let answer!: (v: never) => void;
+    const spy = vi.spyOn(api, "listScorecards").mockReturnValue(new Promise((r) => (answer = r)) as never);
+    try {
+      render(
+        <MemoryRouter>
+          <SidebarNav />
+        </MemoryRouter>,
+      );
+      // the menu is drawn (Inbox among it) with the scores still on their way
+      await waitFor(() => expect(document.querySelector("[data-waiting-on]")).toBeNull(), { timeout: 3000 });
+      expect(screen.getByTestId("nav-inbox")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-objectives-loading")).toBeTruthy();
+      answer({ nodes: [] } as never);
+      await waitFor(() => expect(screen.queryByTestId("sidebar-objectives-loading")).toBeNull());
+      expect(await screen.findByRole("button", { name: "Add project" })).toBeTruthy();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("Sidebar inbox count (T13-S13: replaces the M2-10 non-green count)", () => {
   it("shows the server status's needsYou per milestone, nothing at 0, never the open-node count", async () => {
     const a = await api.createMilestone({ title: "Waits", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam" });
