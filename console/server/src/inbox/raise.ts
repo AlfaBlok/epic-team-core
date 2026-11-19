@@ -7,7 +7,7 @@ import type { DB } from "../db.js";
 import type { Milestone, Store } from "../store.js";
 import { DEFAULT_OWNER, ownerOf } from "../tenancy/owner.js";
 import { askKindOf, parseAsks } from "./asks.js";
-import { addToWaitingField, appendUnderWaiting, dropFromWaitingField, oneLine, sameText, type SpineWrite, type SpineWriter } from "./spineWrite.js";
+import { addToWaitingField, appendUnderWaiting, dropFromWaitingField, oneLine, replacementIn, sameText, type SpineWrite, type SpineWriter } from "./spineWrite.js";
 
 export { addToWaitingField, dropFromWaitingField };
 
@@ -153,8 +153,13 @@ export async function retireAsk(d: RaiseDeps, m: Milestone, path: string, code: 
       if (!ask) return { skip: `the ask ${code} is not open in ${path} any more` };
       const raw = text.split("\n");
       if (onlyConsoleWritten && !raw[ask.line!].includes("the console wrote this line")) return { skip: `the ask ${code} was not raised through the console API, so only its owner takes it out` };
-      raw.splice(ask.line!, 1);
-      return { text: dropFromWaitingField(raw.join("\n"), code), msg: `Ask ${code} moot: ${oneLine(why).slice(0, 80)} (console)`, body: `The agent-team console took the open ask ${code} out of ${path}: ${oneLine(why)}.` };
+      // an ask replaced by another keeps one line naming it (`[superseded <code> <date> by <code>]`, the
+      // skill's format), so an answer pressed on its card a moment later lands on the ask that replaced it
+      const by = replacementIn(why);
+      const tag = /^(\s*[-*]\s+)\[ask\b[^\]]*\](.*)$/i.exec(raw[ask.line!]!);
+      if (by && by !== code && tag) raw[ask.line!] = `${tag[1]}[superseded ${code} ${new Date().toISOString().slice(0, 10)} by ${by}]${tag[2]}`;
+      else raw.splice(ask.line!, 1);
+      return { text: dropFromWaitingField(raw.join("\n"), code), msg: `Ask ${code} moot: ${oneLine(why).slice(0, 80)} (console)`, body: `The agent-team console took the open ask ${code} out of ${path}: ${oneLine(why)}.${by && by !== code && tag ? ` Its line now reads superseded by ${by}, so an answer to ${code} lands on ${by}.` : ""}` };
     },
   });
   if (res.status === "written") d.invalidate?.(repo.path);

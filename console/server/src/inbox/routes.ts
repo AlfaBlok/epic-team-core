@@ -1317,8 +1317,17 @@ export function mountInbox(
     if (!item) return err(c, 404, "not_found", `waiting item ${id} not found (answered already, or the spine changed)`);
     const own = credentialWorld(); // as for /respond
     if (own && milestoneWorld(db, item.milestoneId) !== own) return err(c, 404, "not_found", `waiting item ${id} not found in this world`);
-    if (item.source !== "ask" || !item.path) return err(c, 400, "validation_error", "only an ask written in a spine can be snoozed (the date goes on its line)");
     if (item.state !== "open") return err(c, 409, "conflict", "this ask is not open any more");
+    if (item.source !== "ask" || !item.path) {
+      // a card with no ask line (a red node, a free-text Waiting on): the console keeps the date and the inbox
+      // hides the card until then (inbox/consoleSnooze.ts); before, the press failed (3 of his on 18 Nov 20:34Z)
+      const by = ownerOf(o.db, item.milestoneId).handle;
+      o.deps.store.setConsoleSnooze(item.id, until, by);
+      const { snoozedUntil: _s, ...awake } = item;
+      const back = until ? undefined : pendingItems([awake as WaitingItem])[0];
+      o.readModel?.patch({ kind: "snoozed", id: item.id, until: until ?? null, ...(back ? { item: back } : {}) });
+      return c.json({ id: item.id, snoozedUntil: until ?? null, kept: "console" }, 200);
+    }
     const repo = (item.repo ? resolveRepo(o.deps.reposRoot, item.repo) : undefined) ?? repoDirOf(item.milestoneId).repo;
     if (!repo) return err(c, 409, "conflict", `no checkout of “${item.repo ?? "?"}” under the console's repos root: nothing written`);
     const target = { id: item.id, source: "ask" as const, question: item.question, path: item.path, ...(item.code ? { code: item.code } : {}), ...(item.row ? { row: item.row } : {}), ...(item.line !== undefined ? { line: item.line } : {}) };

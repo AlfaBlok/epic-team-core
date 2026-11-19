@@ -927,6 +927,9 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
   // read above like every other ask; the needs_jordi table is only the log of what was raised and is never read here.
   // the world's owner when it is not the owner, for display (the home world's items are unchanged).
   if (worldOwner) for (const it of out) it.ownerName = worldOwner.name;
+  // a card with no ask line he snoozed: the console keeps the date (inbox/consoleSnooze.ts)
+  const kept = d.store.consoleSnoozes?.();
+  if (kept?.size) for (const it of out) if (it.source === "heuristic" && !it.snoozedUntil && kept.has(it.id)) it.snoozedUntil = kept.get(it.id)!;
   return { items: out, held };
 }
 

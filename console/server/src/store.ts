@@ -10,6 +10,7 @@ import type { HostRunRow } from "./runHostRow.js";
 import { guardMilestoneRepo, repoScopeOf, worldClaims } from "./tenancy/repoScope.js";
 import { personaForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
 import { type HostId, mainHost, ownerName, workerHost } from "./identity.js";
+import { consoleSnoozes, setConsoleSnooze } from "./inbox/consoleSnooze.js";
 
 export interface Milestone {
   id: string;
@@ -590,6 +591,9 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
     worldOfMilestone: tenantOfMilestone,
     /** the world a persona belongs to (any tenant). */
     worldOfPersona: tenantOfPersona,
+    /** snoozes of cards with no ask line, kept by the console (inbox/consoleSnooze.ts), by item id. */
+    consoleSnoozes: (now?: number) => consoleSnoozes(raw, now),
+    setConsoleSnooze: (id: string, until: string | undefined, by?: string) => setConsoleSnooze(raw, id, until, by),
 
     // Tenants and hosts (read-only here: S5 creates a social world repo, S10 adds boxes)
     listTenants: () =>

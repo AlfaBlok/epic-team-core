@@ -105,7 +105,14 @@ export const feedbackCell = (code: string | undefined, date: string, words: stri
 };
 
 export type Edit =
-  | { how: "flip" | "append"; text: string; line: number; code?: string; /** the row feedback reopened, and its status before. */ reopened?: { row: string; was: string } }
+  | {
+      how: "flip" | "append";
+      text: string;
+      line: number;
+      code?: string;
+      /** the row feedback reopened, and its status before. */ reopened?: { row: string; was: string };
+      /** the ask answered was replaced; his answer went on this code, the one that replaced it. */ movedFrom?: string;
+    }
   | { how: "already"; line: number }
   | { how: "missing" };
 
@@ -117,6 +124,19 @@ const isWaitingHeading = (l: string) => {
 
 /** Question text as parseAsks stores it (inline markup stripped), whitespace-collapsed, for comparing. */
 export const sameText = (s: string) => stripInline(s).replace(/\s+/g, " ").trim();
+
+/** a replaced ask's line (`[superseded <code> <date> by <code>]`, the skill's format): the code that replaced it. */
+const SUPERSEDED_LINE = /^\s*[-*]\s+\[superseded\s+([^\s\]]+)\b[^\]]*?\bby\s+(?:[\w.-]+\/)?([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-A\d+)\s*\]/i;
+export function replacedBy(text: string, code: string): string | undefined {
+  for (const l of text.split("\n")) {
+    const m = SUPERSEDED_LINE.exec(l);
+    if (m && m[1] === code) return m[2];
+  }
+  return undefined;
+}
+
+/** an ask code a retire reason names as its replacement (`replaced by E907-A2, which …`). */
+export const replacementIn = (why: string): string | undefined => /\breplaced by\s+(?:[\w.-]+\/)?([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-A\d+)\b/i.exec(why)?.[1];
 
 /** Apply the answer to the spine text: flip the ask's line, or (non-ask item) append an `[answered]` line under `## Waiting on`. */
 export function applyAnswer(text: string, t: AnswerTarget, answer: string, date: string, owner: string = DEFAULT_OWNER, feedback = false): Edit {
@@ -132,7 +152,18 @@ export function applyAnswer(text: string, t: AnswerTarget, answer: string, date:
     const pick = open.find((a) => a.line === t.line) ?? open[0];
     if (!pick) {
       const done = same.find((a) => a.state === "answered");
-      return done ? { how: "already", line: done.line ?? 0 } : { how: "missing" };
+      if (done) return { how: "already", line: done.line ?? 0 };
+      // the ask was replaced while he answered (19 Nov: replaced 3 min before the answer): the
+      // replaced line names the new code, and his answer lands on that ask (a chain followed a few steps, never in a loop)
+      const seen = new Set<string>(t.code ? [t.code] : []);
+      for (let by = t.code ? replacedBy(text, t.code) : undefined; by && !seen.has(by) && seen.size < 6; by = replacedBy(text, by)) {
+        seen.add(by);
+        const next = asks.find((a) => a.code === by && a.state === "open");
+        if (!next) continue;
+        const e = applyAnswer(text, { ...t, code: by, question: next.question, ...(next.line !== undefined ? { line: next.line } : {}), row: next.row ?? undefined }, answer, date, owner, feedback);
+        return e.how === "flip" ? { ...e, movedFrom: t.code } : e;
+      }
+      return { how: "missing" };
     }
     const flipped = flipAskLine(raw[pick.line!], answer, date, owner, feedback);
     if (!flipped) return { how: "missing" };
@@ -1235,6 +1266,7 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     let flip: { before: string; after: string } | undefined;
     let given: { msg: string; body: string } | undefined;
     let reopened: { row: string; was: string } | undefined;
+    let movedFrom: string | undefined;
     if ("edit" in o) {
       const e = o.edit(text, date);
       // a checkout not fetched (it synced moments ago) may be behind what the press saw: before an edit is
@@ -1269,6 +1301,7 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
       commitCode = edit.how === "flip" ? edit.code : undefined;
       if (edit.how === "flip") flip = { before: text.split("\n")[edit.line].replace(/\r$/, ""), after: next.split("\n")[edit.line].replace(/\r$/, "") };
       reopened = edit.reopened;
+      movedFrom = edit.how === "flip" ? edit.movedFrom : undefined;
     }
 
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -1299,7 +1332,9 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
       return skip(`writing would change more than ${rel} (${changed.join(", ")}); reverted`);
     }
 
-    const { msg, body } = given ?? answerMessage(o as WriteInput | RevertInput, mode, rel, commitCode, reopened);
+    const said = given ?? answerMessage(o as WriteInput | RevertInput, mode, rel, commitCode, reopened);
+    // an answer to a replaced ask, landed on the ask that replaced it: the commit says so
+    const { msg, body } = movedFrom ? { msg: `${said.msg} [his answer to ${movedFrom}, which ${commitCode} replaced]`, body: `${said.body}\n\n${movedFrom} was replaced by ${commitCode} before this answer was written; the answer lands on ${commitCode}.` } : said;
     const w = await commitAndPush([rel], msg, body, flip);
     return reopened && w.status === "written" ? { ...w, reopened } : w;
   }

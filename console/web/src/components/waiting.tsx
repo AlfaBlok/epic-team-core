@@ -756,13 +756,17 @@ export function SnoozingLinesFor({ items }: { items: { id: string; label?: strin
   const { entries } = useSnoozes();
   const lines = items.flatMap((i) => {
     const e = entries.get(i.id);
-    return e ? [{ id: i.id, done: !!e.done, text: `${i.label || e.label} until ${snoozeDay(e.until)}` }] : [];
+    return e ? [{ id: i.id, done: !!e.done, text: `${i.label || e.label} until ${snoozeDay(e.until)}`, ...(e.note ? { note: `${i.label || e.label}: ${e.note}` } : {}) }] : [];
   });
   if (!lines.length) return null;
   return (
     <div className="mb-3 grid grid-cols-1 gap-1" data-testid="snoozing">
       {lines.map((l) =>
-        l.done ? (
+        l.done && l.note ? (
+          <div key={l.id} role="status" className="text-xs text-muted-foreground" data-testid="snoozed-line">
+            {l.note}
+          </div>
+        ) : l.done ? (
           <div key={l.id} role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="snoozed-line">
             <Check className="size-3 text-emerald-600" aria-hidden /> Snoozed {l.text}
           </div>

@@ -12,7 +12,8 @@ import { unmarkSent, useSentVersion } from "@/lib/sentRows";
  * line; if the write fails the card comes back with the reason on its Snooze button. Module state, so it outlives the
  * card (the card unmounts the moment it hides) and every list that shows the ask agrees.
  */
-type Entry = { until: string; label: string; done?: boolean };
+/** `note`: what the console said instead of a snooze (the card had already left review). */
+type Entry = { until: string; label: string; done?: boolean; note?: string };
 let entries = new Map<string, Entry>();
 let errors = new Map<string, string>();
 /** Asks just unsnoozed here: open again before the server's status batch (refreshed in the background) lists them. */
@@ -55,13 +56,13 @@ export const snoozeActive = (until: string | undefined, now = Date.now()) =>
   !!until && (until.length === 10 ? until > new Date(now).toISOString().slice(0, 10) : Date.parse(until) > now);
 
 /** The hide-at-once, spinner, "Snoozed" line and error-on-failure of one snooze write (asks and, review cards). */
-async function run(id: string, until: string, label: string, write: () => Promise<{ snoozedUntil?: string | null }>): Promise<void> {
+async function run(id: string, until: string, label: string, write: () => Promise<{ snoozedUntil?: string | null; moot?: boolean; message?: string }>): Promise<void> {
   entries = set(entries, id, { until, label });
   errors = set(errors, id, undefined);
   emit();
   try {
     const r = await mutate(write, "inbox");
-    entries = set(entries, id, { until: r.snoozedUntil ?? until, label, done: true });
+    entries = set(entries, id, { until: r.snoozedUntil ?? until, label, done: true, ...(r.moot && r.message ? { note: r.message } : {}) });
     emit();
     setTimeout(() => {
       if (entries.get(id)?.done) {

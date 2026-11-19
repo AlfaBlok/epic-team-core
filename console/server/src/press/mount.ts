@@ -177,6 +177,10 @@ export interface PressMountOptions {
 
 /** presses that carry the owner's words (Changes wanted, Deny with a reason): never refused into nothing. */
 const WORDS_ROUTE = /\/review-items\/([^/?]+)\/(relaunch|deny)(?:\?|$)/;
+/** a review card's Snooze (or Park): on a card that already left review there is nothing left to hide. */
+const REVIEW_SNOOZE = /\/review-items\/[^/?]+\/snooze(?:\?|$)/;
+/** what a Snooze on a card that left review lands as, and what the card says at once. */
+export const LEFT_REVIEW = "This card had already left review, so there was nothing to snooze.";
 /** Text compared loosely (a status cell squares brackets and folds spaces). */
 const loose = (t: string) => t.replace(/[()[\]“”"]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 
@@ -505,6 +509,12 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
           if (kept.out !== undefined) out = kept.out;
           if (verdict.kind === "landed") status = 200;
         }
+      } else if (status === 404 && REVIEW_SNOOZE.test(req.path) && json(req.body ?? "").until !== null) {
+        // a Snooze on a card whose row left review (18 Nov 20:47Z): nothing to hide any more, so the press
+        // lands as that and the card says so, instead of a failed press. An Unsnooze (`until: null`) still says it failed.
+        verdict = { kind: "landed", note: `${LEFT_REVIEW} (${verdict.reason})` };
+        out = { moot: true, snoozedUntil: null, message: LEFT_REVIEW };
+        status = 200;
       }
     } else if (verdict.kind === "refused" && (status === 400 || status === 413 || status === 422) && WORDS_ROUTE.test(req.path)) {
       // the card refused his words as bad input after the press had already answered "saved" (2026-11-15 03:32-03:42Z:
