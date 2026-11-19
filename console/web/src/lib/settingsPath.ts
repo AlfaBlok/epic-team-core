@@ -42,6 +42,8 @@ function usePages(input: boolean): Page[] {
     { screen: "testers", to: "/feedback", label: "Voice feedback", what: "voice notes from testers and customers", testId: "op-feedback", input: false },
     { screen: "yourAi", to: "/your-ai", label: "Your AI", what: "the AI your team runs on", testId: "op-your-ai", input: true },
     { screen: "credits", to: "/credits", label: "Credits", what: "top up your credits", testId: "op-credits", input: true },
+    // the owner: "Can we have in the settings somewhere where those blocks are explicit"; each line leads to where its rule is changed.
+    { screen: "postingLimits", to: "/posting-limits", label: "Posting limits", what: "every rule that can stop a post", testId: "op-posting-limits", input: true },
     { screen: "browserAuth", to: "/auth", label: w.browserAuth, what: "sign the team browser in or out", testId: "op-browser-auth", input: true },
     { screen: "settings", to: `/${DASHBOARD_PATH}`, label: "Dashboard", what: "project cards, personas and activity", testId: "op-dashboard", input: false },
   ];
