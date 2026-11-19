@@ -19,7 +19,7 @@ import { homeRepo, ownerName, socialProduct } from "../identity.js";
  *   ---
  *   <the request in plain words>
  *
- * The receiving world's Delivery Manager reads its open notes on its next wake (this section of its wake prompt; only the
+ * The receiving world's Delivery Manager reads its open notes on its next wake (an urgent note wakes it at once; this section of its wake prompt; only the
  * repo's home milestone, the one on its root spine, gets it, so one wake answers each note), acts within its own remit,
  * then answers by dropping a note in the sender's inbox and marking the received one `status: answered`. The full contract
  * is the team doc docs/desk-inbox.md (the code repo) and `scripts/desk_note.py`, which writes, lists and answers notes.
@@ -56,6 +56,8 @@ export interface DeskNote {
   source?: string;
   /** a monitor alert handed back to its team (status/alertHandBack.ts): the alert's id. */
   alert?: string;
+  /** an urgent note wakes the receiving world's Delivery Manager at once (cycle `tickUrgentNotes`). */
+  urgent?: boolean;
   body: string;
 }
 
@@ -65,6 +67,14 @@ export interface DeskNote {
  * desk_note.py `parse` keeps the same rule.
  */
 export const IMPROVEMENT_ABOUT = /^\s*(?:re:\s*)?improvement[\s-]+request\s*:/i;
+/**
+ * an urgent note: `urgent: yes` in its frontmatter (desk_note.py send --urgent), or an original note whose
+ * `about` starts "URGENT" (how worlds marked them by hand). An answer (`in-reply-to`) is urgent only by the field.
+ * desk_note.py `is_urgent` keeps the same rule.
+ */
+export const URGENT_ABOUT = /^\s*urgent\b/i;
+const urgentOf = (f: Record<string, string>) =>
+  f.urgent ? /^(yes|true|1)$/i.test(f.urgent) : !f["in-reply-to"] && URGENT_ABOUT.test(f.about);
 const kindOf = (f: Record<string, string>) => (f.kind ? f.kind.toLowerCase() : IMPROVEMENT_ABOUT.test(f.about) ? IMPROVEMENT_KIND : undefined);
 /** A hand-made request names its ask in brackets, "(…)": read as `a social world repo/`. */
 export function askFromAbout(about: string): string | undefined {
@@ -99,6 +109,7 @@ export function parseNote(file: string, text: string): DeskNote | undefined {
     ...(f["done-means"] ? { doneMeans: f["done-means"] } : {}),
     ...(f.source ? { source: f.source } : {}),
     ...(f.alert ? { alert: f.alert } : {}),
+    ...(urgentOf(f) ? { urgent: true } : {}),
     body: m[2].trim(),
   };
 }
@@ -126,6 +137,24 @@ export function readInbox(checkoutDir: string): DeskNote[] {
 
 export const openNotes = (notes: DeskNote[]) => notes.filter((n) => n.status === "open");
 
+/**
+ * the open urgent notes of a checkout's desk inbox, each with when it reached this checkout (the file's mtime: the
+ * console's pull wrote it), for the urgent sweep (cycle `tickUrgentNotes`).
+ */
+export function urgentOpenNotes(checkoutDir: string): Array<{ file: string; about: string; at: string }> {
+  return openNotes(readInbox(checkoutDir))
+    .filter((n) => n.urgent)
+    .map((n) => {
+      let at: string;
+      try {
+        at = fs.statSync(path.join(checkoutDir, n.file)).mtime.toISOString();
+      } catch {
+        at = new Date().toISOString();
+      }
+      return { file: n.file, about: n.about, at };
+    });
+}
+
 const BODY_MAX = 1_500;
 
 /** The Delivery Manager's wake section for its repo's open notes; undefined when none is open. */
@@ -138,9 +167,12 @@ export function deskInboxSection(notes: DeskNote[], repo: string): string | unde
     `1. Read it and act within your remit and write rule: a thing to do becomes a row in the right spine of this repo (owner a persona of this world), a question gets its answer, a decision only ${ownerName()} can take becomes a coded ask in your spine. You never act on the sender's world: its settings, repos and spines stay its own.`,
     `2. Answer it: drop one note in the sender's inbox (its \`reply-to\` repo, folder \`${DESK_INBOX_DIR}/\`) named \`<today>-<this world>-re-<slug>.md\` with frontmatter \`from\` (this world), \`about\`, \`reply-to\` (this repo), \`status: open\`, \`in-reply-to: <the note's path here>\`, and in the body what you did (row ids, links) or why not. Write nothing else in the sender's repo. Easiest: \`python3 <${homeRepo()} checkout>/scripts/desk_note.py reply <this checkout>/<note path> --body "…"\`.`,
     "3. Mark the received note `status: answered` (and add `answered: <reply path>`), commit both repos naming this run, push.",
+    ...(open.some((n) => n.urgent)
+      ? ["An **URGENT** note woke you now, ahead of your cadence: act on it first in this wake, before any other work, and answer it in this wake."]
+      : []),
     ...open.map((n) => {
       const body = n.body.length > BODY_MAX ? `${n.body.slice(0, BODY_MAX)}…` : n.body;
-      return [`- \`${n.file}\` from **${n.from}**${n.replyTo ? ` (reply to ${n.replyTo})` : ""}${n.inReplyTo ? `, answering ${n.inReplyTo}` : ""}: ${n.about}`, ...body.split("\n").map((l) => `  > ${l}`)].join("\n");
+      return [`- ${n.urgent ? "**URGENT** " : ""}\`${n.file}\` from **${n.from}**${n.replyTo ? ` (reply to ${n.replyTo})` : ""}${n.inReplyTo ? `, answering ${n.inReplyTo}` : ""}: ${n.about}`, ...body.split("\n").map((l) => `  > ${l}`)].join("\n");
     }),
     ...(open.some((n) => n.kind === IMPROVEMENT_KIND && !n.inReplyTo)
       ? [

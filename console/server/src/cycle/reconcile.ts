@@ -47,8 +47,12 @@ export interface ReconcileDeps {
 
 /** the summary mark of a run whose wake was re-sent once. */
 export const RESENT = "re-sent once";
-/** T3's error text when the provider could not start the turn (on the worker server, 2026-10-31: the MCP registration timed out under load). */
-export const START_FAILED = /could not start this turn|did not answer the MCP server registration/i;
+/**
+ * T3's error text when the provider could not start the turn (on the worker server, 2026-10-31: the MCP registration timed out under load).
+ * Also a home thread too long to hand to a provider session ("Insufficient context allowance for the provider handoff"):
+ * that thread can never start a turn again, so the wake goes to a new one instead of failing every wake on it.
+ */
+export const START_FAILED = /could not start this turn|did not answer the MCP server registration|insufficient context allowance/i;
 /**
  * a turn that failed on the seat's usage limit (T3 2026-11-01: error "Usage limit reached: Claude API rate limit
  * reached. Try again later.", notice "… until the 5-hour limit resets in 1h 5m", reply "You've hit your session limit").

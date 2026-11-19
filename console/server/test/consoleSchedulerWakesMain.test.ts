@@ -103,7 +103,7 @@ describe("T8-S18 console scheduler wakes host1 personas", () => {
     t.store.createRun({ assignmentId: t.a.id, parentRunId: t.top()[1].id, outcome: "progressed", summary: "worker", endedAt: new Date(Date.now() + 5).toISOString() });
     t.due();
     expect(await t.cycle.tickCadence()).toEqual([t.a.id]);
-    expect(t.t3.calls).toEqual(["sendToThread"]);
+    expect(t.t3.calls).toEqual(["readThreadStatus", "sendToThread"]); // the home thread's size is read before the post
   });
 
   it("disabled assignments and paused or settled milestones do not wake (no T3 call, no run)", async () => {

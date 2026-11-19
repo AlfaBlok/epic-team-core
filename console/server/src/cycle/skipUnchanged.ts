@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OpenAsk, Run } from "../store.js";
 import type { Grant } from "./grants.js";
+import { newsPart } from "./wakeNews.js";
 
 /**
  * an Unblocker cadence wake with nothing new since its last check is not started. Since "nothing new" is
@@ -55,6 +56,8 @@ export interface WakeState {
   data?: string;
   /** spines of the tree whose Current State lags their children (rollup.ts rollupPart), Delivery Manager only; "" when none. */
   rollup?: string;
+  /** the open faults the repo's home Delivery Manager owns (wakeNews.ts: red server-wheel key results, open desk notes), one line each. */
+  news?: string[];
 }
 
 /** the sorted ready rows nobody is on (a dispatching persona only), whatever the seats do. */
@@ -90,7 +93,8 @@ export function wakeFingerprint(s: WakeState): string {
     // `q` (the ready rows) only when there are some, so other fingerprints stay the same. `f` (ready + a free
     // seat) is always false now: the seat is not a part (it was false whenever there were no ready rows, so unchanged).
     // `u` (a Current State lagging its children) only when one lags, so fingerprints without a lag stay the same.
-    .update(JSON.stringify({ s: s.spines, r: [...s.running].sort(), f: false, j: s.answer, p: textHash(s.prompt ?? ""), ...(s.data ? { d: s.data } : {}), ...readyKey(s), ...(s.rollup ? { u: s.rollup } : {}) }))
+    // `n` (open faults, wakeNews.ts) only when there are some, so fingerprints without any stay the same.
+    .update(JSON.stringify({ s: s.spines, r: [...s.running].sort(), f: false, j: s.answer, p: textHash(s.prompt ?? ""), ...(s.data ? { d: s.data } : {}), ...readyKey(s), ...(s.rollup ? { u: s.rollup } : {}), ...(s.news?.length ? { n: newsPart(s.news) } : {}) }))
     .digest("hex")
     .slice(0, 32);
 }

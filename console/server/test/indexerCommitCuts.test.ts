@@ -51,7 +51,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function setup(o: { changed?: string[]; spines?: SpinesRunner } = {}) {
+function setup(o: { changed?: string[]; spines?: SpinesRunner; now?: () => number } = {}) {
   const db = openDb(path.join(root, "c.db"));
   dbs.push(db);
   const store = createStore(db);
@@ -71,6 +71,7 @@ function setup(o: { changed?: string[]; spines?: SpinesRunner } = {}) {
     statusEveryMs: 3600_000,
     statusMaxAgeMs: 3600_000,
     changedFiles: () => (changes.asked++, changes.files),
+    ...(o.now ? { now: o.now } : {}),
     onWritten: (k) => written.push(k),
   });
   const pass = async () => {
@@ -90,6 +91,30 @@ describe("read model: only the work a commit needs", () => {
     s.written.length = 0;
     s.db.prepare("UPDATE assignments SET last_run_at = ? WHERE id = ?").run(new Date().toISOString(), s.a.id);
     await s.pass();
+    expect(s.written).toEqual([]);
+    s.r.stop();
+  });
+
+  it("console writes re-check every view at most every 5 min; one inside the gap is done when it ends", async () => {
+    let t = Date.parse("2026-11-19T12:00:00Z");
+    const s = setup({ now: () => t });
+    await s.pass();
+    s.written.length = 0;
+    s.r.dirty(); // a run update, a press: the first one re-checks at once
+    await s.pass();
+    const all = s.written.length;
+    expect(all).toBeGreaterThan(0);
+    s.written.length = 0;
+    t += 30_000;
+    s.r.dirty(); // inside the gap: kept, nothing rebuilt yet
+    await s.pass();
+    expect(s.written).toEqual([]);
+    t += 300_000; // the gap ended: the kept write re-checks
+    await s.pass();
+    expect(s.written.length).toBe(all);
+    s.written.length = 0;
+    t += 1_000;
+    await s.pass(); // nothing due any more
     expect(s.written).toEqual([]);
     s.r.stop();
   });

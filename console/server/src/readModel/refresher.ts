@@ -61,6 +61,15 @@ export interface RefresherOptions {
    * last output meanwhile and other views never wait for it. A console write (`dirty(dir)`) and the full refresh re-read at once.
    */
   rescanGapMs?: number;
+  /**
+   * a console write (any API call that is not a read) re-checks every view as if the console rows changed, at most this
+   * often (default 5 min, the same bound a pull has); one inside the gap is kept and done when it ends. Every call (each
+   * run update, each press) did it at once, so every view of every world was rebuilt on almost every pass, and writes
+   * never stop, so the gap is how often it happens. Spine writes, the owner's answers and review buttons (dirty with a
+   * checkout, patch, dirtyAll) keep their own immediate paths, and the fingerprint still catches the milestone,
+   * assignment, persona and thread rows at once: this re-check is only the safety net for anything else.
+   */
+  writeRecheckMs?: number;
   /** Files changed between two commits of a checkout (default git diff); tests pass a fake. */
   changedFiles?: ChangedFiles;
   /** How long a view computation may wait for spines.py (the run itself is bounded by its own timeout). */
@@ -383,6 +392,9 @@ export function createRefresher(o: RefresherOptions) {
     }
   };
   let lastFp: string | undefined;
+  const writeRecheckMs = o.writeRecheckMs ?? 5 * 60_000;
+  let recheckDue = false;
+  let lastRecheckAt = -Infinity;
   let lastDv = -1;
   let lastStatusAt = 0;
   let lastFullAt = now();
@@ -501,6 +513,11 @@ export function createRefresher(o: RefresherOptions) {
     for (const dir of allDirs) if (full || (stampChanged(dir) && !inGap(dir, t) && !onlyUnreadMoved(dir))) dropDir(dir);
     for (const dir of allDirs) ensureSpines(dir);
     // Console rows: a changed fingerprint recomputes every view; runs alone (data_version) only the statuses.
+    if (recheckDue && t - lastRecheckAt >= writeRecheckMs) {
+      recheckDue = false;
+      lastRecheckAt = t;
+      lastFp = undefined;
+    }
     const fp = fingerprint();
     const dv = dataVersion();
     const statusKeys = [...keys].filter(([, k]) => k.kind === "status" || k.kind === "status-one").map(([s]) => s);
@@ -676,7 +693,11 @@ export function createRefresher(o: RefresherOptions) {
      */
     dirty: (dir?: string, d?: { stale?: boolean }) => {
       if (dir && !d?.stale) dropDir(dir);
-      else if (!dir) lastFp = undefined;
+      else if (!dir) {
+        recheckDue = true;
+        // inside the gap nothing is due yet: the pass every tick picks it up when the gap ends.
+        if (now() - lastRecheckAt < writeRecheckMs) return;
+      }
       kick();
     },
     /** Every view is recomputed on the next pass (the owner answered: the answered set changed). */

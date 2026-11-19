@@ -109,7 +109,7 @@ describe("T8-S30 (a) a freed seat after a blocked wake is no news", () => {
   });
 
   it("pure rules: seatFreedNews, cadenceSkipDecision and wokeBecause agree", () => {
-    const P: WakeParts = { spines: "s", prompt: "p", answer: "", running: "r", ready: "2:abc", data: "", rollup: "" };
+    const P: WakeParts = { spines: "s", prompt: "p", answer: "", running: "r", ready: "2:abc", data: "", rollup: "", news: "" };
     const run = (outcome: string) => ({ id: "r", assignmentId: "a", startedAt: "2026-10-31T21:01:00Z", endedAt: "2026-10-31T21:10:00Z", outcome, summary: "x", kind: "wake", askFingerprint: "f", wakeParts: P }) as Run;
     const now = Date.parse("2026-10-31T21:50:00Z");
     expect(seatFreedNews(run("blocked"), "1:abc")).toBe(false);

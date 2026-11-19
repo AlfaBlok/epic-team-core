@@ -28,6 +28,7 @@ import { heldRelease, releasedWhy } from "./held.js";
 import { gateKindOf, gateSkipSummary, lastRealWake, staleRunMsFor, type GateDecision } from "./gateCore.js";
 import type { Grant } from "./grants.js";
 import { parkDecision } from "./park.js";
+import { newsPart } from "./wakeNews.js";
 import { SKIP_PREFIX, askFingerprint, cadenceSkipDecision, dataHash, keepSeatSeen, readyPart, spinesHash, wakeFingerprint, workedIds, type WakeState } from "./skipUnchanged.js";
 import { wakeParts, wokeBecause } from "./wakeWhy.js";
 import { rollupLagMsFromEnv, rollupPart, rollupSection, spineLags, type LastCommitAt, type SpineLag } from "./rollup.js";
@@ -149,6 +150,11 @@ export interface CycleOptions {
    * wakes that milestone's Delivery Manager when one is older than the grace and no wake since has carried it.
    */
   orphansDue?: () => Promise<Array<{ milestoneId: string; short: string; date: string }>>;
+  /**
+   * every world's open urgent desk notes (milestone = the repo's home, `at` = when the note reached its checkout), read by
+   * the urgent sweep (tickUrgentNotes), which wakes that milestone's Delivery Manager at once.
+   */
+  urgentNotesDue?: () => Promise<Array<{ milestoneId: string; file: string; at: string }>>;
   /** launch board reds with no open row whose owning epic is in this milestone's tree (Delivery Manager only). */
   launchDrafts?: (m: Milestone) => Promise<string | undefined>;
   /**
@@ -165,6 +171,12 @@ export interface CycleOptions {
   totemMap?: (m: Milestone) => Promise<string | undefined>;
   /** the repo's open desk-to-desk notes from other worlds (desk/inbox.ts; undefined = none, or not the repo's home milestone). */
   deskInbox?: (m: Milestone) => Promise<string | undefined>;
+  /**
+   * the open faults the milestone's Delivery Manager owns, one line each (cycle/wakeNews.ts: its repo's open
+   * desk notes and red server-wheel key results; [] when none, or not the repo's home milestone). A part of its wake
+   * fingerprint, so a fault that starts, clears or changes is never "nothing new".
+   */
+  wakeNews?: (m: Milestone) => Promise<string[]>;
   /** Mac ticket questions to the Team desk still open for this milestone (a Delivery Manager wake answers them first). */
   deskQuestions?: (m: Milestone, base: string) => Promise<string | undefined>;
   /** a Delivery Manager wake's section on stopped / overdue `Monitoring:` items (write a coded ask or clear the item). */
@@ -190,6 +202,8 @@ export interface CycleOptions {
    * (`CONSOLE_CAP_FALLBACK=1`), and also opens the console worker route (POST /api/runs/<id>/workers, the main server launches).
    */
   capFallback?: boolean;
+  /** a home thread with more items than this moves to a new one at its next wake (default HOME_THREAD_MAX_ITEMS; 0 = never; CONSOLE_HOME_THREAD_MAX_ITEMS). */
+  homeThreadMaxItems?: number;
   /** a deferred wake (load-cap, no seat) gives up, failed with the reason, after this many ms (default 60 min). */
   deferMaxMs?: number;
   /** a wake T3 refused because the thread stayed busy re-wakes this many ms later (default 5 min)... */
@@ -241,9 +255,13 @@ export interface CycleOptions {
 }
 
 /** the orphan sweep reads the orphan list this often, gives a fresh orphan this long to be named, and re-wakes after this. */
+/** a home thread that broke for good had 9,631 items; a new one starts well before that. */
+export const HOME_THREAD_MAX_ITEMS = 4_000;
 export const ORPHAN_CHECK_MS = 5 * 60_000;
 export const ORPHAN_GRACE_MS = 10 * 60_000;
 export const ORPHAN_REWAKE_MS = 6 * 3_600_000;
+/** an urgent note's wake that did not start (failed, skipped, held) is tried again after this. */
+export const URGENT_RETRY_MS = 10 * 60_000;
 
 /** planning | ready | running | parked | finished; a wake works only `runnable` spines (Status ready, active, blocked). */
 export interface RunState {
@@ -1034,24 +1052,63 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const woken: string[] = [];
     for (const [milestoneId, cs] of byMilestone) {
       if (!cs.some((c) => now.getTime() - Date.parse(c.date) >= ORPHAN_GRACE_MS)) continue;
-      const m = store.getMilestone(milestoneId);
-      if (!m || m.paused || m.settledAt) continue;
-      const a = store.listAssignments({ milestoneId }).find((x) => (x.enabled || (!!x.parkedAt && x.parkedReason !== SETTLED_REASON)) && isDeliveryManager(store.getPersona(x.personaId)?.name)); // auto-parked counts, hand-switched-off does not
-      if (!a || skipHeld(a, m) || liveWake(a.id) || deferredWake(a.id)) continue;
+      const a = homeDm(milestoneId);
+      if (!a) continue;
       const newest = Math.max(...cs.map((c) => Date.parse(c.date)));
-      const carried = store
-        .listRuns({ assignmentId: a.id, limit: 100 })
-        .find((r) => !r.parentRunId && r.kind === "wake" && r.outcome !== "failed" && !r.heldOn && !/^(skipped|held|parked|re-armed)\b/.test(r.summary) && Date.parse(r.startedAt) > newest);
+      const carried = wakesSince(a.id, newest).find(wakeRan);
       if (carried && now.getTime() - Date.parse(carried.startedAt) < ORPHAN_REWAKE_MS) continue;
-      const why = `orphan commits: ${cs.map((c) => c.short).join(", ")}`;
-      try {
-        const run = await runNow(a.id);
-        if (store.getRun(run.id)?.summary.startsWith("Run now:")) store.updateRun(run.id, { summary: `Orphan-commit wake (${why}): waiting for the persona to wake` });
-        if (store.getRun(run.id)?.outcome === "running") store.updateRun(run.id, { wokeBecause: why });
-        woken.push(a.id);
-      } catch (e) {
-        console.error(`orphan wake ${a.id}:`, errorText(e));
-      }
+      if (await wakeHome(a, `orphan commits: ${cs.map((c) => c.short).join(", ")}`, "Orphan-commit wake")) woken.push(a.id);
+    }
+    return woken;
+  }
+
+  /** the home milestone's Delivery Manager that a sweep may wake now (auto-parked counts, hand-switched-off does not). */
+  function homeDm(milestoneId: string): Assignment | undefined {
+    const m = store.getMilestone(milestoneId);
+    if (!m || m.paused || m.settledAt) return undefined;
+    const a = store.listAssignments({ milestoneId }).find((x) => (x.enabled || (!!x.parkedAt && x.parkedReason !== SETTLED_REASON)) && isDeliveryManager(store.getPersona(x.personaId)?.name));
+    return !a || skipHeld(a, m) || liveWake(a.id) || deferredWake(a.id) ? undefined : a;
+  }
+  /** the assignment's top-level wakes started after `sinceMs`, newest first. */
+  const wakesSince = (assignmentId: string, sinceMs: number) =>
+    store.listRuns({ assignmentId, limit: 100 }).filter((r) => !r.parentRunId && r.kind === "wake" && Date.parse(r.startedAt) > sinceMs);
+  /** a wake that really ran (not failed, held, skipped, parked). */
+  const wakeRan = (r: Run) => r.outcome !== "failed" && !r.heldOn && !/^(skipped|held|parked|re-armed)\b/.test(r.summary);
+  /** a sweep's wake through Run now (past the runnable, park and unchanged gates), labelled with why; true when started. */
+  async function wakeHome(a: Assignment, why: string, label: string): Promise<boolean> {
+    try {
+      const run = await runNow(a.id);
+      if (store.getRun(run.id)?.summary.startsWith("Run now:")) store.updateRun(run.id, { summary: `${label} (${why}): waiting for the persona to wake` });
+      if (store.getRun(run.id)?.outcome === "running") store.updateRun(run.id, { wokeBecause: why });
+      return true;
+    } catch (e) {
+      console.error(`${label} ${a.id}:`, errorText(e));
+      return false;
+    }
+  }
+
+  /**
+   * an urgent desk note (docs/desk-inbox.md, `urgent: yes` or an `about` starting "URGENT") wakes the receiving
+   * world's home Delivery Manager at once, on the next scheduler tick after the note reaches its checkout, instead of on
+   * its next cadence (an outage note once waited hours for the receiver's cadence). Once per note: a wake that ran after the
+   * note arrived carries it (its wake prompt lists the note first); a wake that did not start is tried again after
+   * URGENT_RETRY_MS. Same wake path and gates as the orphan sweep.
+   */
+  async function tickUrgentNotes(now: Date = new Date()): Promise<string[]> {
+    if (!o.enabled || !o.t3 || !o.urgentNotesDue) return [];
+    const due = await o.urgentNotesDue().catch((e) => (console.error("urgent note sweep:", errorText(e)), []));
+    const byMilestone = new Map<string, Array<{ file: string; at: string }>>();
+    for (const n of due) byMilestone.set(n.milestoneId, [...(byMilestone.get(n.milestoneId) ?? []), n]);
+    const woken: string[] = [];
+    for (const [milestoneId, ns] of byMilestone) {
+      const a = homeDm(milestoneId);
+      if (!a) continue;
+      const fresh = ns.filter((n) => !wakesSince(a.id, Date.parse(n.at)).some(wakeRan)); // no wake ran since it arrived
+      if (!fresh.length) continue;
+      const oldest = Math.min(...fresh.map((n) => Date.parse(n.at)));
+      const tried = wakesSince(a.id, oldest)[0];
+      if (tried && now.getTime() - Date.parse(tried.startedAt) < URGENT_RETRY_MS) continue;
+      if (await wakeHome(a, `urgent desk note: ${fresh.map((n) => n.file.replace(/^.*\//, "")).join(", ")}`, "Urgent-note wake")) woken.push(a.id);
     }
     return woken;
   }
@@ -1096,6 +1153,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
         void cleared
           .then(() => tickCadence())
           .then(() => tickOrphans())
+          .then(() => tickUrgentNotes())
           .catch((e) => console.error("cadence scheduler:", e)),
       o.cadenceTickMs,
     );
@@ -1284,8 +1342,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     // a parent's Current State lagging its children is news for the Delivery Manager (bookkeeping-only child
     // commits do not move the spines part), and stays news while the children keep moving.
     const rollup = dispatches ? rollupPart(await lagsOf(t)) : "";
+    // open faults outside the repo (a red server-wheel key result, a failing check, a channel down, an open desk note) are news too.
+    const news = dispatches && o.wakeNews ? await o.wakeNews(m).catch(() => [] as string[]) : [];
     // the ready rows themselves (tree keys: unique even when every Issue cell reads `draft`) are a part, so the same set is not news.
-    const parts: WakeState = { spines: spinesHash(files), running, readyAndSeatFree, ...(readyIdle ? { ready: readyNodes.map((n) => n.key) } : {}), answer: answer?.id ?? "", prompt, data: dataHash(dir), ...(rollup ? { rollup } : {}) };
+    const parts: WakeState = { spines: spinesHash(files), running, readyAndSeatFree, ...(readyIdle ? { ready: readyNodes.map((n) => n.key) } : {}), answer: answer?.id ?? "", prompt, data: dataHash(dir), ...(rollup ? { rollup } : {}), ...(news.length ? { news } : {}) };
     return { fingerprint: wakeFingerprint(parts), readyAndSeatFree, parts, readyIds };
   }
   /** ids of the milestone's runs flagged rule broken in the last week ("" when none). */
@@ -1314,6 +1374,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     if (d.work) return { work: d };
     return { skipped: store.createRun({ assignmentId: a.id, outcome: "idle", endedAt: iso(), summary: gateSkipSummary(lastRealWake(runs)?.id, d.why) }) };
   }
+  /** a wake whose open faults changed names them. */
+  const withNews = (why: string, news: string[] | undefined) => (news?.length && why.includes("open faults changed") ? `${why}: ${news.join("; ").slice(0, 600)}` : why);
   const skipsGeneral = (p: Persona) => p.skipUnchanged && !isUnblocker(p.name);
   /** the milestone's idle objectives, for its Delivery Manager only (the persona that owns them); [] for the others. */
   const idleObjectivesOf = async (m: Milestone, p: Persona): Promise<string[]> =>
@@ -1335,7 +1397,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     if (!isUnblocker(p.name)) {
       const s = await wakeState(a, m);
       const runs = store.listRuns({ assignmentId: a.id, limit: 100 });
-      const why = () => wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds });
+      const why = () => withNews(wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds }), s?.parts.news);
       if (!s) return { why: why() }; // ready rows + a free seat are a fingerprint part, no longer a bypass
       const d = cadenceSkipDecision(runs, s.fingerprint, undefined, undefined, readyPart(s.parts));
       if (!d.skip) return { why: why() };
@@ -1388,7 +1450,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       parts: s && wakeParts(s.parts),
       readyIds: s?.readyIds ?? [],
       wouldSkip: p.skipUnchanged && d.skip,
-      ...(d.skip ? {} : { why: idleObjectives.length ? idleWhy(idleObjectives) : wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds }) }),
+      ...(d.skip ? {} : { why: idleObjectives.length ? idleWhy(idleObjectives) : withNews(wokeBecause(runs, s && wakeParts(s.parts), s?.fingerprint, { readyIds: s?.readyIds }), s?.parts.news) }),
+      ...(s?.parts.news?.length ? { news: s.parts.news } : {}),
       ...(idleObjectives.length ? { idleObjectives } : {}),
       ...(gate ? { preCheck: { work: gate.work, why: gate.why } } : {}),
       ...(brief ? { brief } : {}),
@@ -1434,7 +1497,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     if (!after || after.fingerprint === before.fingerprint) return;
     // the wake's own commit may also carry its data/ files; those are its own writes, not news.
     // so may the roll-up of a lagging parent (its own Current State commit), which clears the rollup part.
-    if (wakeFingerprint({ ...before.parts, spines: after.parts.spines, data: after.parts.data, rollup: after.parts.rollup }) !== after.fingerprint) return;
+    // and the desk notes it answered (its own commit closes them), so an answered note is not news either;
+    // a server-wheel fault that changed meanwhile stays news.
+    const wheelOnly = (p: WakeState) => newsPart((p.news ?? []).filter((l) => l.startsWith("wheel:")));
+    if (wheelOnly(before.parts) !== wheelOnly(after.parts)) return;
+    if (wakeFingerprint({ ...before.parts, spines: after.parts.spines, data: after.parts.data, rollup: after.parts.rollup, news: after.parts.news }) !== after.fingerprint) return;
     const parts = wakeParts(after.parts);
     parts.ready = keepSeatSeen(run.wakeParts?.ready, parts.ready);
     store.updateRun(runId, { askFingerprint: after.fingerprint, wakeParts: parts });
@@ -1705,6 +1772,19 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       starting.delete(runId);
     }
   }
+  /**
+   * a home thread past `homeThreadMaxItems` items starts over on a new one before it grows too big to hand to a
+   * provider session (a 9,631-item thread once failed every wake for 10 h). An
+   * unreadable count keeps the thread.
+   */
+  async function tooLong(client: T3Client, threadId: string): Promise<string | undefined> {
+    const env = Number(process.env.CONSOLE_HOME_THREAD_MAX_ITEMS);
+    const max = o.homeThreadMaxItems ?? (process.env.CONSOLE_HOME_THREAD_MAX_ITEMS && Number.isFinite(env) ? env : HOME_THREAD_MAX_ITEMS);
+    if (!(max > 0)) return undefined;
+    const st = await client.readThreadStatus(threadId).catch(() => undefined);
+    const n = Number((st?.raw as { itemCount?: unknown } | undefined)?.itemCount);
+    return Number.isFinite(n) && n > max ? `home thread too long (${n} items, over ${max})` : undefined;
+  }
   async function sendWakeNow(id: string, runId: string, opts: { fresh?: string }): Promise<void> {
     const { m, p } = ctx(id);
     refuseHeld(m); // backstop: retries and deferred wakes reach here without runNow
@@ -1717,7 +1797,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     // throws a retryable no_seat from pickSeat below, so the wake is deferred, never failed).
     const blocked = link?.threadId ? seatBlocked(link.seat) : undefined;
     const stale = link?.threadId
-      ? opts.fresh ?? (blocked ? `home seat ${blocked}` : undefined) ?? (pw ? staleSessionReason(link.toolFp, pw.toolFp) : undefined)
+      ? opts.fresh ?? (blocked ? `home seat ${blocked}` : undefined) ?? (pw ? staleSessionReason(link.toolFp, pw.toolFp) : undefined) ?? (await tooLong(client, link.threadId))
       : undefined;
     const run = store.getRun(runId);
     if (stale) {
@@ -2679,6 +2759,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     rearmParked,
     tickCadence,
     tickOrphans,
+    tickUrgentNotes,
     clearTasks,
     tickRetry,
     tickDeferred,

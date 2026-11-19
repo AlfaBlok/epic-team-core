@@ -196,6 +196,8 @@ export interface Sites {
   macListUrl: string;
   /** the Epic Book's link to the owner's open questions (a plan page); none by default */
   bookQuestionsUrl: string;
+  /** the servers' wheel (its wheel.json): its red key results wake their owner repo's Delivery Manager; none by default */
+  serverWheelUrl: string;
   /** how other hosts reach the main host over ssh (an ssh config alias) */
   mainSsh: string;
   /** the epic that owns the daily press test: its spine in the home repo, its code and the row that runs the test */
@@ -226,6 +228,7 @@ export const NEUTRAL_SITES: Sites = {
   gitEmail: "console@example.com",
   macListUrl: "",
   bookQuestionsUrl: "",
+  serverWheelUrl: "",
   mainSsh: "main",
   pressTest: { spine: "docs/spines/buttons-never-fail.md", epic: "EPIC-900", row: "E900-S2" },
 };

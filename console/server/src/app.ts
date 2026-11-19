@@ -37,6 +37,7 @@ import { activeGrantsFor } from "./cycle/grants.js";
 import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js";
 import { runStateFor } from "./cycle/runState.js";
 import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
+import { FAILED_WAKES_IN_A_ROW, failedWakesAction, failedWakesQuestion, openFailedWakesAsk, wakeStreak } from "./cycle/failedWakes.js";
 import { repeatStreak } from "./cycle/repeat.js";
 import { followUp } from "./cycle/followUp.js";
 import { childEpicsFor } from "./cycle/children.js";
@@ -210,7 +211,8 @@ import { campaignQuickStatus, milestoneInstructions, milestoneTools } from "./vo
 import { createChatUnread } from "./desk/unread.js";
 import { DeskError, TEAM_KEY, type DeskMessage } from "./desk/session.js";
 import { mountCounts } from "./counts.js";
-import { deskInboxSection, mountDeskInbox, readInbox } from "./desk/inbox.js";
+import { deskInboxSection, mountDeskInbox, readInbox, urgentOpenNotes } from "./desk/inbox.js";
+import { deskNoteLines, serverWheelReader, wheelFaults } from "./cycle/wakeNews.js";
 import { createNoteCross, type NoteCross } from "./desk/noteCross.js";
 import { citeOf, handImprovement, improvementsOutSection, improvementsTakenSection, resolveImprovementTarget, type WorldRow } from "./inbox/improvement.js";
 import { bookBrief, briefing, treeBrief, type TreeEntry } from "./voice/brief.js";
@@ -870,14 +872,21 @@ export function createApp(
    */
   /** the Mac tickets' desk questions (made with the steps pages below; the wake reads it later). */
   let deskQs: DeskQuestions | undefined;
-  const deskInboxOf = async (m: Milestone): Promise<string | undefined> => {
+  /** the milestone's checkout when it is its repo's home milestone in its world (the one on the root spine, else the oldest). */
+  const homeCheckoutOf = (m: Milestone) => {
     const r = resolveRepo(read.reposRoot, m.repo);
     if (!r) return undefined;
     const root = (x: Milestone) => /(^|\/)root\.md$/i.test(x.path ?? "");
     const world = store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT;
     const same = orphanMilestones(world).filter((x) => resolveRepo(read.reposRoot, x.repo)?.path === r.path);
     const home = same.find(root) ?? same[0];
-    if (home?.id !== m.id) return undefined;
+    return home?.id === m.id ? r : undefined;
+  };
+  const serverWheel = serverWheelReader(process.env.CONSOLE_SERVER_WHEEL_URL ?? (siteConfig().serverWheelUrl || undefined));
+  const deskInboxOf = async (m: Milestone): Promise<string | undefined> => {
+    const r = homeCheckoutOf(m);
+    if (!r) return undefined;
+    const world = store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT;
     const notes = readInbox(r.path);
     // the improvement requests this world handed to others (their state read from each builder's inbox), and the
     // ones it took from others and has not told done yet.
@@ -1080,7 +1089,10 @@ export function createApp(
       browserUrls: (m) => browserArea?.urlsFor(store.worldOfMilestone(m.id) ?? DEFAULT_TENANT) ?? [],
       browserHeaders: (url) => browserArea?.headersFor(url) ?? {},
     }),
-    onRunEnded: (runId) => usage.runEnded(runId),
+    onRunEnded: (runId) => {
+      usage.runEnded(runId);
+      void failedWakesCard(runId).catch((e) => console.error(`failed wakes card ${runId}:`, e));
+    },
     creditGate: (a, m) => credits?.gate(a, m), // per-world gate, default off; the home world never held (hosted/billing.ts)
     // the wake also lists the rows other personas' running child runs claim (the repo desk's, the DM's).
     treeTodo: async (m) => [await treeTodo(m), claimsSection(claimsFor(store, m))].filter(Boolean).join("\n\n") || undefined,
@@ -1099,11 +1111,33 @@ export function createApp(
       const worlds = new Set(store.listMilestones().map((m) => store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT));
       return (await Promise.all([...worlds].map((w) => orphansOf(orphanMilestones(w))))).flat();
     },
+    // every world's open urgent desk notes, for the sweep that wakes its home Delivery Manager at once
+    urgentNotesDue: async () => {
+      // every repo of every world, its home milestone picked as deskInboxOf does (root spine, else the first)
+      const worlds = new Set(store.listMilestones().map((m) => store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT));
+      const out: Array<{ milestoneId: string; file: string; at: string }> = [];
+      for (const w of worlds) {
+        const homes = new Map<string, Milestone>();
+        for (const m of orphanMilestones(w)) {
+          const dir = resolveRepo(read.reposRoot, m.repo)?.path;
+          if (dir && (!homes.has(dir) || (/(^|\/)root\.md$/i.test(m.path ?? "") && !/(^|\/)root\.md$/i.test(homes.get(dir)!.path ?? "")))) homes.set(dir, m);
+        }
+        for (const [dir, h] of homes) out.push(...urgentOpenNotes(dir).map((n) => ({ milestoneId: h.id, file: n.file, at: n.at })));
+      }
+      return out;
+    },
     launchDrafts: launchDraftsOf, // launch board reds with no owner row
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
     totemMap: async (m) => totemMapFor(m), // the product's map: read its totems first, write back last (root L-77)
     ownerObjectives: async (m) => (ownerObjectivesNow && worldOf(m.id) === DEFAULT_TENANT ? ownerObjectivesNow() : undefined), // his objectives open every wake and brief
     deskInbox: deskInboxOf, // notes other worlds dropped in this repo's desk/inbox/
+    // the home Delivery Manager's open faults (open desk notes, its red server-wheel key results) are a part of its wake fingerprint
+    wakeNews: async (m) => {
+      const r = homeCheckoutOf(m);
+      if (!r) return [];
+      const repo = path.basename(r.path);
+      return [...deskNoteLines(readInbox(r.path)), ...wheelFaults(await serverWheel(), repo, homeRepo())];
+    },
     // Mac ticket questions to the Team desk still waiting for an answer (steps/deskQuestions.ts)
     deskQuestions: async (m, base) => (deskQs ? deskQuestionsSection(deskQs.listOpen([m.id]), base) : undefined),
     createMilestone: async (input) => withDeliveryManager(await recordFirst(() => recordedMilestones().createMilestone(input))), // every goal has a persona
@@ -4069,6 +4103,27 @@ export function createApp(
   // `[ask <code>: …]` line (inbox/raise.ts, through the one spine writer); the inbox reads it from the spine like any other
   // ask. The needs_jordi table is only the log of what was raised (ops): the read path never reads it.
   const raiseDeps = (): RaiseDeps => ({ db, store, reposRoot: read.reposRoot, writer: spine, invalidate: dropSpines });
+  // a persona whose last 3 wakes failed raises one inbox card in its milestone's spine; its next working wake takes it out.
+  async function failedWakesCard(runId: string): Promise<void> {
+    const run = store.getRun(runId);
+    if (!run || run.kind !== "wake" || run.parentRunId) return;
+    const a = store.getAssignment(run.assignmentId);
+    const m = a && store.getMilestone(a.milestoneId);
+    const p = a && store.getPersona(a.personaId);
+    if (!m || !p || !m.path) return;
+    const streak = wakeStreak(store.listRuns({ assignmentId: a.id, limit: 30 }));
+    if (!streak) return;
+    const question = failedWakesQuestion(p.name, m.title);
+    if (streak.state === "failed") {
+      const r = await raiseAsk(raiseDeps(), m, { question, proposedAction: failedWakesAction(streak.runs), askedBy: "the console's failed-wakes watch", runId, kind: "decide" });
+      if (r.status === "written" && !r.reason) console.warn(`[ALERT] ${p.name} on ${m.title}: ${FAILED_WAKES_IN_A_ROW} failed wakes in a row, ask ${r.code}`);
+      return;
+    }
+    const dir = resolveRepo(read.reposRoot, m.repo)?.path;
+    const f = dir ? path.join(dir, m.path) : undefined;
+    const code = f && fs.existsSync(f) ? openFailedWakesAsk(fs.readFileSync(f, "utf8"), question) : undefined;
+    if (code) await retireAsk(raiseDeps(), m, m.path, code, `the ${p.name} woke again (run ${runId})`, true);
+  }
   api.get("/needs-owner", (c) => {
     const status = c.req.query("status");
     if (status !== undefined && !s.needsJordiFilterStatus.safeParse(status).success)

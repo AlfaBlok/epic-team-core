@@ -1,4 +1,5 @@
 import type { Run } from "../store.js";
+import { newsPart } from "./wakeNews.js";
 import { CADENCE_SKIP_MAX_AGE_MS, SKIP_AFTER, SKIP_PREFIX, checkDue, readyPart, seatFreed, seatFreedNews, textHash, type WakeState } from "./skipUnchanged.js";
 
 /**
@@ -7,7 +8,7 @@ import { CADENCE_SKIP_MAX_AGE_MS, SKIP_AFTER, SKIP_PREFIX, checkDue, readyPart, 
  * did, the skip rule that let it run (a child that ended, the last wake's outcome, the max age since the last real wake).
  * ready rows + a free seat are news only when that set changed (the `ready` part), never on their own.
  */
-export const WAKE_PARTS = ["spines", "prompt", "answer", "running", "ready", "data", "rollup"] as const;
+export const WAKE_PARTS = ["spines", "prompt", "answer", "running", "ready", "data", "rollup", "news"] as const;
 export type WakePart = (typeof WAKE_PARTS)[number];
 export type WakeParts = Record<WakePart, string>;
 
@@ -21,14 +22,15 @@ export function wakeParts(s: WakeState): WakeParts {
     ready: readyPart(s),
     data: s.data ?? "",
     rollup: s.rollup ?? "",
+    news: newsPart(s.news ?? []),
   };
 }
 
 export function parseWakeParts(text: string | null | undefined): WakeParts | undefined {
   if (!text) return undefined;
   try {
-    // parts recorded before `data` existed read as "" (no data/ tree); likewise `rollup` (no lag).
-    const o = { data: "", rollup: "", ...(JSON.parse(text) as Partial<WakeParts>) };
+    // parts recorded before `data` existed read as "" (no data/ tree); likewise `rollup` (no lag) and `news` (no open fault).
+    const o = { data: "", rollup: "", news: "", ...(JSON.parse(text) as Partial<WakeParts>) };
     return WAKE_PARTS.every((k) => typeof o[k] === "string") ? (o as WakeParts) : undefined;
   } catch {
     return undefined;
@@ -47,6 +49,7 @@ const PART_WORDS: Record<WakePart, string> = {
   ready: "ready rows + a free seat changed",
   data: "data/ files changed",
   rollup: "a Current State lag changed (roll-up due or done)",
+  news: "open faults changed (a red server-wheel key result, a failing check, a channel down or an open desk note)",
 };
 
 const counted = (r: Run) => !r.parentRunId && r.kind !== "answer_run" && !!r.askFingerprint;

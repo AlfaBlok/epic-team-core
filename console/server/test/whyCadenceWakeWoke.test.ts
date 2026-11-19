@@ -31,7 +31,7 @@ let cleanup: (() => void) | undefined;
 afterEach(() => cleanup?.());
 
 const NOW = Date.parse("2026-10-26T03:00:00Z");
-const P: WakeParts = { spines: "s1", prompt: "p1", answer: "", running: "r0", ready: "0", data: "", rollup: "" };
+const P: WakeParts = { spines: "s1", prompt: "p1", answer: "", running: "r0", ready: "0", data: "", rollup: "", news: "" };
 const run = (id: string, over: Partial<Run> = {}): Run => ({
   id, assignmentId: "a", startedAt: "2026-10-26T01:18:00Z", endedAt: "2026-10-26T01:19:00Z", outcome: "blocked", summary: "blocked: waits on E900-A11",
   kind: "wake", askFingerprint: "fp1", wakeParts: P, ...over,
@@ -40,9 +40,9 @@ const run = (id: string, over: Partial<Run> = {}): Run => ({
 describe("why a cadence wake woke", () => {
   it("names each fingerprint part that changed", () => {
     const now: Record<string, Partial<WakeParts>> = {
-      spines: { spines: "s2" }, prompt: { prompt: "p2" }, answer: { answer: "jr_1" }, running: { running: "r1" }, ready: { ready: "1" }, data: { data: "d1" }, rollup: { rollup: "u1" },
+      spines: { spines: "s2" }, prompt: { prompt: "p2" }, answer: { answer: "jr_1" }, running: { running: "r1" }, ready: { ready: "1" }, data: { data: "d1" }, rollup: { rollup: "u1" }, news: { news: "n1" },
     };
-    const words = { spines: "spines changed", prompt: "prompt changed", answer: "new answer", running: "running children changed", ready: "ready rows nobody is on + a free seat", data: "data/ files changed", rollup: "a Current State lag changed" };
+    const words = { spines: "spines changed", prompt: "prompt changed", answer: "new answer", running: "running children changed", ready: "ready rows nobody is on + a free seat", data: "data/ files changed", rollup: "a Current State lag changed", news: "open faults changed" };
     for (const k of WAKE_PARTS) {
       const parts = { ...P, ...now[k] };
       expect(changedParts(P, parts)).toEqual([k]);

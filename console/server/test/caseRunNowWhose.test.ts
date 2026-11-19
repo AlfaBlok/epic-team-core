@@ -27,6 +27,7 @@ class FakeT3 implements T3Client {
   launched: { threadId: string; instanceId?: string }[] = [];
   turns = new Map<string, T3ThreadRun[]>();
   errors = new Map<string, string>();
+  items = new Map<string, number>();
   async listProjects() {
     return [{ id: "proj", title: "home_repo", workspaceRoot: "/srv/agent/github/home_repo" }];
   }
@@ -48,7 +49,7 @@ class FakeT3 implements T3Client {
   }
   async readThreadStatus(threadId: string) {
     const runs = this.turns.get(threadId) ?? [];
-    return { status: runs[0]?.status ?? "idle", runs, raw: {} };
+    return { status: runs[0]?.status ?? "idle", runs, raw: { itemCount: this.items.get(threadId) } };
   }
   async readLastError(threadId: string) {
     return this.errors.get(threadId);
@@ -166,6 +167,36 @@ describe("T6-S39 case 2: the provider could not start the turn", () => {
     expect(t.t3.launched[1].instanceId).toBe("claudeAgent_seat2");
     expect(r.threadId).toBe("home2");
     expect(r.seat).toBe("seat2");
+  });
+
+  it("a home thread too long for the provider handoff: the wake goes once to a new thread", async () => {
+    const t = await setup(["seat1", "seat2"]);
+    const run = await t.cycle.runNow(t.a.id);
+    t.age(run.id, 6 * MIN);
+    t.t3.turns.set("home1", [t.turn("failed", 5, 3)]);
+    t.t3.errors.set("home1", "Provider error: Insufficient context allowance for the provider handoff. Compact the target conversation or use a larger-context model; the current request has not been truncated.");
+    await t.cycle.reconcile();
+    const r = t.store.getRun(run.id)!;
+    expect(r.outcome).toBe("running");
+    expect(r.summary).toContain(`${RESENT} on a new thread`);
+    expect(t.t3.launched.map((l) => l.threadId)).toEqual(["home1", "home2"]);
+    expect(r.threadId).toBe("home2");
+  });
+
+  it("a home thread past the item limit moves to a new thread at the next wake, the move recorded", async () => {
+    const t = await setup(["seat1", "seat2"]);
+    t.t3.items.set("home1", 4_001);
+    const run = await t.cycle.runNow(t.a.id);
+    expect(t.t3.launched.map((l) => l.threadId)).toEqual(["home1", "home2"]);
+    expect(t.t3.sent).toEqual([]);
+    const r = t.store.getRun(run.id)!;
+    expect(r.threadId).toBe("home2");
+    expect(r.preWake).toContain("fresh session: home thread too long (4001 items, over 4000)");
+    // under the limit: the home thread is reused
+    t.store.updateRun(run.id, { outcome: "progressed", endedAt: new Date().toISOString() });
+    t.t3.items.set("home2", 120);
+    await t.cycle.runNow(t.a.id);
+    expect(t.t3.sent).toEqual(["home2"]);
   });
 
   it("another provider error: recorded in the summary, the run fails, no re-send", async () => {
