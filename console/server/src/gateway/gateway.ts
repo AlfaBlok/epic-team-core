@@ -33,7 +33,10 @@ const isGatewayRoute = (method: string, path: string) =>
 const refuse = (status: number, code: string, message: string) =>
   new Response(JSON.stringify({ error: { code, message } }), { status, headers: { "content-type": "application/json", "www-authenticate": "Bearer" } });
 
-export function createGateway(o: { db: DB; fetch: Fetch; dispatcher?: FaceRunner }) {
+/** A host's own gateway routes, asked first once the token checks out (hosted: a workspace's included AI). */
+export type GatewayExtra = (req: Request, id: Extract<Identity, { kind: "token" }>) => Promise<Response | undefined> | Response | undefined;
+
+export function createGateway(o: { db: DB; fetch: Fetch; dispatcher?: FaceRunner; extra?: GatewayExtra }) {
   const auth = createAuth(o.db);
   const face = o.dispatcher ? dispatcherFace(o.db, o.dispatcher) : undefined;
 
@@ -50,6 +53,10 @@ export function createGateway(o: { db: DB; fetch: Fetch; dispatcher?: FaceRunner
     const method = req.method === "HEAD" ? "GET" : req.method;
     const id = identify(req);
     if (id instanceof Response) return id;
+    if (o.extra) {
+      const r = await o.extra(req, id);
+      if (r) return r;
+    }
 
     const d = DISPATCHER.exec(url.pathname);
     if (d) {

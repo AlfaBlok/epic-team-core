@@ -161,7 +161,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/credits$`)], // the world's own balance + ledger (writes stay platform-only)
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // a world buys its own €49 Epic Team plan (owner login only, below)
   ["GET", new RegExp(`^/api/tenants/${ID}/plan$`)], // may the world buy the paid plan, has it paid (the Buy button)
-  ["GET|PUT", new RegExp(`^/api/tenants/${ID}/ai$`)], // the workspace's own AI (hosted cycle/worldAi.ts; the PUT is the owner's login only, below)
+  ["GET", new RegExp(`^/api/tenants/${ID}/capacity$`)], // its plan's included AI: seats and tokens used (hosted cycle/capacity.ts; the PUT is the platform's)
+  ["GET|PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // the workspace's own AI (hosted cycle/worldAi.ts; the PUT is the owner's login only, below)
   // the world's own lists by path (app.ts: a store for the path's tenant in every auth mode, rule 3 404s another
   // world) and its provider default (one tenants row, the path's; the PUT stays the platform's). routeList4.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs|provider)$`)],
@@ -255,6 +256,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // every rule that can stop a post and the blocks of the last day, read from the path world's social repos and its own
   // Team Browser only (social/postingRules.ts worldRepos); `all` widens it only for the home world.
   ["GET", new RegExp(`^/api/tenants/${ID}/social/posting-rules$`)],
+  // a posting number saved from Settings: only an owner login of one of the platform's own worlds (plan internal), its
+  // rules read from the path world as above; any other world is a 404 (social/postingRules.ts `ours`).
+  ["POST", new RegExp(`^/api/tenants/${ID}/social/posting-numbers$`)],
   // the product deck, the metrics catalog and each campaign's target, read from the path world's social repo only (social/motion.ts worldRepos + socialRepo); the site numbers only for a world on plan internal.
   ["GET", new RegExp(`^/api/tenants/${ID}/social/motion$`)],
   // a post's page reads its history from the path world's social repo only (social/history.ts worldRepos + socialRepo).
@@ -436,7 +440,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["PUT", new RegExp(`^/api/tenants/${ID}/credits/gate$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // money: an owner login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)], // New workspace: an owner login makes one in their own name
-  ["PUT", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into the workspace's vault: the owner's login, never an agent token
+  ["PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into (or out of) the workspace's vault: the owner's login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
   ["GET", new RegExp(`^/api/tenants/${ID}/github/(start|repos|check)$`)], // the owner's own GitHub: never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/github/repo(/new)?$`)],

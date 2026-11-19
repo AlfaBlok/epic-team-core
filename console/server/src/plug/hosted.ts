@@ -120,6 +120,9 @@ export interface SocialArea {
     socialUrl: string;
     digestBase: string;
     notify?: (text: string, id: string) => Promise<true | string>;
+    /** the console's spine writer (a posting number saved from Settings commits through it) and the owner's name. */
+    spine?: import("../inbox/spineWrite.js").SpineWriter;
+    ownerName?: () => string;
   }): { campaigns: unknown; postReview: PostReview };
   /** every site's past days of a world. */
   sitesDaily(store: Store, world: string): unknown;

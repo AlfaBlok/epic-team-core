@@ -2,6 +2,7 @@ import type { HostedPlug } from "./hosted.js";
 import type { DB } from "../db.js";
 import type { Vps3Target } from "../t3/remoteHost.js";
 import type { SecretPut, SecretPutInput, SecretStoreResult } from "./keys.js";
+import type { GatewayExtra } from "../gateway/gateway.js";
 import { ownerName } from "../identity.js";
 
 /**
@@ -129,6 +130,8 @@ export interface HostHooks {
   wrapFetch<F extends Fetch>(fetch: F, o: { db: DB; mode: { devCopy: boolean; staging: boolean }; preflight: (req: Request, peer?: string) => { status: number; code: string; message: string } | undefined }): F;
   /** Old route names this host still answers (rewritten to the core's names before anything reads the path); none in the core. */
   aliasRoutes<F extends Fetch>(fetch: F): F;
+  /** The host's own agent-gateway routes (hosted: a workspace's included AI); none in the core. */
+  gatewayExtra(db: DB): GatewayExtra | undefined;
   /** The words the start line adds for this host's mode. */
   modeNote(mode: { devCopy: boolean; staging: boolean }): string;
   /** GitHub traffic readers for the Performance page; none in the core. */
@@ -185,6 +188,7 @@ const ONE_TEAM: HostedHooks = {
     diskProbe: () => undefined,
     wrapFetch: (fetch) => fetch,
     aliasRoutes: (fetch) => fetch,
+    gatewayExtra: () => undefined,
     modeNote: () => "",
     codeViews: null,
     referrers: null,

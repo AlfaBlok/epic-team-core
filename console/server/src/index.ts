@@ -297,7 +297,7 @@ const server = serve({ fetch: appFetch, hostname: host, port }, (info) => {
 // the agent gateway (token only, D4), a second listener on loopback/tailnet; off unless CONSOLE_GATEWAY_PORT is set.
 const gw = gatewayConfigFromEnv();
 const gateway = gw
-  ? serve({ fetch: hooks.host.aliasRoutes(createGateway({ db, fetch: appFetch, dispatcher: gw.dispatcherCmd ? cliRunner(gw.dispatcherCmd) : undefined })), hostname: gw.host, port: gw.port }, (info) =>
+  ? serve({ fetch: hooks.host.aliasRoutes(createGateway({ db, fetch: appFetch, dispatcher: gw.dispatcherCmd ? cliRunner(gw.dispatcherCmd) : undefined, extra: hooks.host.gatewayExtra(db) })), hostname: gw.host, port: gw.port }, (info) =>
       console.log(`agent gateway on http://${gw.host}:${info.port} (bearer tokens only${gw.dispatcherCmd ? ", dispatcher face on" : ""})`),
     )
   : undefined;

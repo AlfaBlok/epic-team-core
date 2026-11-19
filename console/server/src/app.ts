@@ -71,9 +71,10 @@ import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } fr
 import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
-import { createPursuits, effortForSpine, epicHeading, objectiveIds, parsePursuits, priorityLines } from "./pursuits.js";
-import { mapSection, productFor, readMaps, sameRepoName, totemView } from "./totemMap.js";
+import { createPursuits, effortForSpine, epicHeading, objectiveIds, priorityLines } from "./pursuits.js";
+import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
 import { wheelTrackers } from "./trackers.js";
+import { storePersonas, wheelReader } from "./wheel.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
@@ -1005,14 +1006,7 @@ export function createApp(
   const totemHome = () => resolveRepo(read.reposRoot, homeRepo())?.path;
   const totemMaps = () => readMaps(totemHome());
   /** the objective whose epics list this milestone's spine (docs/pursuits.json), for picking its product. */
-  const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => {
-    try {
-      const doc = parsePursuits(fs.readFileSync(path.join(totemHome() ?? "", "docs/pursuits.json"), "utf8"));
-      return doc.pursuits.find((p) => p.epics.some((e) => !!m.repo && sameRepoName(e.repo, m.repo) && e.path === m.path) || (!!m.repo && !!p.plan && sameRepoName(p.plan.repo, m.repo) && p.plan.path === m.path))?.id;
-    } catch {
-      return undefined;
-    }
-  };
+  const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => wheelReader(totemHome()).ofSpine(m.repo, m.path);
   const totemMapFor = (m: { repo?: string; path: string }): string => {
     const maps = totemMaps();
     return mapSection(maps, productFor(maps, { objective: objectiveOfMilestone(m), repo: m.repo }));
@@ -1967,6 +1961,15 @@ export function createApp(
     return v ? c.json(v) : c.json({ error: "not_found" }, 404);
   });
   // a wheel's tracker tables (shortlists: entries, status, columns), the frame's, its product's and its own.
+  // the wheel as one record: objective, key results, map, trackers, plan and personas joined in one place
+  // (wheel.ts); scripts/wheel.py reads these. Home world only, as the objectives file is.
+  const wheels = () => wheelReader(totemHome(), storePersonas(createStore(db)));
+  const homeOnly = () => { const w = credentialWorld(); return !w || w === DEFAULT_TENANT; };
+  api.get("/wheels", (c) => (homeOnly() ? c.json({ wheels: wheels().all() }) : c.json({ error: { code: "not_found" } }, 404)));
+  api.get("/wheels/:id", (c) => {
+    const w = homeOnly() ? wheels().one(c.req.param("id")) : null;
+    return w ? c.json(w) : c.json({ error: { code: "not_found" } }, 404);
+  });
   api.get("/trackers/:wheel", (c) => {
     const v = wheelTrackers(totemHome(), c.req.param("wheel"));
     return v ? c.json(v) : c.json({ error: "not_found" }, 404);
@@ -3487,6 +3490,8 @@ export function createApp(
     socialUrl: process.env.CONSOLE_SOCIAL_URL || (process.env.CONSOLE_STAGING === "1" ? cycle.publicUrl : siteConfig().socialUrl),
     digestBase: process.env.CONSOLE_SOCIAL_URL || cycle.publicUrl,
     notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
+    spine, // a posting number saved from Settings commits through the spine writer
+    ownerName,
   });
   postReview = sites?.postReview;
   const campaigns = sites?.campaigns;
