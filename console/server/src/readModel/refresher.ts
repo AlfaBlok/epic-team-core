@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { worldPriorities } from "../inbox/jordiPriority.js";
 import fs from "node:fs";
@@ -60,11 +61,79 @@ export interface RefresherOptions {
    * last output meanwhile and other views never wait for it. A console write (`dirty(dir)`) and the full refresh re-read at once.
    */
   rescanGapMs?: number;
+  /** Files changed between two commits of a checkout (default git diff); tests pass a fake. */
+  changedFiles?: ChangedFiles;
   /** How long a view computation may wait for spines.py (the run itself is bounded by its own timeout). */
   softMs?: number;
   log?: (msg: string) => void;
   /** A view was written (the worker tells the main thread). */
   onWritten?: (key: string, at: string) => void;
+}
+
+interface AssignmentRow {
+  id: string;
+  milestone_id: string;
+  persona_id: string;
+  enabled: number;
+  last_run_at: string | null;
+}
+
+/**
+ * Each milestone's assignments in ownerFor's order (inbox/waiting.ts: enabled first, then one with a home thread, then the
+ * newest run), with persona and enabled kept: what the waiting views read from the assignments, without the run times.
+ */
+/**
+ * Paths no view reads (code, dated logs, voice note transcripts, proposal and landing pages): a commit that touches only
+ * these moves HEAD but changes nothing a view shows, so it rebuilds nothing (about one commit in seven on a busy
+ * repo). Anything else (spines, cards, asks, desk, docs/status screenshots, priorities, pursuits …) still rebuilds.
+ */
+export const UNREAD_PATHS = ["hosted/", "core/", "browser/", "video/", "docs/voice-notes/", "docs/proposals/", "docs/landing/", "docs/outcomes/2"];
+export const unreadPath = (rel: string) => UNREAD_PATHS.some((p) => rel.startsWith(p));
+
+/** Files changed between two commits (git diff --name-only); undefined when git cannot say (a rewritten history). */
+export type ChangedFiles = (dir: string, from: string, to: string) => string[] | undefined;
+export const gitChangedFiles: ChangedFiles = (dir, from, to) => {
+  try {
+    const out = execFileSync("git", ["-C", dir, "diff", "--name-only", "--no-renames", from, to], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024 });
+    return out.split("\n").filter(Boolean);
+  } catch {
+    return undefined;
+  }
+};
+
+/** Two spines.py outputs say the same (a re-run after a commit that changed nothing they read). */
+export function sameOutput(a: SpinesJson | undefined, b: SpinesJson | undefined): boolean {
+  if (!a || !b) return a === b;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+export function ownerOrder(rows: AssignmentRow[], db?: DB): [string, string[]][] {
+  let threads = new Set<string>();
+  try {
+    if (db) threads = new Set((db.prepare("SELECT assignment_id FROM cycle_assignment_link WHERE thread_id IS NOT NULL").all() as { assignment_id: string }[]).map((r) => r.assignment_id));
+  } catch {
+    /* no links table: no home threads */
+  }
+  const by = new Map<string, AssignmentRow[]>();
+  for (const r of rows) by.set(r.milestone_id, [...(by.get(r.milestone_id) ?? []), r]);
+  return [...by.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([m, list]) => [
+      m,
+      [...list]
+        .sort(
+          (a, b) =>
+            Number(!!b.enabled) - Number(!!a.enabled) ||
+            Number(threads.has(b.id)) - Number(threads.has(a.id)) ||
+            (b.last_run_at ?? "").localeCompare(a.last_run_at ?? "") ||
+            a.id.localeCompare(b.id),
+        )
+        .map((r) => `${r.id}:${r.persona_id}:${r.enabled ? 1 : 0}`),
+    ]);
 }
 
 interface DirStamp {
@@ -100,7 +169,8 @@ export function createRefresher(o: RefresherOptions) {
   const log = o.log ?? ((m: string) => console.warn(m));
   const statusEveryMs = o.statusEveryMs ?? 30_000;
   const statusMaxAgeMs = o.statusMaxAgeMs ?? 120_000;
-  const fullEveryMs = o.fullEveryMs ?? 15 * 60_000;
+  // every hour (was 15 min): HEAD and the stamped spine files catch every change; this only heals a missed one.
+  const fullEveryMs = o.fullEveryMs ?? 60 * 60_000;
   const dropUnreadMs = o.dropUnreadMs ?? 3 * 24 * 3600_000;
   const softMs = o.softMs ?? 120_000;
   const rescanGapMs = o.rescanGapMs ?? 0;
@@ -250,8 +320,11 @@ export function createRefresher(o: RefresherOptions) {
         .then(() => {
           running.delete(dir);
           ready.add(dir);
-          // its views were rebuilt from the last output meanwhile (`readable`); a new output rebuilds them again.
-          if (before && spinesOut.get(dir) !== before) {
+          // its views were rebuilt from the last output meanwhile (`readable`); a new output rebuilds them again, but only
+          // when it says something else: the same output after a commit (most of them) rebuilt every view of every world
+          // reading the repo a second time.
+          const after = spinesOut.get(dir);
+          if (before && after !== before && !sameOutput(before, after)) {
             reads.drop(dir);
             for (const [s, k] of keys) if (dirsOf(k).includes(dir)) dirty.add(s);
           }
@@ -288,7 +361,14 @@ export function createRefresher(o: RefresherOptions) {
       }
     };
     q("SELECT * FROM milestones ORDER BY id"); // every column: priority (big_root), titles, settle, pause
-    q("SELECT id, milestone_id, persona_id, enabled, last_run_at FROM assignments ORDER BY id"); // ownerFor; not the scheduler's next-wake times
+    // ownerFor reads last_run_at only to break a tie between assignments (enabled, then a home thread, then the newest
+    // run): the order it picks from goes in, not the time. Each wake moved last_run_at, so every wake (about 18 an hour)
+    // rebuilt every view of every world; now only a wake that changes who is picked does.
+    try {
+      h.update(JSON.stringify(ownerOrder(db.prepare("SELECT id, milestone_id, persona_id, enabled, last_run_at FROM assignments ORDER BY id").all() as AssignmentRow[], db)));
+    } catch {
+      h.update("assignments");
+    }
     q("SELECT id, name FROM personas ORDER BY id");
     // no needs_jordi and no jordi_responses here: asks and answers come from the spines alone (a console spine
     // write marks its checkout dirty), so the cache depends on the repo for them.
@@ -306,6 +386,25 @@ export function createRefresher(o: RefresherOptions) {
   let lastDv = -1;
   let lastStatusAt = 0;
   let lastFullAt = now();
+
+  const changedFiles = o.changedFiles ?? gitChangedFiles;
+  /**
+   * HEAD moved, no stamped spine file changed and the commits touched only paths no view reads: the stamp takes the new
+   * HEAD and nothing is rebuilt. Anything git cannot answer counts as a change.
+   */
+  const onlyUnreadMoved = (dir: string): boolean => {
+    const st = stamps.get(dir);
+    if (!st?.head) return false;
+    const h = headOf(dir);
+    if (!h || h === st.head) return false;
+    for (const [rel, v] of st.files) if (statOf(path.join(dir, rel)) !== v) return false;
+    const files = changedFiles(dir, st.head, h);
+    if (!files?.length || !files.every(unreadPath)) return false;
+    st.head = h;
+    skippedCommits++;
+    return true;
+  };
+  let skippedCommits = 0;
 
   const stampChanged = (dir: string): boolean => {
     const st = stamps.get(dir);
@@ -399,7 +498,7 @@ export function createRefresher(o: RefresherOptions) {
     for (const k of keys.values()) for (const d of dirsOf(k)) allDirs.add(d);
     const full = t - lastFullAt >= fullEveryMs;
     if (full) lastFullAt = t;
-    for (const dir of allDirs) if (full || (stampChanged(dir) && !inGap(dir, t))) dropDir(dir);
+    for (const dir of allDirs) if (full || (stampChanged(dir) && !inGap(dir, t) && !onlyUnreadMoved(dir))) dropDir(dir);
     for (const dir of allDirs) ensureSpines(dir);
     // Console rows: a changed fingerprint recomputes every view; runs alone (data_version) only the statuses.
     const fp = fingerprint();
@@ -585,6 +684,8 @@ export function createRefresher(o: RefresherOptions) {
       for (const s of keys.keys()) dirty.add(s);
       kick();
     },
+    /** How many moved HEADs rebuilt nothing (their commits touched only UNREAD_PATHS), since the start. */
+    skippedCommits: () => skippedCommits,
     /** Resolves when no pass and no spines.py run is in flight (tests). */
     idle,
     keys: () => [...keys.keys()],

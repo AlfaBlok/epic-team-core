@@ -40,7 +40,10 @@ export interface IndexerConfig {
   tenant?: string;
   authOn?: boolean;
   teamRepo?: string;
-  /** Read model refresher tick (default 30 s, indexerTickMs), queue poll (1 s), heartbeat (5 s), book check (2 min; 0 = no book). */
+  /**
+   * Read model refresher tick (default 30 s, indexerTickMs), queue poll (1 s), heartbeat (5 s), book check (2 min; 0 = no
+   * book: a check reads only each repo's HEAD, and a moved one rebuilds that repo's part from its new commits).
+   */
   tickMs?: number;
   pollMs?: number;
   beatMs?: number;
@@ -213,6 +216,7 @@ export function createIndexer(db: DB, c: IndexerConfig, d: IndexerDeps = {}) {
       seeded,
       ...(book?.builtAt() ? { book: new Date(book.builtAt()).toISOString() } : {}),
       ...(remote ? { scans: remote.stats() } : {}),
+      saved: { skippedCommits: refresher.skippedCommits(), bookReused: book?.stats().reused ?? 0, bookBuilt: book?.stats().built ?? 0, bookIncremental: book?.stats().incremental ?? 0 },
     };
     try {
       kvSet(db, BEAT_KEY, b, new Date(now()).toISOString());

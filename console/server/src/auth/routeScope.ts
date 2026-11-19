@@ -445,6 +445,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/github/(start|repos|check)$`)], // the owner's own GitHub: never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/github/repo(/new)?$`)],
   ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only
+  ["PUT", new RegExp(`^/api/capacity/${ID}$`)], // a world's included AI seats (money), owner only (hosted cycle/capacity.ts)
   ["PUT", new RegExp(`^/api/tenants/${ID}/provider$`)],
   ["POST", /^\/api\/team-skills(\/preview)?$/],
   ["DELETE", new RegExp(`^/api/team-skills/${ID}$`)],

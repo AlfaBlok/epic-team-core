@@ -199,7 +199,8 @@ describe("E940-S2 service: cached, background, no git on the request path", () =
     t = 4_000 + 10_000; // old enough: rebuilt even with the same HEADs (uncommitted spine edits), git not re-run
     await b.get();
     await new Promise((r) => setTimeout(r, 0));
-    expect([gitCalls, spinesCalls]).toEqual([2, 3]);
+    // the moved HEAD read only its new commits (an ancestry check, then the log of h1..h2), never the whole log again.
+    expect([gitCalls, spinesCalls]).toEqual([3, 3]);
   });
 
   it("the very first read waits at most softMs, and a failing repo keeps the others", async () => {

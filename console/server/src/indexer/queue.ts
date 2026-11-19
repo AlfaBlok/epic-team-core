@@ -88,6 +88,11 @@ export interface IndexerBeat {
   book?: string;
   /** scans another host read for this one (CONSOLE_SPINES_REMOTE), and the ones that fell back here. */
   scans?: { remote: number; local: number; why: string[] };
+  /**
+   * work saved after commits since the start: moved HEADs that rebuilt no view (only unread paths changed),
+   * book repo parts kept or built, and book git logs read as only the new commits.
+   */
+  saved?: { skippedCommits: number; bookReused: number; bookBuilt: number; bookIncremental: number };
 }
 
 export const BEAT_KEY = "beat";

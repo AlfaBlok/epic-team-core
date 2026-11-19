@@ -21,7 +21,8 @@ export const BOOK_MAX_AGE_MS = 10 * 60_000;
 export const BOOK_SINCE_DAYS = 120;
 /** With no reader, the timer rebuilds an unchanged book (no HEAD moved) only this often: uncommitted spine edits. */
 export const BOOK_IDLE_MAX_AGE_MS = 30 * 60_000;
-const LOG_ARGS = (days: number) => ["log", `--since=${days}.days`, "--no-color", "-n", "4000", "--format=%x1e%h%x1f%cI%x1f%s", "--name-only"];
+const LOG_MAX = 4000;
+const LOG_ARGS = (days: number) => ["log", `--since=${days}.days`, "--no-color", "-n", String(LOG_MAX), "--format=%x1e%h%x1f%cI%x1f%s", "--name-only"];
 
 /** HEAD commit of a checkout from its.git files (loose ref, else packed-refs); undefined when it cannot be read. */
 export function headOf(repoDir: string): string | undefined {
@@ -117,6 +118,8 @@ export function createBook(o: {
   const commitsCache = new Map<string, { head: string; commits: BookCommit[] }>();
   let book: Book | null = o.store?.load() ?? null;
   let builtAt = book ? Date.parse(book.builtAt) || 0 : 0;
+  /** the last build that found the book current, a new one or the same (no new book when nothing moved). */
+  let freshAt = builtAt;
   let checkedAt = 0;
   let heads = "";
   /** HEADs of every repo the book reads, from the.git files: unchanged = nothing was pushed or pulled. */
@@ -132,11 +135,32 @@ export function createBook(o: {
   let pending: Promise<Book> | undefined;
   let lastError: string | undefined;
 
+  const sinceDays = o.sinceDays ?? BOOK_SINCE_DAYS;
+  /**
+   * the commits since the last HEAD only: the whole 120-day log (4,000 commits with their files, about 2 s of git
+   * for a busy repo) was read again at every moved HEAD, about every 2 min. A HEAD that is not a
+   * descendant of the last one (a rewritten history) or any git error reads the whole log as before.
+   */
+  const newerCommits = async (dir: string, from: string, to: string, old: BookCommit[]): Promise<BookCommit[] | undefined> => {
+    try {
+      await o.git(dir, ["merge-base", "--is-ancestor", from, to]);
+      const fresh = parseGitLog(await o.git(dir, [...LOG_ARGS(sinceDays), `${from}..${to}`]));
+      const seen = new Set(fresh.map((c) => c.sha));
+      const cutoff = now() - sinceDays * 86_400_000;
+      return [...fresh, ...old.filter((c) => !seen.has(c.sha))].filter((c) => !(Date.parse(c.date) < cutoff)).slice(0, LOG_MAX);
+    } catch {
+      return undefined;
+    }
+  };
+  let incremental = 0;
+
   const commitsOf = async (dir: string): Promise<BookCommit[]> => {
     const h = head(dir);
     const hit = commitsCache.get(dir) ?? (h ? o.commits?.get(dir) : undefined);
     if (hit && h && hit.head === h) return (commitsCache.set(dir, hit), hit.commits);
-    const commits = parseGitLog(await o.git(dir, LOG_ARGS(o.sinceDays ?? BOOK_SINCE_DAYS)));
+    const more = hit && h ? await newerCommits(dir, hit.head, h, hit.commits) : undefined;
+    if (more) incremental++;
+    const commits = more ?? parseGitLog(await o.git(dir, LOG_ARGS(sinceDays)));
     if (h) {
       commitsCache.set(dir, { head: h, commits });
       try {
@@ -148,12 +172,25 @@ export function createBook(o: {
     return commits;
   };
 
+  /**
+   * each repo's part of the book as last built, with what it was built from: a repo whose HEAD, spines.py
+   * output and the previews did not move keeps its part, so a commit rebuilds one repo's part, not all of them. A build
+   * with every part kept makes no new book at all. `full` (an old book, the daily rebuild) builds every part again, so an
+   * edit no HEAD shows (an uncommitted card) is in within BOOK_IDLE_MAX_AGE_MS.
+   */
+  const parts = new Map<string, { head: string; spines: unknown; previews: string; part: BookRepo }>();
+  let reused = 0;
+  let built = 0;
+
   // One repo at a time: the host is loaded, and spines.py is already cached per repo (adapters/spines.ts cachedRunner).
-  const build = async (): Promise<Book> => {
+  const build = async (full: boolean): Promise<Book | null> => {
     heads = headsNow();
     const out: BookRepo[] = [];
+    let changed = full || !book;
     // the tailnet previews any repo has recorded (docs/status/previews.json), so a stopped one names its folder.
     const previews = o.repos().filter((r) => r.hasEpicSpine).flatMap((r) => readPreviews(r.path));
+    const previewsKey = JSON.stringify(previews);
+    const seen = new Set<string>();
     for (const repo of o.repos().filter((r) => r.hasEpicSpine)) {
       let spines;
       try {
@@ -163,6 +200,14 @@ export function createBook(o: {
         continue;
       }
       if (!spines.root && !spines.nodes.length) continue;
+      seen.add(repo.path);
+      const h = head(repo.path);
+      const kept = parts.get(repo.path);
+      if (!full && kept && h && kept.head === h && kept.spines === spines && kept.previews === previewsKey) {
+        out.push(kept.part);
+        reused++;
+        continue;
+      }
       let commits: BookCommit[] = [];
       let error: string | undefined;
       try {
@@ -171,19 +216,33 @@ export function createBook(o: {
         error = `git log failed: ${(e as Error).message.split("\n")[0]}`;
         commits = commitsCache.get(repo.path)?.commits ?? [];
       }
-      out.push(buildRepoBook(repo, spines, commits, error, { previews }));
+      const part = buildRepoBook(repo, spines, commits, error, { previews });
+      built++;
+      changed = true;
+      if (h && !error) parts.set(repo.path, { head: h, spines, previews: previewsKey, part });
+      else parts.delete(repo.path);
+      out.push(part);
     }
+    for (const dir of [...parts.keys()]) if (!seen.has(dir)) (parts.delete(dir), (changed = true));
+    if (!changed && book && out.length === book.repos.length) return null;
     return assembleBook(out, new Date(now()));
   };
 
-  const refresh = (): Promise<Book> => {
+  /** when every part was last built from scratch (a full build), for the idle heal. */
+  let fullAt = 0;
+  const refresh = (full = false): Promise<Book> => {
     if (!pending) {
-      pending = build()
+      const whole = full || !book || now() - fullAt >= idleMaxAgeMs;
+      pending = build(whole)
         .then((b) => {
-          book = b;
           dirty = false;
-          builtAt = checkedAt = now();
+          checkedAt = freshAt = now();
           lastError = undefined;
+          if (whole) fullAt = now();
+          // nothing moved: the book as it was is current (no new book, no 7 MB write).
+          if (!b) return book!;
+          book = b;
+          builtAt = now();
           try {
             o.store?.save(b);
           } catch (e) {
@@ -211,7 +270,7 @@ export function createBook(o: {
    */
   const tick = (): boolean => {
     if (pending) return false;
-    if (!book || dirty || now() - builtAt >= idleMaxAgeMs) return (refresh().catch(() => undefined), true);
+    if (!book || dirty || now() - fullAt >= idleMaxAgeMs) return (refresh().catch(() => undefined), true);
     checkedAt = now();
     if (headsNow() !== heads) return (refresh().catch(() => undefined), true);
     return false;
@@ -225,7 +284,7 @@ export function createBook(o: {
           timer = setTimeout(r, softMs);
         });
         await Promise.race([refresh().catch(() => {}), late]).finally(() => clearTimeout(timer));
-      } else if (dirty || now() - builtAt >= maxAgeMs) refresh();
+      } else if (dirty || now() - freshAt >= maxAgeMs) refresh();
       else if (!pending && now() - checkedAt >= ttlMs) {
         checkedAt = now();
         if (headsNow() !== heads) refresh();
@@ -239,8 +298,10 @@ export function createBook(o: {
     /** daily refresh: a fresh build that starts after now (a build already running is waited out first). */
     async rebuild(): Promise<Book> {
       if (pending) await pending.catch(() => undefined);
-      return refresh();
+      return refresh(true);
     },
+    /** How the builds went since the start: repo parts kept or built, and git logs read as only the new commits. */
+    stats: () => ({ reused, built, incremental }),
     tick,
     /** Check every `everyMs` (tick) so the book is rebuilt on a spine/git change or when old, read or not. */
     start(everyMs: number) {
@@ -307,6 +368,7 @@ export function followBook(o: { store: BookStore; ask: (rebuild: boolean) => voi
       if (!book || seen === before) throw new Error("the indexer did not rebuild the book in time");
       return book;
     },
+    stats: () => ({ reused: 0, built: 0, incremental: 0 }),
     tick: () => false,
     start() {},
     stop() {},
