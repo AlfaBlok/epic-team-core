@@ -93,6 +93,7 @@ import { mountPagePins } from "./pagePins.js";
 import { mountAudioStore } from "./voice/audioStore.js";
 import { createVoiceNotesReader } from "./voiceNotesIndex.js";
 import { createXStatsReader } from "./xStats.js";
+import { createPostStats } from "./postStats.js";
 import { createLeases, mountClaims } from "./review/leases.js";
 import { createCheckoutSync, mountCheckoutSync, type CheckoutSync } from "./status/checkoutSync.js";
 import { createJobServers, mountJobServers, type JobServers } from "./status/jobServers.js";
@@ -1944,6 +1945,13 @@ export function createApp(
   // X stats of the team's six accounts, one file a day (data/x-stats/<date>.json, scripts/x_stats.py).
   const xStats = createXStatsReader({ reposRoot: read.reposRoot });
   api.get("/x-stats", (c) => c.json(xStats.get(c.req.query("date") || undefined)));
+  // the one store of every post's numbers per day (post_stats, loaded from those files): a campaign's status is read
+  // here (?date&product&campaign&channel&message&group=message|channel|message-channel|campaign|post).
+  const postStats = createPostStats({ db, reposRoot: read.reposRoot });
+  api.get("/post-stats", (c) => {
+    const q = (k: string) => c.req.query(k) || undefined;
+    return c.json(postStats.query({ date: q("date"), product: q("product"), campaign: q("campaign"), channel: q("channel"), message: q("message"), group: q("group") }));
+  });
   // the rules every worker brief carries verbatim, fresh from this release (a manager's brief helper reads them);
   // ?repo=<row's repo>&title=<row title> adds the owner's view only for a row on its topic (docs/his-views.json)
   // root L-77: the map. Every product's totems (the hardwired nodes of its data graph), one totem's content
