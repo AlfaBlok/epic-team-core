@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parsePursuits, PURSUITS_FILE, ranksOf, type PursuitsDoc } from "./pursuits.js";
-import { parseScorecardFile, SCORECARD_DIR, type ScorecardFile } from "./scorecards.js";
+import { noFalseGreen, parseScorecardFile, SCORECARD_DIR, type ScorecardFile } from "./scorecards.js";
 import { productFor, readMaps, sameRepoName, type Grows, type Totem, type TotemMaps } from "./totemMap.js";
 import { wheelTrackers, type TrackerTable } from "./trackers.js";
 import { turnerOf, type Turner } from "./personaGaps.js";
@@ -89,7 +89,7 @@ function keyResultsOf(f: ScorecardFile | null): WheelKeyResult[] {
       ...(k.doneMeans ? { doneMeans: k.doneMeans } : {}),
       ...(k.value ? { value: k.value } : {}),
       ...(k.target ? { target: k.target } : {}),
-      ...(k.colour ? { colour: k.colour } : {}),
+      ...(k.colour ? { colour: noFalseGreen(k.colour, k) } : {}),
       ...(k.evidence !== undefined ? { evidence: k.evidence } : {}),
       work: Array.isArray(k.work) ? k.work.filter((w) => typeof w === "string") : [],
     };

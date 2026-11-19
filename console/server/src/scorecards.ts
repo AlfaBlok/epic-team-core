@@ -43,6 +43,8 @@ export interface SpineInfo {
   review?: string[];
 }
 export type RowState = "green" | "amber" | "red" | "unknown";
+import { noFalseGreen } from "./noFalseGreen.js";
+export { noFalseGreen };
 /** one measurable row of a scorecard's table (the owner vn_fd4f7a7a: "a table of measurable rows coloured green/amber/red"). */
 export interface ScorecardRow {
   label: string;
@@ -283,7 +285,7 @@ export interface ScorecardFile {
   /** where the shape came from. */
   proposal?: string;
   /** the key results: label, the Done-means id it measures, value, note (due date, aim), colour, work codes. */
-  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string; evidence?: unknown }[];
+  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string; evidence?: unknown; posts?: number; readings?: number }[];
   /** "repo CODE" of the epic whose Goal sentence is the objective. */
   spine?: string;
   /** the child epics the sidebar shows, short names: { epic: "EPIC-907" or a spine path, name }. */
@@ -517,7 +519,8 @@ export function buildScorecards(
       // `doneMeans` is a box id, `repo:` first when the box lives in another repo (other:E907-1).
       const box = k.doneMeans && /^([\w.-]+:)?[A-Z][A-Z0-9]*-\d+$/.test(k.doneMeans) ? workOf([k.doneMeans])[0] : undefined;
       const ticked = box?.kind === "done-means" && box.status === "done";
-      const declared = k.colour && ROW_STATES.has(k.colour) ? k.colour : "unknown";
+      const said = k.colour && ROW_STATES.has(k.colour) ? k.colour : "unknown";
+      const declared = noFalseGreen(said, k);
       return {
         label: k.label,
         kind: "key-result",

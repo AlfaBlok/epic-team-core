@@ -43,6 +43,22 @@ export interface RecoverOptions {
   now?: () => Date;
 }
 
+/**
+ * which script left each file in the way, so the reason names the writer to fix (a shared checkout once sat 7 behind
+ * for 25 min over two files a script wrote and never committed, and the reason named only the files). A writer that
+ * commits through a shared-write helper signs its commits `Written-by: <script>`; else the file's last commit subject
+ * says who wrote it last. At most three files.
+ */
+export async function whoLeft(git: GitIn, files: string[]): Promise<string> {
+  const parts: string[] = [];
+  for (const f of files.slice(0, 3)) {
+    const r = await ok(git, ["log", "-1", "--format=%(trailers:key=Written-by,valueonly,separator=%x2C )%x1f%s", "--", f]);
+    const [by, subject] = (r.ok ? r.out : "").split("\x1f").map((x) => (x ?? "").trim());
+    parts.push(by ? `${f} by ${by}` : subject ? `${f}, last written by “${subject.slice(0, 90)}”` : `${f}, never committed`);
+  }
+  return parts.length ? `left by: ${parts.join("; ")}${files.length > 3 ? `; ${files.length - 3} more` : ""}` : "";
+}
+
 export async function recoverPull(git: GitIn, o: RecoverOptions = {}): Promise<Recovered> {
   const retryMs = o.retryMs ?? 2_000;
   const step = async (args: string[]) => {
@@ -97,7 +113,7 @@ export async function recoverPull(git: GitIn, o: RecoverOptions = {}): Promise<R
     for (const p of untracked) {
       const mine = (await ok(git, ["hash-object", "--", p])).out;
       const theirs = (await ok(git, ["rev-parse", "-q", "--verify", `${upstream}:${p}`])).out;
-      if (!mine || mine !== theirs) return no(`untracked ${p} differs from the file ${upstream} adds (kept, nothing removed)`);
+      if (!mine || mine !== theirs) return no(`untracked ${p} differs from the file ${upstream} adds (kept, nothing removed); ${await whoLeft(git, [p])}`);
       same.push(p);
     }
     if (same.length) {
@@ -109,19 +125,22 @@ export async function recoverPull(git: GitIn, o: RecoverOptions = {}): Promise<R
 
   // uncommitted edits: stash and put back, only when they merge cleanly onto main
   let stashed = false;
+  let left = "";
   const dirty = await ok(git, ["status", "--porcelain", "-uno"]);
   if (!dirty.ok) return no(`git status failed: ${dirty.err}`);
   if (dirty.out) {
-    const files = dirty.out.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+    // the status code, not a fixed 3 chars: ok() trims the output, so the first line's leading space is gone (" M x" → "M x")
+    const files = dirty.out.split("\n").map((l) => l.replace(/^[ MADRCTU]{1,2} /, "").trim()).filter(Boolean);
     const s = await ok(git, ["stash", "create"]);
     if (!s.ok) return no(`cannot read the local edits: ${s.err}`);
     if (s.out) {
       const dry = await ok(git, ["merge-tree", "--write-tree", "--name-only", s.out, upstream]);
-      if (!dry.ok) return no(`local edits in ${files.slice(0, 3).join(", ")} clash with ${upstream} (kept, nothing reset)`);
+      if (!dry.ok) return no(`local edits in ${files.slice(0, 3).join(", ")} clash with ${upstream} (kept, nothing reset); ${await whoLeft(git, files)}`);
       const stamp = (o.now?.() ?? new Date()).toISOString();
       const push = await step(["stash", "push", "-q", "-m", `console-sync ${stamp}`]);
       if (!push.ok) return no(`could not stash the local edits: ${push.err}`);
       stashed = true;
+      left = await whoLeft(git, files);
     }
   }
   const putBack = async (): Promise<string | undefined> => {
@@ -141,6 +160,6 @@ export async function recoverPull(git: GitIn, o: RecoverOptions = {}): Promise<R
   else did.push(`fast-forwarded ${behind} commit(s)`);
   const lost = await putBack();
   if (lost) return no(`moved to ${upstream} but ${lost}`);
-  if (stashed) did.push("kept the local edits (stashed and put back)");
+  if (stashed) did.push(`kept the local edits (stashed and put back; ${left})`);
   return { ok: true, did: did.join("; ") };
 }

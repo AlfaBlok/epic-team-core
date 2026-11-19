@@ -7,6 +7,8 @@
  * Nothing is guessed: a channel nobody reads says "not measured yet", one without an account says so.
  */
 
+import { noFalseGreen } from "../noFalseGreen.js";
+
 export type LaunchState = "green" | "amber" | "red" | "unknown";
 export type LaunchChannelKey = "x" | "reddit" | "linkedin" | "tiktok" | "youtube";
 
@@ -82,7 +84,7 @@ export function launchKeyResults(scorecardText: string | null): LaunchKeyResult[
       {
         label,
         value: str(k.value) ?? "not measured yet",
-        state: stateOf(k.colour),
+        state: noFalseGreen(stateOf(k.colour), k),
         ...(str(k.target) ? { target: str(k.target) } : {}),
         ...(str(k.note) ? { note: str(k.note) } : {}),
         ...(str(k.measuredAt) ? { measuredAt: str(k.measuredAt) } : {}),

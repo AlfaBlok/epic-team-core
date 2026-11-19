@@ -103,10 +103,23 @@ describe("the console's checkouts follow main by themselves", () => {
     const head = at(clone);
     const r = await puller().pull(clone);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toMatch(/clash with origin\/main \(kept, nothing reset\)/);
+    expect(!r.ok && r.reason).toMatch(/clash with origin\/main \(kept, nothing reset\); left by: README.md, last written by “one”/);
     expect(read(clone, "README.md")).toBe("mine\nb\nc\nd\ne\n");
     expect(at(clone)).toBe(head);
     expect(git(clone, "stash", "list")).toBe("");
+  });
+
+  it("the reason names the script that left the file (its Written-by trailer)", async () => {
+    write(seed, "README.md", "A2\nb\nc\nd\nE\n");
+    git(seed, "commit", "-qam", "words refresh", "-m", "Written-by: scripts/his_words.py refresh\nRun: t");
+    git(seed, "push", "-q", "origin", "main");
+    git(clone, "pull", "-q", "--ff-only");
+    write(seed, "README.md", "A3\nb\nc\nd\nE\n");
+    git(seed, "commit", "-qam", "three");
+    git(seed, "push", "-q", "origin", "main");
+    write(clone, "README.md", "left\nb\nc\nd\nE\n");
+    const r = await puller().pull(clone);
+    expect(!r.ok && r.reason).toMatch(/left by: README.md by scripts\/his_words.py refresh/);
   });
 
   it("an untracked file holding main's exact bytes is cleared; a different one is kept and stops the pull", async () => {
