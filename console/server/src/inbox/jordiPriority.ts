@@ -62,7 +62,8 @@ export interface JordiPriority {
  * every list (above the red line) until it is answered or closed. `scripts/pressing.py` writes the entries into the
  * levels file from his voice notes (and the desk adds one by hand); the console only reads them.
  */
-export type PressingKind = "frustrated" | "repeated";
+/** `first`: one item the owner asked by name to be first; it leads even his first objective. */
+export type PressingKind = "frustrated" | "repeated" | "first";
 export interface PressingMark {
   kind: PressingKind;
   why: string;
@@ -199,8 +200,10 @@ export const RED_LINE_TIER = 0;
 export const PRESSING_TIER = -1;
 /** The tier of an item the persona did not rank: with the normal ones. */
 export const UNRANKED_TIER = TIER.normal;
+/** an item the owner asked by name to be first leads every tier, his first objective too. */
+export const FIRST_TIER = -3;
 export const tierOf = (p?: Pick<JordiPriority, "level" | "redLine" | "pressing" | "objective">) =>
-  p?.objective?.n === 0 ? OBJECTIVE_TIER : p?.pressing ? PRESSING_TIER : p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER;
+  p?.pressing?.kind === "first" ? FIRST_TIER : p?.objective?.n === 0 ? OBJECTIVE_TIER : p?.pressing ? PRESSING_TIER : p?.redLine ? RED_LINE_TIER : p ? TIER[p.level] : UNRANKED_TIER;
 
 const STATES = new Set<RedLineState>(["proposed", "agreed", "changed"]);
 /** At most this many items lead the inbox, whatever the file says (the owner: a line, not a second backlog). */
@@ -324,7 +327,7 @@ export function parsePressing(text: string, repoName: string): PressingEntry[] {
     const ref = s("ref");
     const why = s("why");
     const kind = s("kind");
-    if (!ref || !why || (kind !== "frustrated" && kind !== "repeated")) continue;
+    if (!ref || !why || (kind !== "frustrated" && kind !== "repeated" && kind !== "first")) continue;
     const repo = s("repo") ?? repoName;
     const key = `${norm(repo)}#${norm(ref)}#${s("path") ?? ""}`;
     if (seen.has(key)) continue;

@@ -64,6 +64,13 @@ export interface RaisedAsk {
   kind?: "do" | "decide" | "approve" | "provide";
 }
 
+/**
+ * E948-S155: a caller that writes its fields with " - " ("… - context: … - impact: … - label: urgent") gets them as the
+ * line's own fields (" — "), so the card shows each in its place and reads its label; before, the whole card was one question.
+ */
+const FLAT_FIELD = /\s+-\s+(?=(?:context|details|impact|risks?|recommend(?:ation)?|options?|steps?|unblocks?|effort|label|why\s+[\w ]{1,20}?)\s*:)/gi;
+export const fieldsApart = (question: string) => question.replace(FLAT_FIELD, " — ");
+
 /** The ask line (human-asks v6 grammar; `approve` when an action is proposed, else the kind the question says, else `decide`). */
 export function askLine(code: string, a: RaisedAsk, date: string, owner: string = DEFAULT_OWNER): string {
   // A proposed action is what the owner approves or denies (the Needs the owner contract); a bare question is read for its kind.
@@ -72,7 +79,7 @@ export function askLine(code: string, a: RaisedAsk, date: string, owner: string 
   const row = a.row && /^[\w.-]+$/.test(a.row) ? ` row ${a.row}` : "";
   const by = `${oneLine(a.askedBy)}${a.runId ? ` (run ${a.runId})` : ""}`;
   return [
-    `- [ask ${code}: ${kind} @${owner} since ${date}${row}] ${oneLine(a.question)}`,
+    `- [ask ${code}: ${kind} @${owner} since ${date}${row}] ${fieldsApart(oneLine(a.question))}`,
     ...(a.proposedAction?.trim() ? [`recommend: ${oneLine(a.proposedAction)}`] : []),
     `context: raised by ${by} through the console API; the console wrote this line`,
   ].join(" — ");

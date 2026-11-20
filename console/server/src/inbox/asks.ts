@@ -412,6 +412,11 @@ export interface HumanAsk {
    */
   putFirst?: { objective: string };
   /**
+   * `— label: urgent` (E948-S155, the owner 20 Nov on his personal reply cards: "top of inbox as priority"): the card leads his inbox,
+   * pinned above every section, and is never held back waiting for its dry run (it shows at once, marked not checked).
+   */
+  urgent?: true;
+  /**
    * who approves the answer (`approve by @Marta`): the row stays blocked until they do.
    * `aware`: who hears the outcome without acting (`aware @the owner, @Sofia`). `escalatedBy`: who passed it up (`escalated
    * by @Leo`, Not sure or the time limit), with their note in `— escalated: …`.
@@ -479,6 +484,10 @@ export const MAC_AGENT_LABEL = "needs Mac agent";
 export const LABEL_SEG = /^\s*label\s*:\s*(.+?)\s*$/i;
 /** the same field as it sits on a line, for spines.py, which glues an unknown field to the one before it. */
 export const LABEL_ON_LINE = /\s+(?:—|--)\s+label\s*:\s*needs\s+mac\s+agent\b[^—]*?(?=\s+(?:—|--)\s+|$)/i;
+/** `label: urgent` (also `top of inbox` or `pressing`): the card leads his inbox (E948-S155). */
+export const isUrgentLabel = (v: string) => /^(?:urgent|top of inbox|pressing)$/i.test(stripInline(v).trim());
+/** the urgent label as it sits on a line, glued by spines.py to the field before it. */
+export const URGENT_ON_LINE = /\s+(?:—|--|-)\s+label\s*:\s*(?:urgent|top of inbox|pressing)\s*(?=\s+(?:—|--|-)\s+|$)/i;
 export const isMacLabel = (v: string) => /^needs\s+mac\s+agent$/i.test(stripInline(v).trim());
 /** a question that starts with the label ("needs Mac agent: …", the form other worlds wrote first) counts too. */
 export const MAC_QUESTION = /^\W*needs\s+mac\s+agent\b/i;
@@ -650,6 +659,10 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
         prio.label = true;
         continue;
       }
+      if (label && isUrgentLabel(label[1])) {
+        ask.urgent = true;
+        continue;
+      }
       const obj = OBJECTIVE_SEG.exec(seg);
       if (obj) {
         prio.objective = stripInline(obj[1]).trim();
@@ -708,6 +721,9 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
     else if (improve.raw.length) ask.question = [ask.question, ...improve.raw].join(" — ");
     if (prio.label && prio.objective) ask.putFirst = { objective: prio.objective };
     else if (prio.raw) ask.question = `${ask.question} — ${prio.raw}`;
+    // E948-S155: a line written with " - " between its fields (the console API's flat ask) keeps its urgent label in the question.
+    // only marked, never cut out: the card's id is made from its question, and an answer already given must stay on it.
+    if (URGENT_ON_LINE.test(ask.question)) ask.urgent = true;
     if (ask.question) out.push(ask);
   });
   return out;
@@ -838,6 +854,8 @@ export function unglueLabel<T extends HumanAsk>(a: T): T {
     if (typeof v !== "string" || !LABEL_ON_LINE.test(v)) continue;
     out = { ...out, [k]: v.replace(LABEL_ON_LINE, "").trim(), macAgent: true };
   }
+  // E948-S155: the urgent label glued to a field marks the ask (the words stay: the card's id is made from its question).
+  if (keys.some((k) => typeof out[k] === "string" && URGENT_ON_LINE.test(out[k] as string))) out = { ...out, urgent: true };
   return MAC_QUESTION.test(out.question) ? { ...out, macAgent: true } : out;
 }
 
@@ -915,6 +933,8 @@ export function asksFor(repoDir: string, rel: string, spinesWaitingOn?: unknown)
           ...((twin ? twin.snoozedUntil : fromSpines) ? { snoozedUntil: (twin ? twin.snoozedUntil : fromSpines)! } : {}),
           // the Mac label, from the file as it is now when the twin is found.
           ...((twin ? twin.macAgent : macFromSpines) ? { macAgent: true as const } : {}),
+          // E948-S155: the urgent label, from the file as it is now (or spines.py's glued field).
+          ...(twin?.urgent || a.urgent ? { urgent: true as const } : {}),
           // spines.py glues the improvement fields onto the field before them: the markdown twin reads them apart.
           // the same for a priority ask: its objective and plain fields from the file.
           ...(twin?.putFirst ? { putFirst: twin.putFirst, question: twin.question, unblocks: twin.unblocks, recommend: twin.recommend, context: twin.context, contextText: twin.contextText, impact: twin.impact, risk: twin.risk, why: twin.why, answer: a.answer ?? twin.answer } : {}),

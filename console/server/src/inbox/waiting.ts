@@ -94,6 +94,8 @@ export interface WaitingItem {
   improvementError?: string;
   /** a priority ask (`label: priority`): the objective his Yes puts first; pinned above everything in his inbox. */
   putFirst?: { objective: string };
+  /** E948-S155: `label: urgent` on the ask: pinned first in his inbox, never held for its dry run. */
+  urgent?: true;
   /** on the stored answer: the pursuits.json commit his Yes made (or why it could not). */
   priorityMoved?: string;
   priorityError?: string;
@@ -691,7 +693,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             const raw = a.line !== undefined ? linesOf(rel)?.[a.line] : undefined;
             gate = dryRunProblem(raw, a.since, dryRunsOf(d.reposRoot));
             if (gate) {
-              const o = dryRunOverdue(raw, a.since, dryRunsOf(d.reposRoot), (await sinceAt(rel, a.line)) ?? endOfDay(a.since));
+              const o = dryRunOverdue(raw, a.since, dryRunsOf(d.reposRoot), (await sinceAt(rel, a.line)) ?? endOfDay(a.since), Date.now(), !!a.urgent);
               if (o.note) [overdueNote, overdueKind, gate] = [o.note, o.kind, undefined];
               else if (o.releaseAt !== undefined) expiresAt = Math.min(expiresAt ?? Infinity, o.releaseAt);
             }
@@ -718,6 +720,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             ...(a.state === "open" && a.doneAt === undefined && a.macAgent && !a.secret ? { macAgent: true as const } : {}),
             ...(a.improvement ? { improvement: a.improvement } : {}),
             ...(a.putFirst ? { putFirst: a.putFirst } : {}),
+            ...(a.urgent && a.state === "open" ? { urgent: true as const } : {}),
             repo: repo.name,
             ...(a.code ? { code: a.code } : {}),
             ...(a.steps ? { steps: a.steps } : {}),

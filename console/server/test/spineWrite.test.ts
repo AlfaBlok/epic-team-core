@@ -522,6 +522,21 @@ describe("API: answer lands in the spine, state read from the spine, wake lists 
     expect(wake2.prompt).not.toContain("Answered by Sam");
   });
 
+  it("E948-S155: an answered ask whose line the team rewords shows once, never its old wording as a second card", async () => {
+    const { call } = setup();
+    const m = (await call("POST", "/api/milestones", { title: "Inbox", repo: "Acme/inbox", path: "docs/spines/root.md" })).json;
+    const ask = (await items(call, m.id)).find((i) => i.source === "ask" && i.question.startsWith("Ship with"));
+    const r = await call("POST", `/api/waiting-on-owner/${ask.id}/respond`, { kind: "answer", text: "one", milestoneId: m.id });
+    expect(r.json.spine).toMatchObject({ status: "written" });
+    // the team rewords the answered line (same code), as E948-A18 was on 20 Nov
+    put("docs/spines/root.md", read("docs/spines/root.md").replace("Ship with one logger or two?", "Ship with one logger, or two of them?"));
+    commitAll(repo, "reworded");
+    const all = (await items(call, m.id)).filter((i) => i.code === "E909-A1");
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ state: "answered", answer: "one", response: { spine: { status: "written" } } });
+    expect(all[0].question).toContain("two of them?");
+  });
+
   it("a refused write keeps the answer, says why, and Retry writes it once the cause is gone", async () => {
     const { call } = setup();
     const m = (await call("POST", "/api/milestones", { title: "Inbox", repo: "Acme/inbox", path: "docs/spines/root.md" })).json;

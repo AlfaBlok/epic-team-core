@@ -89,3 +89,25 @@ describe("a question on what comes first sits first in his inbox", () => {
     expect(pinned.closest("[data-fold-section]")?.getAttribute("data-testid")).toBe("waiting-on-you");
   });
 });
+
+// E948-S155 (the owner, 20 Nov, on his personal reply cards: "top of inbox as priority"): an ask labelled urgent is pinned the same
+// way, first of the pinned ones.
+describe("an urgent ask leads his inbox", () => {
+  const URGENT = sampleAsk({ id: "wj_urgent", code: "E900-A9", ask: "provide", question: "Which option do you send?", urgent: true } as Partial<WaitingItem>);
+  it("is pinned while open and unsnoozed", () => {
+    expect(isPinnedPriority(URGENT)).toBe(true);
+    expect(isPinnedPriority({ ...URGENT, state: "answered" })).toBe(false);
+    expect(isPinnedPriority({ ...URGENT, snoozedUntil: "2026-11-30" })).toBe(false);
+  });
+  it("sits first in Blocked on you, above the priority question and the pressing ask", async () => {
+    vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([PRESSING, PRIORITY, URGENT]);
+    vi.spyOn(api, "listStatus").mockResolvedValue(batch([pending("wj_pressing"), pending("wj_prio"), pending("wj_urgent")]));
+    inbox();
+    await waitFor(() => expect(screen.getAllByTestId("pinned-priority-ask")).toHaveLength(2));
+    const [first, second] = screen.getAllByTestId("pinned-priority-ask");
+    expect(first!.getAttribute("data-priority")).toBe("urgent");
+    expect(first!.textContent).toContain("Which option do you send?");
+    expect(second!.getAttribute("data-priority")).toBe("team-browser");
+  });
+});
+

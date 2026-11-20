@@ -14,7 +14,7 @@ export interface OwnerPriority {
   /** on the owner's red line: above every level, with a red marker. */
   redLine?: { sentence: string; state: RedLine["state"]; ask?: string; at?: string; name?: string; line?: number };
   /** he was frustrated about it or asked for it again: first of all, until it is answered. */
-  pressing?: { kind: "frustrated" | "repeated"; why: string; words?: string; said?: string; source?: string };
+  pressing?: { kind: "frustrated" | "repeated" | "first"; why: string; words?: string; said?: string; source?: string };
   /** the objective of his it moves (his order from the objectives screen; n 0 is his first, whose items lead). */
   objective?: { n: number; id: string; name: string };
 }
@@ -204,6 +204,8 @@ export interface WaitingItem {
   improvement?: { to: string; campaign?: string; doneMeans?: string };
   /** a priority ask: "Put X first in your objectives?"; pinned above everything in his inbox, his Yes puts X first. */
   putFirst?: { objective: string };
+  /** E948-S155: `label: urgent` on the ask: pinned first in his inbox, above every section. */
+  urgent?: true;
   state: "open" | "answered" | "done" | "superseded";
   /** the spine line is `[feedback …]`: the owner asked for changes; the work is reopened. */
   feedback?: boolean;

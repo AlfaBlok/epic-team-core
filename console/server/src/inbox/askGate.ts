@@ -20,7 +20,9 @@ import { untappableProblem } from "./untappable.js";
  *    of a few words, and when that reason is his Mac, his Chrome, his laptop or his sign-in, it also says why the Team
  *    Browser or the server browser cannot, anywhere in the ask (the owner, 12 Nov: "why do you still have to bring it to my guy?").
  * 6. (E996-S29, every open ask whatever its date) It names only what its card has: a private box to paste a value into only
- *    with a `secret: <app> <NAME>` target, an Approve button only on an approve ask (inbox/phantomRefs.ts).
+ *    with a `secret: <app> <NAME>` target, an Approve button only on an approve ask (inbox/phantomRefs.ts). E948-S155: and
+ *    only the controls its kind shows: a decide or approve card has buttons and no answer box (words asking him to write or
+ *    say his answer on the card hold it), a provide card has an answer box and Send and no Done, Stuck, Yes or No.
  * 8. (E996-S43) A fresh agent completed it from the card alone: scripts/ask_dryrun.py dry-runs every open ask with only its
  *    card's words and links; a failed one is held as "ask needs rewriting: step N <why>", a new one waits for its dry run
  *    (inbox/askDryRun.ts, applied in inbox/waiting.ts where the spine line is at hand).

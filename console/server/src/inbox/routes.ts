@@ -941,8 +941,14 @@ export function mountInbox(
       if (r.spine?.status === "written" && !byQuestion.has(qkey(r.item.path, r.item.question))) byQuestion.set(qkey(r.item.path, r.item.question), r);
     }
     const answeredLines = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done")).map((i) => qkey(i.path, i.question)));
+    // E948-S155: an ask reworded between his press and the answered line keeps its code: the line carries the answer, so
+    // the stored copy of the old wording never comes back as a second card (one ask showed twice, two wordings).
+    const ckey = (path?: string, code?: string | null) => (code ? `${path ?? ""}\u0000${code}` : "");
+    const answeredCodes = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done") && i.code).map((i) => ckey(i.path, i.code)));
+    const byCode = new Map<string, JordiResponse>();
+    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && !byCode.has(ckey(r.item.path, r.item.code))) byCode.set(ckey(r.item.path, r.item.code), r);
     const out = items.flatMap((it): (WaitingItem & { response?: JordiResponse })[] => {
-      const r = latest.get(it.id) ?? (it.state === "answered" || it.state === "done" ? byQuestion.get(qkey(it.path, it.question)) : undefined);
+      const r = latest.get(it.id) ?? (it.state === "answered" || it.state === "done" ? (byQuestion.get(qkey(it.path, it.question)) ?? (it.source === "ask" && it.code ? byCode.get(ckey(it.path, it.code)) : undefined)) : undefined);
       if (!r) return [it];
       // A free-text `Waiting on:` item whose answer is now an `[answered]` line is carried by that line's card.
       if (it.source === "heuristic" && r.spine?.status === "written" && answeredLines.has(qkey(it.path, it.question))) return [];
@@ -957,7 +963,7 @@ export function mountInbox(
     for (const [id, r] of latest) {
       // no Needs the owner rows are read here (they were a DB store of asks); an answered spine line is its own card.
       if (present.has(id) || r.spine?.status !== "written" || r.item.source === "needs_jordi") continue;
-      if (answeredLines.has(qkey(r.item.path, r.item.question))) continue;
+      if (answeredLines.has(qkey(r.item.path, r.item.question)) || answeredCodes.has(ckey(r.item.path, r.item.code))) continue;
       if (!inScope(r, scope)) continue;
       if (Date.now() - Date.parse(r.spine.at ?? r.createdAt) > DONE_SHOWN_MS) continue;
       out.push({ ...(r.item as WaitingItem), state: "done", answer: answerWord(r.kind, r.text), response: r });

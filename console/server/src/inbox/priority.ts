@@ -1,5 +1,5 @@
 import type { Milestone, Store } from "../store.js";
-import { tierOf, type JordiPriority, type Locatable, type PriorityLookup } from "./jordiPriority.js";
+import { FIRST_TIER, tierOf, type JordiPriority, type Locatable, type PriorityLookup } from "./jordiPriority.js";
 
 /**
  * the owner's lists ("Blocked, waiting on you", "Done, waiting for your review") follow milestone priority:
@@ -51,7 +51,9 @@ export function byMilestonePriority<T extends Ranked & Locatable>(
       const p = lookup?.(it);
       // his objectives' order (n 0 is his first; none after every objective) breaks ties inside a tier, before the line and file order
       const o = Math.min(p?.objective?.n ?? OBJECTIVE_NONE, OBJECTIVE_NONE);
-      return { it, i, r: rankOf(it, ranks), p, t: lookup ? tierOf(p) : 0, o, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
+      // E948-S155: an urgent ask (`label: urgent`) is in the same first tier as an item he asked by name to be first.
+      const t = (it as { urgent?: boolean }).urgent ? FIRST_TIER : lookup ? tierOf(p) : 0;
+      return { it, i, r: rankOf(it, ranks), p, t, o, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
     })
     .sort((a, b) => a.t - b.t || a.o - b.o || a.l - b.l || a.r - b.r || a.i - b.i)
     .map(({ it, r, p, t, o, l }) => {

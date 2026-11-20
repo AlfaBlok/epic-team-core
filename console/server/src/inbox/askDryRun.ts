@@ -106,14 +106,25 @@ export const NOT_CHECKED_NOTE = "Not checked yet: no fresh reader has read this 
  * else undefined (still held, or not held). `heldSince` is when the ask's current words were committed (git blame of its
  * line; undefined = not committed yet, so not overdue). `releaseAt` says when a still-held ask turns overdue.
  */
+/** E948-S155: an urgent ask (`label: urgent`) is never held for its dry run; its card says it was not checked yet. */
+export const URGENT_NOT_CHECKED_NOTE = "Not checked yet: no fresh reader has read this card. It is urgent, so it reaches you at once.";
+
 export function dryRunOverdue(
   raw: string | undefined,
   since: string | null | undefined,
   verdicts: Map<string, DryRunVerdict> | undefined,
   heldSince: string | undefined,
   now = Date.now(),
+  urgent = false,
 ): { note?: string; kind?: "not-checked" | "unclear"; releaseAt?: number } {
-  if (!dryRunProblem(raw, since, verdicts) || !heldSince) return {};
+  if (!dryRunProblem(raw, since, verdicts)) return {};
+  // E948-S155: urgent leads his inbox at once, whatever the reader has or has not said yet (E948-A19 sat held 20 Nov 20:18Z).
+  if (urgent) {
+    const v = verdicts?.get(lineHash(raw!));
+    if (v?.verdict !== "fail") return { note: URGENT_NOT_CHECKED_NOTE, kind: "not-checked" };
+    return { note: `A fresh reader found this unclear: ${(v.reason ?? "").trim() || "a fresh agent could not do it from the card alone"}`.slice(0, 600), kind: "unclear" };
+  }
+  if (!heldSince) return {};
   const t = Date.parse(heldSince);
   if (!Number.isFinite(t)) return {};
   const releaseAt = t + HOLD_LIMIT_MS;

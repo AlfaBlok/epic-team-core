@@ -32,6 +32,7 @@ const redLabel = (r: NonNullable<OwnerPriority["redLine"]>) => (r.name ? `Red li
 const PRESSING_LABEL: Record<NonNullable<OwnerPriority["pressing"]>["kind"], string> = {
   frustrated: "You were frustrated",
   repeated: "You asked again",
+  first: "You asked for this first",
 };
 /**
  * why the item ranks where it does, in one short line: his first objective leads ("Your objective 1: Five testers use
@@ -39,6 +40,7 @@ const PRESSING_LABEL: Record<NonNullable<OwnerPriority["pressing"]>["kind"], str
  */
 export function rankWhy(p: OwnerPriority): string {
   const o = p.objective;
+  if (p.pressing?.kind === "first") return PRESSING_LABEL.first;
   if (o && o.n === 0) return `Your objective 1: ${o.name}`;
   const hot = p.pressing;
   const base = hot ? PRESSING_LABEL[hot.kind] : p.redLine ? redLabel(p.redLine) : undefined;

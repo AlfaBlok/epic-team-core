@@ -1633,7 +1633,12 @@ export const AS_OF_QUIET_MS = 2 * 60_000;
 export const staleAsOf = (asOf: string, now = Date.now()) => now - Date.parse(asOf) > AS_OF_QUIET_MS;
 
 /** an open priority ask (the owner, vn_cdcf1208: "if the question reaches me 10 notifications deep ... we've defeated the purpose"). */
-export const isPinnedPriority = (i: WaitingItem) => !!i.putFirst && i.state === "open" && !i.snoozedUntil && !i.macAgent;
+/**
+ * a priority ask, or an item the owner asked by name to be first (pressing kind `first`, or `label: urgent` on the ask,
+ * E948-S155): it leads Blocked on you, the section open.
+ */
+export const leadsFirst = (i: WaitingItem) => !!i.urgent || i.ownerPriority?.pressing?.kind === "first";
+export const isPinnedPriority = (i: WaitingItem) => (!!i.putFirst || leadsFirst(i)) && i.state === "open" && !i.snoozedUntil && !i.macAgent;
 
 /**
  * the one-line question on his order of work, "Put X first in your objectives?", sits first in his Inbox,
@@ -1734,7 +1739,7 @@ export function WaitingOnYou({
   // your objectives?", vn_cdcf1208) and an account to connect lead this section, never loose above every section;
   // while a priority ask is here the section opens by itself (an account to connect waits folded, as before).
   // E948-S141: an answered priority ask is out of the count and the list at once, like every card
-  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? stillOpen((data ?? []).filter(isPinnedPriority), (i) => `ask:${i.id}`) : [];
+  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? stillOpen((data ?? []).filter(isPinnedPriority).sort((a, b) => Number(leadsFirst(b)) - Number(leadsFirst(a))), (i) => `ask:${i.id}`) : [];
   const connectList = useConnects("inbox", connects && part !== "rest");
   const connectFirst = connects && part !== "rest" ? connectList : [];
   const [sectionOpen, setSectionOpen] = useSectionOpen(fold, true, pinnedFirst.length > 0);
@@ -1893,7 +1898,7 @@ export function WaitingOnYou({
         {pinnedFirst.length > 0 && (
           <div className="mb-3 grid gap-3" data-testid="pinned-priority">
             {pinnedFirst.map((i) => (
-              <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst!.objective} data-inbox-open="">
+              <div key={i.id} data-testid="pinned-priority-ask" data-priority={i.putFirst?.objective ?? "urgent"} data-inbox-open="">
                 <WaitingCard item={i} showMilestone qualify={qualify} />
               </div>
             ))}

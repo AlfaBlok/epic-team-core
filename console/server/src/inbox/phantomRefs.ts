@@ -23,6 +23,16 @@ export const ASKS_FOR_KEY =
 /** Words that send him to press an Approve button. */
 const NAMES_APPROVE = /\b(?:press|click|tap|hit)\s+(?:the\s+)?["“]?approve["”]?(?:\s+button)?\b/i;
 
+/**
+ * E948-S155 (E948-A18 on 20 Nov: a `decide` card, so Yes and No buttons and no box, whose words said "Say or write here
+ * what to change"): words that send him to write or say his answer into a box on the card. Only a `provide` card (no
+ * `secret:`) has that box with its Send button; a `do` card has a note box beside Done and Stuck.
+ */
+export const WRITES_ON_CARD =
+  /\b(?:write|type|record|put|say|give|send)\b[^.;—\n]{0,80}?\b(?:in|into|on)\s+(?:the|this|its)\s+(?:card'?s\s+)?(?:answer\s+|text\s+|note\s+|reply\s+|voice\s+)?box\b|\b(?:answer|reply|text or voice)\s+box\b|\b(?:say|write|type|record)\b(?:\s+or\s+(?:say|write|type|record))?\s+(?:it\s+|them\s+|your\s+\w+\s+)?(?:here|on this card|in this card)\b/i;
+/** Words that send him to press Done, Stuck, Yes or No: a `provide` answer card has none of them, only its box and Send. */
+export const PRESSES_BUTTON = /\b(?:press|click|tap|hit)\s+(?:the\s+)?["“]?(?:done|stuck|yes|no)["”]?(?:\s+button)?\b/i;
+
 export interface RefAsk {
   ask: string;
   secret?: unknown;
@@ -45,6 +55,13 @@ export function phantomRefProblem(a: RefAsk): string | undefined {
   // the end of the action is a key: its card must have the box (the owner, 12 Nov: "the end of the action is for me to paste the key and I don't have a box")
   if (!a.secret && a.ask.toLowerCase() === "provide" && ASKS_FOR_KEY.test(text(a.question, a.steps)) && !T3_SECRET_CARD.test(all))
     return `it asks ${ownerName()} for a key but names no \`secret: <app> <NAME>\`, so its card has no box to paste it into: add the secret target (E996-S29)`;
+  // E948-S155: the card's words name only the controls its kind shows (decide: its buttons; approve: Approve and Deny;
+  // provide: an answer box and Send; do: Done, Stuck and a note).
+  const kind = a.ask.toLowerCase();
+  if ((kind === "decide" || kind === "approve") && WRITES_ON_CARD.test(text(a.question, a.steps, a.recommend)))
+    return `it asks ${ownerName()} to write or say his answer on the card, but a ${kind} card shows only its buttons and no answer box: make it a provide ask (its card has the answer box and Send), or give it the options he presses (E948-S155)`;
+  if (kind === "provide" && !a.secret && PRESSES_BUTTON.test(text(a.question, a.steps, a.recommend)))
+    return `it tells ${ownerName()} to press a button a provide card does not have: that card shows an answer box and Send, no Done, Stuck, Yes or No. Name the box, or make it a do or decide ask (E948-S155)`;
   if (a.ask.toLowerCase() !== "approve" && NAMES_APPROVE.test(all))
     return `it tells ${ownerName()} to press Approve, but a ${a.ask} ask's card has no Approve button: name the button the card has, or make it an approve ask (E996-S29)`;
   return undefined;
