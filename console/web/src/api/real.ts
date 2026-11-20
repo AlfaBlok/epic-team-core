@@ -417,6 +417,7 @@ export function createRealClient(): ApiClient {
     // the app start asked /api/me five times at once; concurrent callers now share one request
     getWhatsAppHolder: () => call("GET", "/notify/whatsapp/holder"),
     setWhatsAppHolder: (personaId) => call("PUT", "/notify/whatsapp/holder", { personaId }),
+    getBriefingPictures: (limit) => call("GET", `/notify/briefings${limit ? `?limit=${limit}` : ""}`),
     getMe: () => (meInFlight ??= call<Me>("GET", "/me").finally(() => (meInFlight = undefined))),
     logout: () => call("POST", "/access/logout"),
     switchWorld: (tenant) => call("POST", "/access/switch", { tenant }),

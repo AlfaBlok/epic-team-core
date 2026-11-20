@@ -92,6 +92,7 @@ import type {
   MemoryNoteFilter,
   TeamSkillsView,
   WhatsAppHolderView,
+  BriefingPictures,
   TeamSkillPreview,
   TeamSkillAddResult,
   TeamSkillRemoveResult,
@@ -673,6 +674,8 @@ export interface ApiClient {
   getMe?(): Promise<Me>;
   /** who sends the owner WhatsApp, for which milestones, and which path sends now. */
   getWhatsAppHolder?(): Promise<WhatsAppHolderView>;
+  /** the pictures of the briefings sent on WhatsApp, newest first; absent where the world sends none. */
+  getBriefingPictures?(limit?: number): Promise<{ briefings: BriefingPictures[] }>;
   /** the owner picks the one persona that holds whatsapp-notify (it leaves every other persona). */
   setWhatsAppHolder?(personaId: string): Promise<WhatsAppHolderView>;
   /** Log out (POST /api/access/logout) and Switch world (POST /api/access/switch {tenant}, a new session), from the account block. */

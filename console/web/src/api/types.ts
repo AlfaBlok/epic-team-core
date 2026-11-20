@@ -2962,6 +2962,13 @@ export interface FeedbackView {
   public: boolean;
 }
 
+/** one sent briefing's pictures (GET /api/notify/briefings): 06:00 morning or 18:30 evening, in the order sent. */
+export interface BriefingPictures {
+  briefing: "morning" | "evening";
+  at: string;
+  pictures: { url: string; what: string; ok: boolean; receipt: string | null }[];
+}
+
 /** who sends the owner WhatsApp (the persona holding `whatsapp-notify`), the milestones it acts for, which path sends now. */
 export interface WhatsAppHolderView {
   skill: string;

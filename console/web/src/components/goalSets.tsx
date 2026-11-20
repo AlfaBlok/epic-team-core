@@ -1538,6 +1538,8 @@ export function GoalSetPage() {
 
 // his briefing, loaded when the screen shows; its file reads this one's parts.
 const BriefingSlot = lazyPage(() => import("@/components/briefing"), "BriefingSlot", null);
+// the last briefings' pictures, under the Briefing button.
+const LastBriefings = lazyPage(() => import("@/components/lastBriefings"), "LastBriefings", null);
 
 const loadDesk = (read?: ChatRead) => api.getDeskChat(read);
 const sendDesk = (text: string, page?: string, id?: string, files?: string[]) => (files?.length ? api.sendDeskMessage(text, page ?? SET_NAME.all, id, files) : api.sendDeskMessage(text, page ?? SET_NAME.all, id));
@@ -1674,6 +1676,7 @@ export function GoalSetsPage() {
       {error && <div className="text-sm text-destructive">Could not read the {SET_NAME.many.toLowerCase()}: {error.message}</div>}
       <TabStrip tabs={ALL_TABS} tab={tab} counts={{ inbox: inbox.rows.length }} />
       {tab === "table" && data && <BriefingSlot nodes={sets.map((x) => x.n)} kind="objective" />}
+      {tab === "table" && <LastBriefings />}
       {tab === "table" && <PersonaGapsLine />}
       {tab === "table" && (
         <WheelsTable nodes={sets.map((x) => x.n)} countFor={inbox.countFor} />
