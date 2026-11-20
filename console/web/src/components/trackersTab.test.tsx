@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, filterColumns, filterRows, filtersFromSearch, pillTone, sizeOf, sortRows } from "./trackersTab";
+import { addLine, EMPTY, filterColumns, filterRows, filtersFromSearch, pillTone, sizeOf, sortRows } from "./trackersTab";
 
 // The owner (vn_1df1364f): the Trackers tab holds only tables; who goes first is a Wave column he filters by.
 const tb = { columns: ["Name", "Wave", "Audience", "Status"], statuses: ["candidate", "contacted", "agreed"], rows: [
@@ -45,5 +45,13 @@ describe("filters", () => {
   it("reads filters from the link", () => {
     expect(filtersFromSearch("?tab=trackers&filter=Wave:1&filter=Status:candidate")).toEqual({ Wave: "1", Status: "candidate" });
     expect(filtersFromSearch("?filter=Wave:")).toEqual({ Wave: EMPTY });
+  });
+});
+
+// The owner (vn_578b0feb): "a table capability in every wheel": every wheel says how a table is added.
+describe("addLine", () => {
+  it("says how a wheel gets a table, with or without tables", () => {
+    expect(addLine(0)).toMatch(/^This wheel has no tables yet\. A table is asked for by the team .* your yes\.$/);
+    expect(addLine(2)).toMatch(/^Another table for this wheel is asked for/);
   });
 });

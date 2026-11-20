@@ -87,7 +87,7 @@ describe("T96-S8 the rule everywhere agents read it", () => {
     expect(STEPS_PAGE_RULE).toContain("voice button");
   });
 
-  it("every persona wake and every worker brief carries it", () => {
+  it("every persona wake and every worker brief carries it", async () => {
     const p = buildWakePrompt({ name: "Delivery Manager", remit: "Run E4.", skills: [] }, { title: "E4", repo: "Acme/home_repo", path: "docs/E4.md", owner: "" });
     expect(p).toContain(NO_COPY_PASTE_RULE);
     const text = wakeProtocol({
@@ -98,7 +98,8 @@ describe("T96-S8 the rule everywhere agents read it", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain(NO_COPY_PASTE_RULE);
+    expect(brief).toContain("/api/worker-rules"); // the rules are served, not pasted
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules().join("\n")).toContain(NO_COPY_PASTE_RULE);
   });
 });
 

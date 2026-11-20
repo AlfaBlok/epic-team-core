@@ -78,6 +78,27 @@ describe("Sidebar draws whole, the objectives in its first frame", () => {
   });
 });
 
+describe("Sidebar draws whole, the Messages entry in its first frame", () => {
+  it("keeps one skeleton while the chats are not read, then draws the menu", async () => {
+    let answer!: (v: never) => void;
+    const spy = vi.spyOn(api, "getMessages").mockReturnValue(new Promise((r) => (answer = r)) as never);
+    try {
+      render(
+        <MemoryRouter>
+          <SidebarNav />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(document.querySelector("[data-waiting-on]")?.getAttribute("data-waiting-on") ?? "").toContain("messages"), { timeout: 3000 });
+      expect(screen.getByTestId("sidebar-body").hidden).toBe(true);
+      answer({ repos: [], chats: [], counts: { waiting: 0 } } as never);
+      await waitFor(() => expect(document.querySelector("[data-waiting-on]")).toBeNull());
+      expect(screen.getByTestId("sidebar-body").hidden).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("Sidebar inbox count (T13-S13: replaces the M2-10 non-green count)", () => {
   it("shows the server status's needsYou per milestone, nothing at 0, never the open-node count", async () => {
     const a = await api.createMilestone({ title: "Waits", repo: "Acme/home_repo", path: "docs/spines/m2-team-console.md", owner: "Sam" });

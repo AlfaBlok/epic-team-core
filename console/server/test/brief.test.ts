@@ -9,7 +9,7 @@ import { REPO_IS_SOURCE_RULE } from "../src/inbox/asks.js";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../docs/spines/root.md");
 
 describe("T62-S3 the repo-is-the-source rule in the wake and worker brief", () => {
-  it("every wake carries it under the repo rules, and every worker brief carries it verbatim", () => {
+  it("every wake carries it under the repo rules, and every worker brief carries it verbatim", async () => {
     const text = wakeProtocol({
       base: "http://c",
       run: { id: "run_1" },
@@ -20,7 +20,8 @@ describe("T62-S3 the repo-is-the-source rule in the wake and worker brief", () =
     const repoRules = text.slice(text.indexOf("A. Repo rules"), text.indexOf("B. Child workers"));
     expect(repoRules).toContain(REPO_IS_SOURCE_RULE);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain(`"${REPO_IS_SOURCE_RULE}"`);
+    expect(brief).toContain("/api/worker-rules"); // the rules are served, not pasted
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules().join("\n")).toContain(REPO_IS_SOURCE_RULE);
     expect(REPO_IS_SOURCE_RULE).toMatch(/Decisions and state go into the spine, never only into the console's API or DB/);
   });
 

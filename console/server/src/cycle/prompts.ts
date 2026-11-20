@@ -297,9 +297,8 @@ export function wakeProtocol(o: {
         ...(o.deckUrl
           ? [`      Its brief opens with the line \`${deckBriefLine(o.deckUrl)}\` and, when it names a Bound epic, \`This epic's deck: ${o.deckUrl}&epic=<that epic's EPIC-n>\`.`]
           : []),
-        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, these eleven rules:",
-        ...workerBriefRules(o.objectivesLine).map((r) => `      "${r}"`),
-        `      A brief helper of your own (a script, a rules file) reads them fresh each wake from \`${base}/api/worker-rules\` (plain text, one quoted rule a line), never a copy kept from an earlier wake.`,
+        "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, the worker rules:",
+        `      paste whole what \`curl -sS -G ${base}/api/worker-rules --data-urlencode repo=<row repo> --data-urlencode title=<row title>\` returns (plain text, one quoted rule a line, ${workerBriefRules(o.objectivesLine).length} rules, the owner's live objectives first), fetched fresh for each brief, never a copy kept from an earlier wake.`,
         ...(grants.length ? [`      ${GRANT_BRIEF_RULE}`] : []),
         `      (the PATCH: \`curl -sS -X PATCH ${base}/api/runs/<child run id> ${h} -d ${j({ outcome: "monitoring", nextCheckAt: "<ISO UTC>", summary: "<what it waits for>", endedAt: "<ISO UTC now>" })}\`)`,
         `      Then \`curl -sS -X PATCH ${base}/api/runs/<child run id> ${h} -d ${j({ threadId: "<childThreadId>" })}\`.`,

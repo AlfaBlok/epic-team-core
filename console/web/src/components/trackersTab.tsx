@@ -284,6 +284,11 @@ function Table({ t, initial }: { t: TrackerTable; initial: Filters }) {
   );
 }
 
+/** how any wheel gets a table: asked for by the team, opened by his yes. */
+export function addLine(tables: number) {
+  return `${tables ? "Another table for this wheel" : "This wheel has no tables yet. A table"} is asked for by the team when its work needs one, and opens with your yes.`;
+}
+
 export function TrackersTab({ wheel }: { wheel: string }) {
   const { data, error, loading } = useQuery(() => api.getTrackers(wheel), [wheel]);
   const initial = useMemo(() => filtersFromSearch(typeof window === "undefined" ? "" : window.location.search), []);
@@ -294,6 +299,11 @@ export function TrackersTab({ wheel }: { wheel: string }) {
       {data.tables.map((t) => (
         <Table key={t.id} t={t} initial={initial} />
       ))}
+      {/* The owner 2026-11-20 (vn_578b0feb): "I remember recommending having a table capability in
+          every wheel." Any wheel can hold tables; nothing is pre-made beyond what he named. */}
+      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="trackers-add">
+        {addLine(data.tables.length)}
+      </p>
     </section>
   );
 }

@@ -155,7 +155,38 @@ export function urgentOpenNotes(checkoutDir: string): Array<{ file: string; abou
     });
 }
 
-const BODY_MAX = 1_500;
+const BODY_MAX = 600;
+/**
+ * the wake carries at most this many notes in full (urgent first, then the oldest), then one line each for the next
+ * ones up to LINES_MAX characters, then a count and the command that lists the rest (136 open notes in full
+ * were 131 KB of a 235 KB wake; a wake stays under 100,000 characters).
+ */
+export const FULL_NOTES_MAX = 6;
+export const LINES_MAX = 3_000;
+
+const headOf = (n: DeskNote) =>
+  `- ${n.urgent ? "**URGENT** " : ""}\`${n.file}\` from **${n.from}**${n.replyTo ? ` (reply to ${n.replyTo})` : ""}${n.inReplyTo ? `, answering ${n.inReplyTo}` : ""}: ${n.about}`;
+
+/** urgent notes first, then the oldest: the first FULL_NOTES_MAX in full, the next as one line each, then the count left. */
+export function noteLines(open: DeskNote[], repo: string): string[] {
+  const order = [...open.filter((n) => n.urgent), ...open.filter((n) => !n.urgent)];
+  const full = order.slice(0, Math.max(FULL_NOTES_MAX, open.filter((n) => n.urgent).length));
+  const out = full.map((n) => {
+    const body = n.body.length > BODY_MAX ? `${n.body.slice(0, BODY_MAX)}… (open the note for the rest)` : n.body;
+    return [headOf(n), ...body.split("\n").map((l) => `  > ${l}`)].join("\n");
+  });
+  let used = 0, listed = full.length;
+  for (const n of order.slice(full.length)) {
+    const line = headOf(n);
+    if (used + line.length > LINES_MAX) break;
+    out.push(line);
+    used += line.length;
+    listed++;
+  }
+  if (listed < order.length)
+    out.push(`- …and ${order.length - listed} more open note${order.length - listed > 1 ? "s" : ""}: \`python3 <${homeRepo()} checkout>/scripts/desk_note.py list <this checkout>\` lists every one (${repo}); open each note's file for its body.`);
+  return out;
+}
 
 /** The Delivery Manager's wake section for its repo's open notes; undefined when none is open. */
 export function deskInboxSection(notes: DeskNote[], repo: string): string | undefined {
@@ -170,10 +201,7 @@ export function deskInboxSection(notes: DeskNote[], repo: string): string | unde
     ...(open.some((n) => n.urgent)
       ? ["An **URGENT** note woke you now, ahead of your cadence: act on it first in this wake, before any other work, and answer it in this wake."]
       : []),
-    ...open.map((n) => {
-      const body = n.body.length > BODY_MAX ? `${n.body.slice(0, BODY_MAX)}…` : n.body;
-      return [`- ${n.urgent ? "**URGENT** " : ""}\`${n.file}\` from **${n.from}**${n.replyTo ? ` (reply to ${n.replyTo})` : ""}${n.inReplyTo ? `, answering ${n.inReplyTo}` : ""}: ${n.about}`, ...body.split("\n").map((l) => `  > ${l}`)].join("\n");
-    }),
+    ...noteLines(open, repo),
     ...(open.some((n) => n.kind === IMPROVEMENT_KIND && !n.inReplyTo)
       ? [
           `An **improvement request** note (\`kind: improvement-request\`) is work ${ownerName()} already approved on his card in the sending world (${socialProduct()} never codes, so it hands builds to this desk). Do not ask him again: make ONE ledger row for it in the spine that owns that product or site (its \`done-means\` is the row's done means, cite the note path and its \`ask\`), then answer with \`python3 <${homeRepo()} checkout>/scripts/desk_note.py reply <this checkout>/<note> --to <its reply-to checkout> --from <this world> --reply-to <this repo> --request taken --row <row code> --body \"<row code, spine link, when>\"\`. Only when it cannot be built (outside every remit here, or unsafe) answer \`--request declined\` with why. When the row later closes, \`desk_note.py done\` tells the sender what is live (listed under Improvement requests taken).`,

@@ -173,12 +173,21 @@ export const childLine = (c: ChildEpic) => {
   return `- ${c.path} — ${c.title} — Status: ${c.status} (${c.runState}) — ${v === "owned" ? `owned by ${c.ownedBy}: leave it alone` : CHILD_LABEL[v]}`;
 };
 
+/** every child that needs a look gets its line; finished ones are one count line (a smaller wake). */
+export const childLines = (children: ChildEpic[]): string[] => {
+  const done = children.filter((c) => childVerdict(c) === "finished");
+  return [
+    ...children.filter((c) => childVerdict(c) !== "finished").map(childLine),
+    ...(done.length ? [`- ${done.length} finished child${done.length > 1 ? "ren" : ""} (${done.map((c) => c.path.replace(/^.*\//, "").replace(/\.md$/, "")).join(", ")}): skip: finished`] : []),
+  ];
+};
+
 /** steps 1-2 of a wake on a spine with children: it steers them and starts only what the owner stamped ready. */
 export function parentWakeSteps(children: ChildEpic[], maxWorkers = DEFAULT_MAX_WORKERS, rule: (max: number) => string = dispatchRule): string[] {
   return [
     "This spine has child epics; you steer them. Read each child's `## Current State` and Status, not its rows, and do not start rows that belong to a child spine except as below.",
     "Children (the console's reading of `spines.py --json`; trust the spine if it changed since):",
-    ...children.map(childLine),
+    ...childLines(children),
     "1. For each PICK UP child (Status `ready`, or `active` with no enabled persona of its own): read its Issue Ledger and list its rows with Status `ready` that are unblocked. " +
       "A `draft` row is planning: never start it. An `active` child with no ready rows needs nothing from you.",
     `2. Start those rows: ${rule(maxWorkers)} Each brief names \`Bound epic: <child path>\`. ` +

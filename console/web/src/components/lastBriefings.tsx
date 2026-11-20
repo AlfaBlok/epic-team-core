@@ -29,6 +29,15 @@ export function splitBriefings(all: BriefingPictures[]): { last: BriefingPicture
   return { last, earlier };
 }
 
+/** whether it reached his phone, in his words: read, delivered, not yet, failed (nothing until it is known). */
+export function deliveryWords(d: BriefingPictures["delivery"]): { text: string; tone: "ok" | "wait" | "bad" } | null {
+  if (d === "read") return { text: "Read on your phone", tone: "ok" };
+  if (d === "delivered") return { text: "Delivered to your phone", tone: "ok" };
+  if (d === "failed") return { text: "Did not reach your phone", tone: "bad" };
+  if (d === "pending" || d === "sent") return { text: "Sent, not delivered yet", tone: "wait" };
+  return null;
+}
+
 function Briefing({ b }: { b: BriefingPictures }) {
   const [open, setOpen] = useState<number | null>(null);
   const pic = open == null ? undefined : b.pictures[open];
@@ -36,6 +45,14 @@ function Briefing({ b }: { b: BriefingPictures }) {
     <div className="grid min-w-0 gap-1.5" data-testid="briefing-pictures" data-briefing={b.briefing}>
       <div className="text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{NAME[b.briefing]}</span> · {briefingWhen(b.at)}
+        {deliveryWords(b.delivery) && (
+          <>
+            {" · "}
+            <span data-testid="briefing-delivery" data-delivery={b.delivery} className={cn(deliveryWords(b.delivery)!.tone === "bad" && "font-medium text-destructive")}>
+              {deliveryWords(b.delivery)!.text}
+            </span>
+          </>
+        )}
       </div>
       <div className="flex min-w-0 gap-2 overflow-x-auto">
         {b.pictures.map((p, i) => (

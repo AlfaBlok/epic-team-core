@@ -28,6 +28,7 @@ class FakeT3 implements T3Client {
   turns = new Map<string, T3ThreadRun[]>();
   errors = new Map<string, string>();
   items = new Map<string, number>();
+  runCounts = new Map<string, number>();
   async listProjects() {
     return [{ id: "proj", title: "home_repo", workspaceRoot: "/srv/agent/github/home_repo" }];
   }
@@ -49,7 +50,7 @@ class FakeT3 implements T3Client {
   }
   async readThreadStatus(threadId: string) {
     const runs = this.turns.get(threadId) ?? [];
-    return { status: runs[0]?.status ?? "idle", runs, raw: { itemCount: this.items.get(threadId) } };
+    return { status: runs[0]?.status ?? "idle", runs, raw: { itemCount: this.items.get(threadId), runCount: this.runCounts.get(threadId) } };
   }
   async readLastError(threadId: string) {
     return this.errors.get(threadId);
@@ -181,6 +182,19 @@ describe("T6-S39 case 2: the provider could not start the turn", () => {
     expect(r.summary).toContain(`${RESENT} on a new thread`);
     expect(t.t3.launched.map((l) => l.threadId)).toEqual(["home1", "home2"]);
     expect(r.threadId).toBe("home2");
+  });
+
+  it("a home thread with 300 turns moves to a new thread at the next wake, 299 keeps it", async () => {
+    const t = await setup(["seat1", "seat2"]);
+    t.t3.items.set("home1", 900);
+    t.t3.runCounts.set("home1", 300);
+    const run = await t.cycle.runNow(t.a.id);
+    expect(t.t3.launched.map((l) => l.threadId)).toEqual(["home1", "home2"]);
+    expect(t.store.getRun(run.id)!.preWake).toContain("fresh session: home thread too long (300 turns, 300 or more)");
+    t.store.updateRun(run.id, { outcome: "progressed", endedAt: new Date().toISOString() });
+    t.t3.runCounts.set("home2", 299);
+    await t.cycle.runNow(t.a.id);
+    expect(t.t3.sent).toEqual(["home2"]);
   });
 
   it("a home thread past the item limit moves to a new thread at the next wake, the move recorded", async () => {

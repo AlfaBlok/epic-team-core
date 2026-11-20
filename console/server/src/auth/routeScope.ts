@@ -58,6 +58,7 @@ const OPEN: [string, RegExp][] = [
   ["POST", /^\/api\/public\/testers$/], // the tester signup form on epicspine.dev (testers.ts guards it)
   ["POST", /^\/api\/public\/stripe\/tester$/], // the Stripe webhook of the tester link (signature-checked in stripeTesters.ts)
   ["POST", /^\/api\/public\/stripe\/team$/], // the Stripe webhook of Epic Team's own account (signature-checked in stripeTeam.ts)
+  ["GET", /^\/api\/public\/stripe\/team\/probe\/[a-f0-9]{32}$/], // the team's €1 probe link of the plan checkout (token-checked in stripeTeam.ts)
   // a recipient's voice feedback link: the page and its record/send calls; the token in the path is the credential
   // (voiceFeedback.ts). Public through Traefik on our site only after the owner's yes.
   ["GET", /^\/api\/public\/feedback\/[\w-]{10,40}$/],

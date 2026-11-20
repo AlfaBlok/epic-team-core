@@ -71,7 +71,7 @@ describe("T14-S3 parent wake prompt", () => {
     expect(p).toContain("- docs/ready.md — T docs/ready.md — Status: ready (ready) — PICK UP");
     expect(p).toContain("- docs/draft.md — T docs/draft.md — Status: draft (planning) — skip: planning");
     expect(p).toContain("- docs/owned.md — T docs/owned.md — Status: active (running) — owned by Builder: leave it alone");
-    expect(p).toContain("- docs/done.md — T docs/done.md — Status: done (finished) — skip: finished");
+    expect(p).toContain("- 1 finished child (done): skip: finished");
     expect(p.match(/PICK UP$/gm)).toHaveLength(1);
   });
 

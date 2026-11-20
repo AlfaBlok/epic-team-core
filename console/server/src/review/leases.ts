@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import type { Store } from "../store.js";
+import type { Run, Store } from "../store.js";
 import type { SpineWriter } from "../inbox/spineWrite.js";
 import type { GitOut } from "../freshness.js";
 import { computeClaims, expireLeaseText, statusBeforeClaimIn, type ClaimedRow } from "./rows.js";
@@ -58,7 +58,21 @@ export async function statusBeforeClaim(git: GitOut, dir: string, file: string, 
   return before ? statusBeforeClaimIn(before, ref) : undefined;
 }
 
-export function createLeases(o: { store: () => Pick<Store, "listMilestones">; reposRoot: string; writer?: SpineWriter; git: GitOut; now?: () => number; log?: (m: string) => void; wrote?: (dir: string) => void }) {
+/** how long after its nextCheckAt a monitoring run with no new report still counts as waiting, not stalled. */
+export const MONITOR_GRACE_MS = 2 * 3600_000;
+
+/**
+ * the timed check a lease's run is waiting on, when it still counts: the run's last report was `monitoring` with a
+ * nextCheckAt that is ahead, or passed by less than MONITOR_GRACE_MS. Past that it is a real stall (undefined).
+ */
+export function monitoringWait(run: Pick<Run, "outcome" | "nextCheckAt"> | undefined, now: number): { until: string } | undefined {
+  if (!run || run.outcome !== "monitoring" || !run.nextCheckAt) return undefined;
+  const t = Date.parse(run.nextCheckAt);
+  if (!Number.isFinite(t) || now - t > MONITOR_GRACE_MS) return undefined;
+  return { until: new Date(t).toISOString().slice(0, 16) + "Z" };
+}
+
+export function createLeases(o: { store: () => Pick<Store, "listMilestones"> & Partial<Pick<Store, "getRun">>; reposRoot: string; writer?: SpineWriter; git: GitOut; now?: () => number; log?: (m: string) => void; wrote?: (dir: string) => void }) {
   const now = () => o.now?.() ?? Date.now();
   async function view(): Promise<(ClaimView & { dir: string })[]> {
     const out: (ClaimView & { dir: string })[] = [];
@@ -78,15 +92,18 @@ export function createLeases(o: { store: () => Pick<Store, "listMilestones">; re
       const at = utc(now());
       const back = await statusBeforeClaim(o.git, c.dir, c.path, c.ref, c.by);
       const to = back ?? "ready";
+      const wait = monitoringWait(o.store().getRun?.(c.by), now());
       const w = await o.writer.edit({
         repoDir: c.dir,
         path: c.path,
         label: c.ref,
         edit: (text) => {
-          const t = expireLeaseText(text, c.ref, c.by, c.until, at, back);
+          const t = expireLeaseText(text, c.ref, c.by, c.until, at, back, wait);
           const word = to.replace(/[*`]/g, "").trim().split(/\s/)[0];
           return typeof t === "string"
-            ? back
+            ? wait && !back
+              ? { text: t, msg: `Lease ended ${c.ref}: ${c.by} is monitoring until ${wait.until} (row waiting)`, body: `${c.by} claimed ${c.ref} at ${c.at} and ended its turn monitoring a timed check (nextCheckAt ${wait.until}); the lease ran out at ${c.liveUntil}. The row waits for that check, it is not idle: no re-dispatch.` }
+              : back
               ? { text: t, msg: `Lease expired ${c.ref}: ${c.by} (back to ${word}, as claimed)`, body: `${c.by} claimed ${c.ref} at ${c.at} while it was ${word}; the lease ran out at ${c.liveUntil} with no commit naming the row since${c.lastCommitAt ? ` ${c.lastCommitAt}` : ""}. The row keeps the status it had when it was claimed.` }
               : { text: t, msg: `Lease expired ${c.ref}: ${c.by} (back to ready, re-dispatch)`, body: `${c.by} claimed ${c.ref} at ${c.at}; the lease ran out at ${c.liveUntil} with no commit naming the row since${c.lastCommitAt ? ` ${c.lastCommitAt}` : ""}. The row is ready again; the Delivery Manager's next wake dispatches it.` }
             : t;

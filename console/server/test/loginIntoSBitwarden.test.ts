@@ -12,7 +12,7 @@ describe("T83-S13 every new login into Sam's Bitwarden at creation", () => {
     expect(LOGIN_RULE).not.toMatch(/password=|BW_PASSWORD/);
   });
 
-  it("every persona wake and every worker brief carries it", () => {
+  it("every persona wake and every worker brief carries it", async () => {
     const p = buildWakePrompt({ name: "Delivery Manager", remit: "Run E4.", skills: [] }, { title: "E4", repo: "Acme/home_repo", path: "docs/E4.md", owner: "" });
     expect(p).toContain(LOGIN_RULE);
     const text = wakeProtocol({
@@ -23,7 +23,8 @@ describe("T83-S13 every new login into Sam's Bitwarden at creation", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these eleven rules");
-    expect(brief).toContain(`"${LOGIN_RULE}"`);
+    expect(brief).toContain("verbatim, the worker rules"); // served at /api/worker-rules, not pasted into the wake
+    expect(brief).toContain("/api/worker-rules");
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules()).toContain(LOGIN_RULE);
   });
 });

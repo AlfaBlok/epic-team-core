@@ -56,7 +56,7 @@ describe("his objectives first", () => {
     expect(workerBriefRules()[0]).toContain("GET /api/objectives");
   });
 
-  it("the wake's dispatch step prints the rules with the live list in every brief", () => {
+  it("the wake's dispatch step prints the rules with the live list in every brief", async () => {
     const text = wakeProtocol({
       base: "http://c",
       run: { id: "run_1" },
@@ -66,7 +66,8 @@ describe("his objectives first", () => {
       objectivesLine: "1. Acme (2 of 3)",
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these eleven rules");
-    expect(brief).toContain("His objectives now: 1. Acme (2 of 3).");
+    expect(brief).toContain("verbatim, the worker rules"); // served at /api/worker-rules, not pasted into the wake
+    expect(brief).toContain("/api/worker-rules");
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules("1. Acme (2 of 3)").join("\n")).toContain("His objectives now: 1. Acme (2 of 3).");
   });
 });

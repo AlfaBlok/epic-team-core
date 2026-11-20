@@ -214,6 +214,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // the objectives, read once for their own list and to leave out every milestone an objective holds: that
   // milestone IS the objective, listed above with its wheel, so it never shows twice nor opens a second way.
   const sets = useGoalSets();
+  // the Messages entry shows only once its chats are read: it is part of the one frame too (it arrived last on its own).
+  const messagesList = useMessages();
   // a milestone he retired leaves the list too; its page still opens by its link.
   const held = (id: string) => !campaignSkin && (!!objectiveOf(sets.data?.nodes, id) || !!sets.data?.retired?.includes(id));
   const listed = allMilestones && (project.current && !byProject ? allMilestones.filter((m) => project.keep(m.id)) : allMilestones);
@@ -399,6 +401,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const waitingOn = [
     !allMilestones && "milestones",
     !sets.data && !sets.error && "scorecards",
+    shows("messages") && !messagesList.data && !messagesList.error && "messages",
     (!statuses || statuses.loading) && "status",
     allCards === undefined && "review-items",
     !pinnedPages.data && !pinnedPages.error && "pinned",

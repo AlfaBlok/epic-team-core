@@ -17,7 +17,7 @@ describe("T8-S10 finish the job (root L-16)", () => {
     expect(FINISH_THE_JOB_RULE).toContain("ask-tier items stay asks");
   });
 
-  it("every worker brief carries it verbatim, next to the finish and tier rules", () => {
+  it("every worker brief carries it verbatim, next to the finish and tier rules", async () => {
     const text = wakeProtocol({
       base: "http://c",
       run: { id: "run_1" },
@@ -26,8 +26,9 @@ describe("T8-S10 finish the job (root L-16)", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain("these eleven rules");
-    expect(brief).toContain(`"${FINISH_THE_JOB_RULE}"`);
+    expect(brief).toContain("verbatim, the worker rules"); // served at /api/worker-rules, not pasted into the wake
+    expect(brief).toContain("/api/worker-rules");
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules()).toContain(FINISH_THE_JOB_RULE);
   });
 
   it("the wake's closing step finishes what the wake started before the PATCH", () => {

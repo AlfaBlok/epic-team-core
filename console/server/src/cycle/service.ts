@@ -204,6 +204,8 @@ export interface CycleOptions {
   capFallback?: boolean;
   /** a home thread with more items than this moves to a new one at its next wake (default HOME_THREAD_MAX_ITEMS; 0 = never; CONSOLE_HOME_THREAD_MAX_ITEMS). */
   homeThreadMaxItems?: number;
+  /** and one with this many turns or more (default HOME_THREAD_MAX_TURNS; 0 = never; CONSOLE_HOME_THREAD_MAX_TURNS). */
+  homeThreadMaxTurns?: number;
   /** a deferred wake (load-cap, no seat) gives up, failed with the reason, after this many ms (default 60 min). */
   deferMaxMs?: number;
   /** a wake T3 refused because the thread stayed busy re-wakes this many ms later (default 5 min)... */
@@ -257,6 +259,13 @@ export interface CycleOptions {
 /** the orphan sweep reads the orphan list this often, gives a fresh orphan this long to be named, and re-wakes after this. */
 /** a home thread that broke for good had 9,631 items; a new one starts well before that. */
 export const HOME_THREAD_MAX_ITEMS = 4_000;
+/**
+ * and a new one after this many turns (wakes and notes sent into it): the manager's thread filled up after about 300
+ * turns and could not start a turn for 8 h.
+ */
+export const HOME_THREAD_MAX_TURNS = 300;
+/** a wake prompt stays under this many characters; a longer one is logged. */
+export const WAKE_PROMPT_MAX = 100_000;
 export const ORPHAN_CHECK_MS = 5 * 60_000;
 export const ORPHAN_GRACE_MS = 10 * 60_000;
 export const ORPHAN_REWAKE_MS = 6 * 3_600_000;
@@ -1780,10 +1789,14 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   async function tooLong(client: T3Client, threadId: string): Promise<string | undefined> {
     const env = Number(process.env.CONSOLE_HOME_THREAD_MAX_ITEMS);
     const max = o.homeThreadMaxItems ?? (process.env.CONSOLE_HOME_THREAD_MAX_ITEMS && Number.isFinite(env) ? env : HOME_THREAD_MAX_ITEMS);
-    if (!(max > 0)) return undefined;
     const st = await client.readThreadStatus(threadId).catch(() => undefined);
-    const n = Number((st?.raw as { itemCount?: unknown } | undefined)?.itemCount);
-    return Number.isFinite(n) && n > max ? `home thread too long (${n} items, over ${max})` : undefined;
+    const raw = st?.raw as { itemCount?: unknown; runCount?: unknown } | undefined;
+    const n = Number(raw?.itemCount);
+    if (max > 0 && Number.isFinite(n) && n > max) return `home thread too long (${n} items, over ${max})`;
+    const envT = Number(process.env.CONSOLE_HOME_THREAD_MAX_TURNS);
+    const maxT = o.homeThreadMaxTurns ?? (process.env.CONSOLE_HOME_THREAD_MAX_TURNS && Number.isFinite(envT) ? envT : HOME_THREAD_MAX_TURNS);
+    const t = Number(raw?.runCount);
+    return maxT > 0 && Number.isFinite(t) && t >= maxT ? `home thread too long (${t} turns, ${maxT} or more)` : undefined;
   }
   async function sendWakeNow(id: string, runId: string, opts: { fresh?: string }): Promise<void> {
     const { m, p } = ctx(id);
@@ -2099,6 +2112,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     if (pre && /pull failed|unreadable/.test(pre))
       prompt += `\nNote: console ${pre}. Your checkout and repo tools may be stale: fix it if it is yours to fix (never reset others' work), else say so in your summary.\n`;
     prompt = hooks.worldPrompt(prompt, { tenant: milestoneWorld(db, m.id), personaId: p.id, consoleUrl: jobBase ?? baseFor(p.host === workerHost() ? workerHost() : mainHost()), job: !!jobBase }); // the home world unchanged
+    if (prompt.length > WAKE_PROMPT_MAX) console.warn(`wake ${id}: prompt ${prompt.length} characters, over ${WAKE_PROMPT_MAX}: shrink the section that grew`);
     if (p.freshThreadEachWake && !jobBase) return launchFresh(a, m, p, run, prompt); // a job is a fresh session already
     return { prompt, run };
   }

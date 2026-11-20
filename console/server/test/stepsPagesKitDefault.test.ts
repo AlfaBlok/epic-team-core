@@ -14,7 +14,7 @@ describe("steps pages on the kit by default", () => {
     expect(STEPS_PAGE_RULE).toContain("docs/steps-kit.md");
   });
 
-  it("the wake's worker brief carries it verbatim", () => {
+  it("the wake's worker brief carries it verbatim", async () => {
     const text = wakeProtocol({
       base: "http://c",
       run: { id: "run_1" },
@@ -23,7 +23,8 @@ describe("steps pages on the kit by default", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain(`"${STEPS_PAGE_RULE}"`);
+    expect(brief).toContain("/api/worker-rules"); // the rules are served, not pasted
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules().join("\n")).toContain(STEPS_PAGE_RULE);
   });
 
   it("a console-launched worker's first message carries it", () => {

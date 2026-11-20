@@ -2970,8 +2970,12 @@ export interface FeedbackView {
 export interface BriefingPictures {
   briefing: "morning" | "evening";
   at: string;
-  pictures: { url: string; what: string; ok: boolean; receipt: string | null }[];
+  pictures: { url: string; what: string; ok: boolean; receipt: string | null; delivery?: BriefingDelivery | null; deliveryAt?: string | null }[];
+  /** the delivery state of the whole briefing (its weakest picture); null = not read yet. */
+  delivery?: BriefingDelivery | null;
 }
+/** what the messaging channel says of a sent message: its delivery receipt. */
+export type BriefingDelivery = "pending" | "sent" | "delivered" | "read" | "failed" | "unknown";
 
 /** who sends the owner WhatsApp (the persona holding `whatsapp-notify`), the milestones it acts for, which path sends now. */
 export interface WhatsAppHolderView {

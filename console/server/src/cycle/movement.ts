@@ -462,6 +462,24 @@ const lastStallFire = (runs: Run[], epicPath: string) =>
     .pop();
 
 /**
+ * Rows whose newest worker run (a child run; its summary names the row) reported monitoring with a nextCheckAt still
+ * ahead: row → nextCheckAt. A wake's own summary names many rows, so only child runs count.
+ */
+export function monitoringRows(runs: Pick<Run, "outcome" | "nextCheckAt" | "summary" | "startedAt" | "parentRunId">[], now: number): Map<string, string> {
+  const newest = new Map<string, Pick<Run, "outcome" | "nextCheckAt" | "startedAt">>();
+  for (const r of runs) {
+    if (!r.parentRunId) continue;
+    const row = rowOf(r.summary ?? "");
+    if (!row) continue;
+    const had = newest.get(row);
+    if (!had || had.startedAt < r.startedAt) newest.set(row, r);
+  }
+  const out = new Map<string, string>();
+  for (const [row, r] of newest) if (r.outcome === "monitoring" && r.nextCheckAt && Date.parse(r.nextCheckAt) > now) out.set(row, r.nextCheckAt);
+  return out;
+}
+
+/**
  * Pure: the stall watch's verdict for one epic. `runs` = the milestone's runs (newest first or not); `now` in ms.
  * Fires only when every condition holds; otherwise the first failing one is the reason (the dry list shows it).
  */
@@ -491,6 +509,10 @@ export function stallVerdict(
   if (!isGoing(e.status)) return held(`status ${e.status}: not ready/active`);
   if (!e.ready.length) return held("");
   if (e.workers.length) return skip(`worker running (${e.workers.map((w) => w.ticket).join(", ")})`);
+  // a ready row whose run is monitoring a timed check still ahead is waiting, not idle.
+  const watched = monitoringRows(i.runs, now);
+  const readyNow = e.ready.filter((id) => !watched.has(id));
+  if (!readyNow.length) return skip(`ready rows wait on a timed check (${e.ready.map((id) => `${id} until ${watched.get(id)}`).join(", ")})`);
   if (i.milestone.settledAt || i.milestone.paused) return skip("milestone paused or settled");
   if (ef?.parked) return skip(`pursuit ${ef.pursuitName} is parked: no nudges`);
   if (!a) return skip("no Delivery manager assigned");
@@ -511,7 +533,7 @@ export function stallVerdict(
   if (!freeSeat(i.seats)) return skip("no free seat");
   const idle = moved === undefined ? "no commit on record" : `no worker or commit for ${Math.round((now - moved) / 3600_000 * 10) / 10} h`;
   const rank = ef ? ` (${ef.pursuitName}: nudged after ${patience})` : "";
-  return { ...base, verdict: "fire", reason: `${e.ready.length} ready row${e.ready.length === 1 ? "" : "s"} (${e.ready.slice(0, 5).join(", ")}), ${idle}${rank}`, assignmentId: a.id };
+  return { ...base, verdict: "fire", reason: `${readyNow.length} ready row${readyNow.length === 1 ? "" : "s"} (${readyNow.slice(0, 5).join(", ")}), ${idle}${rank}`, assignmentId: a.id };
 }
 
 /** The Run now note for one milestone's stalled epics (one Run now per milestone per tick). */

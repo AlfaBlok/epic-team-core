@@ -1004,9 +1004,10 @@ export function statusBeforeClaimIn(text: string, ref: string): string | undefin
 
 /**
  * a lease expired: Owner `unassigned (lease of <by> expired <UTC>: …)`, and an `active` Status goes back to the status
- * the row had when it was claimed (`back`: review stays review, monitoring stays monitoring), else `ready`.
+ * the row had when it was claimed (`back`: review stays review, monitoring stays monitoring), else `ready`. With `wait`
+ * (the claiming run reported monitoring with a check still due) the row goes to `waiting (… until <at>, <run>)`.
  */
-export function expireLeaseText(text: string, ref: string, by: string, until: string, at: string, back?: string): string | { skip: string } {
+export function expireLeaseText(text: string, ref: string, by: string, until: string, at: string, back?: string, wait?: { until: string }): string | { skip: string } {
   const raw = text.split("\n");
   const r = ledgerLines(text).find((x) => x.id === ref && x.col.owner >= 0);
   if (!r) return { skip: `row ${ref} is not in this spine any more` };
@@ -1016,6 +1017,14 @@ export function expireLeaseText(text: string, ref: string, by: string, until: st
   const st = r.col.status >= 0 ? stripInline(r.cells[r.col.status] ?? "") : "";
   if (!/^(?:active|claimed)\b/i.test(st)) return { skip: `row ${ref} is ${st || "without a status"}, not active: a lease expires only on a row being worked on` };
   const cells = [...r.cells];
+  // the claiming run ended its turn monitoring a timed check (nextCheckAt ahead): the row waits, it is not idle.
+  // The run stays in the Owner cell (no claim form, so no lease to sweep again); the Status says until when.
+  if (wait && !back?.trim()) {
+    cells[r.col.owner] = cellText(`${by} (monitoring until ${wait.until}; lease ended ${at})`);
+    if (r.col.status >= 0) cells[r.col.status] = cellText(`waiting (monitoring a timed check until ${wait.until}, ${by})`);
+    raw[r.line] = joinRow(cells) + (raw[r.line].endsWith("\r") ? "\r" : "");
+    return raw.join("\n");
+  }
   const to = back?.trim() || "ready";
   const isReady = /^ready\b/i.test(stripInline(to));
   cells[r.col.owner] = cellText(`unassigned (lease of ${by} expired ${at}: ${isReady ? "re-dispatch" : `back to ${stripInline(to).split(/\s/)[0]}`})`);

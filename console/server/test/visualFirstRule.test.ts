@@ -15,7 +15,7 @@ describe("visual first (root L-59)", () => {
     for (const s of ["Clean, simple, sophisticated", "scripts/clean_look_check.py", "--screens", "app-screens.md", "hallmark"]) expect(VISUAL_FIRST_RULE).toContain(s);
   });
 
-  it("every worker brief the manager writes carries it verbatim", () => {
+  it("every worker brief the manager writes carries it verbatim", async () => {
     const text = wakeProtocol({
       base: "http://c",
       run: { id: "run_1" },
@@ -24,7 +24,8 @@ describe("visual first (root L-59)", () => {
       persona: { id: "p_1", name: "archivist" },
     } as never);
     const brief = text.slice(text.indexOf("Its brief must say"), text.indexOf("   4. When its completion arrives"));
-    expect(brief).toContain(`"${VISUAL_FIRST_RULE}"`);
+    expect(brief).toContain("/api/worker-rules"); // the rules are served, not pasted
+    expect((await import("../src/cycle/prompts.js")).workerBriefRules()).toContain(VISUAL_FIRST_RULE);
   });
 
   it("a console-launched worker's first message carries it", () => {

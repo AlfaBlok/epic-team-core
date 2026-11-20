@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SpinesJson } from "../src/adapters/spines.js";
 import { openDb, type DB } from "../src/db.js";
 import { activeGrantsFor, GRANT_BRIEF_RULE, GRANT_USE_RULE, grantsSection } from "../src/cycle/grants.js";
-import { WORKER_TIER_RULE, wakeProtocol } from "../src/cycle/prompts.js";
+import { WORKER_TIER_RULE, wakeProtocol, workerBriefRules } from "../src/cycle/prompts.js";
 import { createCycle } from "../src/cycle/service.js";
 import { ASK_LEAD_RULE, ASK_TIER_ITEMS, ASK_TYPE_RULES, ASK_WRITING_RULE, KICKOFF_RULE, isUnblocker, TIER_ASK } from "../src/inbox/asks.js";
 import { createStore } from "../src/store.js";
@@ -63,7 +63,8 @@ describe("T8-S4 ask tier and ask-writing rules", () => {
     expect(WORKER_TIER_RULE).toContain(ASK_WRITING_RULE);
     const p = protocol("archivist");
     expect(p).toContain(ASK_WRITING_RULE);
-    expect(p).toContain(WORKER_TIER_RULE);
+    expect(p).toContain("/api/worker-rules"); // served, not pasted into the wake
+    expect(workerBriefRules()).toContain(WORKER_TIER_RULE);
   });
 });
 

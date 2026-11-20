@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api, type BriefingPictures } from "@/api";
-import { LastBriefings, splitBriefings } from "@/components/lastBriefings";
+import { deliveryWords, LastBriefings, splitBriefings } from "@/components/lastBriefings";
 
 afterEach(() => {
   cleanup();
@@ -54,5 +54,21 @@ describe("the last briefings on Home", () => {
     const { container } = render(<LastBriefings delayMs={0} />);
     await waitFor(() => expect((api as unknown as { getBriefingPictures: ReturnType<typeof vi.fn> }).getBriefingPictures).toHaveBeenCalled());
     expect(container.textContent).toBe("");
+  });
+
+  // each briefing he got is confirmed delivered, not only sent (the channel's delivery receipt)
+  it("says whether each briefing reached his phone: read, delivered, not yet, failed; nothing before it is known", async () => {
+    expect(deliveryWords("read")?.text).toBe("Read on your phone");
+    expect(deliveryWords("delivered")?.text).toBe("Delivered to your phone");
+    expect(deliveryWords("sent")?.text).toBe("Sent, not delivered yet");
+    expect(deliveryWords("failed")?.tone).toBe("bad");
+    expect(deliveryWords(null)).toBeNull();
+    const two = [{ ...morning("2026-11-20T12:00:30Z", "a"), delivery: "delivered" as const }, evening("2026-11-20T00:30:10Z", "b")];
+    (api as { getBriefingPictures?: unknown }).getBriefingPictures = vi.fn(async () => ({ briefings: two }));
+    render(<LastBriefings delayMs={0} />);
+    await waitFor(() => expect(screen.getAllByTestId("briefing-pictures")).toHaveLength(2));
+    const [m, e] = screen.getAllByTestId("briefing-pictures");
+    expect(m.querySelector("[data-testid=briefing-delivery]")?.textContent).toBe("Delivered to your phone");
+    expect(e.querySelector("[data-testid=briefing-delivery]")).toBeNull();
   });
 });
