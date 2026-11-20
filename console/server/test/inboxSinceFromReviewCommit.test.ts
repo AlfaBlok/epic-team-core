@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { entryFromLog, inboxSince, inboxSinceOf, resetInboxSince } from "../src/review/inboxSince.js";
 
 // (vn_7c5aa36e, "how old is the card in minutes, hours, days, weeks"): a review card's age counts from when the
@@ -47,6 +47,26 @@ describe("inboxSince", () => {
     expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
     expect(await inboxSince(dir, "docs/e.md", "T1-S9", "review")).toBeUndefined();
     expect(await inboxSince(dir, "../x.md", "T1-S1", "review")).toBeUndefined();
+  });
+
+  it("reads each spine once per change, not once per card (a list read ~13 MB of spines per call)", async () => {
+    commit(row("review", "2026-10-21"), "2026-10-21T14:05:00Z");
+    const abs = path.join(dir, "docs/e.md");
+    const reads = vi.spyOn(fs, "readFileSync");
+    try {
+      const of = () => reads.mock.calls.filter((c) => c[0] === abs).length;
+      expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
+      await inboxSince(dir, "docs/e.md", "T1-S1", "review");
+      await inboxSince(dir, "docs/e.md", "T1-S2", "active");
+      expect(of()).toBe(1);
+      // the row moves on: the changed file is read again and the new line is looked up
+      commit(row("active (iteration 2)", "2026-10-22"), "2026-10-22T10:00:00Z");
+      commit(row("review (iteration 2)", "2026-10-23"), "2026-10-23T11:30:00Z");
+      expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review (iteration 2)")).toBe("2026-10-23T11:30:00.000Z");
+      expect(of()).toBe(2);
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   it("inboxSinceOf waits at most its budget and answers what it has", async () => {

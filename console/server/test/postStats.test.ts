@@ -28,6 +28,8 @@ const day = (date: string, views: number, likes: number) => ({
   channels: [
     { campaign: "alpha-campaign", product: "Alpha", channel: "forum", livePosts: 1, measured: 1, dms: 2, dmsWhy: null, notMeasured: null },
     { campaign: "alpha-campaign", product: "Alpha", channel: "pro", livePosts: 1, measured: 0, dms: null, dmsWhy: "no chat", notMeasured: "Pro …" },
+    { campaign: "alpha-campaign", product: "Alpha", channel: "x", livePosts: 2, measured: 2, dms: 1, dmsNew: 1, dmLinks: ["https://x.example.com/messages/1-2", 7],
+      dmSeen: ["https://x.example.com/messages/1-2"], dmsWhy: null, dmsSource: "social_dms browser: 1 conversations listed", notMeasured: null },
   ],
 });
 
@@ -67,6 +69,9 @@ describe("post stats store", () => {
     expect(m1).toMatchObject({ posts: 2, measured: 1, views: null, likes: 4 });
     expect(b.groups.find((g) => g.key === "none")).toMatchObject({ posts: 1, views: 5 });
     expect(b.channels.find((c) => c.channel === "forum")?.dms).toBe(2);
+    // an inbox read gives the day's DMs, how many are new since the day before and their links, never words
+    expect(b.channels.find((c) => c.channel === "x")).toMatchObject({ dms: 1, dmsNew: 1, dmLinks: ["https://x.example.com/messages/1-2"] });
+    expect(b.channels.find((c) => c.channel === "pro")).toMatchObject({ dms: null, dmsNew: null, dmLinks: [], dmsWhy: "no chat" });
     const byCh = s.query({ group: "message-channel", message: "1" });
     expect(byCh.groups.map((g) => g.key)).toEqual(["M1|forum", "M1|pro"]);
     expect(s.query({ date: "2026-11-17", channel: "x" }).posts.map((p) => p.postId).sort()).toEqual(["300", "301", "302"]);

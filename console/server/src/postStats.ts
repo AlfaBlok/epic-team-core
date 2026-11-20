@@ -50,6 +50,10 @@ export interface PostStatsChannel {
   accountPosts: number | null;
   measured: number;
   dms: number | null;
+  /** conversations not in the day before's inbox reading (null: no reading the day before). */
+  dmsNew: number | null;
+  /** links of the conversations counted in `dms` (never a word of a message). */
+  dmLinks: string[];
   dmsWhy: string | null;
   notMeasured: string | null;
 }
@@ -103,6 +107,10 @@ export function migratePostStats(db: DB): void {
       PRIMARY KEY (date, campaign, channel));
     CREATE TABLE IF NOT EXISTS post_stats_files (date TEXT PRIMARY KEY, mtime REAL NOT NULL, loaded_at TEXT NOT NULL);
   `);
+  // DMs read from each channel's inbox: how many are new since the day before, and their links
+  const cols = new Set((db.prepare("PRAGMA table_info(post_stats_channels)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("dms_new")) db.exec("ALTER TABLE post_stats_channels ADD COLUMN dms_new INTEGER");
+  if (!cols.has("dm_links")) db.exec("ALTER TABLE post_stats_channels ADD COLUMN dm_links TEXT");
 }
 
 /** One day file into the store (replaces that day's rows). Exported for the tests. */
@@ -115,7 +123,7 @@ export function loadPostStatsDay(db: DB, text: string, mtime = 0): number {
     posted_at, kind, measured, views, likes, replies, reposts, dms, not_measured, read_at, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const insCh = db.prepare(`INSERT OR REPLACE INTO post_stats_channels (date, campaign, product, channel, live_posts, account_posts, measured,
-    dms, dms_why, not_measured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    dms, dms_why, not_measured, dms_new, dm_links) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
   db.transaction(() => {
     db.prepare("DELETE FROM post_stats WHERE date = ?").run(date);
@@ -145,7 +153,8 @@ export function loadPostStatsDay(db: DB, text: string, mtime = 0): number {
       const channel = str(c.channel);
       if (!campaign || !channel) continue;
       insCh.run(date, campaign, str(c.product), channel, num(c.livePosts) ?? 0, num(c.accountPosts), num(c.measured) ?? 0, num(c.dms),
-        str(c.dmsWhy), str(c.notMeasured));
+        str(c.dmsWhy), str(c.notMeasured), num(c.dmsNew),
+        JSON.stringify(Array.isArray(c.dmLinks) ? (c.dmLinks as unknown[]).filter((l): l is string => typeof l === "string") : []));
     }
     db.prepare("INSERT OR REPLACE INTO post_stats_files (date, mtime, loaded_at) VALUES (?, ?, ?)").run(date, mtime, new Date().toISOString());
   })();
@@ -242,9 +251,18 @@ export function createPostStats(o: { db: DB; reposRoot: string; home?: string; d
       const channels = (o.db.prepare(`SELECT * FROM post_stats_channels WHERE ${chWhere.join(" AND ")} ORDER BY campaign, channel`).all(...chArgs) as Record<string, unknown>[]).map((c) => ({
         date: String(c.date), campaign: String(c.campaign), product: String(c.product ?? ""), channel: String(c.channel),
         livePosts: Number(c.live_posts), accountPosts: num(c.account_posts), measured: Number(c.measured), dms: num(c.dms),
-        dmsWhy: str(c.dms_why), notMeasured: str(c.not_measured),
+        dmsNew: num(c.dms_new), dmLinks: links(c.dm_links), dmsWhy: str(c.dms_why), notMeasured: str(c.not_measured),
       }));
       return { dates, date, group, groups, posts, channels, how: POST_STATS_HOW };
     },
   };
+}
+
+function links(v: unknown): string[] {
+  try {
+    const a = JSON.parse(String(v ?? "[]")) as unknown;
+    return Array.isArray(a) ? a.filter((l): l is string => typeof l === "string") : [];
+  } catch {
+    return [];
+  }
 }

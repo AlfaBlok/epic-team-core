@@ -611,7 +611,7 @@ export interface ApiClient {
   /** platform only (the home world): a top-up / grant we make by hand; releases held wakes when back above zero. */
   grantCredits(tenantId: string, input: CreditGrantInput): Promise<CreditGrantResult>;
   /** an owner starts the €49 a month Epic Team checkout for their world; answers the Stripe-hosted page's address. */
-  startPlanCheckout?(tenantId: string): Promise<{ url: string }>;
+  startPlanCheckout?(tenantId: string, seats?: number): Promise<{ url: string }>;
   /** may this world buy the paid plan (the Buy button), and has it paid ("You're on <plan>"). */
   getPlan?(tenantId: string): Promise<PlanState>;
   /** platform only: the per-world gate (the home world is never held either way). */

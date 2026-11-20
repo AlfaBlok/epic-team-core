@@ -1928,6 +1928,10 @@ export interface PlanState {
   paid: boolean;
   awaiting: boolean;
   price: { name: string; eurPerMonth: number };
+  /** the seat bundles on sale (2, 5, 16 seats); older consoles leave it out */
+  bundles?: { seats: number; eurPerMonth: number }[];
+  /** the seats the world's plan includes now */
+  seats?: number;
   subscription?: { status: string; since: string; testMode: boolean };
 }
 

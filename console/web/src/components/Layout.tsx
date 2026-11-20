@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { BundleButtons, SEAT_WORDS, usePlan } from "./buyPlan";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard, KeyRound, Sparkles, Coins, Globe } from "lucide-react";
@@ -350,14 +351,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // each fold opens by itself on one of its own pages, and a press always opens or folds it.
   const [toolsShown, toggleTools] = useFold(TOOLS_STORE, here(tools));
   const [settingsShown, toggleSettings] = useFold(SETTINGS_STORE, here(settings));
-  // his objectives' scores still on their way: the menu is drawn, only the objectives' place shows a quiet placeholder
-  // until they arrive (the menu never waits on GET /api/scorecards).
-  const objectivesLoading = shows("goalSets") && !sets.data && !sets.error;
   const consoleMenu = (
     <>
-      {objectivesLoading ? (
-        <ObjectivesLoading />
-      ) : hasObjectives ? (
+      {hasObjectives ? (
         <SidebarGoalSetsOf
           data={sets.data}
           onNavigate={onNavigate}
@@ -398,10 +394,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   // drawn at once (the owner 18 Nov, vn_1dcd875a: "Fix the loading of the fucking sidebar"): one quiet skeleton until
   // every list the menu shows is in, then the whole menu in one frame, never entries arriving one under another.
-  // The objectives' scores are not waited on (a slow /api/scorecards held the whole menu on the phone): their
-  // place keeps its own placeholder (ObjectivesLoading) and fills when they arrive.
+  // His objectives are part of that one frame (drawn after the rest, they were the entries arriving late);
+  // GET /api/scorecards is kept ready on the server (keptJson), so waiting on it costs a few ms.
   const waitingOn = [
     !allMilestones && "milestones",
+    !sets.data && !sets.error && "scorecards",
     (!statuses || statuses.loading) && "status",
     allCards === undefined && "review-items",
     !pinnedPages.data && !pinnedPages.error && "pinned",
@@ -489,7 +486,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
       {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
       {/* every sidebar entry is a goal set, nested, All goal sets on top; both skins. */}
-      {shows("goalSets") && (objectivesLoading ? <ObjectivesLoading /> : <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />)}
+      {shows("goalSets") && <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />}
 
       {/* the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
           microphone. The other things are in the sidebar." So every other page sits here, below the goal sets, in his
@@ -636,17 +633,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         }}
       />}
     </AtOnce>
-    </div>
-  );
-}
-
-/** the objectives' place in the menu while their scores are on their way: a few quiet lines, the same height as the list. */
-export function ObjectivesLoading() {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5" data-testid="sidebar-objectives-loading" aria-label="Loading objectives" aria-busy>
-      {Array.from({ length: 5 }, (_, i) => (
-        <div key={i} className="h-8 animate-pulse rounded-md bg-muted/50" />
-      ))}
     </div>
   );
 }
@@ -1153,37 +1139,23 @@ export function Reconnecting() {
  */
 export function BillingNote() {
   const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const world = me?.billing === "awaiting_payment" ? me?.tenant?.id : undefined;
+  const { data: plan } = usePlan(world);
   if (me?.billing !== "awaiting_payment") return null;
   const back = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("checkout") === "done";
-  const world = me?.tenant?.id;
-  const pay = async () => {
-    if (!world || !api.startPlanCheckout) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      window.location.assign((await api.startPlanCheckout(world)).url);
-    } catch (e) {
-      setError((e as Error).message || "The payment page did not open. Try again in a minute.");
-      setBusy(false);
-    }
-  };
+  // the seat bundles on sale, the one picked on the product site first
   return (
     <div role="status" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-testid="billing-note">
       {back ? (
         <p>Thank you. Stripe is confirming your payment. Your team starts as soon as it arrives, refresh in a moment.</p>
       ) : (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="min-w-0 flex-1">Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid: €49 a month.</p>
-          {world && api.startPlanCheckout && (
-            <Button size="sm" onClick={pay} disabled={busy} pending={busy} pendingLabel="Opening…" data-testid="billing-pay">
-              Pay €49 a month
-            </Button>
-          )}
+        <div className="flex flex-col gap-2">
+          <p className="min-w-0">
+            Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid. {SEAT_WORDS}
+          </p>
+          {plan && <BundleButtons plan={plan} size="sm" testid="billing-pay" />}
         </div>
       )}
-      {error && <p className="mt-2 text-xs text-red-700 dark:text-red-400">{error}</p>}
     </div>
   );
 }

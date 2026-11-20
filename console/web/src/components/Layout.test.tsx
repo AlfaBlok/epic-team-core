@@ -54,8 +54,8 @@ describe("Sidebar (M2-7: long titles stay inside the sidebar)", () => {
   });
 });
 
-describe("Sidebar never waits on the objectives' scores", () => {
-  it("draws the menu while GET /api/scorecards has not answered, a placeholder in the objectives' place, then fills them", async () => {
+describe("Sidebar draws whole, the objectives in its first frame", () => {
+  it("keeps one skeleton while GET /api/scorecards has not answered, then draws the menu and the objectives together", async () => {
     let answer!: (v: never) => void;
     const spy = vi.spyOn(api, "listScorecards").mockReturnValue(new Promise((r) => (answer = r)) as never);
     try {
@@ -64,12 +64,13 @@ describe("Sidebar never waits on the objectives' scores", () => {
           <SidebarNav />
         </MemoryRouter>,
       );
-      // the menu is drawn (Inbox among it) with the scores still on their way
-      await waitFor(() => expect(document.querySelector("[data-waiting-on]")).toBeNull(), { timeout: 3000 });
-      expect(screen.getByTestId("nav-inbox")).toBeTruthy();
-      expect(screen.getByTestId("sidebar-objectives-loading")).toBeTruthy();
+      // every other list is in: the menu still waits, named, on the objectives' scores only
+      await waitFor(() => expect(document.querySelector("[data-waiting-on]")?.getAttribute("data-waiting-on")).toBe("scorecards"), { timeout: 3000 });
+      expect(screen.getByTestId("sidebar-body").hidden).toBe(true);
       answer({ nodes: [] } as never);
-      await waitFor(() => expect(screen.queryByTestId("sidebar-objectives-loading")).toBeNull());
+      await waitFor(() => expect(document.querySelector("[data-waiting-on]")).toBeNull());
+      expect(screen.getByTestId("sidebar-body").hidden).toBe(false);
+      expect(screen.getByTestId("nav-inbox")).toBeTruthy();
       expect(await screen.findByRole("button", { name: "Add project" })).toBeTruthy();
     } finally {
       spy.mockRestore();

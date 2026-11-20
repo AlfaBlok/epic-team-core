@@ -77,25 +77,51 @@ function lookup(repoDir: string, rel: string, rowId: string, statusCol: number, 
   });
 }
 
-/** The row's line in the spine now and its status column (the cell that reads `status`). */
-function rowNow(abs: string, rowId: string, status: string): { line: string; col: number } | undefined {
+/**
+ * Each spine's table rows by id (the first line whose first cell is the id), read once per file change (mtime and size).
+ * Every list call asks for every card's row: reading and splitting each 100 to 430 KB spine once per card made one
+ * list ~0.2 s of solid CPU, and the inbox's first draw makes four or five lists at once.
+ */
+const fileRows = new Map<string, { mtimeMs: number; size: number; rows: Map<string, string> }>();
+
+function rowsOf(abs: string): Map<string, string> | undefined {
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(abs);
+  } catch {
+    fileRows.delete(abs);
+    return undefined;
+  }
+  const kept = fileRows.get(abs);
+  if (kept && kept.mtimeMs === st.mtimeMs && kept.size === st.size) return kept.rows;
   let text: string;
   try {
     text = fs.readFileSync(abs, "utf8");
   } catch {
     return undefined;
   }
-  const want = stripInline(rowId).toLowerCase();
-  const s = stripInline(status).trim();
+  const rows = new Map<string, string>();
   for (const line of text.split("\n")) {
-    if (!line.trim().startsWith("|")) continue;
-    const c = cells(line);
-    if ((c[0] ?? "").toLowerCase() !== want) continue;
-    const col = c.findIndex((x, i) => i > 0 && x.trim() === s);
-    const loose = col >= 0 ? col : c.findIndex((x, i) => i > 0 && word(x) === word(s) && /^(review|done)\b/i.test(x));
-    return loose >= 0 ? { line, col: loose } : undefined;
+    const t = line.trim();
+    if (!t.startsWith("|")) continue;
+    const first = (/^\|([^|]*)/.exec(t)?.[1] ?? "").trim();
+    if (!first || first.startsWith("-")) continue;
+    const id = stripInline(first).toLowerCase();
+    if (!rows.has(id)) rows.set(id, line);
   }
-  return undefined;
+  fileRows.set(abs, { mtimeMs: st.mtimeMs, size: st.size, rows });
+  return rows;
+}
+
+/** The row's line in the spine now and its status column (the cell that reads `status`). */
+function rowNow(abs: string, rowId: string, status: string): { line: string; col: number } | undefined {
+  const line = rowsOf(abs)?.get(stripInline(rowId).toLowerCase());
+  if (!line) return undefined;
+  const s = stripInline(status).trim();
+  const c = cells(line);
+  const col = c.findIndex((x, i) => i > 0 && x.trim() === s);
+  const loose = col >= 0 ? col : c.findIndex((x, i) => i > 0 && word(x) === word(s) && /^(review|done)\b/i.test(x));
+  return loose >= 0 ? { line, col: loose } : undefined;
 }
 
 /** When the row `rowId` in `rel` reached the owner's inbox (ISO), as far as git knows; one lookup per row line. */
@@ -141,4 +167,7 @@ export async function inboxSinceOf(
 }
 
 /** Tests only. */
-export const resetInboxSince = () => cache.clear();
+export const resetInboxSince = () => {
+  cache.clear();
+  fileRows.clear();
+};
