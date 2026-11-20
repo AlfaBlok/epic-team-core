@@ -35,7 +35,7 @@ describe("T62-S3 only the indexer writes a cache table", () => {
   });
 
   it("the scan knows the cache tables and catches a write from elsewhere (demo)", () => {
-    expect(cacheTables().sort()).toEqual(["book_cache", "deck_material", "desk_view_cache", "read_model", "repo_index", "review_live", "spines_cache"]); // added deck_material (the epic decks' material facts, written by deck/notify.ts only); spines_cache (indexer/ only)
+    expect(cacheTables().sort()).toEqual(["book_cache", "deck_material", "desk_view_cache", "read_model", "repo_index", "review_inbox_since", "review_live", "spines_cache"]); // review_inbox_since (review/review.ts only); added deck_material (the epic decks' material facts, written by deck/notify.ts only); spines_cache (indexer/ only)
     expect(cacheWriteProblems("inbox/routes.ts", 'db.prepare("UPDATE read_model SET payload = ? WHERE key = ?")')).toHaveLength(1);
     expect(cacheWriteProblems("app.ts", "db.prepare(`INSERT OR REPLACE INTO book_cache (id) VALUES (1)`)")).toHaveLength(1);
     expect(cacheWriteProblems("review/review.ts", 'db.prepare("DELETE FROM repo_index WHERE host = ?")')).toHaveLength(1);

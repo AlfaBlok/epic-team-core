@@ -92,9 +92,10 @@ describe("T62-S3 a decision whose spine write did not land is not counted as don
     expect(tables.filter((t) => /^review_/.test(t))).toEqual([]);
     const bad = srcFiles()
       .filter((f) => /\/review\//.test(f))
-      // review_live is a cache of the link checks and review_agent_wake the dedupe of the gate's wakes (ops, not
-      // a decision): their writes are the only ones allowed
-      .filter((f) => /\b(INSERT\s+(OR\s+\w+\s+)?INTO\s+(?!review_live\b|review_agent_wake\b)\w+|UPDATE\s+(?!review_live\b|review_agent_wake\b)\w+\s+SET|DELETE\s+FROM\s+(?!review_live\b|review_agent_wake\b)\w+)/i.test(fs.readFileSync(f, "utf8")));
+      // review_live is a cache of the link checks, review_inbox_since a cache of git's answer for each card's inbox
+      // time and review_agent_wake the dedupe of the gate's wakes (ops, not a decision): their writes are
+      // the only ones allowed
+      .filter((f) => /\b(INSERT\s+(OR\s+\w+\s+)?INTO\s+(?!review_live\b|review_inbox_since\b|review_agent_wake\b)\w+|UPDATE\s+(?!review_live\b|review_inbox_since\b|review_agent_wake\b)\w+\s+SET|DELETE\s+FROM\s+(?!review_live\b|review_inbox_since\b|review_agent_wake\b)\w+)/i.test(fs.readFileSync(f, "utf8")));
     expect(bad.map((f) => srcRel(f))).toEqual([]);
   });
   // turned this on; the behaviour (each change on main first, a failed write changes nothing, a lost DB rebuilt from

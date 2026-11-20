@@ -3,7 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { entryFromLog, inboxSince, inboxSinceOf, resetInboxSince } from "../src/review/inboxSince.js";
+import { openDb } from "../src/db.js";
+import { entryFromLog, inboxSince, inboxSinceOf, keepInboxSinceIn, resetInboxSince } from "../src/review/inboxSince.js";
+import { ensureReviewInboxSince } from "../src/review/review.js";
 
 // (vn_7c5aa36e, "how old is the card in minutes, hours, days, weeks"): a review card's age counts from when the
 // row went to review, never from a later restamp of the row.
@@ -18,7 +20,10 @@ describe("inboxSince", () => {
     fs.mkdirSync(path.join(dir, "docs"));
     execFileSync("git", ["-C", dir, "init", "-q"]);
   });
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => {
+    keepInboxSinceIn(undefined);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   const commit = (text: string, at: string) => {
     fs.writeFileSync(path.join(dir, "docs/e.md"), `# E\n${HEAD}${text}| T1-S2 | x | y | other | active | none | 2026-10-01 |\n`);
     const env = { ...process.env, GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -66,6 +71,50 @@ describe("inboxSince", () => {
       expect(of()).toBe(2);
     } finally {
       reads.mockRestore();
+    }
+  });
+
+  // After a release the memory is empty, and each inbox list waited its whole 1.5 s budget while git found
+  // every card's time again (the phone's first sections at 2.4 to 4.6 s). The times are kept in the console's database.
+  it("a time found once outlives a restart: the stored one is used while the row's line is the same, without git", async () => {
+    const db = openDb(":memory:");
+    ensureReviewInboxSince(db);
+    commit(row("review", "2026-10-21"), "2026-10-21T14:05:00Z");
+    expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
+    expect(db.prepare("SELECT at FROM review_inbox_since").all()).toEqual([{ at: "2026-10-21T14:05:00.000Z" }]);
+    resetInboxSince(); // a restart: the memory is empty
+    fs.rmSync(path.join(dir, ".git"), { recursive: true, force: true }); // git can no longer answer
+    expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
+  });
+
+  it("a changed row line looks again; a git failure is not stored and is asked again after a restart", async () => {
+    const kept = new Map<string, { line: string; at: string | null }>();
+    keepInboxSinceIn({ get: (k) => kept.get(k), put: (k, line, at) => void kept.set(k, { line, at }) });
+    commit(row("review", "2026-10-21"), "2026-10-21T14:05:00Z");
+    expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
+    commit(row("active (iteration 2)", "2026-10-22"), "2026-10-22T10:00:00Z");
+    commit(row("review (iteration 2)", "2026-10-23"), "2026-10-23T11:30:00Z");
+    resetInboxSince();
+    expect(await inboxSince(dir, "docs/e.md", "T1-S1", "review (iteration 2)")).toBe("2026-10-23T11:30:00.000Z");
+    expect([...kept.values()].map((v) => v.at)).toEqual(["2026-10-23T11:30:00.000Z"]);
+    // no git at all: nothing answers, nothing is stored, the next list asks git again
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-since-bare-"));
+    try {
+      fs.mkdirSync(path.join(bare, "docs"));
+      fs.writeFileSync(path.join(bare, "docs/e.md"), `# E\n${HEAD}${row("review", "2026-10-21")}`);
+      kept.clear();
+      expect(await inboxSince(bare, "docs/e.md", "T1-S1", "review")).toBeUndefined();
+      expect(kept.size).toBe(0);
+      execFileSync("git", ["-C", bare, "init", "-q"]);
+      const env = { ...process.env, GIT_COMMITTER_DATE: "2026-10-21T14:05:00Z", GIT_AUTHOR_DATE: "2026-10-21T14:05:00Z", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+      execFileSync("git", ["-C", bare, "add", "-A"], { env });
+      execFileSync("git", ["-C", bare, "commit", "-qm", "x"], { env });
+      expect(await inboxSince(bare, "docs/e.md", "T1-S1", "review")).toBeUndefined(); // until the next start, no git again
+      resetInboxSince();
+      expect(await inboxSince(bare, "docs/e.md", "T1-S1", "review")).toBe("2026-10-21T14:05:00.000Z");
+      expect(kept.size).toBe(1);
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
     }
   });
 

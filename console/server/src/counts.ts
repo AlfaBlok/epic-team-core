@@ -22,7 +22,7 @@ import { ownerName } from "./identity.js";
 export interface CountsDeps {
   store: Store;
   status: () => Promise<{ milestones: { milestoneId: string; needsYou: number | null; loading?: boolean }[]; needsYou: number | null; loading?: boolean; asOf?: string }>;
-  review: { list: () => Promise<{ milestoneId?: string }[]> };
+  review: { list: (f?: { ages?: boolean }) => Promise<{ milestoneId?: string }[]> };
   unread?: ChatUnread;
   /** the worlds a login belongs to (auth's memberships), for the world switcher's per-world counts. */
   memberships?: (userId: string) => Member[];
@@ -64,7 +64,7 @@ export function mountCounts(api: Hono, d: CountsDeps) {
     const here = d.store.tenant ?? DEFAULT_TENANT;
     const own = async (): Promise<Omit<WorldCounts, "tenantId" | "tenantName" | "role" | "current">> => {
       const st = await d.status();
-      return { needsYou: st.loading ? null : st.needsYou, review: (await d.review.list()).length };
+      return { needsYou: st.loading ? null : st.needsYou, review: (await d.review.list({ ages: false })).length };
     };
     if (!ctx || !i || i.kind !== "session" || !d.memberships || ctx.mode !== "on") {
       const t = d.store.getTenant(here);
@@ -87,7 +87,7 @@ export function mountCounts(api: Hono, d: CountsDeps) {
     const st = await d.status();
     // the badge, sidebar and section header count the cards the owner must act
     // on (live, not snoozed, not backlog); Older rows and Not live yet are their own folded sections with their own counts
-    const reviews = await d.review.list();
+    const reviews = await d.review.list({ ages: false });
     const desk = deskKeyOf(world);
     const unread = d.unread?.counts((k) => k === desk || (k.startsWith("milestone:") && ids.has(k.slice("milestone:".length))));
     const milestones: Record<string, MilestoneCounts> = {};

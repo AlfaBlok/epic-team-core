@@ -10,8 +10,8 @@ import { stripInline } from "../adapters/markdown.js";
  * for a card he never marked); a later edit of the row that keeps that word (a restamp of Last verified, a new evidence
  * link, a snooze) does not move it, and a row that left review and came back counts from its return.
  *
- * Found once per row line (`git log -G` on the row, about half a second) and kept in memory; a changed row line looks
- * again. Never blocks a list for long: `inboxSinceOf` waits at most `budgetMs` and answers what it has.
+ * Found once per row line (`git log -G` on the row, about half a second), kept in memory and in the console's database
+ * (so a restart does not look again); a changed row line looks again. Never blocks a list for long: `inboxSinceOf` waits at most `budgetMs` and answers what it has.
  */
 
 const cells = (line: string) =>
@@ -67,12 +67,28 @@ export function entryFromLog(log: string, rowId: string, statusCol: number, want
 type Hit = { line: string; at: Promise<string | undefined> };
 const cache = new Map<string, Hit>();
 
-function lookup(repoDir: string, rel: string, rowId: string, statusCol: number, want: string, width: number): Promise<string | undefined> {
+/**
+ * Where found times outlive a restart: the console's database (review/review.ts `review_inbox_since`).
+ * The memory above is empty after each start, and every list then waited its whole budget while ~54 `git log -G` runs
+ * (about half a second each, more on a loaded host) found again what was known before: the phone's first inbox draw
+ * after a release took 2.4 to 4.6 s. A stored time is used while the row's line is the same; `at` null = git found none.
+ */
+export interface InboxSinceStore {
+  get(key: string): { line: string; at: string | null } | undefined;
+  put(key: string, line: string, at: string | null): void;
+}
+let kept: InboxSinceStore | undefined;
+export const keepInboxSinceIn = (s: InboxSinceStore | undefined) => {
+  kept = s;
+};
+
+/** git's answer: `ok` false when git itself failed (timeout, no repo), so nothing is stored. */
+function lookup(repoDir: string, rel: string, rowId: string, statusCol: number, want: string, width: number): Promise<{ ok: boolean; at?: string }> {
   return new Promise((resolve) => {
     // extended regex: `\|` is the pipe itself (a bare `|` matched every commit)
     const re = `^\\|[[:space:]]*${escapeRe(rowId)}[[:space:]]*\\|`;
     execFile("git", ["-C", repoDir, "log", "--no-merges", "-E", "--format=C %ct", "-p", "-U0", "-G", re, "--", rel], { timeout: 10_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? undefined : entryFromLog(stdout, rowId, statusCol, want, width));
+      resolve(err ? { ok: false } : { ok: true, at: entryFromLog(stdout, rowId, statusCol, want, width) });
     });
   });
 }
@@ -134,8 +150,31 @@ export function inboxSince(repoDir: string, rel: string, rowId: string, status: 
   const key = `${repoDir}\0${rel}\0${rowId}`;
   const hit = cache.get(key);
   if (hit && hit.line === now.line) return hit.at;
-  const at = lookup(repoDir, rel, rowId, now.col, want, cells(now.line).length);
-  cache.set(key, { line: now.line, at });
+  let stored: ReturnType<InboxSinceStore["get"]>;
+  try {
+    stored = kept?.get(key);
+  } catch {
+    stored = undefined;
+  }
+  if (stored && stored.line === now.line) {
+    const at = Promise.resolve(stored.at ?? undefined);
+    cache.set(key, { line: now.line, at });
+    return at;
+  }
+  const line = now.line;
+  const at = lookup(repoDir, rel, rowId, now.col, want, cells(line).length).then((r) => {
+    // git failed (a timeout on a loaded host): kept in memory as none until the next start, never stored, so the next
+    // start asks again and no list spawns git again meanwhile
+    if (r.ok) {
+      try {
+        kept?.put(key, line, r.at ?? null);
+      } catch {
+        /* a store that cannot write only costs the lookup again after the next start */
+      }
+    }
+    return r.at;
+  });
+  cache.set(key, { line, at });
   return at;
 }
 

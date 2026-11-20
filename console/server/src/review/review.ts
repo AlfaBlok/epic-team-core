@@ -13,7 +13,7 @@ import { SNOOZE_UNTIL, snoozedNow, snoozeMinute } from "../inbox/asks.js";
 import { byMilestonePriority, storeRanks } from "../inbox/priority.js";
 import type { PriorityLookup } from "../inbox/jordiPriority.js";
 import { resolveRepo } from "../adapters/repos.js";
-import { inboxSince, inboxSinceOf } from "./inboxSince.js";
+import { inboxSince, inboxSinceOf, keepInboxSinceIn } from "./inboxSince.js";
 import type { SpineWrite, SpineWriter } from "../inbox/spineWrite.js";
 import { serverTimingOf, timeWrites } from "../inbox/spineWrite.js";
 import type { ReadModelHost } from "../readModel/host.js";
@@ -336,6 +336,29 @@ export function ensureReviewLive(db: DB): void {
   if (!cols.some((c) => c.name === "plan")) db.exec("ALTER TABLE review_live ADD COLUMN plan TEXT");
 }
 
+/**
+ * when each card reached the owner's inbox, as git found it (review/inboxSince.ts), kept across restarts:
+ * keyed by checkout, spine and row, valid while the row's line is the same. A cache: dropped, git finds each one again.
+ */
+export function ensureReviewInboxSince(db: DB): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS review_inbox_since (
+      key TEXT PRIMARY KEY,
+      line TEXT NOT NULL,
+      at TEXT,
+      found_at TEXT NOT NULL
+    );
+  `);
+  const get = db.prepare("SELECT line, at FROM review_inbox_since WHERE key = ?");
+  const put = db.prepare(
+    "INSERT INTO review_inbox_since (key, line, at, found_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET line = excluded.line, at = excluded.at, found_at = excluded.found_at",
+  );
+  keepInboxSinceIn({
+    get: (key) => get.get(key) as { line: string; at: string | null } | undefined,
+    put: (key, line, at) => void put.run(key, line, at, new Date().toISOString()),
+  });
+}
+
 type LiveRow = { ok: number; status: number | null; error: string | null; checked_at: string; plan: string | null };
 
 export interface ReviewOptions {
@@ -379,6 +402,7 @@ export type ActionResult = { item: ReviewItem } | { error: 404 | 409 | 422 | 502
 
 export function createReview(db: DB, o: ReviewOptions) {
   ensureReviewLive(db);
+  if (!o.inboxSince) ensureReviewInboxSince(db);
   const { store } = o;
   const now = () => o.now?.() ?? new Date();
   const iso = () => now().toISOString();
@@ -544,17 +568,19 @@ export function createReview(db: DB, o: ReviewOptions) {
   /**
    * The cards: `review` (default) = live, not snoozed, not backlog (what the counts show); `snoozed`; `pending` = not live
    * yet; `backlog` = live rows marked ` — backlog since:`, folded apart; `all`. Pending links are checked in the
-   * background (`wait`: before answering, tests and the recheck route).
+   * background (`wait`: before answering, tests and the recheck route). `ages: false` leaves out each card's inbox age
+   * (a count needs none).
    */
-  async function list(f: { state?: ReviewListState; wait?: boolean } = {}): Promise<ReviewItem[]> {
+  async function list(f: { state?: ReviewListState; wait?: boolean; ages?: boolean } = {}): Promise<ReviewItem[]> {
     const rs = await rows();
     // only a card's evidence link is checked (L-47); rows the gate stops need no check
     const check = checkRows(rs.filter((r) => r.verdict.kind === "card"));
     if (f.wait) await check;
     else void check;
     const items = rs.map(toItem);
-    // each card's age counts from when it reached his inbox, never from a later restamp
-    const since = await inboxSinceOf(
+    // each card's age counts from when it reached his inbox, never from a later restamp; a count (`ages: false`) shows
+    // no age, so it never waits on one (the inbox's first draw asks two counts beside its two lists)
+    const since = f.ages === false ? new Map<string, string>() : await inboxSinceOf(
       rs.filter((r) => r.verdict.kind === "card").map((r) => ({ id: r.id, repoDir: repoDir(r), path: r.path, ref: r.ref, status: r.status })),
       o.inboxSinceBudgetMs,
       o.inboxSince,
