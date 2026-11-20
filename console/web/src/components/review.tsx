@@ -38,7 +38,11 @@ const refused = (): never => {
 };
 import { FoldSection, SkeletonCards, SortControl, sortSection, useSectionOpen, useSectionSort } from "@/components/homeSection";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
-import { HOLD_MS, SnoozeDate, SnoozeDropdown, SnoozingLinesFor } from "@/components/waiting";
+import { HOLD_MS, isUrgentAsk, SnoozeDate, SnoozeDropdown, SnoozingLinesFor, WaitingCard } from "@/components/waiting";
+import { useWaitingList } from "@/lib/data";
+import { openCards as stillOpen } from "@/lib/inbox";
+import { withSnoozes } from "@/lib/snooze";
+import type { OwnerPriority, WaitingItem } from "@/api/inbox-types";
 import { ParkButton, parkReview } from "@/components/parkButton";
 import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/postBasics";
 import { keepPlace } from "@/lib/keepPlace";
@@ -64,7 +68,24 @@ export function WaitingForReview({
   tone = "review",
   empty = "Nothing finished waiting for your review.",
   snoozedList = "own",
+  lead,
+  leadCount = 0,
+  leadReady = true,
+  hideEmpty = false,
+  order,
+  opens = false,
 }: {
+  /** E948-S132: cards drawn first in the section (the Urgent section's asks), counted in its pill. */
+  lead?: ReactNode;
+  leadCount?: number;
+  /** the lead cards' list is in (the section shows no "nothing here" before). */
+  leadReady?: boolean;
+  /** E948-S132: an empty section is not drawn at all (Urgent: "empty means hidden"). */
+  hideEmpty?: boolean;
+  /** the section's own order of its cards (Urgent: the one he asked first leads), in place of ready and deadline first. */
+  order?: (cards: Listed[]) => Listed[];
+  /** the section opens by itself while it holds a card (Urgent), even where the Inbox lands folded. */
+  opens?: boolean;
   fold?: string;
   only?: (i: ReviewItem) => boolean;
   title?: string;
@@ -84,7 +105,7 @@ export function WaitingForReview({
   const { data: fetchedAll, error, cards: allCards } = useReviewCards({ keep: project.keep });
   // a goal set shows its own cards only; the Inbox shows every card.
   const cards = only ? allCards?.filter(only) : allCards;
-  useSlotReady(!!fetchedAll || !!error);
+  useSlotReady((!!fetchedAll || !!error) && leadReady);
   const { data: fetchedSnoozedAll } = useQuery(() => api.listReviewItems({ state: "snoozed" }) as Promise<Listed[]>, [], { tag: "inbox" });
   // the selected project's review cards only.
   const fetched = fetchedAll?.filter((i) => project.keep(i.milestoneId) && (!only || only(i)));
@@ -92,7 +113,7 @@ export function WaitingForReview({
   // (the owner 20:27Z: "It should just be at the top on blocked waiting for me or top done waiting for your
   // review"): a card ready for him, or with a deadline, leads this section, never a section of its own; while one is
   // here the section opens by itself (even where the Inbox lands folded).
-  const leads = !!cards?.some((i) => leadsSection(i.face));
+  const leads = !!cards?.some((i) => leadsSection(i.face)) || (opens && ((cards?.length ?? 0) > 0 || leadCount > 0));
   const now = useMinuteClock(leads);
   // the Team home's section header folds like every section (L-39, remembered); the cards in it are never folded
   const [open, setOpen] = useSectionOpen(fold, true, leads);
@@ -112,7 +133,7 @@ export function WaitingForReview({
   // 2026-11-12 "I want to be able to do sorting"): Highest priority keeps the server's order, the others by the date it came to review.
   const [sort, setSort] = useSectionSort(fold);
   const shown = hits ? (cards as Listed[] | undefined)?.filter((i) => hits.has(i.id)) : (cards as Listed[] | undefined);
-  const data = shown && leadsFirst(sortSection(shown, sort, (i) => i.createdAt || undefined));
+  const data = shown && (order ? order(shown) : leadsFirst(sortSection(shown, sort, (i) => i.createdAt || undefined)));
   const snoozedFrom = snoozedList === "all" ? fetchedAll?.filter((i) => project.keep(i.milestoneId)) : fetched;
   const snoozedAll = snoozedList === "none" ? [] : [
     ...(snoozedFrom ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
@@ -159,11 +180,13 @@ export function WaitingForReview({
     if (back.length) setLeaving((s) => new Set([...s].filter((id) => !back.includes(id))));
   }, [listed, leaving]);
   if ((error as { status?: number } | undefined)?.status === 403) return null;
+  // E948-S132: Urgent is drawn only while it holds a card (a Sent row of a card he just pressed keeps it a moment)
+  if (hideEmpty && (!((data || error) && leadReady) || items.length + leadCount + rows.length === 0)) return null;
   return (
     <>
       <FoldSection
         title={title}
-        count={data ? items.length : fold && !error ? undefined : 0}
+        count={data ? items.length + leadCount : fold && !error ? undefined : 0}
         hideZero={!fold}
         tone={tone}
         testId={testId}
@@ -175,7 +198,8 @@ export function WaitingForReview({
         <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
         {error && <ErrorBox error={error} muted />}
         {!data && !error && <SkeletonCards count={undefined} testId={`${testId}-loading`} />}
-        {data && items.length === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing here matches “{search.q}”.</p> : <Empty>{empty}</Empty>)}
+        {lead}
+        {data && items.length + leadCount === 0 && (hits ? <p className="text-sm text-muted-foreground" data-testid="nothing-matches-review">Nothing here matches “{search.q}”.</p> : <Empty>{empty}</Empty>)}
         {rows.length > 0 && (
           <ul className="grid min-w-0 grid-cols-1 gap-[18px]" data-testid="review-feed">
             {rows.map(({ slot, item: i, sent }, n) =>
@@ -191,6 +215,7 @@ export function WaitingForReview({
                 data-testid="review-feed-item"
                 data-inbox-card={`review:${i.id}`}
                 data-inbox-open=""
+                data-inbox-tone={isDecisionCard(i.face) ? "red" : "green"}
                 data-lead={leadsSection(i.face) ? "yes" : undefined}
               >
                 {leadsSection(i.face) && (
@@ -239,13 +264,75 @@ export function WaitingForReview({
   );
 }
 
+/**
+ * E948-S132 (the owner, vn_a80780bd 20 Nov 22:33Z: "we've been asking for like an urgent section in the inbox? ... it's
+ * still not there"; 16 Nov 20:27Z: "if we add another section, we can call urgent or priority"): one section, Urgent,
+ * at the very top of his Inbox on phone and laptop, in both skins. In it every open card labelled urgent or pressing
+ * (he asked for it first, again, or with frustration), the one he asked to be first leading; each leaves the section it
+ * would sit in, so nothing shows twice and every pill still counts what its section draws. Empty, it is not drawn.
+ */
+export const URGENT_SECTION = "Urgent";
+export const isUrgentReview = (i: Pick<ReviewItem, "ownerPriority" | "face">) => !!i.ownerPriority?.pressing || i.face?.ready?.why === "urgent";
+/** 0: he asked for it by name to be first, or it is labelled urgent; 1: pressing (asked again, frustrated). */
+export const urgentRank = (p: OwnerPriority | undefined, labelled = false) => (labelled || p?.pressing?.kind === "first" ? 0 : 1);
+const pressOrder = (p: OwnerPriority | undefined) => p?.pressing?.order ?? Number.MAX_SAFE_INTEGER;
+export function urgentOrder<T extends { ownerPriority?: OwnerPriority }>(list: T[], labelled: (i: T) => boolean = () => false): T[] {
+  return list
+    .map((i, n) => ({ i, n }))
+    .sort((a, b) => urgentRank(a.i.ownerPriority, labelled(a.i)) - urgentRank(b.i.ownerPriority, labelled(b.i)) || pressOrder(a.i.ownerPriority) - pressOrder(b.i.ownerPriority) || a.n - b.n)
+    .map(({ i }) => i);
+}
+
+export function InboxUrgent() {
+  // the same shared fetch as Blocked on you (one request, one moment for both sections)
+  const { data: fetched, error } = useWaitingList();
+  const project = useProject();
+  const { entries: snoozes } = useSnoozes();
+  const search = useInboxSearch();
+  const hits = search.active ? search.hits : undefined;
+  const asks = urgentOrder(
+    (withSnoozes(fetched, snoozes) ?? []).filter((i) => isUrgentAsk(i) && project.keep(i.milestoneId) && (!hits || hits.has(i.id))),
+    (i: WaitingItem) => !!i.urgent,
+  );
+  const open = stillOpen(asks, (i) => `ask:${i.id}`);
+  const qualify = new Set(open.map((i) => i.repo).filter(Boolean)).size > 1;
+  const lead =
+    open.length > 0 ? (
+      <div className="mb-[18px] grid min-w-0 grid-cols-1 gap-[18px]" data-testid="urgent-asks">
+        {open.map((i) => (
+          <div key={i.id} className="min-w-0" data-testid="urgent-ask" data-inbox-open="" data-inbox-tone="red" data-urgent={i.urgent ? "label" : i.ownerPriority?.pressing?.kind}>
+            <WaitingCard item={i} showMilestone qualify={qualify} />
+          </div>
+        ))}
+      </div>
+    ) : undefined;
+  return (
+    <WaitingForReview
+      fold="urgent"
+      closedGoals={false}
+      only={isUrgentReview}
+      title={URGENT_SECTION}
+      testId="inbox-urgent"
+      tone="needs-you"
+      empty=""
+      snoozedList="none"
+      lead={lead}
+      leadCount={open.length}
+      leadReady={!!fetched || !!error}
+      hideEmpty
+      order={(cards) => urgentOrder(cards)}
+      opens
+    />
+  );
+}
+
 /** E948-S103: the Inbox's Decisions bucket, the review cards that wait on his choice, counted red as waiting on him. */
 export function InboxDecisions() {
-  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
+  return <WaitingForReview fold="decisions" closedGoals={false} only={(i) => isDecisionCard(i.face) && !isUrgentReview(i)} title={DECISIONS_SECTION} testId="inbox-decisions" tone="needs-you" empty="No decision waits on you." snoozedList="none" />;
 }
 /** E948-S103: Done, waiting for your review keeps only finished work he marks done (a ready or deadline card leads it,). */
 export function InboxDoneForReview() {
-  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face)} snoozedList="none" />;
+  return <WaitingForReview fold="review" closedGoals={false} only={(i) => !isDecisionCard(i.face) && !isUrgentReview(i)} snoozedList="none" />;
 }
 
 /**

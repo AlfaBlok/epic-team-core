@@ -84,7 +84,9 @@ const top = (id: string) => document.querySelector(`[data-testid="${id}"]`)?.tex
 const allMatch = () => {
   const r = inboxCountCheck();
   expect(r.mismatches).toEqual([]);
-  expect(r.sections.filter((s) => !s.folded).map((s) => s.section).sort()).toEqual([...COUNTED_SECTIONS].sort());
+  // E948-S132: Urgent is not drawn while no card is urgent or pressing
+  const drawnHere = COUNTED_SECTIONS.filter((id) => id !== "inbox-urgent" || document.querySelector('[data-fold-section][data-testid="inbox-urgent"]'));
+  expect(r.sections.filter((s) => !s.folded).map((s) => s.section).sort()).toEqual([...drawnHere].sort());
   return r;
 };
 

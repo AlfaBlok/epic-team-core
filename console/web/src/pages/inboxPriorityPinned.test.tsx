@@ -68,17 +68,20 @@ describe("a question on what comes first sits first in his inbox", () => {
 
   // (the owner 16 Nov 20:27Z: "I don't want to add more sections!!! It should just be at the top on blocked
   // waiting for me"): the question leads Blocked on you, never loose above every section, and Blocked opens by itself.
-  it("leads Blocked on you, above the pressing ask, shown once and counted there", async () => {
+  // E948-S132: the pressing ask sits in Urgent, the one section above it (vn_a80780bd).
+  it("leads Blocked on you, shown once and counted there; the pressing ask is in Urgent above it", async () => {
     inbox();
     const pinned = await screen.findByTestId("pinned-priority-ask");
     expect(pinned.getAttribute("data-priority")).toBe("team-browser");
     expect(pinned.textContent).toContain("Put Team browser first in your objectives?");
     const blocked = screen.getByTestId("waiting-on-you");
     expect(blocked.contains(pinned)).toBe(true);
-    await waitFor(() => expect(within(blocked).getByText("Which mail address do testers write to?")).toBeTruthy());
-    expect(before(pinned, within(blocked).getByText("Which mail address do testers write to?"))).toBe(true);
+    const urgent = await screen.findByTestId("inbox-urgent");
+    await waitFor(() => expect(within(urgent).getByText("Which mail address do testers write to?")).toBeTruthy());
+    expect(within(blocked).queryByText("Which mail address do testers write to?")).toBeNull();
+    expect(before(urgent, blocked)).toBe(true);
     expect(within(blocked).getAllByText("Put Team browser first in your objectives?")).toHaveLength(1);
-    await waitFor(() => expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("2"));
+    await waitFor(() => expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("1"));
     // nothing loose between the sections: the question sits inside one
     expect(pinned.closest("[data-fold-section]")).toBe(blocked);
   });
@@ -99,15 +102,19 @@ describe("an urgent ask leads his inbox", () => {
     expect(isPinnedPriority({ ...URGENT, state: "answered" })).toBe(false);
     expect(isPinnedPriority({ ...URGENT, snoozedUntil: "2026-11-30" })).toBe(false);
   });
-  it("sits first in Blocked on you, above the priority question and the pressing ask", async () => {
+  // E948-S132 (vn_a80780bd): it sits first in Urgent, above the pressing ask; the priority question stays in Blocked on you.
+  it("sits first in Urgent, above the pressing ask; the priority question leads Blocked on you", async () => {
     vi.spyOn(api, "listWaitingOnOwner").mockResolvedValue([PRESSING, PRIORITY, URGENT]);
     vi.spyOn(api, "listStatus").mockResolvedValue(batch([pending("wj_pressing"), pending("wj_prio"), pending("wj_urgent")]));
     inbox();
-    await waitFor(() => expect(screen.getAllByTestId("pinned-priority-ask")).toHaveLength(2));
-    const [first, second] = screen.getAllByTestId("pinned-priority-ask");
-    expect(first!.getAttribute("data-priority")).toBe("urgent");
+    const urgent = await screen.findByTestId("inbox-urgent");
+    await waitFor(() => expect(within(urgent).getAllByTestId("urgent-ask")).toHaveLength(2));
+    const [first, second] = within(urgent).getAllByTestId("urgent-ask");
+    expect(first!.getAttribute("data-urgent")).toBe("label");
     expect(first!.textContent).toContain("Which option do you send?");
-    expect(second!.getAttribute("data-priority")).toBe("team-browser");
+    expect(second!.textContent).toContain("Which mail address do testers write to?");
+    const pinned = screen.getAllByTestId("pinned-priority-ask");
+    expect(pinned).toHaveLength(1);
+    expect(pinned[0]!.getAttribute("data-priority")).toBe("team-browser");
   });
 });
-

@@ -86,14 +86,17 @@ describe("root L-87: the Inbox holds only the filters on top and the sections wi
     expect(extras()).toEqual(["a[asks-this-week]: 33 asks to you this week", "p[sync-footer]: Oldest sync from GitHub: 14 min ago"]);
   });
 
-  it("the sections keep one order, Blocked on you first, even when a pressing card waits for review", async () => {
+  // E948-S132 (the owner, vn_a80780bd: "we've been asking for like an urgent section in the inbox"): a pressing card sits in
+  // Urgent, the one section above Blocked on you; the rest keep their order.
+  it("the sections keep one order, Urgent then Blocked on you first, when a pressing card waits for review", async () => {
     const pressing = sampleReview({ id: "rv_pressing", ref: "E900-S5", ownerPriority: { pressing: { why: "said again" } } } as never);
     vi.spyOn(api, "listReviewItems").mockImplementation(((q?: { state?: string }) =>
       Promise.resolve(q?.state === "snoozed" ? [sampleReview({ id: "rv_snoozed", ref: "E900-S9", snoozedUntil: "2026-12-01" } as never)] : [pressing, sampleReview({ id: "rv_done", ref: "E900-S4" })])) as never);
     inbox("console");
     await drawn();
     const { sections, ok } = inboxOrder(document.querySelector("main"));
-    expect(sections[0]).toBe("waiting-on-you");
+    expect(sections[0]).toBe("inbox-urgent");
+    expect(sections[1]).toBe("waiting-on-you");
     expect(sections.indexOf("inbox-decisions")).toBeLessThan(sections.indexOf("waiting-for-review"));
     expect(sections.filter((x) => (INBOX_ORDER as readonly string[]).includes(x))).toEqual(sections);
     expect(ok).toBe(true);

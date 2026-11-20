@@ -80,9 +80,9 @@ describe("one inbox pattern: what is ready leads its own section", () => {
       expect(within(first).getByTestId("ready-open").getAttribute("href")).toBe("https://mail.google.com/mail/u/0/#drafts");
       expect(within(within(review).getAllByTestId("review-feed-item")[1]).getByTestId("deadline-line")).toBeTruthy();
       expect(within(review).getAllByTestId("review-feed-item")[2].getAttribute("data-lead")).toBeNull();
-      // a ready decision leads Decisions, its own section, once
-      const decisions = screen.getByTestId("inbox-decisions");
-      await waitFor(() => expect(ids(decisions)).toEqual(["review:rv_ready_dec"]));
+      // E948-S132: a ready decision he called urgent sits in Urgent, the section above every other, once
+      const urgent = screen.getByTestId("inbox-urgent");
+      await waitFor(() => expect(ids(urgent)).toEqual(["review:rv_ready_dec"]));
       for (const id of ["rv_ready", "rv_due", "rv_ready_dec"]) expect(document.querySelectorAll(`[data-inbox-card="review:${id}"]`)).toHaveLength(1);
     });
 

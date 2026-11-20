@@ -20,7 +20,7 @@ export const INBOX_ALLOWED = [
  * waiting for your review; a pressing or ready card leads inside its own section and never moves a section). Snoozed
  * reviews is the last fold, below every section. A section with nothing to show may be absent; the rest keep this order.
  */
-export const INBOX_ORDER = ["waiting-on-you", "inbox-decisions", "inbox-goals-to-set", "waiting-for-review", "inbox-team-cards", "inbox-everything-else", "review-snoozed"] as const;
+export const INBOX_ORDER = ["inbox-urgent", "waiting-on-you", "inbox-decisions", "inbox-goals-to-set", "waiting-for-review", "inbox-team-cards", "inbox-everything-else", "review-snoozed"] as const;
 
 /** the page's top-level sections by test id, top to bottom, and whether they keep INBOX_ORDER. */
 export function inboxOrder(root: Element | null = document.querySelector("main")): { sections: string[]; ok: boolean } {

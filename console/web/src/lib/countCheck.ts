@@ -5,13 +5,14 @@
  *
  *   section pill  ==  open cards drawn in it ([data-inbox-open], a Sent row is never one)
  *   top bar red   ==  Blocked on you + Decisions waiting on you      top bar green  ==  Done, waiting for your review
+ *   (E948-S132: plus the Urgent section's cards, each counted red or green by its `data-inbox-tone`)
  *
  *   menu Inbox red/green  ==  top bar red/green (E948-S141 iteration 2: phone and laptop read the same numbers)
  * The same function runs in the unit test (inboxCountsMatchCards.test.tsx) and on his live inbox after each release
  * (hosted/console/scripts/inbox-count-check.mjs calls `window.inboxCountCheck()` on production, read only, at 390 px).
  * A folded section draws no cards, so it is reported `folded` and not compared: the live check opens every section first.
  */
-export const COUNTED_SECTIONS = ["waiting-on-you", "inbox-decisions", "waiting-for-review", "inbox-goals-to-set", "inbox-team-cards"] as const;
+export const COUNTED_SECTIONS = ["inbox-urgent", "waiting-on-you", "inbox-decisions", "waiting-for-review", "inbox-goals-to-set", "inbox-team-cards"] as const;
 
 export interface SectionCount {
   section: string;
@@ -37,11 +38,13 @@ const pillOf = (root: ParentNode, testId: string): number | null => {
 };
 
 /** the open cards drawn inside one section: each [data-inbox-open] counts 1, or its number (an ask set of n asks). */
-export function openCardsDrawn(section: Element): number {
+export function openCardsDrawn(section: Element, tone?: "red" | "green"): number {
   let n = 0;
   for (const el of section.querySelectorAll("[data-inbox-open]")) {
     if (el.closest("[data-fold-section]") !== section) continue;
     if (el.querySelector('[data-testid="sent-row"]')) continue;
+    // E948-S132: the Urgent section holds both kinds; each card says which top bar number it counts in
+    if (tone && el.getAttribute("data-inbox-tone") !== tone) continue;
     const v = el.getAttribute("data-inbox-open");
     n += v ? Number(v) || 1 : 1;
   }
@@ -67,8 +70,12 @@ export function inboxCountCheck(root: ParentNode = document): CountCheck {
     const green = pillOf(root, "topbar-review");
     const by = (id: string) => sections.find((s) => s.section === id);
     const known = (...ids: string[]) => ids.every((id) => !by(id) || !by(id)!.folded);
-    const redCards = known("waiting-on-you", "inbox-decisions") ? (by("waiting-on-you")?.cards ?? 0) + (by("inbox-decisions")?.cards ?? 0) : null;
-    const greenCards = known("waiting-for-review") ? by("waiting-for-review")?.cards ?? 0 : null;
+    // E948-S132: the Urgent section's asks and decisions count red, its finished work green
+    const urgent = root.querySelector('[data-fold-section][data-testid="inbox-urgent"]');
+    const urgentRed = urgent ? openCardsDrawn(urgent, "red") : 0;
+    const urgentGreen = urgent ? openCardsDrawn(urgent, "green") : 0;
+    const redCards = known("inbox-urgent", "waiting-on-you", "inbox-decisions") ? urgentRed + (by("waiting-on-you")?.cards ?? 0) + (by("inbox-decisions")?.cards ?? 0) : null;
+    const greenCards = known("inbox-urgent", "waiting-for-review") ? urgentGreen + (by("waiting-for-review")?.cards ?? 0) : null;
     topbar = { red, green, redCards, greenCards };
     // the sections are on this page only on the Inbox; elsewhere the top bar is not compared
     if (by("waiting-for-review") || by("waiting-on-you")) {

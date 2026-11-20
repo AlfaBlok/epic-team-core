@@ -1639,6 +1639,12 @@ export const staleAsOf = (asOf: string, now = Date.now()) => now - Date.parse(as
  */
 export const leadsFirst = (i: WaitingItem) => !!i.urgent || i.ownerPriority?.pressing?.kind === "first";
 export const isPinnedPriority = (i: WaitingItem) => (!!i.putFirst || leadsFirst(i)) && i.state === "open" && !i.snoozedUntil && !i.macAgent;
+/**
+ * E948-S132 (the owner, vn_a80780bd 20 Nov: "we've been asking for like an urgent section in the inbox ... it's still not
+ * there"): an open ask labelled urgent, or pressing (he asked for it first, again, or with frustration), sits in the
+ * Inbox's own Urgent section at the very top, out of Blocked on you.
+ */
+export const isUrgentAsk = (i: WaitingItem) => i.state === "open" && !i.snoozedUntil && !i.macAgent && (!!i.urgent || !!i.ownerPriority?.pressing);
 
 /**
  * the one-line question on his order of work, "Put X first in your objectives?", sits first in his Inbox,
@@ -1656,9 +1662,12 @@ export function WaitingOnYou({
   part = "all",
   only,
   connects = false,
+  urgentApart = false,
 }: {
   /** the Inbox's accounts to connect lead this section (before, loose cards above every section). */
   connects?: boolean;
+  /** E948-S132: the Inbox draws its urgent and pressing asks in the Urgent section above, so they leave this one. */
+  urgentApart?: boolean;
   /** a goal set lists its own asks only. */
   only?: (i: WaitingItem) => boolean;
   milestoneId?: string;
@@ -1739,7 +1748,8 @@ export function WaitingOnYou({
   // your objectives?", vn_cdcf1208) and an account to connect lead this section, never loose above every section;
   // while a priority ask is here the section opens by itself (an account to connect waits folded, as before).
   // E948-S141: an answered priority ask is out of the count and the list at once, like every card
-  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? stillOpen((data ?? []).filter(isPinnedPriority).sort((a, b) => Number(leadsFirst(b)) - Number(leadsFirst(a))), (i) => `ask:${i.id}`) : [];
+  const leadsHere = (i: WaitingItem) => isPinnedPriority(i) && !(urgentApart && isUrgentAsk(i));
+  const pinnedFirst = part !== "rest" && !milestoneId && !spine ? stillOpen((data ?? []).filter(leadsHere).sort((a, b) => Number(leadsFirst(b)) - Number(leadsFirst(a))), (i) => `ask:${i.id}`) : [];
   const connectList = useConnects("inbox", connects && part !== "rest");
   const connectFirst = connects && part !== "rest" ? connectList : [];
   const [sectionOpen, setSectionOpen] = useSectionOpen(fold, true, pinnedFirst.length > 0);
@@ -1765,7 +1775,7 @@ export function WaitingOnYou({
   // list has one for it, else its status row, so the count and the rows are the same list (before, an item with a list
   // entry but no card, a guessed line, was counted and shown nowhere).
   // an open priority ask ("Put X first in your objectives?") leads this section (pinnedFirst), so the rows below leave it out.
-  const pinned = !milestoneId && !spine ? new Set((data ?? []).filter(isPinnedPriority).map((i) => i.id)) : new Set<string>();
+  const pinned = !milestoneId && !spine ? new Set((data ?? []).filter((i) => isPinnedPriority(i) || (urgentApart && isUrgentAsk(i))).map((i) => i.id)) : new Set<string>();
   const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && !pinned.has(st.id) && (!hits || hits.has(st.id))) : undefined;
   const blockedIds = blocked && new Set(blocked.map((i) => i.id));
   const isOpen = (i: WaitingItem) => (blockedIds ? blockedIds.has(i.id) : pending(i) && !pinned.has(i.id));
@@ -1790,7 +1800,7 @@ export function WaitingOnYou({
   const consumed = (i: WaitingItem) => i.state === "done" || !!i.consumedAt || (i.source === "needs_jordi" && written);
   const answeredAt = (i: WaitingItem) => i.response?.createdAt ?? i.since ?? "";
   const rest = items
-    .filter((i) => isStructured(i) && !isOpen(i) && !i.decidedBy)
+    .filter((i) => isStructured(i) && !isOpen(i) && !pinned.has(i.id) && !i.decidedBy)
     .sort((a, b) => answeredAt(b).localeCompare(answeredAt(a)) || Number(consumed(a)) - Number(consumed(b)));
   // a spine line naming the owner with no coded ask is no question for him: no card here, never counted (the
   // header lists it for the Delivery Manager, the Tree shows it amber). Only future gates of such lines show, under Coming up.

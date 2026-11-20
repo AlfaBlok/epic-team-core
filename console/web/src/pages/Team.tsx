@@ -21,7 +21,7 @@ import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
 import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
-import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews } from "@/components/review";
+import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews, InboxUrgent } from "@/components/review";
 import { FoldSection, InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { useInboxPlace } from "@/lib/inboxPlace";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
@@ -411,13 +411,19 @@ export function TeamPage({
           {only !== "goals" && <InboxShowFilter show={show} onChange={setShow} />}
           {/* the owner: the same few sections as EpicTeam's Inbox, all folded when it opens. */}
           {only !== "goals" && <InboxPlace.Provider value={only === "inbox" ? inboxPlace.place : undefined} key={only === "inbox" ? inboxPlace.visit : undefined}><LandFolded.Provider value={only === "inbox"}><SlotStack name="social-inbox">
+            {/* E948-S132 (vn_a80780bd): Urgent, the very top of his inbox, above every section; not drawn when empty. */}
+            {(keeps.blocked || keeps.review) && (
+              <Slot name="social-urgent" fallback={0}>
+                <InboxUrgent />
+              </Slot>
+            )}
             <Slot name="social-other-worlds">
               <OtherWorldsWaiting />
             </Slot>
             {keeps.blocked && (
               <Slot name="social-blocked" fallback={420}>
                 {/* the phone Home: no laptop switch here, it is EpicTeam's (the Mac list), as on EpicTeam's quiet Inbox. */}
-                <WaitingOnYou title="Blocked on you" fold="blocked" part="blocked" />
+                <WaitingOnYou title="Blocked on you" fold="blocked" part="blocked" urgentApart />
               </Slot>
             )}
             {keeps.review && (
@@ -491,10 +497,17 @@ export function TeamPage({
           {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}
           <InboxShowFilter show={show} onChange={setShow} />
           <SlotStack name="inbox">
+            {/* E948-S132 (the owner, vn_a80780bd 20 Nov: "we've been asking for like an urgent section in the inbox ... it's
+                still not there"): Urgent, above every section: every urgent or pressing card, the one he asked first leading. */}
+            {(keeps.blocked || keeps.review) && (
+              <Slot name="urgent" fallback={0}>
+                <InboxUrgent />
+              </Slot>
+            )}
             {/* E948-S103 (vn_a8293638): cards that wait on his choice sit in their own bucket, above finished work */}
             {keeps.blocked && (
               <Slot name="blocked" fallback={420}>
-                <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" connects />
+                <WaitingOnYou title="Blocked on you" fold="blocked" laptop={home} part="blocked" connects urgentApart />
               </Slot>
             )}
             {/* the owner: "either I'm reviewing something or I am unblocking something". Goals to set is
