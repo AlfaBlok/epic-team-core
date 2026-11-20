@@ -251,6 +251,8 @@ export interface WaitingItem {
   recommendation?: string;
   /** E996-S58: what a fresh reader still found unclear after 3 rounds. */
   readerNote?: string;
+  /** E948-S154: held by the dry run more than 2 hours, shown anyway; readerNote is its one line. */
+  heldPast2h?: "not-checked" | "unclear";
   /** plain-words sections of an ask; the card shows them labelled, technical fields under Details. */
   contextText?: string;
   impact?: string;

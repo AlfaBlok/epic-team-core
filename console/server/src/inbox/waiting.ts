@@ -1,5 +1,5 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
-import { createDryRunReader, dryRunNote, dryRunProblem } from "./askDryRun.js";
+import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
 import { createAskLogReader, repeatProblem, sizeProblem, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "node:child_process";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
@@ -134,6 +134,11 @@ export interface WaitingItem {
   whyYou?: string;
   /** E996-S58: what a fresh reader still found unclear after 3 rounds (the ask reaches the owner with it beside). */
   readerNote?: string;
+  /**
+   * E948-S154: the dry-run gate held this card more than 2 hours, so it reaches the owner anyway, marked by `readerNote`:
+   * `not-checked` (no fresh reader has read it) or `unclear` (a fresh reader failed it). Absent on every card that passed.
+   */
+  heldPast2h?: "not-checked" | "unclear";
   /** `secret: <app> <NAME>` on a provide ask: the card shows a password box; the server stores it with `secret put`. */
   secret?: SecretTarget;
   /** environmentId = the T3 environment of threadId when known (link t3code://threads/<env>/<thread>). */
@@ -547,12 +552,16 @@ function walk(root: TreeNode): Visit[] {
 }
 
 /** spine items of a built tree per (milestone, owner, HEAD); dropped with the tree object. */
-const spineItemsMemo = new WeakMap<Tree, Map<string, { blame: NonNullable<WaitingDeps["blame"]>; firstAdded: NonNullable<WaitingDeps["firstAdded"]>; items: WaitingItem[]; settled: SettledAsk[]; held: HeldAsk[] }>>();
+// E948-S154: `expiresAt`: the first moment a dry-run hold in it turns 2 hours old (it then reaches the owner, marked).
+const spineItemsMemo = new WeakMap<Tree, Map<string, { blame: NonNullable<WaitingDeps["blame"]>; firstAdded: NonNullable<WaitingDeps["firstAdded"]>; items: WaitingItem[]; settled: SettledAsk[]; held: HeldAsk[]; expiresAt?: number }>>();
 
 /** Items for one milestone (spine items + its open Needs the owner rows). */
 export async function waitingForMilestone(d: WaitingDeps, m: Milestone): Promise<WaitingItem[]> {
   return (await waitingAndHeld(d, m)).items;
 }
+
+/** E948-S154: a date-only `since` read as the end of that day (UTC), so a hold is never timed from before its words. */
+const endOfDay = (since: string | null | undefined) => (since && /^\d{4}-\d{2}-\d{2}$/.test(since) ? `${since}T23:59:59Z` : undefined);
 
 /** E996-S43: the dry-run verdicts of the home repo per repos root (inbox/askDryRun.ts), read again when they change. */
 const dryRunReaders = new Map<string, ReturnType<typeof createDryRunReader>>();
@@ -599,7 +608,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
     // while the memoized tree object is the same, so a 30 s poll does not rescan and re-blame every spine.
     const memoKey = tree ? JSON.stringify([m.id, m.title, m.path, owner, headOf(repo.path) ?? null, dryRunReader(d.reposRoot).stamp(), askLogReader(d.reposRoot).stamp()]) : "";
     const hit = tree ? spineItemsMemo.get(tree)?.get(memoKey) : undefined;
-    if (tree && hit && hit.blame === blame && hit.firstAdded === firstAdded) {
+    if (tree && hit && hit.blame === blame && hit.firstAdded === firstAdded && !(hit.expiresAt !== undefined && Date.now() >= hit.expiresAt)) {
       worldOwner = tree.owner;
       owners = tree.owners ?? {};
       settledCodes.push(...hit.settled);
@@ -617,6 +626,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         if (!blames.has(rel)) blames.set(rel, blame(repo.path, rel));
         return (await blames.get(rel))?.[line];
       };
+      let expiresAt: number | undefined;
       const linesCache = new Map<string, string[] | undefined>();
       const linesOf = (rel: string) => {
         if (!linesCache.has(rel)) linesCache.set(rel, fileLines(repo.path, rel));
@@ -670,13 +680,22 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           if (row && a.state === "open") askRows.add(row.node);
           // an ask that fails the gate never reaches the owner; the Delivery Manager's wake lists it.
           // E996-S43: and one a fresh agent could not do from the card alone (or a new one not yet dry-run) waits too.
-          const gate =
-            !fyi && a.state === "open" && a.doneAt === undefined
-              ? (askGateProblem(a) ??
-                repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ??
-                sizeProblem(a) ??
-                dryRunProblem(a.line !== undefined ? linesOf(rel)?.[a.line] : undefined, a.since, dryRunsOf(d.reposRoot)))
-              : undefined;
+          const gated = !fyi && a.state === "open" && a.doneAt === undefined;
+          let gate = gated
+            ? (askGateProblem(a) ?? repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ?? sizeProblem(a))
+            : undefined;
+          // E948-S154: a dry-run hold lasts 2 hours at most: then the ask reaches him, its card marked by one line.
+          let overdueNote: string | undefined;
+          let overdueKind: "not-checked" | "unclear" | undefined;
+          if (gated && !gate) {
+            const raw = a.line !== undefined ? linesOf(rel)?.[a.line] : undefined;
+            gate = dryRunProblem(raw, a.since, dryRunsOf(d.reposRoot));
+            if (gate) {
+              const o = dryRunOverdue(raw, a.since, dryRunsOf(d.reposRoot), (await sinceAt(rel, a.line)) ?? endOfDay(a.since));
+              if (o.note) [overdueNote, overdueKind, gate] = [o.note, o.kind, undefined];
+              else if (o.releaseAt !== undefined) expiresAt = Math.min(expiresAt ?? Infinity, o.releaseAt);
+            }
+          }
           if (gate) {
             held.push({ ...(a.code ? { code: a.code } : {}), repo: repo.name, path: rel, ...(a.line !== undefined ? { line: a.line } : {}), question: a.question, reason: gate });
             continue;
@@ -685,7 +704,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           const rowLinkAt = a.row ? link(rel, (row ? rowLineOf(linesOf(rel) ?? [], row.node) : rowLine(linesOf(rel) ?? [], a.row)), `row ${a.row}`)[0] : undefined;
           const stepsLink = a.stepsLink ? contextLink({ ...a, context: a.stepsLink, contextLabel: "runbook" })[0] : undefined;
           const choices = decideChoices(a);
-          const readerNote = !fyi && a.state === "open" && a.line !== undefined ? dryRunNote(linesOf(rel)?.[a.line], dryRunsOf(d.reposRoot)) : undefined;
+          const readerNote = overdueNote ?? (!fyi && a.state === "open" && a.line !== undefined ? dryRunNote(linesOf(rel)?.[a.line], dryRunsOf(d.reposRoot)) : undefined);
           const noteMark = a.state === "open" && a.code ? activeMark(marksOf(rel), a.code, a.question) : undefined;
           out.push({
             id: askItemId(repo.name, rel, a.row, a.question),
@@ -730,6 +749,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             ...(a.risk ? { risk: a.risk } : {}),
             ...(a.why ? { whyYou: a.why } : {}),
             ...(readerNote ? { readerNote } : {}),
+            ...(overdueKind ? { heldPast2h: overdueKind } : {}),
             // a provide ask naming where the key goes gets a private paste box on its card.
             ...(a.secret ? { secret: a.secret } : {}),
             contextLinks: [...contextLink(a), ...link(rel, a.line, `${rel}${a.line !== undefined ? `:${a.line + 1}` : ""} · Waiting on`)],
@@ -914,11 +934,19 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         if (it.source !== "heuristic" || it.gate === "future" || it.line === undefined || !it.path) continue;
         const why = dryRunProblem(linesOf(it.path)?.[it.line], null, verdicts);
         if (!why) continue;
+        // E948-S154: past 2 hours it reaches him, marked (its line's words committed that long ago)
+        const o = dryRunOverdue(linesOf(it.path)?.[it.line], null, verdicts, await sinceAt(it.path, it.line));
+        if (o.note) {
+          it.readerNote = o.note;
+          it.heldPast2h = o.kind;
+          continue;
+        }
+        if (o.releaseAt !== undefined) expiresAt = Math.min(expiresAt ?? Infinity, o.releaseAt);
         held.push({ repo: repo.name, path: it.path, line: it.line, question: it.question, reason: why });
         out.splice(i, 1);
       }
       const byKey = spineItemsMemo.get(tree) ?? new Map();
-      byKey.set(memoKey, { blame, firstAdded, items: out.map((it) => ({ ...it })), settled: [...settledCodes], held: held.map((h) => ({ ...h })) });
+      byKey.set(memoKey, { blame, firstAdded, items: out.map((it) => ({ ...it })), settled: [...settledCodes], held: held.map((h) => ({ ...h })), ...(expiresAt !== undefined ? { expiresAt } : {}) });
       spineItemsMemo.set(tree, byKey);
     }
   }

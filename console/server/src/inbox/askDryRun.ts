@@ -13,7 +13,11 @@ import { homeRepo, ownerName } from "../identity.js";
  * whose words change is dry-run again. This gate (rule 8 of inbox/askGate.ts) holds back:
  *  - an ask whose current words failed: "ask needs rewriting: step N <why>";
  *  - an ask raised from DRY_RUN_FROM whose current words have no verdict yet: "waiting for its dry run".
- * Older open asks with no verdict pass until the sweep (every 15 min, agent-team-ask-dryrun.timer) reaches them.
+ * Older open asks with no verdict pass until the sweep reaches them. The sweep (agent-team-ask-dryrun.timer) judges new and
+ * changed lines every 5 min and every line once an hour (E948-S154).
+ * E948-S154 (the owner, vn_c4ac0561, 20 Nov: "fix it so a held ask always reaches him plainly"): no hold is silent. A dry-run
+ * hold older than HOLD_LIMIT_MS (its current words committed that long ago) reaches him anyway, marked on its card by one
+ * line (`readerNote`): "Not checked yet: …" or "A fresh reader found this unclear: <reason>" (dryRunOverdue).
  */
 export const DRY_RUN_FILE = "docs/asks/dry-runs.json";
 /** the day new asks start waiting for their dry run (the sweep of 2026-11-13 covered every ask open that day). */
@@ -82,7 +86,7 @@ export function dryRunProblem(raw: string | undefined, since: string | null | un
   if (v?.verdict === "fail") return `ask needs rewriting: ${v.reason ?? "a fresh agent could not do it from the card alone"} (E996-S43 dry run)`;
   if (v) return undefined;
   if (since === undefined || (!!since && since >= DRY_RUN_FROM))
-    return `waiting for its dry run: a fresh agent has not yet done it from the card alone, so it does not reach ${ownerName()} yet (E996-S43, every 15 min)`;
+    return `waiting for its dry run: a fresh agent has not yet done it from the card alone, so it does not reach ${ownerName()} yet; the sweep reads new and changed asks every 5 min, and past 2 hours it reaches ${ownerName()} anyway, marked not checked (E996-S43, E948-S154)`;
   return undefined;
 }
 
@@ -91,4 +95,31 @@ export function dryRunNote(raw: string | undefined, verdicts: Map<string, DryRun
   if (raw === undefined || !verdicts) return undefined;
   const v = verdicts.get(lineHash(raw));
   return v?.verdict === "pass" && typeof v.readerNote === "string" && v.readerNote.trim() ? v.readerNote.trim() : undefined;
+}
+
+/** E948-S154: a dry-run hold lasts at most this long; then the ask reaches the owner, marked. */
+export const HOLD_LIMIT_MS = 2 * 3_600_000;
+export const NOT_CHECKED_NOTE = "Not checked yet: no fresh reader has read this card. It waited more than 2 hours, so it reaches you anyway.";
+
+/**
+ * E948-S154: when a dry-run hold (dryRunProblem) is over HOLD_LIMIT_MS old, the one line its card shows instead of the hold;
+ * else undefined (still held, or not held). `heldSince` is when the ask's current words were committed (git blame of its
+ * line; undefined = not committed yet, so not overdue). `releaseAt` says when a still-held ask turns overdue.
+ */
+export function dryRunOverdue(
+  raw: string | undefined,
+  since: string | null | undefined,
+  verdicts: Map<string, DryRunVerdict> | undefined,
+  heldSince: string | undefined,
+  now = Date.now(),
+): { note?: string; kind?: "not-checked" | "unclear"; releaseAt?: number } {
+  if (!dryRunProblem(raw, since, verdicts) || !heldSince) return {};
+  const t = Date.parse(heldSince);
+  if (!Number.isFinite(t)) return {};
+  const releaseAt = t + HOLD_LIMIT_MS;
+  if (now < releaseAt) return { releaseAt };
+  const v = verdicts?.get(lineHash(raw!));
+  if (v?.verdict !== "fail") return { note: NOT_CHECKED_NOTE, kind: "not-checked" };
+  const why = (v.reason ?? "").trim() || "a fresh agent could not do it from the card alone";
+  return { note: `A fresh reader found this unclear: ${why}`.slice(0, 600), kind: "unclear" };
 }
