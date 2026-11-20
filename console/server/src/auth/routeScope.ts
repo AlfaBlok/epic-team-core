@@ -420,6 +420,7 @@ const WORLD_AGENT_SECRETS: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/secret$`)],
 ];
 const OWNER_ONLY: [string, RegExp][] = [
+  ["GET", /^\/api\/vault-approvals\/va_[a-z0-9]{6,40}\/open$/], // the owner's direct link to one approval's one-tap page (an inbox ask carries it), the owner login only
   ["GET|POST", /^\/api\/access\/tokens$/],
   ["DELETE", new RegExp(`^/api/access/tokens/${ID}$`)],
   ["GET", /^\/api\/access\/events$/],
