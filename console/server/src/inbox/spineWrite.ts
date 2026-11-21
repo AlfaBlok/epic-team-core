@@ -8,7 +8,7 @@ import { field, proseLines, stripInline } from "../adapters/markdown.js";
 import { parseAsks, peopleOfTag, SNOOZE_ON_LINE } from "./asks.js";
 import { DEFAULT_OWNER } from "../tenancy/owner.js";
 import { CONTENTION_RETRY_MS, gitContention, withRepoLock } from "../repoLock.js";
-import { localHealRunner, parseRedundant, REDUNDANT } from "../gitStaleLock.js";
+import { localHealRunner, lockHealer, parseRedundant, REDUNDANT, type LockHealer } from "../gitStaleLock.js";
 import { cellText, editRowStatus } from "../review/rows.js";
 import { sites } from "../identity.js";
 
@@ -839,6 +839,8 @@ export interface SpineWriterOptions {
   onPushed?: (repoDir: string) => void;
   onDropped?: (d: DroppedPush) => void;
   log?: (msg: string) => void;
+  /** the stale-lock healer (tests pass their own); default: lockHealer() of gitStaleLock (10 min, no git running). */
+  lockHealer?: LockHealer;
 }
 export const PUSH_RETRY_MS = [1_000, 3_000, 10_000, 30_000, 60_000, 5 * 60_000];
 const gitEnv = (): NodeJS.ProcessEnv => ({ ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=15" });
@@ -854,6 +856,20 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
   const facts = new Map<string, { at: number; email: boolean }>();
   const log = opts.log ?? ((m: string) => console.warn(m));
   const bgOn = !!opts.backgroundPush;
+  const healer = opts.lockHealer ?? lockHealer();
+  /**
+   * a git step refused by a lock file a killed git left in the checkout (a console restart killed a git mid-write and
+   * left .git/index.lock; every later write to that checkout failed "fast-forward ... failed" until a person removed
+   * it, a world's idea cards and the owner's presses with it). When the lock is older than STALE_LOCK_MS and no git
+   * runs in the checkout it is removed, logged, and the caller retries the step once; else the error stands.
+   */
+  const healLock = async (repoDir: string, r: { ok: boolean; err: string; stderr?: string }, step: string): Promise<boolean> => {
+    if (r.ok) return false;
+    const h = await healer(repoDir, r.stderr || r.err).catch(() => undefined);
+    if (!h?.removed || !("lock" in h)) return false;
+    log(`spine write: removed stale ${path.relative(repoDir, h.lock)} in ${repoDir} (${h.ageMin} min old, no git running), retrying the ${step} once`);
+    return true;
+  };
   const retryMs = opts.pushRetryMs ?? PUSH_RETRY_MS;
   /** checkouts whose console commits origin lacks, and their background push. */
   const pend = new Map<string, { since: number; tries: number; lastError?: string; timer?: ReturnType<typeof setTimeout>; running?: Promise<void>; again?: boolean; retryIn?: number }>();
@@ -1082,6 +1098,7 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
         await new Promise((r) => setTimeout(r, CONTENTION_RETRY_MS));
         fetched = await timed("fetch", g(["fetch", "origin", MAIN], { timeout: 45_000 }));
       }
+      if (await healLock(o.repoDir, fetched, "fetch")) fetched = await timed("fetch", g(["fetch", "origin", MAIN], { timeout: 45_000 }));
       if (!fetched.ok) return fail(`git fetch origin ${MAIN} failed: ${fetched.err}`);
       synced.set(o.repoDir, Date.now());
     }
@@ -1098,7 +1115,8 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
       if (!healed.ok) return skip(`local ${MAIN} is ${behind > 0 ? "diverged from" : `${ahead} commit(s) ahead of`} origin/${MAIN}; not fast-forwardable (${healed.reason})`);
       opts.onHeal?.({ repoDir: o.repoDir, backup: healed.backup, dropped: healed.dropped });
     } else if (behind > 0) {
-      const ff = await g(["merge", "--ff-only", `origin/${MAIN}`]);
+      let ff = await g(["merge", "--ff-only", `origin/${MAIN}`]);
+      if (await healLock(o.repoDir, ff, "fast-forward")) ff = await g(["merge", "--ff-only", `origin/${MAIN}`]);
       if (!ff.ok) return fail(`fast-forward to origin/${MAIN} failed: ${ff.err}`);
     }
     return { g, ms, t0, timed, fetched: !fresh };
@@ -1122,7 +1140,8 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     {
       // the pre-write state; a failed push returns the checkout to exactly this.
       const pre = (await g(["rev-parse", "HEAD"])).out;
-      const add = await g(["add", "--", ...files]);
+      let add = await g(["add", "--", ...files]);
+      if (await healLock(repoDir, add, "add")) add = await g(["add", "--", ...files]);
       let noVerify = verify === true ? [] : ["--no-verify"];
       if (add.ok && verify === "scan") {
         // the hooks only when what this commit adds looks like a secret (or cannot be read): gitleaks decides then
