@@ -95,6 +95,8 @@ describe("Urgent: one section at the very top of his inbox", () => {
       // it opens by itself, its pill counts its three cards
       expect(within(urgent).getByTestId("inbox-urgent-toggle").getAttribute("aria-expanded")).toBe("true");
       expect(within(urgent).getByTestId("inbox-urgent-count").textContent).toBe("3");
+      // its order is his (the one he asked first leads): no sort menu on it
+      expect(within(urgent).queryByTestId("inbox-urgent-sort")).toBeNull();
       // nothing twice: out of Blocked on you and out of Done, waiting for your review
       expect(screen.getAllByText("Your reply to your dad, ready to send?")).toHaveLength(1);
       expect(document.querySelectorAll('[data-inbox-card="review:rv_pressed"]')).toHaveLength(1);

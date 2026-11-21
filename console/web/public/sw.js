@@ -1,7 +1,99 @@
-// the installed app's service worker. Only phone notifications: it shows what the console pushes (the Team
-// desk answered, a new ask or review card) and opens its page on tap. No caching, no fetch handler: the app loads as before.
-self.addEventListener("install", () => self.skipWaiting());
+// the installed app's service worker: phone notifications (what the console pushes: the Team desk answered, a new ask
+// or review card, its page opened on tap) and reading offline (the owner on a long flight reads the objectives and key
+// results with no connection). Read only, network first: online every page and every read
+// comes fresh from the console exactly as before and its copy is kept; with no connection the last copy answers, so the
+// Objectives page opens with the numbers it last showed, and the next load online resyncs it. Writes are never touched.
+const PAGES = "offline-pages-v1";
+const ASSETS = "offline-assets-v1";
+const READS = "offline-reads-v1";
+const ASSETS_KEPT = 400;
+const READS_KEPT = 300;
+// on a slow plane or café connection a read that has a kept copy waits this long before the copy answers.
+const SLOW_MS = 6000;
+
+self.addEventListener("install", (e) =>
+  e.waitUntil(
+    (async () => {
+      // the Objectives list and the app shell from the first install, so the page reads offline even if not opened since.
+      await keep(PAGES, "/", await fetch("/", { credentials: "same-origin" }).catch(() => undefined));
+      await keep(READS, "/api/scorecards", await fetch("/api/scorecards", { credentials: "same-origin" }).catch(() => undefined));
+      await self.skipWaiting();
+    })().catch(() => self.skipWaiting()),
+  ),
+);
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+
+async function keep(name, key, res) {
+  if (!res || !res.ok || res.type === "opaque" || res.redirected) return;
+  const c = await caches.open(name);
+  await c.put(key, res);
+}
+async function trim(name, max) {
+  const c = await caches.open(name);
+  const keys = await c.keys();
+  for (const k of keys.slice(0, Math.max(0, keys.length - max))) await c.delete(k);
+}
+const isJson = (res) => (res.headers.get("content-type") || "").includes("application/json");
+
+self.addEventListener("fetch", (e) => {
+  const q = e.request;
+  if (q.method !== "GET" || q.headers.has("range") || (q.headers.get("accept") || "").includes("text/event-stream")) return;
+  const url = new URL(q.url);
+  if (url.origin !== self.location.origin) return;
+  if (q.mode === "navigate") return e.respondWith(page(q));
+  if (url.pathname.startsWith("/assets/")) return e.respondWith(asset(q));
+  if (url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/push")) return e.respondWith(read(q));
+});
+
+// a page: always the network when there is one (a release shows at once); offline, the last app shell (one SPA shell).
+async function page(q) {
+  try {
+    const res = await fetch(q);
+    if (res.ok && (res.headers.get("content-type") || "").includes("text/html")) await keep(PAGES, "/", res.clone());
+    return res;
+  } catch (err) {
+    const c = await caches.open(PAGES);
+    const kept = await c.match("/");
+    if (kept) return kept;
+    throw err;
+  }
+}
+
+// a built file: its name holds its hash, so a kept copy is always the right one.
+async function asset(q) {
+  const c = await caches.open(ASSETS);
+  const kept = await c.match(q);
+  if (kept) return kept;
+  const res = await fetch(q);
+  if (res.ok) {
+    await c.put(q, res.clone());
+    trim(ASSETS, ASSETS_KEPT).catch(() => undefined);
+  }
+  return res;
+}
+
+// a read: the console's answer when it comes, kept; the kept copy when the network fails or is too slow.
+async function read(q) {
+  const c = await caches.open(READS);
+  const kept = await c.match(q);
+  const live = fetch(q).then(async (res) => {
+    if (res.ok && isJson(res)) {
+      await c.put(q, res.clone());
+      trim(READS, READS_KEPT).catch(() => undefined);
+    }
+    return res;
+  });
+  if (!kept) return live;
+  const slow = new Promise((ok) => setTimeout(() => ok("slow"), SLOW_MS));
+  try {
+    const first = await Promise.race([live, slow]);
+    if (first !== "slow") return first;
+    live.catch(() => undefined);
+    return kept.clone();
+  } catch {
+    return kept.clone();
+  }
+}
 
 self.addEventListener("push", (e) => {
   let m = {};

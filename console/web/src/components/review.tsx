@@ -193,7 +193,7 @@ export function WaitingForReview({
         open={open || !!hits}
         onToggle={fold ? setOpen : undefined}
         call={fold && items.length > 0 && <SectionCallButton section={title} testId={testId} onOpen={() => (setOpen(true), setPhoneAll(true))} cards={() => items.map(reviewCard)} />}
-        actions={fold && <SortControl value={sort} onChange={setSort} testId={testId} />}
+        actions={fold && !order && <SortControl value={sort} onChange={setSort} testId={testId} />}
       >
         <SnoozingLinesFor items={[...(fetched ?? []), ...(fetchedSnoozed ?? []).filter((i) => !fetched?.some((x) => x.id === i.id))].map((i) => ({ id: i.id, label: i.face?.title ?? i.title }))} />
         {error && <ErrorBox error={error} muted />}

@@ -256,8 +256,15 @@ describe("T18-S17 act", () => {
     expect(screen.queryByTestId("new-build")).toBeNull();
   });
 
-  it("the service worker still has no fetch handler", () => {
+  it("the service worker never serves a stale page online (the offline copy only when the network fails)", () => {
     const sw = fs.readFileSync(path.resolve(__dirname, "../../public/sw.js"), "utf8");
-    expect(sw).not.toMatch(/addEventListener\(\s*["']fetch["']/);
+    // only a navigation gets the kept shell, and only in the catch of the network fetch: this build check's fetch of the
+    // page (not a navigation) always reaches the console.
+    const page = sw.slice(sw.indexOf("async function page("), sw.indexOf("async function asset("));
+    expect(page.indexOf("await fetch(q)")).toBeGreaterThan(-1);
+    expect(page.indexOf("await fetch(q)")).toBeLessThan(page.indexOf("catch"));
+    expect(page.indexOf("c.match(")).toBeGreaterThan(page.indexOf("catch"));
+    expect(sw).toMatch(/q\.mode === "navigate"/);
+    expect(sw).toMatch(/q\.method !== "GET"/);
   });
 });
