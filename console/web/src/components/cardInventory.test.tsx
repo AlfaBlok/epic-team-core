@@ -5,10 +5,13 @@ import { MemoryRouter } from "react-router-dom";
 import fs from "node:fs";
 import path from "node:path";
 import { CARD_TYPES, CardInventoryPage, NOT_INBOX_CARDS, NO_PARK } from "@/components/cardInventory";
-import { FEEDBACK_HINT, FEEDBACK_SEND, FEEDBACK_TEXT, FEEDBACK_VOICE } from "@/components/cardFeedback";
+import { ANSWER_HINT, FEEDBACK_HINT, FEEDBACK_SEND, FEEDBACK_TEXT, FEEDBACK_VOICE } from "@/components/cardFeedback";
 import { forgetWorld } from "@/lib/useSocial";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetDeskVoiceWorld } from "@/voice/deskBase";
+
+/** E948-S160: the card types that ask for his words: their answer box is open from the start. */
+const ANSWER_CARDS = new Set(["answer"]);
 
 // E948-S60 (the owner 2026-11-12 18:27Z: "Never again I want to see a card with I don't have a simple button to give
 // feedback that allows me to add text, screenshots, voice"; 18:36Z on E946-A29: "Send my pick where there is only one
@@ -84,7 +87,10 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       const blocks = [...root.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       expect(blocks.length, "no feedback block").toBeGreaterThan(0);
       const block = blocks[blocks.length - 1];
-      expect(within(block).queryByRole("textbox"), "a text box is open by default").toBeNull();
+      // E948-S160 (the owner on E995-A10, 22 Nov: "there is no box"): a card that asks for his words shows its answer box open.
+      const asksWords = ANSWER_CARDS.has(c.id);
+      if (asksWords) expect(within(block).getByRole("textbox"), "an Answer card hides its answer box").toBeTruthy();
+      else expect(within(block).queryByRole("textbox"), "a text box is open by default").toBeNull();
       const row = block.querySelector<HTMLElement>("[data-feedback-row]")!;
       const mic = await within(row).findByTestId("answer-voice-button");
       expect(mic.closest("[data-feedback-voice]")).toBeTruthy();
@@ -93,7 +99,7 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       expect(text.textContent?.trim()).toBe(FEEDBACK_TEXT);
       const rowButtons = [...row.querySelectorAll("button")];
       expect(rowButtons.slice(-2), "Voice and Text close the row").toEqual([mic, text]);
-      fireEvent.click(text);
+      if (!asksWords) fireEvent.click(text);
       expect(within(block).getByRole("textbox")).toBeTruthy();
       expect(within(block).getByTestId("chat-attach"), "no screenshot button").toBeTruthy();
       const send = block.querySelector("[data-feedback-send]");
@@ -160,8 +166,8 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       expect(before.map((e) => e.textContent), "words come before the meta line").toEqual([]);
       const blocks = [...shell!.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       const block = blocks[blocks.length - 1];
-      fireEvent.click(within(block).getByTestId("card-feedback-text"));
-      expect(within(block).getByRole("textbox").getAttribute("placeholder")).toBe(FEEDBACK_HINT);
+      if (!ANSWER_CARDS.has(c.id)) fireEvent.click(within(block).getByTestId("card-feedback-text"));
+      expect(within(block).getByRole("textbox").getAttribute("placeholder")).toBe(ANSWER_CARDS.has(c.id) ? ANSWER_HINT : FEEDBACK_HINT);
       expect(block.querySelector("[data-feedback-send]")?.textContent?.trim()).toBe(FEEDBACK_SEND);
     });
 

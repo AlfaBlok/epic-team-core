@@ -30,7 +30,8 @@ export const LEAD_VERB: Record<LeadKind, string> = {
 
 const FROM_ASK: Record<AskKind, LeadKind> = { approve: "approve", decide: "decide", do: "do", provide: "give", unknown: "answer" };
 
-const OWN = /^\s*(?:\*\*)?you\s+(approve|decide|do|give|provide|check|answer)\s*(?:\*\*)?\s*:\s*/i;
+// E948-S160: "You give, urgent: …" is the ask's own lead too (E995-A10 opened that way and lost its lead line).
+const OWN = /^\s*(?:\*\*)?you\s+(approve|decide|do|give|provide|check|answer)(?:\s*,\s*urgent)?\s*(?:\*\*)?\s*:\s*/i;
 const WHY = /(?:^|[\s.;—–-])\s*why\s*:\s*/i;
 /** Openers that only say the kind again ("Approve:", "Decision:", "Please …"), dropped from a derived line. */
 const KIND_OPENER = /^\s*(?:approve|approval|decide|decision|do|action|provide|answer|respond|please)\s*[:\-–—]\s*/i;
@@ -79,7 +80,7 @@ export function askLead(item: {
 }): Lead {
   const full = (item.question || item.title || "").replace(/\s+/g, " ").trim();
   // E948-S129: the page link an ask opens with is the card's own link (askLeadUrl), never the start of its line
-  const text = full.replace(LEAD_URL, "").trim() || full;
+  const text = full.replace(LEAD_MD, "").replace(LEAD_URL, "").trim() || full;
   const own = OWN.exec(text);
   if (own) {
     const raw = own[1].toLowerCase();
@@ -129,25 +130,38 @@ export function reviewLead(face: { title: string; taskGoal?: string }): Lead {
  */
 export const KIND_WORD: Record<LeadKind, string> = { approve: "Decision", decide: "Decision", do: "Do", give: "Answer", check: "Review", answer: "Answer" };
 
-/** a page link the ask opens with ("http://…: record four videos", "Mac page: http://… (Copy button) — …"). */
+/** a page link the ask opens with ("http://…: record four videos", "Mac page: http://… (Copy button) — …"), or the same
+ * link written as markdown ("[dashboard.exa.ai/team-settings](https://…) : You give …", E948-S160). */
+const LEAD_MD = /^\s*\[[^\]]*\]\(https?:\/\/[^)\s]+\)\s*(?:[:—–-]\s+|:)?\s*/i;
 const LEAD_URL = /^\s*(?:mac page\s*:\s*)?https?:\/\/\S+(?:\s*\([^)]*\))?(?:\s+and\s+https?:\/\/\S+(?:\s*\([^)]*\))?)*?(?:\s+[:—–-]\s+|:\s+|\s*[—–]\s*)/i;
 
 /** the ask's text without the page link it opens with, its own "You do:" and its Why. */
 function askText(item: { question?: string; title?: string }): string {
   let text = (item.question || item.title || "").replace(/\s+/g, " ").trim();
-  for (let i = 0; i < 2; i++) text = text.replace(LEAD_URL, "").replace(OWN, "");
+  for (let i = 0; i < 2; i++) text = text.replace(LEAD_MD, "").replace(LEAD_URL, "").replace(OWN, "");
   return strip(splitWhy(text).head);
 }
 
 /** the page link an ask opens with, for the card's one green link. */
 export function askLeadUrl(item: { question?: string; title?: string }): string | undefined {
+  const md = /^\s*\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/i.exec(item.question || item.title || "");
+  if (md) return md[1];
   const m = /^\s*(?:mac page\s*:\s*)?(https?:\/\/[^\s)]+?)[.,;:]?(?=\s|$)/i.exec(item.question || item.title || "");
   return m?.[1];
 }
 
 /** the heading: one short line, a few words (about 70 characters at most), never the Why. */
+/** E948-S160: a heading is plain words: a markdown link reads as its label, emphasis and code marks go (never raw on his card). */
+export function plainMarkdown(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))+\)/g, (_, label: string) => label)
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, "$2")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^#+\s+/, "");
+}
+
 export function cardHeading(item: { question?: string; title?: string }, max = 72): string {
-  const t = askText(item) || (item.title ?? "").trim();
+  const t = plainMarkdown(askText(item) || (item.title ?? "").trim());
   const one = firstSentence(t, 400);
   if (one.length <= max) return cap(one);
   // a long sentence: its first clause when that reads alone (a comma, a colon, a dash), else cut at a word
@@ -180,7 +194,9 @@ export function splitSteps(steps: string | undefined): { list: string[]; done?: 
     .split(/(?:^|\s|\n)(?=\(?\d{1,2}[).]\s)/)
     .map((s) => s.replace(/^\(?\d{1,2}[).]\s*/, "").trim())
     .filter(Boolean);
-  const list = parts.length > 1 ? parts : head.split(/\n+/).map((s) => s.replace(/^[-*•]\s*/, "").trim()).filter(Boolean);
+  // "1 open … · 2 copy … · 3 paste …" (the spine ask line's own way) reads as numbered lines too
+  const dotted = head.split(/\s+·\s+(?=\d{1,2}\s)/).map((s) => s.replace(/^\d{1,2}\s+/, "").trim()).filter(Boolean);
+  const list = parts.length > 1 ? parts : dotted.length > 1 ? dotted : head.split(/\n+/).map((s) => s.replace(/^[-*•]\s*/, "").trim()).filter(Boolean);
   return { list, done };
 }
 

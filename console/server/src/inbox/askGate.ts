@@ -2,6 +2,7 @@ import { ownerName, ownerPattern, socialProduct } from "../identity.js";
 import { phantomRefProblem } from "./phantomRefs.js";
 import { decideButtonsProblem, decideChoices } from "./decideChoices.js";
 import { untappableProblem } from "./untappable.js";
+import { outageProblem } from "./outageAsk.js";
 /**
  * the gate every ask to the owner passes, where it is
  * raised (POST /needs-owner) and where the console reads it from a spine (inbox/waiting.ts). An ask that fails is never
@@ -44,6 +45,10 @@ import { untappableProblem } from "./untappable.js";
  *    lib/faceLink.ts). A choice said wholly in words (start them or keep waiting) has its options on its face already: its
  *    buttons; a bare yes or no is not a choice. The owner on E940-A10 (vn_b2c9395c): "If you don't give me a
  *    link, how the fuck do you expect me to choose?" A spine on GitHub does not count.
+ * 14. (every open ask in any world) One outage, one card: while the console's GitHub sign-in alarm is open, an ask
+ *    whose subject is that incident (a GitHub token, sign-in, login or key) is held under the one alarm, and when the
+ *    alarm closes every ask held under it closes with it (inbox/outageAsk.ts). The owner: "cards are being duplicated
+ *    ... really annoying" (six asks for one token in one outage).
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -129,7 +134,8 @@ const text = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join("
 export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
   // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
-  return wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a);
+  // 14. a duplicate of the one GitHub sign-in alarm comes first: rewriting it would not make it his.
+  return outageProblem(a) ?? wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a);
 }
 
 /** A button that is only a yes or a no (with its next step: "Yes, build it", "No: drop it"). */
@@ -274,7 +280,7 @@ export const ASK_GATE_RULE =
   "The console refuses (422 ask_not_his, or holds back from his inbox and lists to the Delivery Manager) any approve or decide ask that does not name " +
   `what of ${ownerName()}'s it answers (his ask: his words in quotes, a voice note or log id; or a \`why ${ownerName()}:\` that is money, publishing or contacting others, access, ` +
   "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, and any ask carrying a go-live date he did not set (a dated opening, " +
-  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56).";
+  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56). One outage, one card (his words: \"cards are being duplicated\"): while the console's GitHub sign-in alarm is open it holds every ask in any world about a GitHub token, sign-in, login or key and points it at that one alarm; when the alarm closes, those asks close with it: never raise your own ask for it.";
 
 export interface HeldAsk {
   code?: string;

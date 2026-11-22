@@ -35,6 +35,10 @@ export const FEEDBACK_SEND = "Send";
 /** E948-S131 (vn_73e840cd): the two buttons every card ends with, after its own answer buttons. */
 export const FEEDBACK_VOICE = "Voice";
 export const FEEDBACK_TEXT = "Text";
+/** E948-S160 (the owner on E995-A10, 22 Nov: "you're telling me to paste it in a box and there is no box"): a card that asks
+ * for his words (a You give card) shows its answer box open from the start, labelled and prompted as his answer. */
+export const ANSWER_LABEL = "Your answer";
+export const ANSWER_HINT = "Paste or write your answer here";
 
 /**
  * every button in a card's one row (its answers, Park, Snooze, Voice, Text): the same height, and on a phone each line of
@@ -78,6 +82,7 @@ export function FeedbackBlock({
   className,
   actions,
   open: openProp,
+  answer,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -96,13 +101,15 @@ export function FeedbackBlock({
   actions?: ReactNode;
   /** the box shown open from the start (a card that asks for words now): Text is then already pressed. */
   open?: boolean;
+  /** E948-S160: the box is his answer (a You give card): open from the start, named "Your answer". */
+  answer?: boolean;
 }) {
   const empty = !value.trim() && !files.ids.length;
   // E948-S131 (the owner 2026-11-17, vn_73e840cd): "we have the normal button, and then one button which is voice and one
   // button which is text ... with text, it unfolds the text dialogue, but it's not showing by default". The box opens on
   // Text, and stays open while it holds words or a screenshot (a paste or a drop opens it too).
   const [shown, setShown] = useState(false);
-  const open = shown || !!openProp || !empty;
+  const open = shown || !!openProp || !!answer || !empty;
   const ref = useRef<HTMLDivElement>(null);
   const focusNext = useRef(false);
   useEffect(() => {
@@ -143,10 +150,10 @@ export function FeedbackBlock({
       </div>
       {open && (
         <WordsBox
-          label={FEEDBACK_LABEL}
+          label={answer ? ANSWER_LABEL : FEEDBACK_LABEL}
           rows={2}
           boxClassName="min-h-12"
-          placeholder={FEEDBACK_HINT}
+          placeholder={answer ? ANSWER_HINT : FEEDBACK_HINT}
           value={value}
           onChange={onChange}
           files={files}

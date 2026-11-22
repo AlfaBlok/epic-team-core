@@ -120,6 +120,34 @@ describe("T18-S12: a do step's Answer box (the T18-A1 card)", () => {
   });
 });
 
+// E948-S160 (the owner on E995-A10, 22 Nov: "you're telling me to paste it in a box and there is no box"): a You give card
+// shows its answer box from the start, on every screen; a decide or do card keeps its box behind Text (E948-S131).
+describe("E948-S160: a You give card shows its answer box without a press", () => {
+  it("the box is open, named Your answer, and Send sends his words as the answer", async () => {
+    const respond = vi.spyOn(api, "respondToWaiting").mockResolvedValue(answered("wj_3"));
+    const { container } = render(
+      <MemoryRouter>
+        <WaitingCard item={ask({ id: "wj_3", ask: "provide", question: "You give: your Exa team ID. Why: the form needs it.", steps: "1 copy the team ID · 2 paste it in the answer box on this card and press Send" })} />
+      </MemoryRouter>,
+    );
+    const box = within(container).getByTestId("card-feedback-box");
+    const area = within(box).getByLabelText("Your answer") as HTMLTextAreaElement;
+    expect(area.placeholder).toBe("Paste or write your answer here");
+    fireEvent.change(area, { target: { value: "cmwr73wjg" } });
+    fireEvent.click(within(container).getByTestId("answer"));
+    await waitFor(() => expect(respond).toHaveBeenCalledWith("wj_3", expect.objectContaining({ kind: "answer", text: "cmwr73wjg" })));
+  });
+  it("a do card and a decide card keep the box closed until Text", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <WaitingCard item={ask({ id: "wj_4" })} />
+        <WaitingCard item={ask({ id: "wj_5", code: "T18-A2", ask: "decide", question: "Which one?", options: ["A: go", "B: stop"] })} />
+      </MemoryRouter>,
+    );
+    expect(within(container).queryByTestId("card-feedback-box")).toBeNull();
+  });
+});
+
 describe("T18-S12: the phone's Paste button", () => {
   it("reads a screenshot from the clipboard into the files above the box", async () => {
     const read = phone([screenshotItem()]);
@@ -158,7 +186,7 @@ describe("T18-S12: the phone's Paste button", () => {
     const box = await within(container).findByTestId("card-feedback-box");
     fireEvent.click(within(box).getByRole("button", { name: "Attach a screenshot or file" }));
     fireEvent.click(within(box).getByRole("menuitem", { name: "Paste a screenshot" }));
-    await waitFor(() => expect((within(box).getByLabelText("Feedback") as HTMLTextAreaElement).value).toBe("copied words"));
+    await waitFor(() => expect((within(box).getByLabelText("Your answer") as HTMLTextAreaElement).value).toBe("copied words"));
     cleanup();
     phone("refused");
     const again = render(

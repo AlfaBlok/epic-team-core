@@ -402,12 +402,17 @@ export function parseObjectives(pursuitsText: string | undefined, wordsText?: st
 
 /**
  * the objective an item moves, the first in his order it touches: its red line's objective, an objective whose epic or
- * watched file it lives in or whose own repo it lives in, or one whose words its title or question says.
+ * watched file it lives in or whose own repo it lives in, or one whose words its title or question says (an ask: its
+ * question and its epic's title, never the title of a row it sits on, E948-S160).
  */
 export function objectiveOf(defs: ObjectiveDef[], i: Locatable, redLineObjective?: string): ObjectiveMark | undefined {
   const repo = i.repo ? norm(i.repo) : undefined;
   const spine = repo && i.path ? `${repo}:${cleanPath(i.path)}` : undefined;
-  const text = [i.title, i.question].filter(Boolean).join(" ").replace(NOT_ABOUT, " ");
+  // E948-S160 (the owner's E995-A10 card read "Bitwarden" for an Exa ask): an ask is read in its own words and its epic's
+  // title. An ask on a row carries that row's title instead, whose side chores ("Bitwarden item updated") are not what
+  // the ask is about, so it is left out.
+  const own = i.code && i.question && i.row ? [i.question] : [i.title, i.question];
+  const text = own.filter(Boolean).join(" ").replace(NOT_ABOUT, " ");
   const d = defs.find(
     (d) =>
       d.id === redLineObjective ||

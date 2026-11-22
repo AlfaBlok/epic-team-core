@@ -55,6 +55,14 @@ describe("the inbox order comes from his objectives by itself", () => {
     expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S23", title: "Move every password" })?.n).toBe(2);
     // a citation of where his words are kept is not what the item is about
     expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S24", title: "Alerts drop the label. Voice note (Acme Log/2026-11-14.md#^e-1)" })).toBeUndefined();
+
+    // E948-S160 (E995-A10 read "Bitwarden" for an Exa ask): an ask is read in its own words, never its row's side words
+    const exa = { repo: "repo1", code: "E907-A10", row: "E907-S18", path: "docs/spines/startup-programs.md", title: "E907-S18 Exa startup form; password item updated", question: "You give: your Exa team ID. Why: the form needs it." };
+    expect(objectiveOf(defs, exa)).toBeUndefined();
+    // an ask on no row carries its epic's title, which says what the epic is about
+    expect(objectiveOf(defs, { ...exa, row: undefined, title: "EPIC-907: Move every password" })?.n).toBe(2);
+    expect(objectiveOf(defs, { ...exa, question: "You give: the new password for the vault." })?.n).toBe(2);
+    expect(objectiveOf(defs, { ...exa, path: "docs/spines/accounts.md" })?.n).toBe(2);
   });
 
   it("puts his first objective first, then what is pressing, the red line and levels, each in his objectives' order", () => {

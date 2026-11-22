@@ -119,7 +119,7 @@ describe("Answer (free text) shows it is working", () => {
     // a question that needs words (not a yes/no "?") shows the "Your answer" box with one Answer button
     wrap(<WaitingCard item={item({ ask: "decide", decidable: false, options: undefined, question: "Say when to ship the logger." })} />);
     openText();
-    fireEvent.change(screen.getByLabelText("Feedback"), { target: { value: "wait a week" } });
+    fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "wait a week" } });
     const answer = btn(/^\s*Send$/);
     fireEvent.click(answer);
     expect(spy).toHaveBeenCalledWith("wj_1", { kind: "answer", text: "wait a week", milestoneId: "ms_1", wake: true });

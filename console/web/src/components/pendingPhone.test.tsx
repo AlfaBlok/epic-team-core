@@ -69,7 +69,7 @@ describe("T17-S1 answer box on a phone", () => {
     // a question that needs words shows its "Your answer" box at once (an options card shows it under More)
     wrap(<WaitingCard item={{ ...item, ask: "provide" }} />);
     openText();
-    const box = screen.getByRole("textbox", { name: "Feedback" });
+    const box = screen.getByRole("textbox", { name: "Your answer" });
     // the words take the frame's whole width; the buttons sit in a short row under them, inside the same frame
     expect(box.className).toContain("w-full min-w-0 resize-none border-0 bg-transparent px-3 py-2 text-sm");
     for (const c of ["max-sm:text-base", "max-sm:min-h-11", "max-sm:max-h-[40dvh]", "max-sm:[field-sizing:content]"]) expect(box.className).toContain(c);

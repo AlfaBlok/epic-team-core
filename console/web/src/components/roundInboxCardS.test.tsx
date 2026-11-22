@@ -99,7 +99,7 @@ describe("T18-S11 round 2: the inbox card's boxes take screenshots like Chat", (
       </MemoryRouter>,
     );
     openText();
-    const { box, area } = await oneBox(container, "Feedback");
+    const { box, area } = await oneBox(container, "Your answer");
     const press = within(container).getByTestId("answer") as HTMLButtonElement;
     expect(press.disabled).toBe(true);
     pasteFile(area);

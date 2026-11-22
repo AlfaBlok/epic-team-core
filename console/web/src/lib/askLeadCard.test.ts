@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askLeadUrl, cardBody, cardHeading, projectLabel, splitSteps } from "@/lib/askLead";
+import { askLead, askLeadUrl, cardBody, cardHeading, plainMarkdown, projectLabel, splitSteps } from "@/lib/askLead";
 
 // a short heading, the ask as body, a Do card's numbered steps.
 describe("the card's parts", () => {
@@ -21,5 +21,25 @@ describe("the card's parts", () => {
   it("names a project once", () => {
     expect(projectLabel("home_repo · home_repo")).toBe("home_repo");
     expect(projectLabel("whatgpt_v3 · EPIC-900")).toBe("whatgpt_v3 · EPIC-900");
+  });
+  // E948-S160 (the owner on E995-A10, 22 Nov): its title showed raw [link](url) text.
+  it("a markdown link the ask opens with is the card's link, never raw text in its heading", () => {
+    const q = "[dashboard.exa.ai/team-settings](https://dashboard.exa.ai/team-settings) : You give, urgent: your Exa team ID, about 1 minute. Why: it is the only thing Exa's form still needs ([the filled form](http://host1.example:9666/))";
+    const h = cardHeading({ question: q });
+    expect(h).toBe("Your Exa team ID, about 1 minute");
+    expect(h).not.toMatch(/\[|\]\(/);
+    expect(askLeadUrl({ question: q })).toBe("https://dashboard.exa.ai/team-settings");
+    expect(askLead({ ask: "provide", question: q })).toMatchObject({ kind: "give", own: true });
+  });
+  it("reads 1 … · 2 … steps as numbered lines", () => {
+    expect(splitSteps("1 open https://a.b/c in Chrome · 2 copy the team ID shown there · 3 paste it in the answer box and press Send")?.list).toEqual([
+      "open https://a.b/c in Chrome",
+      "copy the team ID shown there",
+      "paste it in the answer box and press Send",
+    ]);
+  });
+  it("a markdown link inside a heading reads as its label", () => {
+    expect(cardHeading({ question: "You give: the code from [the Exa page](https://dashboard.exa.ai/x) here. Why: the form needs it." })).toBe("The code from the Exa page here");
+    expect(plainMarkdown("**Open** `dashboard` [here](https://a.b/c_(d))")).toBe("Open dashboard here");
   });
 });

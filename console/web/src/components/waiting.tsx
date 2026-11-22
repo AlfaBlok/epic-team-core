@@ -1477,6 +1477,7 @@ function WaitingCardBody({
                   id={`note-${item.id}`}
                   className="mt-3.5"
                   open={editing || noteOpen}
+                  answer={wordsAnswer && !item.secret}
                   actions={
                     <div className="contents" data-testid="answer-buttons">
                     {doCard ? (
