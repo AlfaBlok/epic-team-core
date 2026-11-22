@@ -1111,7 +1111,9 @@ function WaitingCardBody({
       const reached = (res.delivery === "sent" || !!res.spine || !!res.job) && res.spine?.status !== "skipped" && res.spine?.status !== "failed";
       showClosed({
         ...(reached ? { slot: `ask:${item.id}` } : {}),
-        said: kind === "approve" ? "Approved" : kind === "deny" ? "Declined" : kind === "feedback" ? "Changes sent to the team" : "Answered",
+        said: res.alreadyAnswered
+          ? alreadyAnsweredLine(res)
+          : kind === "approve" ? "Approved" : kind === "deny" ? "Declined" : kind === "feedback" ? "Changes sent to the team" : "Answered",
         title: item.question || item.title,
         ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
         back: async () => {
@@ -1645,6 +1647,16 @@ export const isPinnedPriority = (i: WaitingItem) => (!!i.putFirst || leadsFirst(
  * there"): an open ask labelled urgent, or pressing (he asked for it first, again, or with frustration), sits in the
  * Inbox's own Urgent section at the very top, out of Blocked on you.
  */
+/**
+ * (the owner 22 Nov 03:35Z: "I press send and it disappears and then it comes back"): a press on a card he had
+ * already answered says so, with when and what, instead of a second plain Answered that the next list could contradict.
+ */
+export function alreadyAnsweredLine(r: Pick<OwnerResponse, "createdAt" | "text" | "kind">): string {
+  const d = new Date(r.createdAt);
+  const at = Number.isFinite(d.getTime()) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  const what = r.kind === "approve" ? "Approved" : r.kind === "deny" ? "Declined" : r.text.trim() ? `“${r.text.trim().slice(0, 40)}”` : "Answered";
+  return `Already answered${at ? ` at ${at}` : ""}: ${what}, the team has it`;
+}
 export const isUrgentAsk = (i: WaitingItem) => i.state === "open" && !i.snoozedUntil && !i.macAgent && (!!i.urgent || !!i.ownerPriority?.pressing);
 
 /**

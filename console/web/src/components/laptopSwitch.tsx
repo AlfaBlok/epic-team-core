@@ -351,7 +351,10 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
     setPress({ key: kind, phase: "sending" });
     setErr(undefined);
     try {
-      const said = spoken ?? (await wordsWithFiles(words, files.ids));
+      const typedSaid = spoken ?? (await wordsWithFiles(words, files.ids));
+      // "why stuck button hidden??????" (owner, 22 Nov): Stuck is never greyed out. On a step already stuck, a press with no words
+      // would change nothing on the server ("same"), so it goes as a note that he pressed Stuck again and wakes the owner.
+      const said = kind === "stuck" && st.state === "stuck" && !typedSaid.trim() ? "Pressed Stuck again: still stuck or changes wanted" : typedSaid;
       const body: StepTickInput = { step: st.step, title: r.title, ...(r.row ? { row: r.row } : r.ask ? { ask: r.ask } : {}), ...(kind === "note" ? {} : { state: kind }), ...(said.trim() ? { comment: said } : {}) };
       await mutate(() => api.stepTick(st.pageId, body), "inbox");
       if (kind === "done") onDone?.();
@@ -389,7 +392,6 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
     big: true,
   });
   const wait = !!press || voice.busy || !files.ready;
-  const typed = !!words.trim() || files.ids.length > 0;
   const line = changeLine(st.change);
   // a dated note with no words is never a blank "Note <date>:" line (the console kept no words for it)
   const last = st.notes.filter((x) => !!x.words?.trim()).slice(-2);
@@ -437,7 +439,7 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
                     <Button size="sm" className={PHONE_TAP} onClick={() => send("done")} data-testid="laptop-done" {...pressProps(press, "done", wait)}>
                       <Check /> {ACTION.done.label}
                     </Button>
-                    <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("stuck")} data-testid="laptop-stuck" {...pressProps(press, "stuck", wait || (st.state === "stuck" && !typed))}>
+                    <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => send("stuck")} data-testid="laptop-stuck" {...pressProps(press, "stuck", wait)}>
                       <MessageSquareReply /> Stuck or changes wanted
                     </Button>
                   </>

@@ -31,9 +31,11 @@ function setup(o: { pending?: boolean[]; inChat?: (sent: string[]) => boolean | 
   };
   let t = Date.parse("2026-11-18T03:43:31Z");
   const sent: string[] = [];
+  const crids: (string | undefined)[] = [];
   const pending = [...(o.pending ?? [])];
   const desk: DeskPort = {
-    send: vi.fn(async (text: string) => {
+    send: vi.fn(async (text: string, _page?: string, crid?: string) => {
+      crids.push(crid);
       const p = pending.length ? pending.shift()! : false;
       if (!p) sent.push(text); // a pending send is the one a restart lost
       return { threadId: "thread_desk", pending: p };
@@ -53,7 +55,7 @@ function setup(o: { pending?: boolean[]; inChat?: (sent: string[]) => boolean | 
     seen: async (id) => (o.inChat ? o.inChat(sent) : sent.some((s) => s.includes(id))),
     onUndelivered: (u) => lines.push({ id: u.id, tries: u.tries, gaveUp: u.gaveUp }),
   });
-  return { db, notes, sent, lines, desk, tick: (ms: number) => (t += ms) };
+  return { db, notes, sent, crids, lines, desk, tick: (ms: number) => (t += ms) };
 }
 const audio = () => new Uint8Array(1500).fill(7);
 async function postNote(s: ReturnType<typeof setup>) {
@@ -104,8 +106,8 @@ describe("every Chat voice note reaches the desk, or he is told it did not", () 
     expect(s.lines).toEqual([]);
   });
 
-  it("while it keeps failing the chat shows it plainly, re-sent each minute; when tries run out it says not delivered", async () => {
-    const s = setup({ pending: Array(DELIVER_TRIES + 1).fill(true) });
+  it("while it keeps failing the chat shows it plainly, re-sent each minute; after DELIVER_TRIES the DM is told and it is never given up", async () => {
+    const s = setup({ pending: Array(DELIVER_TRIES + 3).fill(true) });
     const id = await postNote(s);
     s.tick(DELIVER_CHECK_MS + 1000);
     await s.notes.deliverCheck();
@@ -114,11 +116,12 @@ describe("every Chat voice note reaches the desk, or he is told it did not", () 
       s.tick(60_000);
       await s.notes.deliverCheck();
     }
-    expect(s.notes.get(id)?.delivery).toBe("failed");
-    expect(s.notes.get(id)?.deliverError).toMatch(/not delivered: 10 tries failed/);
-    expect(s.lines.map((l) => l.gaveUp)).toEqual([false, true]); // first miss and the last try, nothing in between
+    expect(s.notes.get(id)?.delivery).toBe("retrying"); // 22 Nov: never "failed", his words are never given up
+    expect(s.lines.map((l) => l.gaveUp)).toEqual([false, true]); // first miss and the stuck line, nothing in between
     s.tick(60_000);
-    expect((await s.notes.deliverCheck()).checked).toBe(0);
+    expect(await s.notes.deliverCheck()).toMatchObject({ checked: 1, resent: 1 }); // still re-sent, under a fresh request id
+    expect(s.crids.at(-1)).toBe(`voice-note-chat-${id}-r${DELIVER_TRIES + 1}`);
+    expect(s.lines.map((l) => l.gaveUp)).toEqual([false, true]);
   });
 
   it("notes posted before the check existed count as delivered (never re-sent on the release)", () => {

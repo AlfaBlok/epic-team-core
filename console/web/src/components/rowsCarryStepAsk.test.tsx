@@ -114,6 +114,16 @@ describe("T96-S12 the card", () => {
     await waitFor(() => expect(screen.getByTestId("sent-row-said").textContent).toBe("Your words went to the team"));
   });
 
+  it("Stuck or changes wanted is never greyed out, even on a step already stuck; a bare press wakes the team", async () => {
+    const tick = vi.spyOn(api, "stepTick").mockResolvedValue({ state: "stuck", spine: "saved" });
+    render(<MacCards rows={laptopRows([e5s9], [])} />);
+    const btn = screen.getByTestId("laptop-stuck") as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect((screen.getByTestId("laptop-done") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    await waitFor(() => expect(tick).toHaveBeenCalledWith("sp_64272444", expect.objectContaining({ state: "stuck", row: "T5-S9", comment: expect.stringContaining("Pressed Stuck again") })));
+  });
+
   it("a refused press says why at the buttons", async () => {
     vi.spyOn(api, "stepTick").mockRejectedValue(new Error("too many ticks on this page in a minute: wait a moment"));
     render(<MacCards rows={laptopRows([e81s8], [])} />);

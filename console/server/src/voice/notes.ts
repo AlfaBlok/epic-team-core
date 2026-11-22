@@ -198,7 +198,7 @@ export const SEND_STUCK_MS = 3 * 60_000;
 const FINISH_TRIES = 30;
 /** a posted note not seen in the chat this long after its post is re-sent (one try a minute). */
 export const DELIVER_CHECK_MS = 2 * 60_000;
-/** the delivery check's most tries of one note; after them the note shows "not delivered" and stays named. */
+/** after this many tries the Delivery Manager is told the note is stuck; the console keeps re-sending it (never gives his words up) for the whole window (22 Nov: two notes were dropped as "failed" after 10 min while T3 was slow). */
 export const DELIVER_TRIES = 10;
 /** notes older than this are not checked again (a note that old in the chat's tail cannot be told from one missing). */
 export const DELIVER_WINDOW_MS = 6 * 3600_000;
@@ -279,7 +279,7 @@ export function createVoiceNotes(d: NotesDeps) {
       ...(r.accepted_at ? { acceptedAt: r.accepted_at } : {}),
       ...(r.send_ms ? { sendMs: JSON.parse(r.send_ms) as Record<string, number> } : {}),
       ...(r.delivered_at ? { deliveredAt: r.delivered_at } : {}),
-      ...(r.state === "posted" && !r.delivered_at && r.deliver_tries > 0 ? { delivery: r.deliver_tries >= DELIVER_TRIES ? ("failed" as const) : ("retrying" as const) } : {}),
+      ...(r.state === "posted" && !r.delivered_at && r.deliver_tries > 0 ? { delivery: "retrying" as const } : {}),
       ...(r.deliver_error ? { deliverError: r.deliver_error } : {}),
     };
   };
@@ -570,8 +570,8 @@ export function createVoiceNotes(d: NotesDeps) {
     const out = { checked: 0, delivered: 0, resent: 0, failed: 0 };
     const t = now();
     const rows = db
-      .prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at <= @cut AND posted_at >= @since AND deliver_tries < @max ORDER BY posted_at")
-      .all({ ...sc, cut: iso(t - DELIVER_CHECK_MS), since: iso(t - DELIVER_WINDOW_MS), max: DELIVER_TRIES }) as any[];
+      .prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at <= @cut AND posted_at >= @since ORDER BY posted_at")
+      .all({ ...sc, cut: iso(t - DELIVER_CHECK_MS), since: iso(t - DELIVER_WINDOW_MS) }) as any[];
     for (const r of rows) {
       if (delivering.has(r.id)) continue;
       delivering.add(r.id);
@@ -589,17 +589,18 @@ export function createVoiceNotes(d: NotesDeps) {
         let error: string = NOT_DELIVERED_RETRYING;
         let took = false;
         try {
-          const s = await d.desk!.send(message(n, r.transcript ?? "", post.audioUrl, post.segments), post.page, `voice-note-chat-${r.id}`);
+          // past DELIVER_TRIES a fresh request id: T3 keeps a taken id's receipt, and a send it took and then lost (22 Nov: T3
+          // restarted mid-queue) came back as a duplicate on every re-send; `seen` above keeps a delivered note from going twice
+          const crid = tries > DELIVER_TRIES ? `voice-note-chat-${r.id}-r${tries}` : `voice-note-chat-${r.id}`;
+          const s = await d.desk!.send(message(n, r.transcript ?? "", post.audioUrl, post.segments), post.page, crid);
           took = !!s && s.pending === false;
         } catch (e) {
           error = `${NOT_DELIVERED_RETRYING} (${(e as Error).message.slice(0, 200)})`;
         }
         out.resent++;
-        const gaveUp = !took && tries >= DELIVER_TRIES;
-        if (gaveUp) {
-          error = `not delivered: ${tries} tries failed; its words and audio are kept`;
-          out.failed++;
-        }
+        // at DELIVER_TRIES the Delivery Manager hears it is stuck (once); the re-sends go on
+        const gaveUp = !took && tries === DELIVER_TRIES;
+        if (gaveUp) out.failed++;
         // a re-send T3 took is delivered unless the chat still lacks it at the next check
         db.prepare("UPDATE voice_notes SET deliver_tries = ?, deliver_error = ?, delivered_at = ? WHERE id = ?").run(tries, took ? null : error, took ? iso() : null, r.id);
         if (took) out.delivered++;

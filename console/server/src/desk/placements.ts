@@ -166,11 +166,28 @@ export function createPlacements(d: PlacementDeps) {
     }
   };
   /** What the spine says now: closed (delivered / dropped, a missing item = dropped), else placed. */
+  // 22 Nov: the desk tick read and parsed every placement's spine each minute (545 of them, 1.4 s of blocked event loop
+  // a minute); a state is kept until its file's mtime or size changes
+  const states = new Map<string, { sig: string; state: Placement["state"] }>();
   const stateOf = (r: any): Placement["state"] => {
+    const f = fileOf(r.repo, r.path);
+    let sig: string;
+    try {
+      if (!f) return "placed";
+      const st = fs.statSync(f);
+      sig = `${st.mtimeMs}:${st.size}`;
+    } catch {
+      return "placed"; // checkout not readable right now: nothing closed that we can see
+    }
+    const k = `${f}\n${r.kind}\n${r.item_id}`;
+    const hit = states.get(k);
+    if (hit && hit.sig === sig) return hit.state;
     const text = read(r.repo, r.path);
-    if (text === undefined) return "placed"; // checkout not readable right now: nothing closed that we can see
+    if (text === undefined) return "placed";
     const now = readPlacement(text, { kind: r.kind, itemId: r.item_id });
-    return now.closed ?? (now.missing ? "dropped" : "placed");
+    const state = now.closed ?? (now.missing ? "dropped" : "placed");
+    states.set(k, { sig, state });
+    return state;
   };
   const row = (r: any) => toPlacement(r, stateOf(r));
   const list = (): Placement[] => (d.db.prepare("SELECT * FROM desk_placement ORDER BY placed_at, rowid").all() as any[]).map(row);
@@ -225,7 +242,8 @@ export function createPlacements(d: PlacementDeps) {
     async sweep(note: (p: Placement) => Promise<true | string>): Promise<{ delivered: number; noted: number }> {
       let delivered = 0;
       let noted = 0;
-      for (const p of list().filter((x) => x.state === "delivered" && !x.notedAt)) {
+      const due = (d.db.prepare("SELECT * FROM desk_placement WHERE noted_at IS NULL ORDER BY placed_at, rowid").all() as any[]).map(row);
+      for (const p of due.filter((x) => x.state === "delivered")) {
         delivered++;
         const res = await note(p);
         if (res === true) {

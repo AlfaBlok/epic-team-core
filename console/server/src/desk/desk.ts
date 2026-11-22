@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { DB } from "../db.js";
@@ -7,7 +8,7 @@ import { errorText } from "../t3/client.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { listRepos } from "../adapters/repos.js";
 import { createPlacements, DELIVERED_MARKER, migratePlacements, type Placement } from "./placements.js";
-import { createChatSession, DeskError, migrateDeskSessions, PAGE_PREFIX, TEAM_KEY, type SessionDeps } from "./session.js";
+import { createChatSession, DeskError, migrateDeskSessions, PAGE_PREFIX, TEAM_KEY, WORKING, type SessionDeps } from "./session.js";
 import { intakeSections, type IntakeRunner } from "./packIntake.js";
 import { DIGEST_MARKER } from "../plug/marks.js";
 import { TESTER_MARKER } from "../plug/marks.js";
@@ -115,6 +116,20 @@ export const UPDATE_MARKER = "[team-desk update]";
 export function migrateDesk(db: DB) {
   migrateDeskSessions(db);
   migratePlacements(db);
+  db.exec("CREATE TABLE IF NOT EXISTS desk_console_lines (crid TEXT PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL, sent_at TEXT, error TEXT)");
+}
+
+/** the most of the console's own lines put into one desk message. */
+export const OUTBOX_BATCH_MAX = 60_000;
+/** the head of one desk message that carries several console lines held while the desk was busy. */
+export const OUTBOX_BATCH_HEAD = "[console lines] held while you were busy";
+
+/** several held console lines as one desk message: one turn instead of one turn each. */
+export function outboxBatch(items: { text: string }[]): string {
+  return [
+    `${OUTBOX_BATCH_HEAD}: ${items.length} lines, oldest first. Handle each as its own text says, in this one turn; reply with one short line per item that asks for a reply, nothing for the rest.`,
+    ...items.map((x, i) => `\n--- ${i + 1} of ${items.length} ---\n${x.text}`),
+  ].join("\n");
 }
 
 export interface DeskDeps {
@@ -312,6 +327,49 @@ export function createDesk(d: DeskDeps) {
   });
   const { current, syncSeed } = chat;
 
+  // ----: console lines held while the desk is busy (desk_console_lines) ----
+  let outboxing: Promise<number> | undefined;
+  /** sends the held console lines (several as one message) when the desk is idle, nothing of his queued; how many went. */
+  function flushOutbox(): Promise<number> {
+    outboxing ??= (async () => {
+      const rows = d.db.prepare("SELECT crid, text FROM desk_console_lines WHERE sent_at IS NULL ORDER BY at, rowid").all() as { crid: string; text: string }[];
+      if (!rows.length) return 0;
+      const live = current();
+      if (!live || !d.t3) return 0;
+      if (chat.queued().length) return 0; // his own messages first
+      const s = await chat.moveIfBlocked(live);
+      if (chat.blocked()) return 0;
+      const c = chat.clientOf(s);
+      const st = await c.readThreadStatus(s.threadId);
+      if (WORKING.has(st.status) || st.activeRunId) return 0;
+      if (c.queuedCount && (await c.queuedCount(s.threadId).catch(() => 0)) > 0) return 0;
+      const pick: { crid: string; text: string }[] = [];
+      let len = 0;
+      for (const r of rows) {
+        if (pick.length && len + r.text.length > OUTBOX_BATCH_MAX) break;
+        pick.push(r);
+        len += r.text.length;
+      }
+      const one = pick.length === 1;
+      const crid = one ? pick[0].crid : `desk-outbox-${createHash("sha256").update(pick.map((x) => x.crid).join("\n")).digest("hex").slice(0, 16)}`;
+      const mark = d.db.prepare("UPDATE desk_console_lines SET sent_at = ?, error = ? WHERE crid = ?");
+      try {
+        await c.sendToThread(s.threadId, one ? pick[0].text : outboxBatch(pick), crid, "auto");
+      } catch (e) {
+        for (const x of pick) mark.run(null, errorText(e).slice(0, 300), x.crid);
+        throw e;
+      }
+      chat.gateOf(s)?.mark(`desk note ${crid}`);
+      const at = new Date(now()).toISOString();
+      for (const x of pick) mark.run(at, null, x.crid);
+      d.db.prepare("DELETE FROM desk_console_lines WHERE sent_at IS NOT NULL AND sent_at < ?").run(new Date(now() - 7 * 86_400_000).toISOString());
+      return pick.length;
+    })().finally(() => {
+      outboxing = undefined;
+    });
+    return outboxing;
+  }
+
   // ----: placements and delivered notes ----
   const placements = createPlacements({ db: d.db, reposRoot: d.reposRoot, now: d.now });
   const base = () => d.publicUrl.replace(/\/+$/, "");
@@ -329,25 +387,19 @@ export function createDesk(d: DeskDeps) {
   async function sendDelivered(p: Placement): Promise<true | string> {
     const live = current();
     if (!live || !d.t3) return "no live desk thread to tell";
-    const s = await chat.moveIfBlocked(live); // off a limited seat first, like his own send
+    await chat.moveIfBlocked(live); // off a limited seat first, like his own send
     const seat = chat.blocked(); // still blocked = no seat with headroom: the sweep retries
     if (seat) return `desk seat ${seat}: note waits for headroom`;
-    const gate = chat.gateOf(s); // the main server's gate only for the main server thread
-    const slot = gate?.take(`desk delivered note ${p.id}`); // the sweep retries
-    if (slot && !slot.ok) return `note waits for the ${mainHost()} session start gap (${slot.reason})`;
     const l = await links(p.repo, p.path);
     const what = p.kind === "epic" ? "epic" : p.kind === "row" ? `ledger row ${p.itemId}` : `Done-means line ${p.itemId}`;
     const text = [
       `${DELIVERED_MARKER} ${p.title} (${what}, ${p.repo}/${p.path}) → ${[l.spine && `spine ${l.spine}`, l.milestoneId && `console ${base()}/milestones/${l.milestoneId}`].filter(Boolean).join(" · ") || `${p.repo}/${p.path}`}`,
       `You placed this item for ${ownerName()} and it has closed. Tell him in one line, links first. Do nothing else.`,
     ].join("\n");
-    try {
-      await chat.clientOf(s).sendToThread(s.threadId, text, `desk-delivered-${p.id}`, "auto");
-      return true;
-    } catch (e) {
-      if (slot?.ok) gate?.cancel(slot.token);
-      return errorText(e);
-    }
+    // held with the other console lines (desk_console_lines): never ahead of his messages, batched while the desk is busy
+    d.db.prepare("INSERT OR IGNORE INTO desk_console_lines (crid, text, at) VALUES (?, ?, ?)").run(`desk-delivered-${p.id}`, text, new Date(now()).toISOString());
+    void flushOutbox().catch((e) => console.error("desk outbox:", errorText(e)));
+    return true;
   }
   let sweeping: Promise<{ delivered: number; noted: number } | void> | undefined;
   const norm = normSaid;
@@ -378,21 +430,25 @@ export function createDesk(d: DeskDeps) {
     },
 
     /** a console note into the live desk thread (the 20:00 digest); true once T3 took it, else why not. */
+    /**
+     * Since 22 Nov (88 receipts flooded the desk, his voice notes waited behind them and were dropped): a console line is
+     * held in desk_console_lines and goes in only while the desk is idle with nothing queued, many held lines as ONE message.
+     * His own messages never wait behind console lines. true = held or sent (the tick keeps sending it).
+     */
     async tell(text: string, clientRequestId: string): Promise<true | string> {
       const live = current();
       if (!live || !d.t3) return "no live desk thread to tell";
       // a note that must reach the owner moves off a limited seat like his own send (a digest once waited days for headroom)
-      const s = await chat.moveIfBlocked(live);
+      await chat.moveIfBlocked(live);
       const seat = chat.blocked(); // still blocked = no seat with headroom: it never lands on a limited seat
       if (seat) return `desk seat ${seat}: note waits for headroom`;
-      try {
-        await chat.clientOf(s).sendToThread(s.threadId, text, clientRequestId, "auto");
-        chat.gateOf(s)?.mark(`desk note ${clientRequestId}`); // a one-off note (its callers do not retry) never waits, but counts
-        return true;
-      } catch (e) {
-        return errorText(e);
-      }
+      d.db.prepare("INSERT OR IGNORE INTO desk_console_lines (crid, text, at) VALUES (?, ?, ?)").run(clientRequestId, text, new Date(now()).toISOString());
+      await flushOutbox().catch((e) => console.error("desk outbox:", errorText(e)));
+      return true;
     },
+
+    flushOutbox: () => flushOutbox(),
+    outbox: () => d.db.prepare("SELECT crid, at, sent_at, error FROM desk_console_lines WHERE sent_at IS NULL ORDER BY at").all() as { crid: string; at: string; sent_at: null; error: string | null }[],
 
     /**
      * One background pass: the delivered notes (once per closed placement) and the sends queued while T3 was down.
@@ -400,7 +456,7 @@ export function createDesk(d: DeskDeps) {
      * pushed to an idle thread resumed its Claude session on the main server for plumbing alone).
      */
     tick(): Promise<{ delivered: number; noted: number } | void> {
-      sweeping ??= Promise.all([placements.sweep(sendDelivered), chat.flushQueued()])
+      sweeping ??= Promise.all([placements.sweep(sendDelivered), chat.flushQueued().then(() => flushOutbox().catch((e) => console.error("desk outbox:", errorText(e))))])
         .then(([r]) => r)
         .catch((e) => console.error("desk tick:", e))
         .finally(() => {

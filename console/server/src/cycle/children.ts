@@ -1,4 +1,5 @@
 import type { SpinesJson } from "../adapters/spines.js";
+import type { Tree, TreeNode } from "../adapters/tree.js";
 
 /**
  * a wake on a spine with children steers them (epicspine-skill run_state contract, docs/handoffs/.md).
@@ -14,6 +15,30 @@ export interface ChildEpic {
   runState: RunState;
   /** Name of the enabled persona assigned to the child's own milestone (it runs the child; the parent leaves it alone). */
   ownedBy?: string;
+  /**
+   * the ready rows of the child's own ledger (tree `ready`), listed by id on its PICK UP line so no ready row
+   * hides behind "read each child's ledger" (three rows sat ready an hour that way). Undefined = the tree was not read.
+   */
+  ready?: string[];
+}
+
+/** The ready rows of the spine at `childPath` in the tree: its own ledger rows and their sub-rows, never a nested spine's. */
+export function childReadyRows(t: Tree, childPath: string): string[] {
+  const norm = (p?: string) => (p ?? "").replace(/^\.\//, "");
+  const find = (n: TreeNode): TreeNode | undefined =>
+    n.kind === "spine" && norm(n.path) === norm(childPath) ? n : n.children.reduce<TreeNode | undefined>((f, c) => f ?? find(c), undefined);
+  const spine = find(t.root);
+  if (!spine) return [];
+  const out: string[] = [];
+  const rows = (n: TreeNode) => {
+    for (const c of n.children)
+      if (c.kind === "ticket") {
+        if (c.ready && !out.includes(c.id)) out.push(c.id);
+        rows(c);
+      }
+  };
+  rows(spine);
+  return out;
 }
 
 export type ChildVerdict = "pickup" | "owned" | "planning" | "parked" | "finished";

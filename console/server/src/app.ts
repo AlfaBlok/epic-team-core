@@ -24,7 +24,7 @@ import { pursuitsDirFor, putFirst } from "./inbox/priorityAsk.js";
 import { doorSession } from "./auth/owner.js";
 import { mountLanding, mountLandingMarks } from "./landing.js";
 import { ownerSeatFree, readSeats, seatBlockerFor } from "./adapters/seats.js";
-import { movingLimit, stalledWake, STALL_WATCH_BY } from "./cycle/movement.js";
+import { movingLimit, stalledWake, STALL_WATCH_BY, unaccountedReady, readyUnstartedText, READY_REBOOK_MARK } from "./cycle/movement.js";
 import { runStats, runsOfMilestones, wakesDidSomething } from "./runStats.js";
 import { activeSeries, BUCKETS, dayBounds, localDay, validTimeZone } from "./activeAgents.js";
 import { createMovement } from "./cycle/movementRoutes.js";
@@ -40,7 +40,7 @@ import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
 import { FAILED_WAKES_IN_A_ROW, failedWakesAction, failedWakesQuestion, openFailedWakesAsk, wakeStreak } from "./cycle/failedWakes.js";
 import { repeatStreak } from "./cycle/repeat.js";
 import { followUp } from "./cycle/followUp.js";
-import { childEpicsFor } from "./cycle/children.js";
+import { childEpicsFor, childReadyRows } from "./cycle/children.js";
 import { textHash } from "./cycle/skipUnchanged.js";
 import { listTemplates } from "./personaTemplates.js";
 import { templateForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
@@ -654,6 +654,8 @@ export function createApp(
   });
 
   const api = new Hono();
+  /** wake runs whose finish was refused once for ready rows with no worker or reason (in memory; a restart only re-refuses once). */
+  const readyRefused = new Set<string>();
   // the Inbox's lists go out gzipped (1.78 MB of JSON took ~30 s on a throttled phone; ~10x smaller packed).
   // Registered first, so it is the outermost layer: every filter that rewrites a list's JSON runs inside it.
   const packed = compress();
@@ -1150,13 +1152,16 @@ export function createApp(
       if (!spines || !rel) return undefined;
       const norm = (p: string) => p.replace(/^\.\//, "");
       const world = store.worldOfMilestone(m.id); // only the milestone's own world names a child's persona
-      return childEpicsFor(spines, rel, (child) => {
+      const tree = await treeFor(m, 1_500, spines).catch(() => undefined);
+      const kids = childEpicsFor(spines, rel, (child) => {
         for (const cm of store.listMilestones().filter((x) => sameRepo(x.repo, m.repo) && x.path && norm(x.path) === child && store.worldOfMilestone(x.id) === world)) {
           const on = store.listAssignments({ milestoneId: cm.id }).find((x) => x.enabled);
           if (on) return store.getPersona(on.personaId)?.name ?? on.personaId;
         }
         return undefined;
       });
+      // each child's ready rows by id, for its PICK UP line.
+      return tree && kids ? kids.map((c) => ({ ...c, ready: childReadyRows(tree, c.path) })) : kids;
     },
     // only answers in a spine count (referenced canonical asks); a console copy of an unwritten answer is none.
     referencedAnswers: async (m) => {
@@ -3092,7 +3097,7 @@ export function createApp(
   };
   // the note's world's Delivery Manager gets one desk-inbox line (its home checkout), and production one WhatsApp alert.
   const undeliveredLine = (u: { id: string; world: string; tries: number; ms: number; gaveUp: boolean; postedAt: string; words: string }) => {
-    const text = u.gaveUp ? `Voice note ${u.id} is still not in the chat after ${u.tries} re-sends; the console stopped retrying.` : `Voice note ${u.id} showed Sent but is not in the chat ${Math.round(u.ms / 60_000)} min later; the console is re-sending it.`;
+    const text = u.gaveUp ? `Voice note ${u.id} is still not in the chat after ${u.tries} re-sends; the console keeps re-sending it.` : `Voice note ${u.id} showed Sent but is not in the chat ${Math.round(u.ms / 60_000)} min later; the console is re-sending it.`;
     console.warn(`[voice] ${text}`);
     if (opts.readModel?.drift?.alert) void whatsapp.alert("voice-send-undelivered", `${text}\nDetails: ${teamLink()}/api/health`);
     const home = worldHome(u.world);
@@ -4049,6 +4054,30 @@ export function createApp(
         throw new ApiError(400, "note_unacknowledged", `this run carried ${run.instructionsBy ?? ownerName()}'s note: ${NOTE_ACK_RULE} The note: ${run.instructions}`);
       noteAckPatch.noteAck = ack;
     }
+    // ready work always starts: a Delivery manager wake leaving ready rows with no worker and no written reason is
+    // refused once (the rows listed back into the same wake); a second such finish is kept, flagged and the next wake booked now.
+    let unstarted: string[] = [];
+    const endWord = p.outcome ?? run?.outcome;
+    if (run && finishing && !run.endedAt && run.kind === "wake" && !run.parentRunId && endWord !== "failed" && endWord !== "stopped" && endWord !== "running") {
+      const persona = store.getPersona(run.personaId ?? store.getAssignment(run.assignmentId)?.personaId ?? "")?.name;
+      if (isDeliveryManager(persona)) {
+        const m = milestoneId ? store.getMilestone(milestoneId) : undefined;
+        const claimed = new Set(m ? claimsFor(store, m).map((x) => x.ticket) : []);
+        const steps = ((await ready().catch(() => undefined)) ?? []).filter((x) => !claimed.has(x));
+        const launchedRows = store.listRuns({ parentRunId: id, limit: 100 }).flatMap((r) => [r.summary.trim().split(/\s+/)[0]?.replace(/[:,.;]+$/, "") ?? "", rowOf(r.summary) ?? ""]).filter(Boolean);
+        unstarted = unaccountedReady({ ready: steps, launchedRows, summary: p.summary ?? run.summary }); // the wake's own words, never a console note
+        if (unstarted.length && !readyRefused.has(id)) {
+          readyRefused.add(id);
+          throw new ApiError(400, "ready_unstarted", readyUnstartedText(unstarted), { rows: unstarted });
+        }
+        if (unstarted.length)
+          ending.patch = {
+            ...ending.patch,
+            retryAt: new Date().toISOString(),
+            summary: `${ending.patch.summary ?? run.summary} [console: ${READY_REBOOK_MARK}: ${unstarted.join(", ")}; next wake booked now to start them or write their reasons]`.trim(),
+          };
+      }
+    }
     // NO_SELF_READY: a finished run whose commits turned a spine or row from draft to ready is flagged (background).
     if (run && finishing && milestoneId) {
       const m = store.getMilestone(milestoneId);
@@ -4091,7 +4120,8 @@ export function createApp(
           ready: steps,
           launched: store.listRuns({ parentRunId: id, limit: 50 }).length,
         });
-        stalledPatch.stalled = why ?? null;
+        stalledPatch.stalled =
+          (unstarted.length ? `left ${unstarted.length} ready row${unstarted.length === 1 ? "" : "s"} with no worker or reason after a refusal: ${unstarted.slice(0, 5).join(", ")}${unstarted.length > 5 ? ", …" : ""}` : why) ?? null;
       }
     }
     if (run && ending.patch.outcome === "monitoring")

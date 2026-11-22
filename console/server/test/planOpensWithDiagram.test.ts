@@ -85,6 +85,34 @@ describe("the review gate holds a plan card without a diagram", () => {
   it("sends a plan card whose page is a wall of words under its diagram back", async () => {
     expect((await verdictFor("A testers plan was made for you.", drawnThenWall)).reason).toMatch(/few words/);
   });
+  it("re-checks a page held on its shape after recheckMs, so a fixed page clears the gate; a clean verdict is kept", async () => {
+    const text = spineText("EPIC-946", "Launch", [{ id: "E946-S1", title: "x", status: "review", evidence: PAGE }], ["Goal sentence: Get the first testers.", ""]).replace("Project name: [The team console](https://team.example/)\n", "");
+    makeRepo(tmp, "home_repo", { "docs/spines/root.md": ROOT, "docs/spines/epic-946.md": text, "docs/cards/shot.png": "", "docs/cards/E946-S1.md": cardText("E946-S1", { evidence: PAGE, title: "A testers plan was made for you." }) }, { cards: false });
+    const store = createStore(db);
+    store.createMilestone({ title: "home_repo", repo: "home_repo", path: "docs/spines/root.md", owner: "", paused: false });
+    let body = drawnThenWall;
+    let fetches = 0;
+    const page = (async () => (fetches++, new Response(body, { status: 200, headers: { "content-type": "text/html" } }))) as unknown as typeof fetch;
+    let t = Date.parse("2026-11-22T12:00:00Z");
+    const review = createReview(db, { store, reposRoot: tmp, writer: createSpineWriter(), cycle: { runNowRequest: async () => ({ run: { id: "r" } }) }, live: { fetch: page, consoleHosts: [], pageHosts: () => ["pages.example"] }, now: () => new Date(t), recheckMs: 60_000 });
+    const verdict = async () => {
+      await review.list({ wait: true, state: "all" });
+      return (await review.list({ state: "all" })).find((i) => i.ref === "E946-S1")!.verdict;
+    };
+    expect((await verdict()).reason).toMatch(/few words/);
+    body = drawn; // the page is fixed after its first check
+    t += 30_000; // inside recheckMs: the held verdict stands, no new fetch
+    const before = fetches;
+    expect((await verdict()).kind).toBe("needs-evidence");
+    expect(fetches).toBe(before);
+    t += 31_000; // past recheckMs: checked again, the fixed page clears
+    expect((await verdict()).kind).toBe("card");
+    const cleared = fetches;
+    t += 10 * 60_000; // a clean ok verdict is known: never fetched again
+    body = tableFirst;
+    expect((await verdict()).kind).toBe("card");
+    expect(fetches).toBe(cleared);
+  });
   it("never holds a card that is not a plan on this rule", async () => {
     expect((await verdictFor("The test page was built so you can check it.", tableFirst)).kind).toBe("card");
   });

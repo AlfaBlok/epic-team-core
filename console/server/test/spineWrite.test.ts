@@ -537,6 +537,32 @@ describe("API: answer lands in the spine, state read from the spine, wake lists 
     expect(all[0].question).toContain("two of them?");
   });
 
+  it("a card still open under another id for an ask he answered reads answered, a press on it returns his answer, and the lookup by its id finds it", async () => {
+    // 22 Nov 03:22Z: his Send it on an ask was written, then an open copy of the ask (reworded at 03:19, another id) came
+    // back as an urgent card; his press on it saved nothing new, and GET /owner-responses?itemId=<the new id> was empty.
+    const { call } = setup();
+    const m = (await call("POST", "/api/milestones", { title: "Inbox", repo: "Acme/inbox", path: "docs/spines/root.md" })).json;
+    const ask = (await items(call, m.id)).find((i) => i.source === "ask" && i.question.startsWith("Ship with"));
+    const r = await call("POST", `/api/waiting-on-owner/${ask.id}/respond`, { kind: "answer", text: "one", milestoneId: m.id });
+    expect(r.json.spine).toMatchObject({ status: "written" });
+    // the open line as a view older than the answer still has it, reworded (so its id is new), same code
+    put("docs/spines/root.md", read("docs/spines/root.md").replace(/^- \[answered E909-A1[^\n]*$/m, "- [ask E909-A1: decide @Sam since 2026-10-20 row T4] Ship with one logger, or two of them? — options: one | two — recommend: one — context: notes.md"));
+    commitAll(repo, "stale open copy");
+    const all = (await items(call, m.id)).filter((i) => i.code === "E909-A1");
+    expect(all).toHaveLength(1);
+    expect(all[0].id).not.toBe(ask.id);
+    expect(all[0]).toMatchObject({ state: "answered", answer: "one", response: { id: r.json.id } });
+    // a press on that card: his stored answer back, marked, and nothing written twice
+    const before = read("docs/spines/root.md");
+    const again = await call("POST", `/api/waiting-on-owner/${all[0].id}/respond`, { kind: "answer", text: "one", milestoneId: m.id });
+    expect(again.status).toBe(200);
+    expect(again.json).toMatchObject({ id: r.json.id, alreadyAnswered: true, spine: { status: "written" } });
+    expect(read("docs/spines/root.md")).toBe(before);
+    // the lookup by the id the card has now finds the same answer
+    const found = (await call("GET", `/api/owner-responses?itemId=${all[0].id}`)).json as any[];
+    expect(found.map((x) => x.id)).toEqual([r.json.id]);
+  });
+
   it("a refused write keeps the answer, says why, and Retry writes it once the cause is gone", async () => {
     const { call } = setup();
     const m = (await call("POST", "/api/milestones", { title: "Inbox", repo: "Acme/inbox", path: "docs/spines/root.md" })).json;

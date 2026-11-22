@@ -231,11 +231,15 @@ describe("(a) app: the finishing PATCH flags a stalled wake", () => {
     commitSpine("| M1 | Build | ready |\n", today);
     const { call, a } = await setup();
     const r1 = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
-    const p1 = await call("PATCH", `/api/runs/${r1.id}`, { outcome: "progressed", summary: "outcome: progressed: tidied", endedAt: new Date().toISOString() });
-    expect(p1.status).toBe(200);
-    expect(p1.json.stalled).toMatch(/launched no worker and named no blocker while 1 row reads ready: M1/);
+    const p1 = await call("PATCH", `/api/runs/${r1.id}`, { outcome: "progressed", summary: "outcome: progressed: tidied\nblocker: deploy guard until 18:00Z", endedAt: new Date().toISOString() });
+    expect(p1.status).toBe(400); // a blanket blocker no longer accounts for M1; refused once with the row listed
+    expect(p1.json.error.code).toBe("ready_unstarted");
+    const p1b = await call("PATCH", `/api/runs/${r1.id}`, { outcome: "progressed", summary: "outcome: progressed: tidied", endedAt: new Date().toISOString() });
+    expect(p1b.status).toBe(200);
+    expect(p1b.json.stalled).toMatch(/left 1 ready row with no worker or reason after a refusal: M1/);
     const r2 = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
-    const p2 = await call("PATCH", `/api/runs/${r2.id}`, { outcome: "progressed", summary: "outcome: progressed: tidied\nblocker: deploy guard until 18:00Z", endedAt: new Date().toISOString() });
+    const p2 = await call("PATCH", `/api/runs/${r2.id}`, { outcome: "progressed", summary: "outcome: progressed: tidied\nblocker: M1 waits on the deploy guard until 18:00Z", endedAt: new Date().toISOString() });
+    expect(p2.status).toBe(200);
     expect(p2.json.stalled).toBeUndefined();
   });
   it("a DM wake that launched a worker is not stalled", async () => {
@@ -243,7 +247,7 @@ describe("(a) app: the finishing PATCH flags a stalled wake", () => {
     const { call, a } = await setup();
     const r = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
     await call("POST", "/api/runs", { assignmentId: a.id, parentRunId: r.id, summary: "M1 build", outcome: "running" });
-    const p = await call("PATCH", `/api/runs/${r.id}`, { outcome: "progressed", summary: "outcome: progressed: dispatched M1", endedAt: new Date().toISOString() });
+    const p = await call("PATCH", `/api/runs/${r.id}`, { outcome: "progressed", summary: "outcome: progressed: dispatched M1\nnot started M2: worker ceiling", endedAt: new Date().toISOString() });
     expect(p.json.stalled).toBeUndefined();
   });
   it("another persona's wake is never flagged", async () => {

@@ -47,6 +47,45 @@ export function stalledWake(i: { persona?: string; outcome: Run["outcome"]; summ
   return `launched no worker and named no blocker while ${i.ready.length} row${i.ready.length === 1 ? "" : "s"} read${i.ready.length === 1 ? "s" : ""} ready: ${shown}`;
 }
 
+/**
+ * ready work always starts. A finishing top-level Delivery manager wake accounts for every unclaimed ready row:
+ * a child run of this wake on it, or a written reason naming it (one summary line with the row id and `not started`,
+ * `left ready`, `queued`, `skipped`, `blocker` or `waits on`; the same reason goes on the row's Next action in the spine).
+ * A `queued: worker ceiling` / `queued: no seat` line covers every row it does not name (the follow-up wake takes them).
+ * The console refuses the first finish that leaves rows unaccounted (400 `ready_unstarted`, the rows listed back into the
+ * same wake); a second one is kept, flagged stalled, and the next wake is booked at once with the rows named.
+ */
+export const READY_ACCOUNT_RULE =
+  "Every ready row in your scope ends this wake with a worker or a written reason: for each ready row you did not start, one summary line " +
+  "`not started <row>: <reason>` (or `left ready: <ids> (<reason>)`, `skipped <row>: …`, `blocker: <row> …`), and the same reason in that row's Next action in the spine. " +
+  "The console refuses a finish that leaves a ready row with neither (400 `ready_unstarted`, the rows listed): start them or write their reasons, then PATCH again.";
+
+const REASON_WORD = /\b(not started|left ready|queued|skipped|blocker|waits on)\b/i;
+const QUEUED_ALL = /\bqueued:\s*(worker ceiling|no seat)/i;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The ready rows a finishing wake left with no child run and no written reason. Pure. */
+export function unaccountedReady(i: { ready: string[]; launchedRows: string[]; summary: string }): string[] {
+  const lines = (i.summary ?? "").split(/\n|(?<=\.)\s+(?=[a-z`-])|\s\|\s|;\s/i);
+  const reasoned = (id: string) => {
+    const re = new RegExp(`(^|[^A-Za-z0-9-])${esc(id)}(?![A-Za-z0-9])`, "i");
+    return lines.some((l) => re.test(l) && REASON_WORD.test(l));
+  };
+  const named = (id: string) => new RegExp(`(^|[^A-Za-z0-9-])${esc(id)}(?![A-Za-z0-9])`, "i").test(i.summary ?? "");
+  const queuedAll = QUEUED_ALL.test(i.summary ?? "");
+  const launched = new Set(i.launchedRows.map((r) => r.toUpperCase()));
+  return i.ready.filter((id) => !launched.has(id.toUpperCase()) && !reasoned(id) && !(queuedAll && !named(id)));
+}
+
+/** The 400 text that lists the rows back into the same wake. */
+export const readyUnstartedText = (rows: string[]) =>
+  `${rows.length} ready row${rows.length === 1 ? "" : "s"} in your scope ha${rows.length === 1 ? "s" : "ve"} no worker and no written reason: ${rows.join(", ")}. ` +
+  "Start each now (one worker per row), or add one summary line per row `not started <row>: <reason>` and write that reason in the row's Next action, then PATCH again. " +
+  "A second finish like this is kept, flagged stalled, and the next wake is booked at once with these rows.";
+
+/** The note a kept second finish carries: the rows go into the next wake, booked now. */
+export const READY_REBOOK_MARK = "ready rows left with no worker or reason";
+
 // ---------- epics of a tree ----------
 
 export interface EpicRows {

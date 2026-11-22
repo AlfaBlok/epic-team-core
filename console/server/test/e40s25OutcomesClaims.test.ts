@@ -83,7 +83,7 @@ describe("outcome log", () => {
     const run = (await (await app.request("/api/runs", json({ assignmentId: a.id, outcome: "running", summary: "wake" }))).json()) as { id: string };
     const r = await app.request(
       `/api/runs/${run.id}`,
-      patch({ outcome: "progressed", summary: "T9-S1 shipped", endedAt: new Date().toISOString(), outcomes: [{ kind: "delivered", text: "The outcome page is live.", row: "T9-S1", link: "https://team.example/outcomes" }, { kind: "merged", text: "Two learnings merged into one.", row: "T9-S2" }] }),
+      patch({ outcome: "progressed", summary: "T9-S1 shipped\nready rows queued: worker ceiling 6", endedAt: new Date().toISOString(), outcomes: [{ kind: "delivered", text: "The outcome page is live.", row: "T9-S1", link: "https://team.example/outcomes" }, { kind: "merged", text: "Two learnings merged into one.", row: "T9-S2" }] }),
     );
     expect(r.status).toBe(200);
     const body = (await r.json()) as { outcomesLogged: { added: number; path: string } };

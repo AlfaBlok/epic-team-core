@@ -437,16 +437,15 @@ describe("T18-S6 delivered notes, once per closed placed item", () => {
     expect(list.map((p) => [p.itemId, p.state, !!p.notedAt])).toEqual([["T4", "delivered", true], ["E9-2", "delivered", true], ["", "delivered", true]]);
   });
 
-  it("a note T3 refused is retried next pass (once accepted, never again); the chat does not show the note", async () => {
+  it("a note T3 refused is held by the console and re-sent next pass (once accepted, never again); the chat does not show the note", async () => {
     const x = await open();
     await x.call("POST", "/api/desk/placements", { repo: "inbox", path: "docs/spines/root.md", kind: "row", itemId: "T4" }, DESK);
     edit("docs/spines/root.md", (t) => t.replace("| blocked |", "| merged |"));
     t3.failSends = true;
-    expect((await x.call("POST", "/api/desk/sweep")).json).toEqual({ delivered: 1, noted: 0 });
-    expect(((await x.call("GET", "/api/desk/placements")).json as any[])[0]).toMatchObject({ state: "delivered", noteError: "T3 busy" });
-    t3.failSends = false;
-    // `delivered` counts the notes due this pass (the state is the spine's on every read, never stored)
+    // 22 Nov: the note is held in desk_console_lines (noted once), the console re-sends it until T3 takes it
     expect((await x.call("POST", "/api/desk/sweep")).json).toEqual({ delivered: 1, noted: 1 });
+    t3.failSends = false;
+    await x.call("POST", "/api/desk/sweep");
     await x.call("POST", "/api/desk/sweep");
     expect(delivered()).toHaveLength(2); // the refused attempt + the accepted one, same request id
     expect(new Set(delivered().map((c) => c.args.clientRequestId)).size).toBe(1);

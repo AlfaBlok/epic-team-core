@@ -31,11 +31,11 @@ export function undeliveredNote(i: UndeliveredInput): { rel: string; text: strin
   const rel = `${DESK_INBOX_DIR}/${i.day}-console-${alertId(i)}.md`;
   const words = oneLine(i.words);
   const quote = words.length > 600 ? `${words.slice(0, 599)}…` : words;
-  const state = i.gaveUp ? `still not in the chat after ${i.tries} re-sends: the console stopped retrying` : "not in the Team desk chat 2 minutes after it showed as sent: the console is re-sending it each minute";
+  const state = i.gaveUp ? `still not in the chat after ${i.tries} re-sends: the console keeps re-sending it each minute` : "not in the Team desk chat 2 minutes after it showed as sent: the console is re-sending it each minute";
   const text = [
     "---",
     `from: ${i.world}`,
-    `about: ${ownerName()}'s Chat voice note ${i.id} did not reach the desk${i.gaveUp ? " (retries used up)" : ""}`,
+    `about: ${ownerName()}'s Chat voice note ${i.id} did not reach the desk${i.gaveUp ? " (still stuck after its first tries)" : ""}`,
     `reply-to: ${i.replyTo}`,
     "status: open",
     `kind: ${UNDELIVERED_KIND}`,

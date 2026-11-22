@@ -52,8 +52,14 @@ export function wakeStub(
  * load) is relaunched once: the broker is told the exact text (it then avoids that seat 10 min) and picks again.
  */
 export const START_FAIL_RULE =
-  "If T3 says the provider could not start this turn (the console records the child `failed` with that text): `$EPICSPINE_DISPATCHER done <pick id> --fail --signal \"<the exact error>\"`, " +
-  "then relaunch it ONCE as a new child run (steps 1-3: `pick` again, the broker now prefers another seat; summary `<ticket id> retry of <old child run id>`); a second failure stays `failed`.";
+  "A start that fails is retried at once in this turn, never left to the next wake: " +
+  "`pick` timing out or answering unreachable: pick again at once, then by its `retry_after_s`; " +
+  "the child run create failing (5xx, timeout, connection reset): POST it again with the SAME clientRequestId (the console answers with the run it already made, never a second one); " +
+  "`delegate_task` failing on transport (ECONNRESET, timeout, 5xx): call it again at once with the SAME clientRequestId `<ticket id>-<child run id>` (T3 binds it to the one task, never a second), and if that fails too, " +
+  "`$EPICSPINE_DISPATCHER done <pick id> --fail --signal \"<the exact error>\"`, `pick` again (the broker now prefers another seat or host) and delegate the same child run with the same clientRequestId on the new pick. " +
+  "If T3 says the provider could not start this turn (the console records the child `failed` with that text): `done <pick id> --fail --signal \"<the exact error>\"`, " +
+  "then relaunch it ONCE as a new child run at once (steps 1-3: `pick` again, the broker prefers another seat; summary `<ticket id> retry of <old child run id>`); a second failure stays `failed`. " +
+  "A row whose start still fails gets its reason: `not started <row>: start failed (<the error>)`.";
 
 /**
  * which rows end in `review`. Only a finished outcome waits for the owner's review; a step that only
@@ -176,7 +182,7 @@ export const X_LINKS_RULE =
 
 /** a child-run create that times out may still have created the run; the retry must not make a second one. */
 export const CHILD_RUN_RETRY_RULE =
-  "Pick a new clientRequestId for each worker you launch; if that POST times out or fails, retry it with the SAME clientRequestId " +
+  "Each row's worker has one clientRequestId per wake, `<ticket id>-<this wake run id>` (a `retry of` relaunch adds `-r2`); if that POST times out or fails, retry it with the SAME clientRequestId " +
   "(the console answers 200 with the run it already created, never a second one). Never retry a run create without it.";
 
 /** how the persona reads its child runs at each wake. */
@@ -207,7 +213,7 @@ export const HELD_RULE =
  */
 export function jobWorkerSection(o: { base: string; runId: string; world: string; maxWorkers: number; runningWorkers?: number }): string[] {
   const h = "-H 'content-type: application/json'";
-  const body = { ticket: "<row id>", title: "<what it does, a few words>", brief: "<the brief>", clientRequestId: "<row id>-<UTC HHMMSS now>" };
+  const body = { ticket: "<row id>", title: "<what it does, a few words>", brief: "<the brief>", clientRequestId: "<row id>-<this wake run id>" };
   return [
     "B. Child workers: never do long work in this thread.",
     `   This workspace (${o.world}) runs on its own job servers: there is no \`$EPICSPINE_DISPATCHER\` and no \`delegate_task\` here. The console starts each worker for you as a job on a job server of this workspace (its keys from this workspace's own vault).`,
@@ -287,7 +293,7 @@ export function wakeProtocol(o: {
           "If `id` is null and `retryable` is true, pick again in this turn after `retry_after_s`, doubling the wait, for about 15 min in total (a Monitor or until-loop, never a foreground sleep). " +
           `Still null at the end, or not retryable: launch no more this wake: put \`N ready rows ${queuedNoSeat()}\` (N = rows not started, the reason = pick's reason field) in your finishing summary, ` +
           "and finish `progressed` if you started any worker, else `monitoring`, with `retryAt` about now + 5 min either way (queued is waiting, not idle; never leave it to the next scheduled wake; a host cap usually clears within minutes).",
-        `   2. Record it first: \`curl -sS -X POST ${base}/api/runs ${h} -d ${j({ assignmentId: assignment.id, parentRunId: run.id, seat: "<pick id>", outcome: "running", summary: "<ticket id> <what it does>", clientRequestId: "<ticket id>-<UTC HHMMSS now>" })}\``,
+        `   2. Record it first: \`curl -sS -X POST ${base}/api/runs ${h} -d ${j({ assignmentId: assignment.id, parentRunId: run.id, seat: "<pick id>", outcome: "running", summary: "<ticket id> <what it does>", clientRequestId: "<ticket id>-<this wake run id>" })}\``,
         "      Start the summary with the ticket id it works on (e.g. `N10-6 ...`). Keep the returned id: the child run id.",
         "      A 409 `claimed` means the row already has a live session (another wake, desk or Delivery Manager runs a worker on it, or its row holds a live claim): skip that row, `$EPICSPINE_DISPATCHER done <pick id>`, and name it `skipped <row>: claimed by <holder>` in your summary.",
         `      ${CHILD_RUN_RETRY_RULE}`,

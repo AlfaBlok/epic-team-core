@@ -3,7 +3,7 @@ import { effectiveWrite, type Assignment, type Milestone, type Persona } from ".
 import { FINISH_THE_JOB_RULE, NO_COPY_PASTE_RULE, VISUAL_FIRST_RULE, isDeliveryManager } from "./inbox/asks.js";
 import { LEFT_READY_RULE } from "./cycle/followUp.js";
 import { childVerdict, type ChildEpic } from "./cycle/children.js";
-import { BLOCKER_RULE } from "./cycle/movement.js";
+import { BLOCKER_RULE, READY_ACCOUNT_RULE } from "./cycle/movement.js";
 import { homeRepo, ownerName } from "./identity.js";
 
 /** the console's state card reads these lines, so every wake leaves them current. */
@@ -170,7 +170,8 @@ const CHILD_LABEL = {
 /** one line per child epic, with the console's verdict (pick up / owned by <persona> / skip). */
 export const childLine = (c: ChildEpic) => {
   const v = childVerdict(c);
-  return `- ${c.path} — ${c.title} — Status: ${c.status} (${c.runState}) — ${v === "owned" ? `owned by ${c.ownedBy}: leave it alone` : CHILD_LABEL[v]}`;
+  const rows = v === "pickup" && c.ready ? ` — ${c.ready.length ? `ready rows: ${c.ready.join(", ")}` : "no ready row"}` : "";
+  return `- ${c.path} — ${c.title} — Status: ${c.status} (${c.runState}) — ${v === "owned" ? `owned by ${c.ownedBy}: leave it alone` : CHILD_LABEL[v]}${rows}`;
 };
 
 /** every child that needs a look gets its line; finished ones are one count line (a smaller wake). */
@@ -188,7 +189,8 @@ export function parentWakeSteps(children: ChildEpic[], maxWorkers = DEFAULT_MAX_
     "This spine has child epics; you steer them. Read each child's `## Current State` and Status, not its rows, and do not start rows that belong to a child spine except as below.",
     "Children (the console's reading of `spines.py --json`; trust the spine if it changed since):",
     ...childLines(children),
-    "1. For each PICK UP child (Status `ready`, or `active` with no enabled persona of its own): read its Issue Ledger and list its rows with Status `ready` that are unblocked. " +
+    "1. For each PICK UP child (Status `ready`, or `active` with no enabled persona of its own): its line above lists every ready row of its Issue Ledger by id (`ready rows: …`). " +
+      "Each listed row gets a worker this wake or a written reason (see step 4); a ready row in its ledger the list missed counts the same. " +
       "A `draft` row is planning: never start it. An `active` child with no ready rows needs nothing from you.",
     `2. Start those rows: ${rule(maxWorkers)} Each brief names \`Bound epic: <child path>\`. ` +
       "For each child you start, set its `Status: active` and its `Last attempted:` naming this run. " +
@@ -334,6 +336,7 @@ export function buildWakePrompt(
     "4. Finish with one line: `outcome: progressed: <step done>, next <step> | blocked: waits on <open ask code> | monitoring: <what> until <when>, next check <ISO> | idle: no step ready` " +
       "followed by a one-line summary of what you did, the agents you launched, and the ready rows still queued with their reason. " +
       LEFT_READY_RULE +
+      ` ${READY_ACCOUNT_RULE}` +
       ` ${BLOCKER_RULE}` +
       ` ${REVIEW_RULE}` +
       (instructions?.trim() ? ` ${NOTE_ACK_RULE}` : "") +

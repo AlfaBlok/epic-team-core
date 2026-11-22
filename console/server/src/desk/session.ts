@@ -63,7 +63,7 @@ export const SEND_VIEW_WAIT_MS = 2_000;
  * runs on into the cache and the chat retries by itself. Was unbounded: on 2026-11-14 Team desk reads took 10.5 to 56.4 s.
  */
 export const EARLIER_BUDGET_MS = 2_000;
-const WORKING = new Set(["preparing", "queued", "starting", "running"]);
+export const WORKING = new Set(["preparing", "queued", "starting", "running"]);
 /**
  * the start of the turn in progress: the active run (by id, else the newest unfinished one), startedAt else
  * requestedAt. Undefined when the thread is not working or T3 sent no runs.

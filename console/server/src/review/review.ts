@@ -535,8 +535,11 @@ export function createReview(db: DB, o: ReviewOptions) {
   async function checkLink(url: string, commit: string | undefined, force = false, plan = false): Promise<void> {
     const key = `${url}\0${commit ?? ""}`;
     const c = liveRow(url, commit);
-    // a plan's page checked before the diagram test is checked once more for it
-    const known = c?.ok === 1 && !(plan && c.plan === null && (o.live?.pageHosts?.() ?? []).includes(hostOf(url)));
+    // a plan's page checked before the diagram test is checked once more for it; a page held on its shape (a plan or
+    // text-wall problem) is re-checked after recheckMs like a failed one, so a page fixed after its first check clears
+    // the gate (a card sat held for days on '775 words' while its live page showed 217)
+    const shapeHeld = !!c?.plan || !!c?.error?.startsWith(TEXT_WALL_PREFIX);
+    const known = c?.ok === 1 && !shapeHeld && !(plan && c.plan === null && (o.live?.pageHosts?.() ?? []).includes(hostOf(url)));
     if (!force && c && (known || Date.parse(c.checked_at) > now().getTime() - recheckMs)) return;
     let p = checking.get(key);
     if (!p) {

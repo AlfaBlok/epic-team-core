@@ -113,6 +113,8 @@ export interface OwnerResponse {
   job?: AnswerJob;
   /** one answer closes many: the other open asks the same answer closed, the maybes, and the one line to show. */
   settles?: Settled;
+  /** the press found this ask already answered (same file and code): this is that answer, nothing new was written. */
+  alreadyAnswered?: boolean;
 }
 
 /** what one answer also settled (server inbox/settles.ts). */

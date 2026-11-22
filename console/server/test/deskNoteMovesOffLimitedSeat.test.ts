@@ -125,3 +125,39 @@ describe("E907-S3 a console note to the owner moves off a limited seat", () => {
     expect(t3.ops("sendToThread").map((c) => c.args.threadId)).toEqual(["desk1"]);
   });
 });
+
+// 22 Nov outage: 88 receipts went into the busy desk one turn each, his voice notes waited behind them and were dropped.
+describe("console lines wait while the desk is busy and go in together, never ahead of him", () => {
+  it("a busy desk holds the lines; once idle they go in as ONE message, oldest first", async () => {
+    let status = "idle";
+    t3.readThreadStatus = async () => ({ status, raw: {} });
+    const desk = deskOn(["seat2"]);
+    await desk.view();
+    status = "running";
+    expect(await desk.tell("receipt one", "r1")).toBe(true);
+    expect(await desk.tell("receipt two", "r2")).toBe(true);
+    expect(await desk.tell("receipt two", "r2")).toBe(true); // the same line twice is held once
+    expect(t3.ops("sendToThread")).toHaveLength(0);
+    expect(desk.outbox().map((x) => x.crid)).toEqual(["r1", "r2"]);
+    status = "completed";
+    expect(await desk.flushOutbox()).toBe(2);
+    const sent = t3.ops("sendToThread").map((c) => c.args);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].message).toContain("2 lines, oldest first");
+    expect(sent[0].message.indexOf("receipt one")).toBeLessThan(sent[0].message.indexOf("receipt two"));
+    expect(desk.outbox()).toEqual([]);
+    expect(await desk.flushOutbox()).toBe(0);
+  });
+
+  it("T3 queue not empty (his message waiting): the lines stay held", async () => {
+    t3.readThreadStatus = async () => ({ status: "completed", raw: {} });
+    (t3 as any).queuedCount = async () => 1;
+    const desk = deskOn(["seat2"]);
+    await desk.view();
+    expect(await desk.tell("digest", "d1")).toBe(true);
+    expect(t3.ops("sendToThread")).toHaveLength(0);
+    (t3 as any).queuedCount = async () => 0;
+    expect(await desk.flushOutbox()).toBe(1);
+    expect(t3.ops("sendToThread").map((c) => c.args)).toEqual([{ threadId: "desk1", message: "digest", clientRequestId: "d1" }]);
+  });
+});

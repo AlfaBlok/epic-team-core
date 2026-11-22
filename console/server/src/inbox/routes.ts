@@ -557,6 +557,17 @@ export function mountInbox(
    * the item behind a click from the stored views only (no spines.py, no git, no inline compute): the milestone's
    * views, then the whole world's, open and settled. Undefined when no stored view has it (an ask newer than the views).
    */
+  /** every item of the stored view the click reads (the milestone's, else the world's), for code counts. */
+  const storedItems = (milestoneId?: string): WaitingItem[] | undefined => {
+    const rm = o.readModel;
+    if (!rm) return undefined;
+    for (const scope of milestoneId ? [{ milestoneId }, {}] : [{}])
+      for (const includeSettled of [false, true]) {
+        const v = rm.peek<WaitingPayload>({ kind: "waiting", world: store.tenant ?? "", ...scope, includeSettled });
+        if (v) return viewWaiting(v.payload, { includeSuperseded: true });
+      }
+    return undefined;
+  };
   const findStored = (id: string, milestoneId?: string): { item: WaitingItem; asker?: Asker | null } | undefined => {
     const rm = o.readModel;
     if (!rm) return undefined;
@@ -928,6 +939,29 @@ export function mountInbox(
    * re-read from the file (spines.py output is cached), and a written answer whose line the owner has since deleted
    * comes back as a `done` item (from the stored snapshot) for a few days. `scope` limits those to the view.
    */
+  /**
+   * (the owner 22 Nov 03:35Z: "I press send and it disappears and then it comes back"): a coded ask is one ask
+   * whatever its id (repo, file, row and wording make the id; a reworded line or the answered tag changes it). His
+   * written answer to the same file and code, given since the ask was opened, answers it.
+   */
+  const answeredByCode = (byCode: Map<string, JordiResponse>, it: Pick<WaitingItem, "source" | "path" | "code" | "since">, unique: (path: string, code: string) => boolean): JordiResponse | undefined => {
+    if (it.source !== "ask" || !it.code || !it.path || !unique(it.path, it.code)) return undefined;
+    const r = byCode.get(`${it.path}\u0000${it.code}`);
+    if (!r) return undefined;
+    const opened = it.since ? Date.parse(it.since) : NaN;
+    return Number.isFinite(opened) && Date.parse(r.createdAt) < opened ? undefined : r;
+  };
+  /** a code that names one ask in its file (two asks can share a code: those still match by question). */
+  const uniqueCodes = (all: WaitingItem[]) => {
+    const n = new Map<string, number>();
+    for (const i of all) if (i.source === "ask" && i.code && i.path) n.set(`${i.path}\u0000${i.code}`, (n.get(`${i.path}\u0000${i.code}`) ?? 0) + 1);
+    return (path: string, code: string) => n.get(`${path}\u0000${code}`) === 1;
+  };
+  const writtenByCode = (): Map<string, JordiResponse> => {
+    const m = new Map<string, JordiResponse>();
+    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && r.item.path && !m.has(`${r.item.path}\u0000${r.item.code}`)) m.set(`${r.item.path}\u0000${r.item.code}`, r);
+    return m;
+  };
   const withResponses = (all: WaitingItem[], scope: { milestoneId?: string; nodeKey?: string; adhoc?: boolean } = {}) => {
     // a done-marked line stays in the spine for good; its card is shown for a few days after the marker date.
     const items = all.filter((i) => !(i.state === "done" && i.doneAt && Date.now() - Date.parse(i.doneAt) > DONE_SHOWN_MS));
@@ -947,8 +981,15 @@ export function mountInbox(
     const answeredCodes = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done") && i.code).map((i) => ckey(i.path, i.code)));
     const byCode = new Map<string, JordiResponse>();
     for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && !byCode.has(ckey(r.item.path, r.item.code))) byCode.set(ckey(r.item.path, r.item.code), r);
+    const unique = uniqueCodes(items);
+    const shownByCode = new Set<string>();
     const out = items.flatMap((it): (WaitingItem & { response?: JordiResponse })[] => {
       const r = latest.get(it.id) ?? (it.state === "answered" || it.state === "done" ? (byQuestion.get(qkey(it.path, it.question)) ?? (it.source === "ask" && it.code ? byCode.get(ckey(it.path, it.code)) : undefined)) : undefined);
+      // an open coded ask whose code he already answered (written) since it was opened is answered, whatever
+      // its id now (a reworded line, or a view older than the answered line, has another id): never an open card again.
+      const sameCode = !r && it.state === "open" ? answeredByCode(byCode, it, unique) : undefined;
+      if (sameCode) shownByCode.add(sameCode.id);
+      if (sameCode) return [{ ...it, state: "answered" as const, answer: answerWord(sameCode.kind, sameCode.text), response: withOwnerRun(sameCode, it) }];
       if (!r) return [it];
       // A free-text `Waiting on:` item whose answer is now an `[answered]` line is carried by that line's card.
       if (it.source === "heuristic" && r.spine?.status === "written" && answeredLines.has(qkey(it.path, it.question))) return [];
@@ -962,7 +1003,7 @@ export function mountInbox(
     const present = new Set(items.map((i) => i.id));
     for (const [id, r] of latest) {
       // no Needs the owner rows are read here (they were a DB store of asks); an answered spine line is its own card.
-      if (present.has(id) || r.spine?.status !== "written" || r.item.source === "needs_jordi") continue;
+      if (present.has(id) || shownByCode.has(r.id) || r.spine?.status !== "written" || r.item.source === "needs_jordi") continue;
       if (answeredLines.has(qkey(r.item.path, r.item.question)) || answeredCodes.has(ckey(r.item.path, r.item.code))) continue;
       if (!inScope(r, scope)) continue;
       if (Date.now() - Date.parse(r.spine.at ?? r.createdAt) > DONE_SHOWN_MS) continue;
@@ -1195,7 +1236,7 @@ export function mountInbox(
     if (!item) {
       // Idempotent: the same answer posted again after the line flipped (its id changed) returns what was recorded.
       const prior = listResponses({ itemId: id }).find((r) => r.spine?.status === "written");
-      if (prior) return c.json(prior, 200);
+      if (prior) return c.json({ ...prior, alreadyAnswered: true }, 200);
       const m = p.data.milestoneId ? store.getMilestone(p.data.milestoneId) : undefined;
       if (saved && m && !via && !p.data.grantWrite) {
         // Not in any stored view yet (an ask newer than the views): stored against its id now, resolved by the job.
@@ -1207,6 +1248,12 @@ export function mountInbox(
     // a world's token or login answers only its own world's asks (the item id is not a path id rule 3 can judge).
     const own = credentialWorld();
     if (own && milestoneWorld(db, item.milestoneId) !== own) return err(c, 404, "not_found", `waiting item ${id} not found in this world`);
+    // a card still showing an ask he already answered (a reworded line or an older view has another id)
+    // gets that stored answer back, marked, and nothing is written twice; the card says when he answered it.
+    if (!unresolved && item.state === "open" && !p.data.grantWrite) {
+      const done = answeredByCode(writtenByCode(), item, uniqueCodes(storedItems(p.data.milestoneId) ?? [item]));
+      if (done) return c.json({ ...done, alreadyAnswered: true }, 200);
+    }
     const kind = outcomeKind(item, p.data.kind);
     if (!unresolved) {
       const bad = answerRefusal(item, kind, p.data.text);
@@ -1492,9 +1539,18 @@ export function mountInbox(
     return { ok: true, body: { ...answered, stored }, stored };
   }
 
-  api.get("/owner-responses", (c) => {
+  api.get("/owner-responses", async (c) => {
     settlePending();
-    return c.json(listResponses({ milestoneId: c.req.query("milestoneId") || undefined, itemId: c.req.query("itemId") || undefined }));
+    const milestoneId = c.req.query("milestoneId") || undefined;
+    const itemId = c.req.query("itemId") || undefined;
+    const direct = listResponses({ milestoneId, itemId });
+    if (direct.length || !itemId) return c.json(direct);
+    // asked by an id the ask has now (its answered line, a reworded line): the answers to the same file and code.
+    // the stored view first (ms); with none, one live read (this lookup used to answer empty here)
+    const all = storedItems(milestoneId) ?? (await waitingOnJordi(o.deps, { ...(milestoneId ? { milestoneId } : {}), includeSuperseded: true }));
+    const item = all.find((i) => i.id === itemId);
+    if (!item || item.source !== "ask" || !item.code || !item.path || !uniqueCodes(all)(item.path, item.code)) return c.json(direct);
+    return c.json(listResponses({ milestoneId }).filter((r) => r.item.code === item.code && r.item.path === item.path));
   });
   api.post("/owner-responses/:id/deliver", async (c) => {
     settlePending(true); // an answer the asker's PR has put in the spine since is settled first

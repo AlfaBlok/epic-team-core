@@ -304,7 +304,7 @@ describe.skipIf(!SKILL)("T14-S4 API (git + spines.py)", () => {
     const f = path.join(repo, "docs/spines/epic-5.md");
     fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace("Status: draft", "Status: ready"));
     git(repo, "commit", "-qam", `PLAN-5: go\n\nRun: ${run.id}`);
-    expect((await call("PATCH", `/api/runs/${run.id}`, { outcome: "progressed", summary: "outcome: progressed: did it", endedAt: new Date().toISOString() })).status).toBe(200);
+    expect((await call("PATCH", `/api/runs/${run.id}`, { outcome: "progressed", summary: "outcome: progressed: did it\nready rows queued: worker ceiling 6", endedAt: new Date().toISOString() })).status).toBe(200); // every ready row accounted
     let flagged: string[] | undefined;
     for (let i = 0; i < 100 && !flagged; i++) {
       await new Promise((r) => setTimeout(r, 100));

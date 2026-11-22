@@ -187,7 +187,7 @@ describe("T6-S35 dispatch text", () => {
       milestone: { id: "ms_1" },
       persona: { id: "p_1", name: "Delivery Manager" },
     } as any);
-    expect(protocol).toContain('"clientRequestId":"<ticket id>-<UTC HHMMSS now>"');
+    expect(protocol).toContain('"clientRequestId":"<ticket id>-<this wake run id>"');
     expect(protocol).toContain(CHILD_RUN_RETRY_RULE);
     expect(wakeStub("http://c", "asg_1")).toContain("-d '{}'");
   });
