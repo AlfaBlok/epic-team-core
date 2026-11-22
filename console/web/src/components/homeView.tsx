@@ -52,7 +52,7 @@ export function HomePage() {
  * results, each of the key results"; 16 Nov: "it should just chat ... load with first objective ... make them all green.
  * With an eager chat agent focused on getting green"): a paid EpicTeam customer workspace's Home is its one objective,
  * Get set up, with its key results and their lights, drawn like the owner's own objectives (GoalHeader, KeyResultSheet), and
- * its chat beside it (under it on a phone), which works them green. Every other world (ours, an unpaid workspace, through
+ * its chat under it in one column (the owner 22 Nov, step note on the four steps: "hate this 2 col design for this home"), which works them green. Every other world (ours, an unpaid workspace, through
  * the door) keeps what it had.
  */
 function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
@@ -68,13 +68,13 @@ function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
   // up: Home shows the workspace, the objectives its owner added (none at first) and its chat
   if (isCleanWorkspace(objective.data))
     return (
-      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-5" data-testid="clean-workspace-home">
+      <div className="grid min-w-0 max-w-3xl gap-8" data-testid="clean-workspace-home">
         <CleanWorkspaceHome workspace={objective.data} />
         <GettingGoingChat world={w} fresh={!objective.data.objectives.length} clean />
       </div>
     );
   return (
-    <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-5" data-testid="get-set-up-home">
+    <div className="grid min-w-0 max-w-3xl gap-8" data-testid="get-set-up-home">
       <GetSetUp objective={objective.data} />
       <GettingGoingChat world={w} fresh={objective.data.green <= 1} />
     </div>

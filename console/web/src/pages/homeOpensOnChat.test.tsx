@@ -9,7 +9,7 @@ import { ApiError } from "@/api/real";
 
 // the owner 2026-11-17 (vn_7bc94847: "one objective and several key results ... First objective, get set up, and then key
 // results"): a paid team workspace's Home is its one objective, Get set up, with each key result and its light, and its
-// chat beside it; other worlds keep their Home.
+// chat under it; other worlds keep their Home.
 
 globalThis.ResizeObserver ??= class {
   observe() {}
@@ -50,7 +50,7 @@ const home = () =>
   );
 
 describe("Home opens on the chat in a paid team workspace", () => {
-  it("shows ONE objective, Get set up, each key result with its light, and the chat beside it", async () => {
+  it("shows ONE objective, Get set up, each key result with its light, and the chat under it", async () => {
     vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-dana"));
     const fo = vi.spyOn(api, "getFirstObjective").mockResolvedValue(objective);
     const desk = vi.spyOn(api, "getWorldDeskChat").mockResolvedValue(chat);
