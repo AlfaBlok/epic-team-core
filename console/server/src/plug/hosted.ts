@@ -283,6 +283,8 @@ export interface HostsViewContext {
   workerLaunch?: (runId: string) => { ticket?: string | null; title?: string | null } | undefined;
   /** cards he sent back that no worker is on and the queue does not hold yet, each with the one thing holding it (the fallback). */
   sentBack?: () => { ref: string; repo: string; title: string; since?: string; why: string; startsAt?: string }[];
+  /** the objective of his a waiting ticket moves (n: its place in his order, 0 = his first). */
+  objectiveOf?: (q: { milestoneId?: string; ticket: string; title?: string | null; repo?: string }) => { n: number; name: string } | undefined;
 }
 
 /** the worker server's disk watch as core uses it (hosted: status/hostDisk.ts). */

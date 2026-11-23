@@ -11,14 +11,8 @@ import { productHref } from "@/lib/scorecards";
  * and size comes from the kit's kit.json in the repo (the pursuit's `kit.dir`), the previews from its previews/ folder
  * (GET /api/pursuits/<id>/kit/...); only the full-size downloads link into the pursuit's file store (`kit.files`).
  */
-export const SOCIAL_KIT_TAB = "social-kit";
-
-/**
- * Pursuits now live in the sidebar as goal sets (/sets/<id>), so the kit is a tab of the
- * set's own page, `/sets/<id>?tab=kit`; the old /pursuits/<id>/social-kit address leads there.
- */
-export const SET_KIT_TAB = "kit";
-export const setKitHref = (setId: string) => `/sets/${encodeURIComponent(setId)}?tab=${SET_KIT_TAB}`;
+import { SET_KIT_TAB, SOCIAL_KIT_TAB, setKitHref } from "@/lib/pursuitRoutes";
+export { SET_KIT_TAB, SOCIAL_KIT_TAB, setKitHref };
 
 /**
  * Whose kit a set shows: its own pursuit's when it has one, else the pursuit its "Social kit" totem points at (the

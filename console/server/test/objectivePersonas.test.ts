@@ -7,7 +7,7 @@ import { createApp } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import { buildScorecards } from "../src/scorecards.js";
 import { ASSIGNMENTS_FILE, assignmentEntryOf, parseAssignments } from "../src/team/assignmentRecord.js";
-import { objectiveSection } from "../src/wakePrompt.js";
+import { objectiveSection, buildWakePrompt } from "../src/wakePrompt.js";
 
 /**
  * The owner asked for one Delivery Manager per objective on its Personas tab: an assignment names the
@@ -110,6 +110,14 @@ describe("an assignment names its objective", () => {
     expect(s).toContain("Your report opens with each key result");
     expect(s).toContain("app: docs/spines/accounts.md");
     expect(objectiveSection("gone")).toContain("`gone` in docs/pursuits.json");
+  });
+
+  it("an objective manager's wake opens with its red key results that nothing moves", () => {
+    const p = { name: "Delivery Manager", remit: "Run the milestone.", skills: [] };
+    const m = { title: "T", repo: "o/r", path: "docs/x.md", owner: undefined } as never;
+    const s = buildWakePrompt(p, m, { writeEnabled: true, writeScope: "x", objective: "vault" });
+    expect(s).toMatch(/## This wake[\s\S]*0\. First, before alerts[\s\S]*kr_orphans\.py --objective vault[\s\S]*\n1\. /);
+    expect(buildWakePrompt(p, m, { writeEnabled: true, writeScope: "x" })).not.toContain("kr_orphans.py --objective");
   });
 
   it("a Delivery Manager of another world's spine the objective lists after its own is its second manager, on its own spine", () => {

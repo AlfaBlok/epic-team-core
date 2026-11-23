@@ -900,8 +900,10 @@ export interface SlotWait {
   sentBack?: boolean;
   /** its place in the one queue order (1 = the next free slot is its), queued tickets only. */
   place?: number;
-  /** why it sits there: urgent or his feedback, waited over a day, or his objective order. */
+  /** why it sits there: urgent or his feedback, his objective order, or waited over a day. */
   tier?: "first" | "overDay" | "objective";
+  /** his objective it moves (n 0 = his first): the queue goes in his objectives' order. */
+  objective?: { n: number; name: string };
 }
 
 /** a standing approval of a milestone (spines.py `grants`), with the Decisions rows citing it. */

@@ -54,6 +54,12 @@ import { ABOUT_FROM, aboutProblem, NO_ABOUT, NO_ABOUT_FIX } from "./about.js";
  *    words, 8 or fewer ("your reply to Dad"), which opens his card as `About: …`; else held as "card needs rewriting: no
  *    About line". Older asks show a derived one (inbox/about.ts). His vn_106f5727: "can you not just put ... somewhere
  *    there that says what's the topic ... I keep saying this, can you please do it".
+ * 5b. (do asks raised from BROWSER_PROMPT_FROM, merged into rule 5) A `do` ask whose step happens in his own
+ *    signed-in browser (a web link and a sign-in, his Chrome or his account) says so and carries `— browser: <one plain
+ *    prompt for Claude in Chrome>`: what to open (its link), what to do, where to put the result; never a terminal line,
+ *    never a secret. Where the Mac agent can do it, `label: needs Mac agent` with its Mac list ticket stands in for it.
+ *    His vn_e166481b on TAX-A20: "can this type of task, which can be done via Claude with the extension, come with a
+ *    prompt that I can paste?" (browserPromptProblem).
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -75,6 +81,8 @@ export interface GateAsk {
   secret?: unknown;
   /** `label: needs Mac agent`: done from its Mac list ticket, the place he acts (rule 11). */
   macAgent?: unknown;
+  /** `browser:` one plain prompt he pastes into Claude in Chrome (rule 5b). */
+  browser?: string | null;
   /** a runbook link inside `steps:` (rule 11). */
   stepsLink?: string;
   /** E948-S172 `about:` the card's topic (rule 15). */
@@ -93,6 +101,8 @@ export const TAPPABLE_FROM = "2026-11-17";
 export const HANDS_WHY_FROM = "2026-11-12";
 /** the day rule 13 started (E948-S151, his voice note vn_b2c9395c of 2026-11-18). */
 export const CHOICE_LINK_FROM = "2026-11-18";
+/** the day rule 5b started (his voice note vn_e166481b of 2026-11-23): asks raised from the next day. */
+export const BROWSER_PROMPT_FROM = "2026-11-24";
 /** A why that rests on his own machine or sign-in; it must then name the team's own browsers (rule 5). */
 const HIS_MACHINE = /\b(?:mac|macbook|chrome|laptop|signed[ -]in|sign[ -]ins?|logged[ -]in)\b/i;
 const OUR_BROWSERS = /\b(?:team(?:'s)? browser|server browser)\b/i;
@@ -142,7 +152,55 @@ export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
   // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
   // 14. a duplicate of the one GitHub sign-in alarm comes first: rewriting it would not make it his.
-  return outageProblem(a) ?? wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a) ?? aboutLineProblem(a);
+  return outageProblem(a) ?? wordsOrButtonsProblem(a) ?? linkProblem(a) ?? browserPromptProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a) ?? aboutLineProblem(a);
+}
+
+/** The step happens in his own signed-in browser: his sign-in, his Chrome or browser, his account on a site. */
+const HIS_BROWSER = /\bsign(?:ed|s)?[ -]?in\b|\blog(?:ged|s)?[ -]?in\b|\byour (?:own )?(?:chrome|browser)\b|\bin (?:your )?chrome\b|\byour [\w.-]+ account\b|\byour account\b/i;
+/** A sign-in for the Team Browser itself, not a step in his own browser. */
+const TEAM_BROWSER_SIGN_IN = /\bsync again\b|\bpress sync\b|\b(?:team(?:'s)? browser|server browser)\b[^;—]{0,20}\bsigned out\b|\bsign(?:ed|s)?[ -]?in\b[^;—]{0,60}\bin the team(?:'s)? browser\b/i;
+/** A line he would type in a terminal: never in a prompt for Claude (root L-54). */
+const TERMINAL_LINE = /(?:^|[.;:!?]\s+|\s—\s)(?:\$\s|sudo\s|curl\s|wget\s|git\s|ssh\s|scp\s|python3?\s|node\s|npm\s|npx\s|pnpm\s|brew\s|bash\s|zsh\s|chmod\s|cd\s+[~/.]|export\s+[A-Z_]+=)/i;
+/** A secret's value: a known key shape, a long random token, or `password: <value>`. */
+const SECRET_VALUE = /\b(?:sk-|sk_live_|ghp_|gho_|github_pat_|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}|\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b|\b(?:password|passcode|pin|api[ _-]?key|token)\s*[:=]\s*\S+/i;
+const WEB = /\bhttps?:\/\/[^\s)\]>"']+|(?<![@\w.\/-])(?:[a-z0-9-]+\.)+(?:com|io|dev|app|net|org|ai|eu|co|me|es|mx)\b(?:\/[^\s)\]>"']*)?/gi;
+const BROWSER_FIX =
+  "add `— browser: <one plain prompt he pastes into Claude in Chrome: open <the https link>, do <the step>, put the result <where>>` (plain words, never a terminal line or a secret), " +
+  "or, when the Mac agent can do it, make it a Mac list ticket (scripts/laptop_ticket.py) and label the ask `needs Mac agent`";
+const BROWSER_WHY = '(his voice note vn_e166481b on TAX-A20: "can this type of task, which can be done via Claude with the extension, come with a prompt that I can paste?")';
+
+/** Whether a `do` ask is a step in his own signed-in browser (rule 5b): it links a site and says he signs in there. */
+export function isBrowserTask(a: GateAsk): boolean {
+  if (a.ask.toLowerCase() !== "do" || a.secret || a.macAgent) return false;
+  const all = text(a.question, a.contextText, a.why, a.steps, a.recommend);
+  // a sign-in for the Team Browser itself (its "signed out, Sync again") has its own card and flow
+  if (!HIS_BROWSER.test(all) || TEAM_BROWSER_SIGN_IN.test(all)) return false;
+  return [...all.matchAll(WEB)].some((m) => !SPINE_ON_GITHUB.test(m[0]));
+}
+
+/** What is wrong with a prompt for Claude in Chrome; undefined when it is fit to paste. */
+export function browserPromptFault(prompt: string): string | undefined {
+  const p = prompt.trim();
+  if (p.split(/\s+/).filter(Boolean).length < 10) return "its `browser:` prompt is too short: say what to open, what to do and where to put the result";
+  if (![...p.matchAll(WEB)].length) return "its `browser:` prompt names no page: put the https link Claude opens first in it";
+  if (TERMINAL_LINE.test(p) || /`[^`]+`/.test(p)) return "its `browser:` prompt holds a terminal line: plain words only, Claude in Chrome clicks and types in pages (root L-54)";
+  if (SECRET_VALUE.test(p.replace(WEB, " "))) return "its `browser:` prompt holds what looks like a secret: never put a key or password in it, his browser is already signed in";
+  return undefined;
+}
+
+/**
+ * 5b. Why this `do` ask in his own signed-in browser has no prompt he can paste into Claude in Chrome; undefined
+ * when it has a fit one, when the Mac agent does it (`needs Mac agent`), or when it is not a browser step.
+ */
+export function browserPromptProblem(a: GateAsk): string | undefined {
+  if (a.state && a.state !== "open") return undefined;
+  if (a.since !== undefined && (!a.since || a.since < BROWSER_PROMPT_FROM)) return undefined;
+  if (a.browser) {
+    const fault = browserPromptFault(a.browser);
+    return fault ? `${fault} ${BROWSER_WHY}` : undefined;
+  }
+  if (!isBrowserTask(a)) return undefined;
+  return `it is a step in ${ownerName()}'s own signed-in browser but carries no prompt for Claude in Chrome: ${BROWSER_FIX} ${BROWSER_WHY}`;
 }
 
 /** 15. a spine ask raised from ABOUT_FROM with no plain `about:` (E948-S172); the console's own raise writes one. */
@@ -296,7 +354,7 @@ export const ASK_GATE_RULE =
   "The console refuses (422 ask_not_his, or holds back from his inbox and lists to the Delivery Manager) any approve or decide ask that does not name " +
   `what of ${ownerName()}'s it answers (his ask: his words in quotes, a voice note or log id; or a \`why ${ownerName()}:\` that is money, publishing or contacting others, access, ` +
   "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, and any ask carrying a go-live date he did not set (a dated opening, " +
-  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56). One outage, one card (his words: \"cards are being duplicated\"): while the console's GitHub sign-in alarm is open it holds every ask in any world about a GitHub token, sign-in, login or key and points it at that one alarm; when the alarm closes, those asks close with it: never raise your own ask for it.";
+  "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note). A do ask whose step is in his own signed-in browser (download a receipt, change a setting) carries `— browser: <one plain prompt he pastes into Claude in Chrome: what to open, what to do, where to put the result>`, never a terminal line or a secret, or is a needs Mac agent ticket when the Mac agent can do it (his vn_e166481b: \"can this type of task ... come with a prompt that I can paste?\"); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56). One outage, one card (his words: \"cards are being duplicated\"): while the console's GitHub sign-in alarm is open it holds every ask in any world about a GitHub token, sign-in, login or key and points it at that one alarm; when the alarm closes, those asks close with it: never raise your own ask for it.";
 
 export interface HeldAsk {
   code?: string;

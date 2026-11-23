@@ -1560,9 +1560,12 @@ export function PersonasTab({ m, objective }: { m: Milestone; /** shown on an ob
   const [steering, setSteering] = useState<Assignment>();
   const [stopping, setStopping] = useState<Run>();
   const isDm = (a: Assignment) => /delivery manager/i.test(personas.find((x) => x.id === a.personaId)?.name ?? "");
-  const mine = objective
-    ? personasOfObjective(assignments, { id: objective.id, milestoneId: m.id, shared: objective.shared }).sort((a, b) => Number(isDm(b)) - Number(isDm(a)))
-    : assignments.filter((a) => a.milestoneId === m.id);
+  const listed = objective ? personasOfObjective(assignments, { id: objective.id, milestoneId: m.id, shared: objective.shared }) : assignments.filter((a) => a.milestoneId === m.id);
+  // the objective manager is the Delivery Manager on this page's milestone (or the only one, while that one is off); another is a second manager from its own world
+  const ownManagerOn = listed.some((x) => isDm(x) && x.enabled && x.milestoneId === m.id);
+  const isManager = (a: Assignment) => isDm(a) && (a.milestoneId === m.id || !ownManagerOn);
+  const rank = (a: Assignment) => (isManager(a) ? 0 : isDm(a) ? 1 : 2);
+  const mine = objective ? [...listed].sort((a, b) => rank(a) - rank(b)) : listed;
 
   return (
     <div className="grid grid-cols-1 gap-3">
@@ -1583,7 +1586,7 @@ export function PersonasTab({ m, objective }: { m: Milestone; /** shown on an ob
             <CardContent className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{objective && isDm(a) ? (a.milestoneId === m.id || !mine.some((x) => isDm(x) && x.enabled && x.milestoneId === m.id) ? "Objective manager" : `Second manager · ${milestones.find((x) => x.id === a.milestoneId)?.title ?? "own world"}`) : (p?.name ?? a.personaId)}</span>
+                  <span className="font-medium">{objective && isDm(a) ? (isManager(a) ? "Objective manager" : `Second manager · ${milestones.find((x) => x.id === a.milestoneId)?.title ?? "own world"}`) : (p?.name ?? a.personaId)}</span>
                   {p && <Badge variant="outline">{p.model}</Badge>}
                   {p && !a.writeEnabled && <Badge variant="gray">diagnose only</Badge>}
                   <ParkedBadge a={a} />

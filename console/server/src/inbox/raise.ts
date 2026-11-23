@@ -65,6 +65,8 @@ export interface RaisedAsk {
   kind?: "do" | "decide" | "approve" | "provide";
   /** E948-S172: the card's topic in plain words (its `About:` line); else derived from the question. */
   about?: string;
+  /** a step in his own signed-in browser: one plain prompt he pastes into Claude in Chrome (its `browser:` field). */
+  browser?: string;
 }
 
 /**
@@ -84,6 +86,8 @@ export function askLine(code: string, a: RaisedAsk, date: string, owner: string 
   return [
     `- [ask ${code}: ${kind} @${owner} since ${date}${row}] ${fieldsApart(oneLine(a.question))}`,
     ...(a.proposedAction?.trim() ? [`recommend: ${oneLine(a.proposedAction)}`] : []),
+    // the prompt is one field, so a dash in it never splits the line
+    ...(a.browser?.trim() ? [`browser: ${oneLine(a.browser).replace(/\s+—\s+/g, ", ")}`] : []),
     `context: raised by ${by} through the console API; the console wrote this line`,
     // E948-S172: every card opens with its topic; the asker's words, else the plain topic of the question
     ...(() => {

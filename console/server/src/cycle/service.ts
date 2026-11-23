@@ -116,6 +116,9 @@ export interface CycleOptions {
   priorityFor?: (m: Milestone) => string;
   /** the Delivery Manager's ready rows in his objectives' order (wakePrompt dispatchOrderSection); "" = none. */
   dispatchOrder?: (m: Milestone, rows: { id: string; title: string; path?: string }[]) => string;
+  /** the objective of his a queued row moves (its place in his order, 0 = his first), so the work queue starts
+   * his first objective's rows first by default; undefined = on none (or not the home world). */
+  queueObjective?: (m: Milestone | undefined, row: { ticket: string; title?: string | null }) => number | undefined;
   /** priority mode: why this assignment's cadence and timed wakes wait now (undefined = they may run). */
   wakeHold?: (assignmentId: string) => string | undefined;
   /** the wake prompt's pack section for this persona when the milestone repo has a pack on (undefined / "" = none). */
@@ -2732,7 +2735,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
 
   /**
    * the work queue drains by itself. Queued console workers (deferred child runs with a launch spec) are tried
-   * in his objective order (milestone rank, then first queued); a refusal that holds every row (host memory or load,
+   * in queueOrder (urgent first, then his objectives in his order); a refusal that holds every row (host memory or load,
    * seats, team ceiling, unreachable) ends the pass and the rows after it carry the same reason (Hosts shows it), so
    * a freed slot goes to the first row in order within one retry tick, never waiting for a manager wake.
    */
@@ -2753,7 +2756,9 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
         const spec = getWorkerLaunch(db, r.id);
         // urgent and his feedback (an answer of his the console picked up, an URGENT row, a card he sent back) go first
         const first = isFirst({ title: spec?.title, brief: spec?.brief, pickup: isPickupRun(r) });
-        return { id: r.id, r, first, rank: r.milestoneId != null ? ranks.get(r.milestoneId) : undefined, since: r.deferred?.firstAt ?? r.startedAt };
+        // his objective it moves (his order): with nothing urgent his first objective's rows lead the queue
+        const objective = spec?.ticket ? o.queueObjective?.(r.milestoneId != null ? store.getMilestone(r.milestoneId) : undefined, { ticket: spec.ticket, title: spec.title }) : undefined;
+        return { id: r.id, r, first, rank: r.milestoneId != null ? ranks.get(r.milestoneId) : undefined, ...(objective !== undefined ? { objective } : {}), since: r.deferred?.firstAt ?? r.startedAt };
       });
     const tried: string[] = [];
     let held: Refusal | undefined;

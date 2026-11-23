@@ -11,10 +11,9 @@ import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, 
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
-import { GOAL_INBOX_TAB, GoalPills, SetWheel, SidebarGoalSetsOf, topObjectives, useGoalSets } from "@/components/goalSets";
+import { GOAL_INBOX_TAB, GoalPills, SetWheel, topObjectives, useGoalSets } from "@/components/goalRing";
 import { isVoiceNotesPin, useFold, useStoredFlag } from "@/lib/storedFlag";
 import { objectiveOf } from "@/lib/scorecards";
-import { SidebarCampaigns } from "@/components/campaignHome";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { INBOX_LAND } from "@/lib/inboxPlace";
 import { Button } from "@/components/ui/button";
@@ -24,6 +23,7 @@ import { MILESTONE_PAGE, milestoneWheelRows, pageMilestones, progressLabel, spli
 import { LoadMore } from "@/components/loadMore";
 import { statusOf } from "@/lib/status";
 import { lazyPage } from "@/lib/lazyPage";
+import { keptPart, loadCampaignHome, loadGoalSets, prefetchSidebarScripts, useScriptIn } from "@/lib/sidebarScripts";
 import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
@@ -49,6 +49,9 @@ import { FoldChevron } from "@/components/foldChevron";
 
 // The New milestone dialog loads its script the first time it opens, not with the first screen.
 const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
+// the objectives list and the social campaigns list are their own scripts (lib/sidebarScripts.ts).
+const SidebarGoalSetsOf = keptPart(loadGoalSets, "SidebarGoalSetsOf");
+const SidebarCampaigns = keptPart(loadCampaignHome, "SidebarCampaigns");
 
 /**
  * the pills' numbers (GET /api/counts, one small answer, polled with the other queries). The Layout reads it once for
@@ -406,7 +409,12 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // every list the menu shows is in, then the whole menu in one frame, never entries arriving one under another.
   // His objectives are part of that one frame (drawn after the rest, they were the entries arriving late);
   // GET /api/scorecards is kept ready on the server (keptJson), so waiting on it costs a few ms.
+  // the objectives and campaigns lists are their own scripts: the one frame waits for them too
+  const setsScript = useScriptIn(loadGoalSets, shows("goalSets"));
+  const campaignsScript = useScriptIn(loadCampaignHome, campaigns);
   const waitingOn = [
+    !setsScript && "goal-sets-script",
+    !campaignsScript && "campaigns-script",
     !allMilestones && "milestones",
     !sets.data && !sets.error && "scorecards",
     shows("messages") && !messagesList.data && !messagesList.error && "messages",
@@ -689,9 +697,15 @@ export function SidebarWarm() {
   useSharedQuery("sb:world-counts", () => (api.getWorldCounts ? api.getWorldCounts() : Promise.resolve(undefined)), { tag: "counts" });
   useGoalSets();
   useStatusBatch();
-  useReviewCards();
+  const { cards } = useReviewCards();
   useMessages();
   useCampaigns();
+  // the menu's own scripts too, once the inbox's cards are in (they never share the line with them)
+  const campaigns = !!useSkin().campaigns;
+  const inboxIn = cards !== undefined;
+  useEffect(() => {
+    if (inboxIn) prefetchSidebarScripts(campaigns);
+  }, [inboxIn, campaigns]);
   return null;
 }
 

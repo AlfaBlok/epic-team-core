@@ -58,9 +58,18 @@ export function vendorChunk(id: string): string | undefined {
 export const ROUTE_PRELOADS: [RegExp, string][] = [
   [/^\/chat\/?$/, "src/pages/Chat.tsx"],
   [/^\/milestones\/[^/]+\/?$/, "src/pages/Milestone.tsx"],
+  // the Inbox and Home load on first open too (their scripts left the entry): asked with it, not after it
+  [/^\/inbox\/?$/, "src/pages/Team.tsx"],
+  [/^\/$/, "src/components/homeView.tsx"],
 ];
+/**
+ * scripts a wide screen (the laptop's sidebar, Layout WIDE_QUERY) draws on every address but the entry no longer
+ * holds (lib/sidebarScripts.ts): asked beside the entry on a wide screen only; a phone's closed menu reads them later.
+ */
+export const WIDE_PRELOADS: string[] = ["src/components/goalSets.tsx"];
+export const WIDE_MEDIA = "(min-width: 768px)";
 type Chunkish = { type: string; fileName: string; isEntry?: boolean; moduleIds?: string[]; modules?: Record<string, unknown>; imports?: string[] };
-export function routePreloadMap(bundle: Record<string, Chunkish>, routes: [RegExp, string][] = ROUTE_PRELOADS): [string, string[]][] {
+export function routePreloadMap(bundle: Record<string, Chunkish>, routes: [RegExp, string][] = ROUTE_PRELOADS, wide: string[] = WIDE_PRELOADS): [string, string[]][] {
   const chunks = Object.values(bundle).filter((c) => c.type === "chunk");
   const entry = new Set<string>();
   const walk = (file: string, into: Set<string>) => {
@@ -70,14 +79,21 @@ export function routePreloadMap(bundle: Record<string, Chunkish>, routes: [RegEx
   };
   for (const c of chunks.filter((x) => x.isEntry)) walk(c.fileName, entry);
   const out: [string, string[]][] = [];
-  for (const [re, mod] of routes) {
+  const scriptsOf = (mod: string) => {
     const has = (x: Chunkish) => (x.moduleIds ?? Object.keys(x.modules ?? {})).some((id) => id.replace(/\\/g, "/").endsWith(`/${mod}`));
     const c = chunks.find((x) => !x.isEntry && has(x));
-    if (!c) continue; // in the entry already, or gone
+    if (!c) return undefined; // in the entry already, or gone
     const files = new Set<string>();
     walk(c.fileName, files);
-    out.push([re.source, [...files].filter((f) => !entry.has(f))]);
+    return [...files].filter((f) => !entry.has(f));
+  };
+  for (const [re, mod] of routes) {
+    const files = scriptsOf(mod);
+    if (files) out.push([re.source, files]);
   }
+  // the wide screen's own scripts, under the media query instead of an address pattern (marked by a leading "@")
+  const wideFiles = [...new Set(wide.flatMap((m) => scriptsOf(m) ?? []))];
+  if (wideFiles.length) out.push([`@${WIDE_MEDIA}`, wideFiles]);
   return out;
 }
 export function routePreloads(): Plugin {
@@ -94,9 +110,31 @@ export function routePreloads(): Plugin {
         if (!ctx.bundle) return html;
         const map = routePreloadMap(ctx.bundle as unknown as Record<string, Chunkish>);
         if (!map.length) return html;
-        const js = `(function(m,p){for(var i=0;i<m.length;i++)if(new RegExp(m[i][0]).test(p)){for(var j=0;j<m[i][1].length;j++){var l=document.createElement("link");l.rel="modulepreload";l.crossOrigin="";l.href=${JSON.stringify(base)}+m[i][1][j];document.head.appendChild(l)}break}})(${JSON.stringify(map)},location.pathname)`;
+        // the first address pattern that matches adds its scripts; an "@<media query>" entry adds its own when it matches
+        const js = `(function(m,p){var s={},r=0;function a(f){for(var j=0;j<f.length;j++)if(!s[f[j]]){s[f[j]]=1;var l=document.createElement("link");l.rel="modulepreload";l.crossOrigin="";l.href=${JSON.stringify(base)}+f[j];document.head.appendChild(l)}}for(var i=0;i<m.length;i++){var k=m[i][0];if(k.charAt(0)==="@"){if(window.matchMedia&&matchMedia(k.slice(1)).matches)a(m[i][1])}else if(!r&&new RegExp(k).test(p)){r=1;a(m[i][1])}}})(${JSON.stringify(map)},location.pathname)`;
         return html.replace(/(<script type="module"[^>]*src=)/, `<script data-route-preloads>${js}</script>\n    $1`);
       },
+    },
+  };
+}
+
+/**
+ * a production build (VITE_API=real) never calls the mock client, yet api/index.ts imported it (and the
+ * sample data under it) into the first download: such a build gets a stub in its place. Tests and `vite` dev keep it.
+ */
+export const MOCK_STUB_ID = "\0console-mock-api-stub";
+export function realApiOnly(mode = process.env.VITE_API): Plugin {
+  return {
+    name: "console-real-api-only",
+    apply: "build",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (mode !== "real" || source !== "./mock" || !importer?.replace(/\\/g, "/").endsWith("/src/api/index.ts")) return null;
+      return MOCK_STUB_ID;
+    },
+    load(id) {
+      if (id !== MOCK_STUB_ID) return null;
+      return `export function createMockClient() { throw new Error("this build talks to the real API only (VITE_API=real)"); }`;
     },
   };
 }
@@ -104,7 +142,7 @@ export function routePreloads(): Plugin {
 export default defineConfig({
   root: __dirname, // also when run from the hosted tree (hosted/console/web/vite.config.ts re-exports this)
   // E948-S129: our JSX goes through src/lib/linkjsx (every URL in rendered text is a link), libraries keep React's own
-  plugins: [react({ jsxImportSource: "@/lib/linkjsx" }), brotliCopies(), routePreloads()],
+  plugins: [realApiOnly(), react({ jsxImportSource: "@/lib/linkjsx" }), brotliCopies(), routePreloads()],
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   build: { outDir: "dist", emptyOutDir: true, rollupOptions: { output: { manualChunks: vendorChunk } } },
   server: {

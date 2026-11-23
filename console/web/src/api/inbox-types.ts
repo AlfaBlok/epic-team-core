@@ -175,6 +175,8 @@ export interface WaitingItem {
   /** E948-S172 the card's topic in plain words, its first line `About: …` (the ask's own `about:`, else derived). */
   about?: string;
   aboutGiven?: true;
+  /** a step in his own signed-in browser: one plain prompt he pastes into Claude in Chrome (Copy on the card). */
+  browserPrompt?: string;
   /** an open ask his long voice note touched, until its owner rewrites it. */
   noteMark?: import("./review-types").NoteMark;
   id: string;

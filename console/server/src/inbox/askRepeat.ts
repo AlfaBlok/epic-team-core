@@ -32,6 +32,9 @@ export interface PriorAnswer {
   on: string;
   /** where it was answered (a spine line), so the line itself is never its own repeat. */
   at?: string;
+  /** E907-S8: what it unblocked (row codes), and its topics (`about:` values), for the FYI rule. */
+  unblocks?: string | null;
+  topics?: string[];
 }
 
 export interface RepeatAsk {
@@ -47,6 +50,13 @@ export interface RepeatAsk {
   steps?: string | null;
   effort?: string | null;
   at?: string;
+  /** E907-S8: its `about:`, its buttons, what it unblocks and its kind, for the FYI rule. */
+  about?: string | null;
+  aboutAll?: string[];
+  options?: string[];
+  unblocks?: string | null;
+  impact?: string | null;
+  risk?: string | null;
 }
 
 const STOP = new Set(
@@ -102,10 +112,91 @@ export function repeatOf(a: RepeatAsk, answered: PriorAnswer[]): { prior: PriorA
   return best && { prior: best.prior, how: best.how };
 }
 
+/**
+ * E907-S8 (the owner, 23 Nov, on E907-A4: "Didn't i answer this several times already?"). He said yes to an FYI about his
+ * personal LinkedIn (E907-A3); the worker then raised a second FYI on the same topic, and rule 9 let it pass because it cited
+ * E907-A3 (a follow-up). Rule 9b: an FYI (its only button "Got it", or recommend "None: FYI", or it opens "FYI") whose row,
+ * what it unblocks or its `about:` topic matches an ask he answered in the last 14 days is held as "already answered on
+ * <date>: <his answer>", citing the earlier ask or not. A real decision (options to choose from) on the same row passes.
+ */
+export const FYI_WINDOW_DAYS = 14;
+/** an about that names no topic (the console's own `about: FYI`, `about: You decide`). */
+const GENERIC_ABOUT = /^(?:fyi|for your information|you decide|decide|decision|a decision|approve|approval|question|update|status|news|none)$/i;
+const ABOUT_IN_TEXT = /(?:^|\s)(?:—|--|-)?\s*about\s*:\s*(.+?)\s*(?=\s(?:—|--|-)\s|$)/gi;
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9@ ]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** the topics a text and its `about:` name, generic ones dropped, normalised. */
+export function topicsIn(...texts: (string | null | undefined)[]): string[] {
+  const out = new Set<string>();
+  for (const t of texts) {
+    if (!t) continue;
+    const vals = /about\s*:/i.test(t) ? [...t.matchAll(ABOUT_IN_TEXT)].map((m) => m[1]) : [];
+    for (const v of vals.length ? vals : []) {
+      const n = norm(v);
+      if (n && !GENERIC_ABOUT.test(n)) out.add(n);
+    }
+  }
+  return [...out];
+}
+
+/** the given about (a bare value) plus any `about:` glued into the other fields. */
+function topicsOfAsk(a: RepeatAsk): string[] {
+  const own = [...(a.aboutAll ?? []), ...(a.about ? [a.about] : [])].map(norm).filter((t) => t && !GENERIC_ABOUT.test(t));
+  return [...new Set([...own, ...topicsIn(a.question, a.why, a.recommend, a.contextText, a.impact, a.risk, a.unblocks, a.steps)])];
+}
+
+/** an FYI: nothing to choose, only to read. */
+export function isFyi(a: RepeatAsk): boolean {
+  const opts = (a.options ?? []).map((o) => norm(o.split(":")[0] ?? o));
+  const onlyAck = opts.length > 0 && opts.every((o) => /^(?:got it|ok|okay|noted|seen|thanks|none|fyi)$/.test(o));
+  return onlyAck || /^\s*none\b[^a-z]*fyi\b/i.test(a.recommend ?? "") || /^\s*fyi\b/i.test(a.question);
+}
+
+const rowCodes = (...xs: (string | null | undefined)[]) =>
+  new Set(xs.flatMap((x) => (x ?? "").toUpperCase().match(/\b(?!EPIC-)[A-Z][A-Z0-9]*-S\d+\b/g) ?? []));
+
+function daysBefore(day: string, n: number): string {
+  const t = Date.parse(`${day}T00:00:00Z`);
+  return Number.isNaN(t) ? "" : new Date(t - n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** rule 9b: the answer an FYI repeats (same row, same unblocked row or same topic, answered in the last 14 days). */
+export function fyiRepeatOf(a: RepeatAsk, answered: PriorAnswer[], today = new Date().toISOString().slice(0, 10)): { prior: PriorAnswer; how: "row" | "topic" } | undefined {
+  if (!isFyi(a)) return undefined;
+  const day = (a.since ?? today).slice(0, 10);
+  const from = daysBefore(day, FYI_WINDOW_DAYS);
+  const mine = topicsOfAsk(a);
+  const myRows = rowCodes(a.row, a.unblocks);
+  let best: { prior: PriorAnswer; how: "row" | "topic" } | undefined;
+  for (const p of answered) {
+    if (a.at && p.at && a.at === p.at) continue;
+    if (a.code && p.code && a.code.toUpperCase() === p.code.toUpperCase()) continue;
+    if (!p.on || p.on > day || (from && p.on < from)) continue;
+    const theirs = p.topics ?? [];
+    const topic = mine.some((t) => theirs.some((u) => t === u || (similarity(contentWords(t), contentWords(u)).score >= 0.75 && contentWords(t).size >= 2)));
+    const pRows = rowCodes(p.row, p.unblocks);
+    const row = [...myRows].some((r) => pRows.has(r));
+    const how = row ? ("row" as const) : topic ? ("topic" as const) : undefined;
+    // the newest answer wins
+    if (how && (!best || p.on > best.prior.on)) best = { prior: p, how };
+  }
+  return best;
+}
+
 /** rule 9: why this open ask must not reach the owner (it repeats one he answered); undefined when it is new. */
 export function repeatProblem(a: RepeatAsk, answered: PriorAnswer[]): string | undefined {
   const hit = repeatOf(a, answered);
-  if (!hit) return undefined;
+  if (!hit) {
+    const f = fyiRepeatOf(a, answered);
+    if (!f) return undefined;
+    const p = f.prior;
+    const said = (p.answer ?? "").replace(/\s+/g, " ").trim();
+    const which = p.code ? `${p.code}${p.repo ? ` in ${p.repo}` : ""}` : p.row ? `row ${p.row}` : "an earlier ask";
+    return (
+      `already answered on ${p.on}: ${said ? `"${short(said)}"` : "answered"} (${which}). ` +
+      `An FYI on a ${f.how} he already answered stays off his inbox: record it on the row, never as a new FYI (E907-S8)`
+    );
+  }
   const p = hit.prior;
   const said = (p.answer ?? "").replace(/\s+/g, " ").trim();
   const which = p.code ? `${p.code}${p.repo ? ` in ${p.repo}` : ""}` : p.row ? `row ${p.row}` : "an earlier ask";
@@ -178,6 +269,7 @@ interface LogEv {
   row?: string;
   repo?: string;
   words?: string;
+  why?: string;
 }
 
 /** the asks the owner answered, folded from the asks log (one line per event, scripts/ask_log + askLog.ts). */
@@ -203,7 +295,8 @@ export function parseAskLog(text: string): PriorAnswer[] {
     } else if (e.ev === "close" && (e.how === "done" || e.how === "answered")) {
       const o = opened.get(e.id);
       if (!o?.what) continue;
-      out.push({ code: e.id, repo: o.repo ?? null, row: o.row ?? null, question: o.what, answer: answer.get(e.id) ?? null, on: (e.at ?? "").slice(0, 10) });
+      const topics = topicsIn(o.what, o.why);
+      out.push({ code: e.id, repo: o.repo ?? null, row: o.row ?? null, question: o.what, answer: answer.get(e.id) ?? null, on: (e.at ?? "").slice(0, 10), ...(topics.length ? { topics } : {}) });
     }
   }
   return out;

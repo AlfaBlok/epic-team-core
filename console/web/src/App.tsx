@@ -9,9 +9,8 @@ import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_
 import { BookIndexRedirect, BookToDeck } from "@/pages/BookRedirect";
 import { DECK_ALL_PATH } from "@/lib/deck";
 import { ALL_PIPELINE_PATH, PRODUCT_PATH, socialPath } from "@/pages/social/nav";
-import { HomePage } from "@/components/homeView";
 import { INBOX_PATH } from "@/components/inboxLine";
-import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/components/pursuits";
+import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/lib/pursuitRoutes";
 import { PRODUCT_DEF_PATH, PRODUCTS_PATH, SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
 import { OBJECTIVE_SEARCH_PATH } from "@/lib/objectiveSearch";
 import { Empty } from "@/components/common";
@@ -27,7 +26,13 @@ import { OnDevicePage } from "@/voice/OnDevice";
 // Home and the sidebar ship in the first download; every other screen is its own script, fetched the first
 // time it opens (lib/lazyPage.tsx). A cold open was one 1.7 MB script (495 KB zipped) holding every screen.
 const CardInventoryPage = lazyPage(() => import("@/components/cardInventory"), "CardInventoryPage");
-const InboxPage = lazyPage(() => import("@/components/homeView"), "InboxPage");
+// Home too (its goals view and the goal-sets code under it): the Inbox opens without them.
+const HomePage = lazyPage(() => import("@/components/homeView"), "HomePage");
+// the Inbox is the Team page itself, never through Home's script (it holds the goals view and the goal-sets code)
+const TeamPage = lazyPage(() => import("@/pages/Team"), "TeamPage");
+function InboxPage() {
+  return <TeamPage only="inbox" />;
+}
 const SettingsPage = lazyPage(() => import("@/pages/Settings"), "SettingsPage");
 const DashboardPage = lazyPage(() => import("@/pages/Settings"), "DashboardPage");
 const MilestonePage = lazyPage(() => import("@/pages/Milestone"), "MilestonePage");

@@ -19,7 +19,6 @@ import { CardButton } from "@/components/ui/cardButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Empty, ErrorBox, Loading, OutcomeBadge, PageHeader, PHONE_TAP, RelTime } from "@/components/common";
-import { MilestoneDialog } from "@/components/dialogs";
 import { WaitingOnYou } from "@/components/waiting";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews, InboxUrgent } from "@/components/review";
 import { FoldSection, InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
@@ -48,8 +47,8 @@ import { CampaignGoalBlock } from "@/components/CampaignGoal";
 import { CampaignChannels } from "@/components/CampaignChannels";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import type { CampaignCard } from "@/api/campaign-types";
-import { dayLabel, slotLabel } from "@/pages/social/parts";
-import { NEW_CAMPAIGN_PATH } from "@/pages/Campaigns";
+import { dayLabel, slotLabel } from "@/lib/dayLabel";
+import { NEW_CAMPAIGN_PATH } from "@/lib/routePaths";
 import { MILESTONE_PAGE, moveFocus, nextFocusPosition, pageMilestones, progressLabel } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
 import { useFocusSave } from "@/lib/useFocusSave";
@@ -61,6 +60,10 @@ import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
 import { FoldChevron } from "@/components/foldChevron";
+import { lazyPage } from "@/lib/lazyPage";
+
+// the new-goal dialog loads its script when opened, so the Inbox downloads less before its first card.
+const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
 
 /**
  * the console skin's

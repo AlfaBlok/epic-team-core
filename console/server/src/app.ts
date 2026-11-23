@@ -1157,6 +1157,18 @@ export function createApp(
   };
   /** the fallback (made further down, once review and the spine writer exist); Hosts reads what it holds. */
   const pickupRef: { current?: Pickup } = {};
+  /** the objective of his a ticket moves (his order, 0 = his first): the work queue and Hosts sort by it, through
+   * the inbox's own lookup (its red line, its key result, its epic, its repo, its words), so the queue and his inbox agree.
+   * A row of another world, or on none of his objectives, is undefined. The house world's rows (house_decision) rank by
+   * House even though they live in another repo. The lookup is read at most every 10 s (a drain pass reads it per row). */
+  let queueLookupMemo: { at: number; lookup: ReturnType<typeof worldPriorities> } | undefined;
+  const queueObjectiveOf = (m: Milestone | undefined, row: { ticket: string; title?: string | null; repo?: string }): { n: number; name: string } | undefined => {
+    if (m && worldOf(m.id) !== DEFAULT_TENANT) return undefined;
+    if (!queueLookupMemo || Date.now() - queueLookupMemo.at > 10_000) queueLookupMemo = { at: Date.now(), lookup: worldPriorities(store, read.reposRoot) };
+    const repo = row.repo ?? (m ? (resolveRepo(read.reposRoot, m.repo)?.name ?? m.repo) : undefined);
+    const o = queueLookupMemo.lookup?.({ ...(repo ? { repo } : {}), row: row.ticket, ref: row.ticket, ...(row.title ? { title: row.title } : {}) })?.objective;
+    return o ? { n: o.n, name: o.name } : undefined;
+  };
   const cycle = createCycle(db, store, {
     effortFor: pursuitEffort,
     priorityFor: (m) => [priority?.promptLines() ?? "", pursuitPriority(m)].filter(Boolean).join("\n"),
@@ -1167,6 +1179,8 @@ export function createApp(
       const repo = resolveRepo(read.reposRoot, m.repo)?.name ?? m.repo;
       return defs.length ? dispatchOrderSection(byObjective(rows.map((r) => ({ ...r, repo, ref: r.id })), (r) => objectiveOf(defs, r))) : "";
     },
+    // a queued row's objective (its key result, epic, repo, words), so his first objective leads the queue by default
+    queueObjective: (m, row) => queueObjectiveOf(m, row)?.n,
     wakeHold: (id) => priority?.holdsWake(id),
     seatsFile: read.seatsFile,
     teamSkills: opts.teamSkills?.wakeCheck
@@ -1246,7 +1260,12 @@ export function createApp(
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
     totemMap: async (m) => totemMapFor(m),
     // every persona commit names its row (its standing row from docs/functions/catalog.json)
-    commitRow: (p, m) => (personaRows(pursuits.homeDir()).size ? standingRowSection(p.name, standingRow(pursuits.homeDir(), p.name), m.path) : undefined),
+    // a customer's workspace (its plan is not internal) has no row of ours: our catalog's standing rows are for our own worlds
+    commitRow: (p, m) => {
+      const w = worldOf(m.id);
+      const ours = w === DEFAULT_TENANT || (db.prepare("SELECT plan FROM tenants WHERE id = ?").get(w) as { plan?: string } | undefined)?.plan === "internal";
+      return ours && personaRows(pursuits.homeDir()).size ? standingRowSection(p.name, standingRow(pursuits.homeDir(), p.name), m.path) : undefined;
+    },
     wakeFirst: (m) => wakeFirst(m), // the product's map: read its totems first, write back last (root L-77)
     ownerObjectives: async (m) => (ownerObjectivesNow && worldOf(m.id) === DEFAULT_TENANT ? ownerObjectivesNow() : undefined), // his objectives open every wake and brief
     // a persona that names an objective works its epics only
@@ -1673,6 +1692,7 @@ export function createApp(
     })(),
     workerLaunch: (runId: string) => getWorkerLaunch(db, runId),
     sentBack: () => pickupRef.current?.waiting() ?? [],
+    objectiveOf: (q) => queueObjectiveOf(q.milestoneId ? store.getMilestone(q.milestoneId) : undefined, q),
     readyRows: async () => {
       const ms = store.listMilestones().filter((m) => !m.paused && m.repo);
       const trees = await Promise.all(ms.map((m) => treeFor(m, 1_500).then((t) => ({ m, t })).catch(() => undefined)));
@@ -3975,7 +3995,8 @@ export function createApp(
     reposRoot: read.reposRoot,
     campaigns,
     socialUrl: process.env.CONSOLE_SOCIAL_URL || (process.env.CONSOLE_STAGING === "1" ? cycle.publicUrl : siteConfig().socialUrl),
-    wake: cycleOpts.enabled ? async (id, note) => (await cycle.runNowRequest(id, { instructions: note, instructionsBy: ownerName() })).run : undefined,
+    // the platform's own starter notes into a customer's workspace (first draft, own server ready) are signed by the console, never by the owner
+    wake: cycleOpts.enabled ? async (id, note) => (await cycle.runNowRequest(id, { instructions: note, instructionsBy: "the console (sign-up)" })).run : undefined,
     browser: browserArea?.forWorlds, // the tester worlds' own instances and keys (hosted/browser.ts)
     consoleUrl: process.env.CONSOLE_PUBLIC_URL || cycle.publicUrl,
     wakeHold: worldHold,
@@ -4503,7 +4524,7 @@ export function createApp(
     const copyPaste = copyPasteProblem(copyPasteInText(p.question));
     if (copyPaste) throw new ApiError(422, "copy_paste_steps", `the ask was not raised: ${copyPaste}`);
     // a decide ask whose card would show no option buttons is refused (the owner: "only ask feedback").
-    const parsedAsk = parseAsks(`## Waiting on\n${askLine("X-A1", { question: p.question, proposedAction: p.proposedAction, askedBy: "a persona", ...(p.kind ? { kind: p.kind } : {}) }, "2000-01-01")}`)[0];
+    const parsedAsk = parseAsks(`## Waiting on\n${askLine("X-A1", { question: p.question, proposedAction: p.proposedAction, askedBy: "a persona", ...(p.kind ? { kind: p.kind } : {}), ...(p.browser ? { browser: p.browser } : {}) }, "2000-01-01")}`)[0];
     const noButtons = parsedAsk ? decideButtonsProblem(parsedAsk) : undefined;
     if (noButtons) throw new ApiError(422, "decide_no_options", `the ask was not raised: ${noButtons}. Nothing was written and ${ownerName()} sees nothing.`);
     const m = found(store.getMilestone(p.milestoneId), "milestone", p.milestoneId);
@@ -4512,7 +4533,7 @@ export function createApp(
     const persona = a ? store.getPersona(a.personaId)?.name : undefined;
     // an ask that does not name what of the owner's it answers, re-states his answer or carries a go-live
     // date he did not set is refused before anything is written; the reason goes back to the persona, never to him.
-    const gate = askGateProblem(parseAsks(`## Waiting on\n${askLine("X-A1", { question: p.question, proposedAction: p.proposedAction, askedBy: "a persona", ...(p.kind ? { kind: p.kind } : {}) }, "2000-01-01")}`).map(({ since: _old, ...x }) => x)[0] ?? { ask: "unknown", question: p.question });
+    const gate = askGateProblem(parseAsks(`## Waiting on\n${askLine("X-A1", { question: p.question, proposedAction: p.proposedAction, askedBy: "a persona", ...(p.kind ? { kind: p.kind } : {}), ...(p.browser ? { browser: p.browser } : {}) }, "2000-01-01")}`).map(({ since: _old, ...x }) => x)[0] ?? { ask: "unknown", question: p.question });
     if (gate) {
       console.log(`ask gate: refused an ask from ${persona ?? (run ? `run ${run.id}` : "an API caller")} on ${m.id}: ${gate.slice(0, 120)}`);
       throw new ApiError(422, "ask_not_his", `the ask was not raised: ${gate}. Nothing was written and ${ownerName()} sees nothing.`);
@@ -4520,7 +4541,7 @@ export function createApp(
     const r = await raiseAsk(
       raiseDeps(),
       m,
-      { question: p.question, proposedAction: p.proposedAction, askedBy: persona ?? (run ? `run ${run.id}` : "an API caller"), ...(run ? { runId: run.id } : {}), ...(p.row ? { row: p.row } : {}), ...(p.kind ? { kind: p.kind } : {}), ...(p.about ? { about: p.about } : {}) },
+      { question: p.question, proposedAction: p.proposedAction, askedBy: persona ?? (run ? `run ${run.id}` : "an API caller"), ...(run ? { runId: run.id } : {}), ...(p.row ? { row: p.row } : {}), ...(p.kind ? { kind: p.kind } : {}), ...(p.about ? { about: p.about } : {}), ...(p.browser ? { browser: p.browser } : {}) },
       p.path,
     );
     if (r.status !== "written")

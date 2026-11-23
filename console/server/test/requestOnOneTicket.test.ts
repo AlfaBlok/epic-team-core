@@ -25,6 +25,10 @@ describe("one id per request", () => {
     expect(requestIdOf(`${AGENT}e988-s47-run_e321e8f3-step3-desk-reply`)).toBeUndefined();
     expect(requestIdOf(`${CLIENT}chat-11112222-aaaa`, "[laptop] Sam is on his laptop for 1 hour")).toBeUndefined();
   });
+  it("the files notice before his voice note is no request: the voice note after it is (the same rule as the hosted check)", () => {
+    expect(requestIdOf(`${CLIENT}chat-26a16a62-aaaa`, "Files for my voice note, which follows in the next message: read both, then answer once.")).toBeUndefined();
+    expect(requestIdOf(`${CLIENT}chat-c19a4e39-aaaa`, "📎 Attachments (1): Sam attached this file to his message.")).toBe("ch_c19a4e39");
+  });
 });
 
 const SPINE = `# EPIC-940: Lanes
@@ -63,6 +67,25 @@ describe("where a request landed, read from the epic file", () => {
     expect(idx.rowsOf("ch_00000000")).toEqual([]);
     expect(idx.rowsOf("ch_caedab95")?.[0].title).toBe("Inbox counts fixed");
     expect(idx.rowsOf("vn_69ef802c")?.[0].title).toBe("Data ingestion objective");
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  it("reads an epic kept outside docs/spines: at the repo top, in docs/, or a spine one folder under docs/", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "req-rows-"));
+    const row = (code: string, id: string) => SPINE.replace("E940-S98", code).replace("vn_69ef802c", id);
+    fs.mkdirSync(path.join(root, "zen", "docs"), { recursive: true });
+    fs.writeFileSync(path.join(root, "zen", "docs", "EPIC-REAL-USER-TEST.md"), row("E907-S3", "vn_2e2710c0"));
+    fs.writeFileSync(path.join(root, "zen", "docs", "NOTES.md"), "# notes vn_00000001, no ledger\n");
+    fs.mkdirSync(path.join(root, "home2"), { recursive: true });
+    fs.writeFileSync(path.join(root, "home2", "EPIC.md"), row("E907-S4", "vn_75913d30"));
+    fs.mkdirSync(path.join(root, "trips", "docs", "travel"), { recursive: true });
+    fs.writeFileSync(path.join(root, "trips", "docs", "travel", "TRAVEL_SPINE.md"), row("Q-5", "e-ea71a0").replace("E940-S99", "Q-6"));
+    fs.writeFileSync(path.join(root, "trips", "docs", "travel", "notes.md"), row("Q-9", "ch_99999999"));
+    const idx = createRequestRows({ reposRoot: () => root });
+    await idx.ready();
+    expect(idx.rowsOf("vn_2e2710c0")?.map((r) => r.code)).toEqual(["E907-S3"]);
+    expect(idx.rowsOf("vn_75913d30")?.map((r) => r.code)).toEqual(["E907-S4"]);
+    expect(idx.rowsOf("e-ea71a0")?.map((r) => r.code)).toEqual(["Q-5"]);
+    expect(idx.rowsOf("ch_99999999")).toEqual([]);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

@@ -33,7 +33,10 @@ export function plainTitle(card: string | undefined, rowTitle: string | undefine
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-const NOT_HIS = /^\s*(?:↔|🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question)/;
+// the console's own lines, the same list as the hosted check (scripts/request_rows.py NOT_HIS): the files notice before his
+// voice note (the note is the request), a sign-up notice, the call record and the after-call check
+const NOT_HIS =
+  /^\s*(?:↔|🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question|Files for my voice note, which follows|New sign-up on |📞 Call with the desk|📞 After the call|EpicTeam call \(voice call with the desk)/;
 
 export function requestIdOf(itemId: string | undefined, text = ""): string | undefined {
   if (!itemId) return undefined;
@@ -60,7 +63,8 @@ export function requestIdOf(itemId: string | undefined, text = ""): string | und
 
 const REQ_ID = /\b(vn_[0-9a-f]{8}|ch_[0-9a-f]{8})\b|\^?\b(e-[0-9a-f]{6})\b/g;
 const ROW_CODE = /\b((?:E\d+|EPIC-\d+|ROOT|TAX|M\d+|[A-Z]{1,6}\d*)-(?:S|A|T|G)\d+[a-z]?)\b/g;
-const ROW_CODE_FULL = /^(?:E\d+|EPIC-\d+|ROOT|TAX|M\d+|[A-Z]{1,6}\d*)-(?:S|A|T|G)\d+[a-z]?$/;
+// a ledger row code, the same as the hosted check (LEDGER_CODE): a code with no S, A, T or G before its number counts too
+const ROW_CODE_FULL = /^(?:E\d+|EPIC-\d+|ROOT|TAX|M\d+|[A-Z]{1,6}\d*)-(?:S|A|T|G)?\d+[a-z]?$/;
 const SPINE_DIRS = ["docs/spines", "spines", "docs/epics"];
 const STATUS = /^(ready|draft|doing|active|in[ _-]?progress|review|blocked|monitoring|done|parked|superseded|folded|claimed|rework|closed|approved)/i;
 const cellsOf = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split(" | ").map((c) => c.trim());
@@ -168,6 +172,34 @@ function spineFiles(repoDir: string): string[] {
     }
   };
   for (const d of SPINE_DIRS) walk(path.join(repoDir, d));
+  // an epic kept outside those folders (an EPIC file in docs/, EPIC.md at the top, docs/travel/TRAVEL_SPINE.md): a file with an
+  // Issue Ledger at the repo top, in docs/, or named for a spine or epic one folder under docs/ (the hosted check reads the same)
+  const top = (dir: string, named: boolean) => {
+    let ents: fs.Dirent[];
+    try {
+      ents = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      if (!e.isFile() || !e.name.endsWith(".md") || (named && !/spine|epic/i.test(e.name))) continue;
+      const p = path.join(dir, e.name);
+      try {
+        if (fs.readFileSync(p, "utf8").includes("## Issue Ledger")) out.push(p);
+      } catch {
+        /* unreadable: skipped */
+      }
+    }
+  };
+  top(repoDir, false);
+  top(path.join(repoDir, "docs"), false);
+  let subs: fs.Dirent[] = [];
+  try {
+    subs = fs.readdirSync(path.join(repoDir, "docs"), { withFileTypes: true });
+  } catch {
+    /* no docs folder */
+  }
+  for (const e of subs) if (e.isDirectory() && !SPINE_DIRS.includes(`docs/${e.name}`)) top(path.join(repoDir, "docs", e.name), true);
   return out;
 }
 

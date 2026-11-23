@@ -8,7 +8,7 @@ import { OwnerPriorityTag } from "./ownerPriority";
 import { NoteMarkBand } from "./noteMark";
 import { Link } from "react-router-dom";
 import { useProject } from "@/lib/project";
-import { AlarmClock, BookOpen, Check, ChevronDown, ExternalLink, Loader2, RotateCw, Send } from "lucide-react";
+import { AlarmClock, BookOpen, Check, ChevronDown, Copy, ExternalLink, Loader2, RotateCw, Send } from "lucide-react";
 import { StampButton } from "@/components/planning";
 import { LinkedText } from "@/components/outcome";
 import { api, ASK_VERB, codeLabel, SNOOZE_CHOICES, isStructured, jobActive, needsAnswer, type JoinedReview, type OwnerActivity, type OwnerResponse, type MilestoneStatusView, type MonitorAlertAsk, type PendingItem, type SnoozeChoice, type SpineRef, type StatusBatch, type WaitingItem, type WakeResult } from "@/api";
@@ -38,7 +38,7 @@ import { pendingAction } from "@/lib/pending";
 import { blockedItems, openCards as stillOpen, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
-import { LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
+import { copyText, LaptopSwitch, laptopRows, MacCards, searchLaptopView } from "@/components/laptopSwitch";
 import { ConnectCards, useConnects } from "@/components/connectCards";
 import { showClosed } from "@/lib/afterClose";
 import { answeredHere, markSent, unmarkSent, useSent, useKeepSent, type SentEntry } from "@/lib/sentRows";
@@ -209,6 +209,31 @@ function HumanSections({ item, linkOnly }: { item: WaitingItem; linkOnly?: boole
           </div>
         ))}
     </dl>
+  );
+}
+
+/**
+ * (his vn_e166481b on TAX-A20: "can this type of task, which can be done via Claude with the extension, come with a
+ * prompt that I can paste?"): a step in his own signed-in browser shows its one prompt for Claude in Chrome with Copy.
+ */
+export function BrowserPrompt({ prompt }: { prompt: string }) {
+  const [said, setSaid] = useState<"copied" | "failed" | undefined>();
+  return (
+    <div className="mt-2.5 rounded-md border px-3 py-2" data-testid="ask-browser">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">In your browser: paste this into Claude in Chrome</div>
+      <p className="mt-1 text-sm leading-relaxed text-foreground/85 break-words" data-testid="ask-browser-prompt">
+        {prompt}
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className={cn("mt-2 w-fit", PHONE_TAP)}
+        data-testid="ask-browser-copy"
+        onClick={async () => setSaid((await copyText(prompt)) ? "copied" : "failed")}
+      >
+        {said === "copied" ? <Check /> : <Copy />} {said === "copied" ? "Copied" : said === "failed" ? "Press and hold to copy" : "Copy the prompt"}
+      </Button>
+    </div>
   );
 }
 
@@ -1547,6 +1572,8 @@ function WaitingCardBody({
                 {go.label} ↗
               </a>
             )}
+            {/* a step in his own signed-in browser: the prompt he pastes into Claude in Chrome, under the place it opens */}
+            {item.browserPrompt && item.state === "open" && <BrowserPrompt prompt={item.browserPrompt} />}
           </>
         )}
         {/* The owner 2026-11-15 00:0xZ: the buttons and the feedback box with its microphone are one group, nothing between

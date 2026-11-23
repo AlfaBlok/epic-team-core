@@ -1,6 +1,6 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
 import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
-import { createAskLogReader, repeatProblem, sizeProblem, type PriorAnswer } from "./askRepeat.js";
+import { createAskLogReader, repeatProblem, sizeProblem, topicsIn, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "node:child_process";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
 import { createHash } from "node:crypto";
@@ -125,6 +125,8 @@ export interface WaitingItem {
   question: string;
   /** E948-S172: the card's topic in plain words, shown first as `About: …` (the ask's `about:`, else derived: inbox/about.ts). */
   about?: string;
+  /** the ask's `browser:` prompt for Claude in Chrome; his card shows it with a Copy button. */
+  browserPrompt?: string;
   /** the about was written on the ask line (not derived). */
   aboutGiven?: true;
   /** Raw status / gate / proposed-action text behind the item. */
@@ -700,7 +702,11 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         ...Object.entries(tree.asks ?? {}).flatMap(([rel, asks]) =>
           asks
             .filter((a) => a.state === "answered" && !a.feedback && !a.supersededBy && isJordis(a, who) && a.since)
-            .map((a) => ({ code: a.code, repo: repo.name, row: a.row, question: a.question, answer: a.answer, on: a.since!, at: `${repo.name}:${rel}:${a.line ?? ""}` })),
+            .map((a) => {
+              // E907-S8: what it unblocked and its topics, so an FYI on the same row or topic is held (rule 9b).
+              const topics = topicsIn(...[...(a.aboutAll ?? []), ...(a.about ? [a.about] : [])].map((t) => `about: ${t}`), a.question, a.why, a.recommend, a.contextText, a.impact, a.risk, a.unblocks);
+              return { code: a.code, repo: repo.name, row: a.row, question: a.question, answer: a.answer, on: a.since!, at: `${repo.name}:${rel}:${a.line ?? ""}`, unblocks: a.unblocks, ...(topics.length ? { topics } : {}) };
+            }),
         ),
         ...askLogReader(d.reposRoot)(),
       ];
@@ -793,6 +799,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             ask: a.ask,
             question: a.question,
             ...(a.about ? { about: a.about, aboutGiven: true as const } : {}),
+            ...(a.browser ? { browserPrompt: a.browser } : {}),
             // E948-S69: a Decide card always has its choices: the listed options, else buttons built from the question.
             ...(choices.options.length ? { options: choices.options } : {}),
             ...(choices.derived && choices.options.length ? { optionsDerived: true as const } : {}),

@@ -6,11 +6,10 @@ import { api } from "@/api";
 import type { Pursuit, PursuitLine, PursuitLineState, PursuitsBody, PursuitTotem } from "@/api/pursuit-types";
 import { pursuitTitle } from "@/api/pursuit-types";
 import { PageHeader } from "@/components/common";
-import { SOCIAL_KIT_TAB, setKitHref } from "@/components/socialKit";
+import { OldPursuitRoute, PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, PursuitKitRedirect, SOCIAL_KIT_TAB, pursuitHref, setKitHref } from "@/lib/pursuitRoutes";
+export { OldPursuitRoute, PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, PursuitKitRedirect, pursuitHref };
 import { PursuitsMap, RankBadge, epicDeckHref } from "@/components/pursuitsMap";
 import { useQuery } from "@/lib/data";
-import { scorecardHref } from "@/lib/scorecards";
-import { useRoutes } from "@/lib/skin";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { byRingColour } from "@/lib/ringOrder";
@@ -21,12 +20,6 @@ import { byRingColour } from "@/lib/ringOrder";
  * stalled. The repo file docs/pursuits.json is the record; GET /api/pursuits reads it (server/src/pursuits.ts). The
  * look follows docs/design/console.md: ink, grey and the one green; red only as the word of a red line or "stalled".
  */
-export const PURSUITS_PATH = "pursuits";
-/** each pursuit has its own page under Pursuits, its tabs Scorecard and (when it has one) Social kit. */
-export const PURSUIT_PATH = `${PURSUITS_PATH}/:id`;
-export const PURSUIT_TAB_PATH = `${PURSUITS_PATH}/:id/:tab`;
-export const pursuitHref = (id: string, tab?: string) => `/${PURSUITS_PATH}/${encodeURIComponent(id)}${tab ? `/${tab}` : ""}`;
-
 export function usePursuits() {
   return useQuery<PursuitsBody>(() => api.listPursuits(), [], { tag: "inbox" });
 }
@@ -280,26 +273,6 @@ function Crumbs({ p, tab }: { p?: Pursuit; tab?: string }) {
 
 const tabClass = ({ isActive }: { isActive: boolean }) =>
   cn("-mb-px border-b-2 px-1 pb-2 text-sm transition-colors", isActive ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground");
-
-/** The old kit address, in both skins (the pursuit pages are console-only): it leads to the goal set's Social kit tab. */
-export const PURSUIT_KIT_PATH = `${PURSUITS_PATH}/:id/${SOCIAL_KIT_TAB}`;
-export function PursuitKitRedirect() {
-  const { id = "" } = useParams();
-  return <Navigate to={setKitHref(id)} replace />;
-}
-
-/**
- * An old /pursuits address. The console skin keeps its pursuit pages; a skin without them (the social one) opens the
- * objective instead: /pursuits -> All objectives, /pursuits/<id> -> /sets/<id>, its social kit -> the Social kit tab.
- */
-export function OldPursuitRoute({ page }: { page: JSX.Element }) {
-  const routes = useRoutes();
-  const { id, tab } = useParams();
-  // one pursuit opens as its wheel, with its tabs, the key results first, in both skins.
-  if (!id && routes("book")) return page;
-  if (!id) return <Navigate to={scorecardHref()} replace />;
-  return <Navigate to={tab === SOCIAL_KIT_TAB ? setKitHref(id) : scorecardHref(id)} replace />;
-}
 
 /** One pursuit's own page: its scorecard, and its social kit inside the console, never a page of its own. */
 export function PursuitPage() {

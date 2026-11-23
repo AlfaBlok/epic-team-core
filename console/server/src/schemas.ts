@@ -180,6 +180,8 @@ export const needsJordiCreate = z
     kind: z.enum(["do", "decide", "approve", "provide"]).optional(),
     /** E948-S172: the card's topic in plain words, 8 or fewer (its first line, `About: …`); derived from the question when left out. */
     about: z.string().trim().min(1).max(80).optional(),
+    /** a `do` step in his own signed-in browser: one plain prompt he pastes into Claude in Chrome (no terminal line, no secret). */
+    browser: z.string().trim().min(1).max(1200).optional(),
   })
   .strict();
 /** an ask the console wrote taken out again by its raiser once it is moot (the Team Browser's site reads signed in again). */

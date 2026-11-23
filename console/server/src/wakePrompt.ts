@@ -292,7 +292,7 @@ export function deckSection(deckUrl: string): string {
 export function buildWakePrompt(
   persona: Pick<Persona, "name" | "remit" | "skills"> & Partial<Pick<Persona, "mayWrite">>,
   milestone: Pick<Milestone, "title" | "repo" | "path" | "owner">,
-  assignment?: Pick<Assignment, "writeEnabled" | "writeScope">,
+  assignment?: Pick<Assignment, "writeEnabled" | "writeScope"> & { objective?: string | null },
   instructions?: string,
   instructionsBy?: string,
   maxWorkers = DEFAULT_MAX_WORKERS,
@@ -344,6 +344,10 @@ export function buildWakePrompt(
     "",
     "## This wake",
     RUNNABLE_RULE,
+    // an objective manager moves its red key results first: alerts and desk notes come after (the owner: "Get it done.")
+    ...(!ownWork && assignment?.objective && isDeliveryManager(persona.name)
+      ? [`0. First, before alerts, desk notes or anything else: run \`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py --objective ${assignment.objective}\` and act on each ORPHAN line's \`do now\` in this wake (write and start its plan ticket, restart its row, or one ask; see Your objective). Your report's first line: \`red with nothing moving it: <n at start> -> <n at end>\`.`]
+      : []),
     ...(ownWork
       ? ownWorkSteps(children)
       : steer

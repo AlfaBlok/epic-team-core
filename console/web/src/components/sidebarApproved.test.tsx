@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
 import type { ScorecardNode, ScorecardsBody } from "@/api/pursuit-types";
 import { SidebarNav } from "@/components/Layout";
+import { loadGoalSets } from "@/lib/sidebarScripts";
 
 /**
  * the owner's yes ("Yes: build it") on the sidebar mock-up ("we need to harmonize the
@@ -16,6 +17,11 @@ import { SidebarNav } from "@/components/Layout";
 const node = (id: string, name: string, rank: number): ScorecardNode =>
   ({ id, kind: "pursuit", name, rank, greens: 0, total: 1, spines: [], keyResults: [{ label: "One", state: "red", value: "0", kind: "key-result", work: [] }], rows: [], children: [] }) as ScorecardNode;
 const body: ScorecardsBody = { nodes: [node("launch", "Acme: 5 testers", 1), node("books", "Books: accounts in order", 2), node("servers", "Acme: servers run themselves", 3)], spineInfo: {} };
+
+// the objectives list is its own script: in, as the menu's warm-up has it before he opens the menu
+beforeAll(async () => {
+  await loadGoalSets();
+}, 60_000);
 
 afterEach(() => {
   cleanup();
