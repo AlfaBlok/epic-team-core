@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ONE_OFFS_SPINE, readOneOffs, stageOf } from "../src/oneOffs.js";
+import { ONE_OFFS_SPINE, createOneOffs, readOneOffs, stageOf } from "../src/oneOffs.js";
 
 /** One-offs are rows titled `One-off:` anywhere, plus every row of the One-offs spine, by lifecycle stage. */
 
@@ -71,4 +71,20 @@ describe("one-offs", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oneoffs-empty-"));
     expect(readOneOffs(dir, "x").oneOffs).toEqual([]);
   });
+
+  it("reads the one-offs repo too, and a row moved there shows once, from there", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "oneoffs-root-"));
+    for (const [name, rel, text] of [
+      ["team", ONE_OFFS_SPINE, spine("EPIC-903: One-offs", row("E903-S7", "none", "One-off: car rental: moved to one-offs OO-S2", "moved (to one-offs OO-S2)", "2026-11-22"))],
+      ["one-offs", "docs/spines/root.md", spine("EPIC: one-offs", row("OO-S1", "w", "Move the one-offs here", "active", "2026-11-22") + row("OO-S2", "none", "One-off: car rental: three prices", "review", "2026-11-13"))],
+    ] as const) {
+      fs.mkdirSync(path.join(root, name, "docs/spines"), { recursive: true });
+      fs.mkdirSync(path.join(root, name, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(root, name, rel), text);
+    }
+    const b = createOneOffs({ reposRoot: root, home: "team" }).get();
+    expect(b.oneOffs.map((o) => [o.id, o.epic.repo, o.stage])).toEqual([["OO-S2", "one-offs", "your card"]]);
+    expect(b.counts["your card"]).toBe(1);
+  });
 });
+

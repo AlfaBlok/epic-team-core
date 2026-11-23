@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { aboutFrom } from "@/lib/about";
 import { Check, Copy, ExternalLink, Laptop, Loader2, MessageSquareReply, RotateCcw } from "lucide-react";
 import { api, type LaptopFor, type LaptopStep, type LaptopView, type MacTask, type StepTickInput, type WaitingItem } from "@/api";
 import { mutate } from "@/lib/data";
@@ -299,7 +300,7 @@ export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { r
 
 function TaskHead({ row: r, n }: { row: LaptopRow; n: number }) {
   return (
-    <CardMeta kind="Mac" since={r.since ?? r.item?.since} sinceWhat="issued">
+    <CardMeta kind="Mac" about={aboutFrom(r.title)} since={r.since ?? r.item?.since} sinceWhat="issued">
       {n > 0 && <span>{n}</span>}
       {r.redLine && <span className="text-xs text-muted-foreground" data-testid="laptop-red-line">Red line</span>}
       {r.minutes != null && <span data-testid="laptop-minutes">{r.minutes} min</span>}

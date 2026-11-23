@@ -20,6 +20,8 @@ export const PRIORITIES_FILE = "docs/priorities.json";
 export const OBJECTIVES_FILE = "docs/pursuits.json";
 /** his words on each objective, with the words that tell a message is about it (scripts/his_words.py). */
 export const HIS_WORDS_FILE = "docs/his-words.json";
+/** each objective's scorecard (its key results and their work lists). */
+const SCORECARD_DIR = "docs/scorecards";
 
 /** the file a checkout's red lines live in: the objectives file when it holds `redLines`, else docs/priorities.json (a world with no pursuits file). */
 export function redLinesFile(dir: string): string {
@@ -95,6 +97,10 @@ export interface ObjectiveDef extends ObjectiveMark {
   repos: string[];
   /** `<repo>:<file>` of its epics and watched files. */
   spines: string[];
+  /** `<repo>:<code>` of every ticket and ask its key results list in their `work` (its scorecard): the item's own key result. */
+  work?: string[];
+  /** a shared objective shown inside another one (its scorecard's `foldedInto`): its items name that one. */
+  foldedInto?: string;
 }
 /** the objective tier: items on his first objective lead, above what is pressing. */
 export const OBJECTIVE_TIER = -2;
@@ -357,12 +363,14 @@ const cleanPath = (f: string) => f.replace(/^\.?\//, "");
  * his objectives in his order (docs/pursuits.json `pursuits`) with their words (docs/his-words.json, by id; its name
  * is the one he uses). A broken or missing objectives file is none: the order is as before.
  */
-export function parseObjectives(pursuitsText: string | undefined, wordsText?: string): ObjectiveDef[] {
+export function parseObjectives(pursuitsText: string | undefined, wordsText?: string, cards: Record<string, string | undefined> = {}): ObjectiveDef[] {
   let ps: Obj[];
   try {
     const p = JSON.parse(pursuitsText ?? "") as Obj;
-    // an objective he switched inactive (`"active": false`) orders nothing.
-    ps = (Array.isArray(p.pursuits) ? (p.pursuits as unknown[]) : []).filter((x): x is Obj => isObj(x) && !!str(x, "id") && x.active !== false);
+    // an objective he switched inactive (`"active": false`) orders nothing; a parked one (`"parked": true`) has no place
+    // in his sidebar, so it takes no number either (every later card read one too high): the number on a card is the
+    // one his sidebar shows.
+    ps = (Array.isArray(p.pursuits) ? (p.pursuits as unknown[]) : []).filter((x): x is Obj => isObj(x) && !!str(x, "id") && x.active !== false && x.parked !== true);
   } catch {
     return [];
   }
@@ -390,20 +398,53 @@ export function parseObjectives(pursuitsText: string | undefined, wordsText?: st
   // a repo is an objective's own only when no other objective names it (the code repo serves them all)
   const named = new Map<string, number>();
   for (const p of places) for (const r of p.repos) named.set(r, (named.get(r) ?? 0) + 1);
-  return ps.map((o, n) => {
+  // its key results' work lists and its fold, from its scorecard (docs/scorecards/<id>.json); a plain code means its first epic's repo
+  const sheets = ps.map((o) => {
+    let card: Obj = {};
+    try {
+      const c = JSON.parse(cards[str(o, "id")!] ?? "{}") as unknown;
+      if (isObj(c)) card = c;
+    } catch {
+      // no scorecard: no work lists
+    }
+    const first = (Array.isArray(o.epics) ? (o.epics as unknown[]) : []).find((e): e is Obj => isObj(e) && !!str(e, "repo"));
+    const home = first ? norm(str(first, "repo")!) : "";
+    const work = (Array.isArray(card.keyResults) ? (card.keyResults as unknown[]) : [])
+      .flatMap((k) => (isObj(k) && Array.isArray(k.work) ? (k.work as unknown[]) : []))
+      .filter((w): w is string => typeof w === "string" && !w.startsWith("note:"))
+      .map((w) => {
+        const m = /^([\w.-]+):(.+)$/.exec(w.trim());
+        return m ? `${norm(m[1])}:${m[2].trim()}` : `${home}:${w.trim()}`;
+      });
+    return { work, foldedInto: str(card, "foldedInto") };
+  });
+  // his order as every list shows it: a folded copy takes no place of its own
+  const ids = new Set(ps.map((o) => str(o, "id")!));
+  const shown = ps.map((o, i) => !(sheets[i].foldedInto && ids.has(sheets[i].foldedInto!)));
+  return ps.map((o, i) => {
     const id = str(o, "id")!;
     const w = ws.find((x) => str(x, "id") === id);
     const match = (w && Array.isArray(w.match) ? (w.match as unknown[]) : [])
       .map((g) => (Array.isArray(g) ? g.filter((t): t is string => typeof t === "string" && !!t.trim()).map(pattern) : []))
       .filter((g): g is RegExp[] => g.length > 0 && g.every(Boolean));
-    return { n, id, name: (w && str(w, "name")) ?? str(o, "name") ?? id, match, repos: [...places[n].repos].filter((r) => named.get(r) === 1), spines: places[n].spines };
+    const n = shown.slice(0, i).filter(Boolean).length;
+    return {
+      n,
+      id,
+      name: (w && str(w, "name")) ?? str(o, "name") ?? id,
+      match,
+      repos: [...places[i].repos].filter((r) => named.get(r) === 1),
+      spines: places[i].spines,
+      work: sheets[i].work,
+      ...(shown[i] ? {} : { foldedInto: sheets[i].foldedInto }),
+    };
   });
 }
 
 /**
- * the objective an item moves, the first in his order it touches: its red line's objective, an objective whose epic or
- * watched file it lives in or whose own repo it lives in, or one whose words its title or question says (an ask: its
- * question and its epic's title, never the title of a row it sits on, E948-S160).
+ * the objective an item moves: its red line's objective, else the first in his order whose epic or watched file it lives
+ * in, else the one whose own repo it lives in, else (only when none owns where it lives) the first whose words
+ * its title or question says (an ask: its question and its epic's title, never the title of a row it sits on, E948-S160).
  */
 export function objectiveOf(defs: ObjectiveDef[], i: Locatable, redLineObjective?: string): ObjectiveMark | undefined {
   const repo = i.repo ? norm(i.repo) : undefined;
@@ -413,13 +454,19 @@ export function objectiveOf(defs: ObjectiveDef[], i: Locatable, redLineObjective
   // the ask is about, so it is left out.
   const own = i.code && i.question && i.row ? [i.question] : [i.title, i.question];
   const text = own.filter(Boolean).join(" ").replace(NOT_ABOUT, " ");
-  const d = defs.find(
-    (d) =>
-      d.id === redLineObjective ||
-      (!!spine && d.spines.includes(spine)) ||
-      (!!repo && d.repos.includes(repo)) ||
-      (!!text.trim() && d.match.some((g) => g.every((re) => re.test(text)))),
-  );
+  // the red line first, then the objective that owns the item's spine or repo; title words count only when no objective
+  // owns where it lives, so a title naming another product does not pull a card away from its own epic's objective.
+  // the item's own key result before where it lives: a key result listing its row, card or ask names the objective
+  // (a ticket in an epic two objectives share moves the one whose key result lists it).
+  const codes = repo ? [i.code, i.row, i.ref].filter((c): c is string => !!c).map((c) => `${repo}:${c}`) : [];
+  const found =
+    (redLineObjective ? defs.find((d) => d.id === redLineObjective) : undefined) ??
+    (codes.length ? defs.find((d) => codes.some((c) => (d.work ?? []).includes(c))) : undefined) ??
+    (spine ? defs.find((d) => d.spines.includes(spine)) : undefined) ??
+    (repo ? defs.find((d) => d.repos.includes(repo)) : undefined) ??
+    (text.trim() ? defs.find((d) => d.match.some((g) => g.every((re) => re.test(text)))) : undefined);
+  // a folded copy of a shared objective names the one it is shown inside: its own product, its place in his order
+  const d = found?.foldedInto ? (defs.find((x) => x.id === found.foldedInto) ?? found) : found;
   return d ? { n: d.n, id: d.id, name: d.name } : undefined;
 }
 
@@ -609,21 +656,36 @@ function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedL
 }
 
 /** a checkout's objectives, parsed again only when either file changes. */
-const parsedObjectives = new Map<string, { p: string; w?: string; defs: ObjectiveDef[] }>();
+const parsedObjectives = new Map<string, { key: string; defs: ObjectiveDef[] }>();
 function objectivesIn(dir: string): ObjectiveDef[] {
   const p = textOf(path.join(dir, OBJECTIVES_FILE));
   if (!p) return [];
   const w = textOf(path.join(dir, HIS_WORDS_FILE));
+  // each objective's scorecard: its key results' work lists and its fold
+  const cards: Record<string, string | undefined> = {};
+  try {
+    for (const o of (JSON.parse(p) as { pursuits?: { id?: unknown }[] }).pursuits ?? []) {
+      if (typeof o?.id === "string" && /^[\w.-]+$/.test(o.id)) cards[o.id] = textOf(path.join(dir, SCORECARD_DIR, `${o.id}.json`));
+    }
+  } catch {
+    // a broken objectives file parses to none below
+  }
+  const key = JSON.stringify([p, w, cards]);
   const hit = parsedObjectives.get(dir);
-  if (hit && hit.p === p && hit.w === w) return hit.defs;
-  const defs = parseObjectives(p, w);
-  parsedObjectives.set(dir, { p, w, defs });
+  if (hit && hit.key === key) return hit.defs;
+  const defs = parseObjectives(p, w, cards);
+  parsedObjectives.set(dir, { key, defs });
   return defs;
 }
 
 /** his objectives in the order the inbox follows (GET /api/inbox-first shows them). */
 export function worldObjectives(store: Pick<Store, "listMilestones">, reposRoot: string): ObjectiveMark[] {
   return worldFiles(store, reposRoot).objectives.map(({ n, id, name }) => ({ n, id, name }));
+}
+
+/** his objectives with what tells an item moves each (its key results' work lists, epics, repos, words). */
+export function worldObjectiveDefs(store: Pick<Store, "listMilestones">, reposRoot: string): ObjectiveDef[] {
+  return worldFiles(store, reposRoot).objectives;
 }
 
 /**

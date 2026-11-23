@@ -619,7 +619,8 @@ export function AssignmentDialog({
   onOpenChange,
   milestoneId,
   assignment,
-}: DialogProps & { milestoneId: string; assignment?: Assignment }) {
+  objective,
+}: DialogProps & { milestoneId: string; assignment?: Assignment; /** attached from an objective's Personas tab: it works that objective. */ objective?: string }) {
   const w = useWords();
   const { data: personas } = useQuery(() => api.listPersonas(), []);
   const [personaId, setPersonaId] = useState("");
@@ -658,7 +659,7 @@ export function AssignmentDialog({
       assignment
         ? api.updateAssignment(assignment.id, { personaId, cadence })
         : // Attached disabled (safety): it starts waking only when toggled on.
-          api.createAssignment({ milestoneId, personaId, cadence, enabled: false }),
+          api.createAssignment({ milestoneId, personaId, cadence, enabled: false, ...(objective ? { objective } : {}) }),
     );
   };
 

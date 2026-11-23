@@ -85,16 +85,16 @@ describe("T6-S36 one wake at a time", () => {
     expect(t.store.getRun(first.json.id)!.startGuards).toEqual([expect.objectContaining({ action: "already_running" })]);
   });
 
-  it("a note that cannot be queued (T3 refuses) is already_running with the reason, still no second wake", async () => {
+  it("a note the running turn cannot take is held for the next wake, still no second wake, never T3's queue", async () => {
     const t = setup();
     const first = await t.runNow({});
     t.t3.failSteer = true;
     const r = await t.runNow({ note: "do X" });
-    expect(r.status).toBe(409);
-    expect(r.json.error.details).toMatchObject({ action: "already_running" });
-    expect(r.json.error.details.reason).toContain("could not queue the note");
+    expect(r.status).toBe(200);
+    expect(r.json.startGuard).toBe("held");
     expect(t.wakes()).toHaveLength(1);
-    expect(t.store.getRun(first.json.id)!.startGuards![0]).toMatchObject({ action: "already_running", note: "do X" });
+    expect(t.t3.sends.filter((s) => s.mode === "auto")).toHaveLength(0);
+    expect(t.store.getRun(first.json.id)!.startGuards![0]).toMatchObject({ action: "held", note: "do X" });
   });
 
   it("an answer wake while the wake runs is a steer, never a second wake (inbox path, T15-S1 kept)", async () => {

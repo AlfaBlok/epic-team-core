@@ -132,3 +132,34 @@ export interface AskLogSummary {
   /** the log page (on the page shell). */
   page?: string;
 }
+
+/** GET /api/homes/:product/:tab: every file a wheel tab homes (docs/totems/<product>.json), newest first. */
+export interface HomeEntry {
+  id: string;
+  repo: string;
+  path: string;
+  /** repo-relative: what a tap opens (GET /api/homes/file/<repo>/<open>). */
+  open: string;
+  title: string;
+  kind: "page" | "note" | "folder";
+  date?: string;
+  row?: string;
+  /** repo-relative spine a weekly log sits under. */
+  spine?: string;
+  files: number;
+  /** the objective it was made for, when its row's spine sits in no objective's tree (homePlace.ts). */
+  objective?: string;
+  placedBy?: "kr" | "epic" | "path";
+  /** why no objective holds it. */
+  notPlaced?: string;
+}
+export interface HomeTabBody {
+  product: string;
+  tab: string;
+  label: string;
+  repos: string[];
+  patterns: string[];
+  homed: number;
+  covered: number;
+  entries: HomeEntry[];
+}

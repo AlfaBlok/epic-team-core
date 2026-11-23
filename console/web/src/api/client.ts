@@ -1,12 +1,12 @@
-import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef } from "./review-types";
+import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef, SentBackCard } from "./review-types";
 import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody } from "./pursuit-types";
+import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
-import type { TotemMaps, TotemView, WheelTrackers } from "./totem-types";
+import type { CampaignTrackers, CampaignWheelPlan, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
-import type { AskLogSummary, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
+import type { AskLogSummary, HomeTabBody, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
 import type {
   BookView,
   RunStatsView,
@@ -267,6 +267,8 @@ export interface ApiClient {
   listPursuits(): Promise<PursuitsBody>;
   /** the goal sets: the scorecard tree (pursuits, their epics inside), each spine's queue and codes. */
   listScorecards(): Promise<ScorecardsBody>;
+  /** an objective's one where-we-are: docs/scorecards/<id>.md, the top of its Context tab. */
+  whereWeAre(id: string): Promise<WhereWeAre>;
   /** every milestone and objective with no Delivery Manager turning it . */
   personaGaps(): Promise<PersonaGapsBody>;
   /** his order of the pursuits (every id once); one commit in docs/pursuits.json. */
@@ -277,6 +279,8 @@ export interface ApiClient {
   setPursuitActive(id: string, active: boolean): Promise<{ ok: true; sha?: string }>;
   /** Mark done (true) or undo (false) on an objective (done: kept in docs/pursuits.json, out of every list, under Done). */
   setPursuitDone(id: string, done: boolean): Promise<{ ok: true; sha?: string }>;
+  /** his Daily briefing switch on one objective (one commit in docs/pursuits.json). */
+  setPursuitBriefing(id: string, on: boolean): Promise<{ ok: true; sha?: string }>;
   /** single jobs outside every pursuit, by stage (rows titled `One-off:` and docs/spines/one-offs.md). */
   listOneOffs(): Promise<OneOffsBody>;
   /** the outcome log: one line per real outcome every persona logged at the end of a wake, filtered. */
@@ -289,6 +293,8 @@ export interface ApiClient {
   advisorVerdict(id: string, v: AdvisorVerdictBody): Promise<{ ok: true; card: TeamCard; rows?: Record<string, string>; failed?: { item: string; reason: string }[]; sha?: string }>;
   /** every one-off page the team serves, by repo and epic (docs/pages/registry.json). */
   listPages(): Promise<PagesBody>;
+  /** every file one wheel tab homes (History, Pages), newest first. */
+  homeTab(product: string, tab: string): Promise<HomeTabBody>;
   /** when a pinned page last refreshed, and its Refresh button. */
   listPinnedPages(): Promise<{ pinned: PageView[] }>;
   pinnedPageStatus(port: number): Promise<PinnedStatus>;
@@ -560,14 +566,17 @@ export interface ApiClient {
   saveOnePager(tenantId: string, milestoneId: string, fields: Partial<Record<OnePagerKey, string>>): Promise<{ commit?: string; onePager?: OnePager; closedDraft?: string }>;
   /** the five tabs' read of the campaign's epic file; Keep or Undo a rebuilt slide; a proposal's Add to the brief / Not now. */
   getCampaignTotems(tenantId: string, milestoneId: string): Promise<CampaignTotems>;
+  /** the campaign's Trackers tab: the tracker tables of the wheel it serves (docs/trackers, never made up). */
+  getCampaignTrackers(tenantId: string, milestoneId: string): Promise<CampaignTrackers>;
+  getCampaignWheelPlan(tenantId: string, milestoneId: string): Promise<CampaignWheelPlan>;
   /** the campaign's Plan tab: its marketing plan from the spine's `## Plan` section (docs/campaign-plan.md). */
   getCampaignPlan(tenantId: string, milestoneId: string): Promise<MarketingPlan>;
   /** the campaign's daily briefings, the morning talk kept on it (latest, then older ones). */
   getCampaignBriefings(tenantId: string, milestoneId: string): Promise<CampaignBriefings>;
   /** the owner writes the Plan's line and eight sections into the campaign spine (one commit). */
   saveCampaignPlan(tenantId: string, milestoneId: string, input: MarketingPlanWrite): Promise<MarketingPlan>;
-  /** an objective's Plan tab: the same eight sections, read from the campaign spine the objective names. */
-  getObjectivePlan(id: string): Promise<MarketingPlan>;
+  /** an objective's Plan tab: its wheel's plan, how each key result gets to green (steps, owners, dates). */
+  getObjectivePlan(id: string): Promise<WheelPlan>;
   /** root L-77: every product's map (its hardwired totems) and one totem's content for its tab. */
   getTotems(): Promise<TotemMaps>;
   getTotem(product: string, id: string): Promise<TotemView>;
@@ -656,7 +665,9 @@ export interface ApiClient {
   undoAnswer(responseId: string): Promise<{ undone: true; itemId: string }>;
   reopenReviewRow(card: ClosedCardRef & { /** the card's id: it lands after the close it undoes */ id?: string }): Promise<{ status: "review"; sha?: string }>;
   /** Add a last thought / Add comment: his words on a closed card, to its row or ask owner (spine first, then a wake). */
-  commentClosedCard(input: ClosedCardRef & { text: string; attachments?: string[]; via?: "text" | "voice" }): Promise<{ sha?: string; woke?: string; wakeError?: string }>;
+  commentClosedCard(input: ClosedCardRef & { text: string; attachments?: string[]; via?: "text" | "voice"; stage?: "closed" | "in_work" }): Promise<{ sha?: string; woke?: string; wakeError?: string }>;
+  /** every card he sent back that is not back in review yet (the Inbox's Sent back, in progress). */
+  listSentBackCards?(): Promise<SentBackCard[]>;
   /** the cards he closed in the last 30 days (Team home's Recently closed). */
   listClosedCards(): Promise<ClosedCard[]>;
   reopenGoal(key: string): Promise<{ goal: ClosedGoal; sha?: string }>;

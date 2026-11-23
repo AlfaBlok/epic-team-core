@@ -105,3 +105,17 @@ describe("WaitingCard: key ask paste box", () => {
     expect(document.body.textContent).not.toContain(VALUE);
   });
 });
+
+describe("a failed paste says why in plain words and keeps saying it", () => {
+  it("a restart the card could not wait out: plain words, and the note survives the card being drawn again", async () => {
+    vi.spyOn(api, "saveKey").mockRejectedValue(new TypeError("Failed to fetch"));
+    const first = wrap(<WaitingCard item={item()} />);
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: VALUE } });
+    fireEvent.submit(screen.getByTestId("secret-box"));
+    await waitFor(() => expect(screen.getByTestId("secret-note").textContent).toMatch(/console was restarting.*Nothing was stored.*Paste the key again/));
+    first.unmount();
+    wrap(<WaitingCard item={item()} />);
+    expect(screen.getByTestId("secret-note").textContent).toMatch(/console was restarting/);
+    expect(document.body.textContent).not.toContain(VALUE);
+  });
+});

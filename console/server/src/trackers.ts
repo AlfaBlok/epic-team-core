@@ -21,13 +21,19 @@ export interface TrackerTable {
   for?: string;
   columns: string[];
   statuses: string[];
+  /** the columns on an entry's folded line; the rest show when he unfolds it. None: every column. */
+  shown?: string[];
   from: "frame" | "product" | "own";
   /** rows may be written (an asked-for table waits for his yes). */
   open: boolean;
   yes?: string;
   rows: string[][];
-  /** entries per status, in the table's status order. */
+  /** entries per status, in the table's status order; statuses in `notCounted` are left out. */
   counts: { status: string; n: number }[];
+  /** entries kept on the table but left out of its count (the team's own test sign-ups), per status. */
+  uncounted?: { status: string; n: number }[];
+  /** where the rows come from when they are not in the repo: a source the console fills from its own database. */
+  source?: string;
   file: string;
 }
 export interface WheelTrackers {
@@ -49,13 +55,37 @@ const readJson = (p: string): Record<string, unknown> => {
   }
 };
 
-type Def = Omit<TrackerTable, "from" | "open" | "rows" | "counts" | "file">;
+type Def = Omit<TrackerTable, "from" | "open" | "rows" | "counts" | "uncounted" | "file"> & { notCounted?: string[] };
+
+/**
+ * The owner: "I think the tester applications are a tracker inside the ... objective": a table declared with `source` (scripts/trackers.py) takes its rows from the console's own database,
+ * never from a csv in the repo (sign-ups are private: never a repo). The layer that owns the data registers the source;
+ * a console without it shows the table empty.
+ */
+export type TrackerSource = (columns: string[]) => string[][];
+const SOURCES = new Map<string, TrackerSource>();
+export function registerTrackerSource(id: string, rows: TrackerSource): void {
+  SOURCES.set(id, rows);
+}
+/**
+ * The owner, 22 Nov (vn_99680bcb): "the ID of the tester is their email. I want to see the email ... clearly". A table
+ * whose rows sit in the repo can still carry a private column the repo never holds: the layer that owns it registers a
+ * join for `<wheel>/<table>`, which may add columns (the first one becomes the entry's id) and fill them each time the
+ * tab opens. Synchronous: a join reads its own cache and never waits.
+ */
+export type TrackerJoin = (t: { columns: string[]; shown?: string[] }, rows: string[][]) => { columns: string[]; shown?: string[]; rows: string[][] };
+const JOINS = new Map<string, TrackerJoin>();
+export function registerTrackerJoin(key: string, join: TrackerJoin): void {
+  JOINS.set(key, join);
+}
 function defs(v: unknown): Def[] {
   return arr(obj(v).tables).flatMap((t) => {
     const o = obj(t);
     const id = str(o.id), name = str(o.name), columns = strs(o.columns);
     if (!id || !/^[a-z0-9][a-z0-9-]*$/.test(id) || !name || columns.length < 2) return [];
-    return [{ id, name, columns, statuses: strs(o.statuses), ...(str(o.for) ? { for: str(o.for) } : {}), ...(str(o.yes) ? { yes: str(o.yes) } : {}) }];
+    const shown = strs(o.shown).filter((c) => columns.includes(c));
+    const notCounted = strs(o.notCounted);
+    return [{ id, name, columns, statuses: strs(o.statuses), ...(str(o.source) ? { source: str(o.source) } : {}), ...(notCounted.length ? { notCounted } : {}), ...(shown.length ? { shown: [columns[0], ...shown.filter((c) => c !== columns[0])] } : {}), ...(str(o.for) ? { for: str(o.for) } : {}), ...(str(o.yes) ? { yes: str(o.yes) } : {}) }];
   });
 }
 
@@ -92,19 +122,33 @@ export function wheelTrackers(home: string | undefined, wheel: string): WheelTra
     for (const t of list) {
       if (seen.has(t.id)) continue;
       seen.add(t.id);
-      const file = `${TRACKERS_DIR}/${wheel}/${t.id}.csv`;
+      const { notCounted = [], ...def } = t;
+      const file = t.source ? `the console's database (${t.source})` : `${TRACKERS_DIR}/${wheel}/${t.id}.csv`;
       let rows: string[][] = [];
       try {
-        rows = csvOf(fs.readFileSync(path.join(home, file), "utf8")).rows;
+        rows = t.source ? (SOURCES.get(t.source)?.(t.columns) ?? []) : csvOf(fs.readFileSync(path.join(home, file), "utf8")).rows;
       } catch {
         /* nothing written yet: ships empty */
       }
-      const si = t.columns.indexOf("Status");
+      const join = JOINS.get(`${wheel}/${t.id}`);
+      if (join) {
+        try {
+          const j = join({ columns: def.columns, ...(def.shown ? { shown: def.shown } : {}) }, rows);
+          def.columns = j.columns;
+          if (j.shown) def.shown = j.shown;
+          rows = j.rows;
+        } catch {
+          /* a join that fails leaves the repo's rows as they are */
+        }
+      }
+      const si = def.columns.indexOf("Status");
       const by = new Map<string, number>();
       for (const r of rows) by.set(r[si] || "no status", (by.get(r[si] || "no status") ?? 0) + 1);
       const rank = (s: string) => (t.statuses.includes(s) ? t.statuses.indexOf(s) : 99);
-      const counts = si < 0 ? [] : [...by].map(([status, n]) => ({ status, n })).sort((a, b) => rank(a.status) - rank(b.status));
-      tables.push({ ...t, from, open: from !== "own" || !!t.yes, rows: rows.slice(0, 500), counts, file });
+      const all = si < 0 ? [] : [...by].map(([status, n]) => ({ status, n })).sort((a, b) => rank(a.status) - rank(b.status));
+      const counts = all.filter((c) => !notCounted.includes(c.status));
+      const uncounted = all.filter((c) => notCounted.includes(c.status));
+      tables.push({ ...def, from, open: from !== "own" || !!t.yes, rows: rows.slice(0, 500), counts, ...(uncounted.length ? { uncounted } : {}), file });
     }
   return { wheel, name: pursuit.name, ...(product ? { product } : {}), tables };
 }

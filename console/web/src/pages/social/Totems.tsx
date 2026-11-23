@@ -13,6 +13,8 @@ import { mutate, useQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
 import { absoluteLinks, splitTaskCodes } from "@/lib/totems";
 import { cn } from "@/lib/utils";
+import { FoldChevron } from "@/components/foldChevron";
+import { HistoryFilesFor } from "./History";
 
 /**
  * the five fixed tabs of a campaign in the social
@@ -260,6 +262,71 @@ function TaskGroup({ g, rows, row, forceOpen, base }: { g: (typeof GROUPS)[numbe
 
 // ---------- Observations ----------
 
+/** a benefit's status as a quiet pill: colour only when it is the claim (works today) or a warning (half built). */
+const BENEFIT_TONE: Record<string, string> = {
+  "works today": "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  "half built": "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300",
+};
+
+/**
+ * The owner 22 Nov: "you're not putting benefits, but benefits is like an extreme thing"; and: "the product type or the
+ * benefits type is an important type ... the personas need this totem in their graph". The campaign's Benefits tab, what the product does for the people who use it, each
+ * line as they read it (what you get, then how), whether it works today, and the real screen that shows it. One source:
+ * the brief's Benefits table, else the product deck's What it does for you (server totems.ts campaignBenefits).
+ */
+export function BenefitsTab({ m }: { m: Milestone }) {
+  const q = useTotems(m.id);
+  const t = q.data;
+  if (q.error && !t) return <ErrorBox error={q.error} />;
+  if (!t) return <Loading />;
+  const b = t.benefits ?? { source: null, lines: [], asked: [] };
+  return (
+    <div data-testid="benefits-tab" data-lines={b.lines.length}>
+      <TabHead title="Benefits">What this product does for the people who use it, in the words they see. Every post opens on one of these, and only on one that works today.</TabHead>
+      {b.lines.length ? (
+        <ol className="grid gap-3" data-testid="benefit-lines">
+          {b.lines.map((l) => (
+            <li key={l.id} id={`benefit-${l.id}`} className="grid min-w-0 gap-3 rounded-xl border bg-card p-4 sm:grid-cols-[1fr_14rem]" data-testid="benefit-line">
+              <div className="flex min-w-0 gap-3">
+                <span className="mt-0.5 w-5 shrink-0 text-sm tabular-nums text-muted-foreground">{l.id}</span>
+                <div className="grid min-w-0 gap-1">
+                  <p className="font-medium leading-snug [overflow-wrap:anywhere]">{l.benefit}</p>
+                  {l.does && <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{l.does}</p>}
+                  {l.status && (
+                    <span className={cn("mt-1 inline-flex h-6 w-fit items-center self-start rounded-full px-2 text-xs font-medium leading-none", BENEFIT_TONE[l.status] ?? "bg-muted text-muted-foreground")} data-testid="benefit-status">
+                      {l.soon ? `${l.status}, coming soon` : l.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {l.screen?.url && (
+                <a href={l.screen.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-md border" title={l.screen.label}>
+                  <img src={l.screen.url} alt={l.screen.label} loading="lazy" className="aspect-[16/10] w-full object-cover object-top" />
+                </a>
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="benefits-none">
+          No benefits written for this product yet. They go in the brief's Benefits table, one line each: what it does, what you get, and whether it works today.
+        </p>
+      )}
+      {b.asked.length > 0 && (
+        <section className="mt-5 grid gap-2" data-testid="benefits-asked">
+          <h3 className="text-sm font-semibold">People asked for</h3>
+          <ul className="grid gap-1 text-sm text-muted-foreground">
+            {b.asked.map((a) => (
+              <li key={a.id}>{a.text} <span className="text-xs">waits for your Add on Observations</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {b.source && <p className="mt-4 text-xs text-muted-foreground">Read from {b.source}</p>}
+    </div>
+  );
+}
+
 export function ObservationsTab({ m }: { m: Milestone }) {
   const [tick, setTick] = useState(0);
   const q = useTotems(m.id, tick);
@@ -276,7 +343,7 @@ export function ObservationsTab({ m }: { m: Milestone }) {
   return (
     <div data-testid="observations-tab">
       <TabHead
-        title="Observations"
+        title="Lessons"
         actions={
           <Pills
             value={scope}
@@ -289,7 +356,7 @@ export function ObservationsTab({ m }: { m: Milestone }) {
           />
         }
       >
-        What we learned: your notes and the Reporter's lessons, each with its evidence. Every persona reads the lines in force when it wakes. A line is retired, never deleted.
+        <span data-testid="lessons-what">What this campaign learned from its own posts and your notes. Every writer follows these before its next post.</span>
       </TabHead>
       <ObsSection id="force" title="In force" meta="read at every wake" list={force} base={base} />
       <FoldSectionProposals list={proposals} m={m} file={file} onDone={() => setTick((k) => k + 1)} />
@@ -393,7 +460,7 @@ function ProposalRow({ o, m, file, onDone }: { o: TotemObservation; m: Milestone
 
 // ---------- History ----------
 
-type HistoryFilter = "all" | "decisions" | "owner" | "wakes" | "posts" | "runs";
+type HistoryFilter = "all" | "decisions" | "owner" | "wakes" | "posts" | "runs" | "files";
 const FILTERS: [HistoryFilter, string][] = [
   ["all", "All"],
   ["decisions", "Decisions"],
@@ -401,20 +468,24 @@ const FILTERS: [HistoryFilter, string][] = [
   ["wakes", "Wakes"],
   ["posts", "Posts and replies"],
   ["runs", "Runs"],
+  // every file the History tab homes (the weekly logs and notes kept in the repo), each opening read-only.
+  ["files", "Logs and notes"],
 ];
 const keepLine = (f: HistoryFilter) => (l: TotemHistoryLine) => f === "all" || (f === "decisions" ? l.kind === "decision" : f === "owner" ? l.kind === "owner" : l.kind === "wake");
 
 export function HistoryTab({ m, posts, runs }: { m: Milestone; posts: ReactNode; runs: ReactNode }) {
   const q = useTotems(m.id);
   const t = q.data;
-  const [filter, setFilter] = useState<HistoryFilter>("all");
+  // ?history=files opens the logs and notes kept in the repo (a link can point straight at them).
+  const [params] = useSearchParams();
+  const [filter, setFilter] = useState<HistoryFilter>(params.get("history") === "files" ? "files" : "all");
   const [every, setEvery] = useState(false);
   return (
     <div data-testid="history-tab">
       <TabHead
         title="History"
         actions={
-          filter !== "posts" && filter !== "runs" ? (
+          filter !== "posts" && filter !== "runs" && filter !== "files" ? (
             <Button variant="outline" size="sm" onClick={() => setEvery(!every)} data-testid="history-every">
               {every ? "Fold the days" : "Open every day"}
             </Button>
@@ -426,7 +497,9 @@ export function HistoryTab({ m, posts, runs }: { m: Milestone; posts: ReactNode;
       <div className="mb-3">
         <Pills value={filter} onChange={setFilter} testId="history-filter" options={FILTERS} />
       </div>
-      {filter === "posts" ? (
+      {filter === "files" ? (
+        <HistoryFilesFor repo={m.repo} path={m.path} campaign />
+      ) : filter === "posts" ? (
         posts
       ) : filter === "runs" ? (
         runs
@@ -470,7 +543,7 @@ function HistoryDayBox({ d, open: byDefault, base }: { d: CampaignTotems["histor
   return (
     <div className="border-b last:border-b-0" data-testid="history-day" data-date={d.date}>
       <button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left text-sm hover:bg-muted/40" onClick={() => setOpen(!open)} aria-expanded={open}>
-        {open ? <ChevronDownSmall /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        <FoldChevron open={open} className="text-muted-foreground" />
         <span className="font-semibold">{fmtDay(d.date)}</span>
         {d.day && <span className="min-w-0 flex-1 truncate text-muted-foreground">{d.day}</span>}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{d.lines.length}</span>
@@ -499,7 +572,6 @@ function HistoryDayBox({ d, open: byDefault, base }: { d: CampaignTotems["histor
   );
 }
 
-const ChevronDownSmall = () => <ChevronRight className="h-4 w-4 rotate-90 text-muted-foreground" />;
 
 // ---------- Chat ----------
 

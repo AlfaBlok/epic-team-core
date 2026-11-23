@@ -40,6 +40,10 @@ describe("a plan opens with a diagram", () => {
     expect(isPlan("A one-page plan was made so you can say the strategy in one breath.")).toBe(true);
     expect(isPlan(undefined, "Give you a roadmap for the week.")).toBe(true);
     expect(isPlan("The page was planned and built.", "You can open the page.")).toBe(false);
+    // a card that mentions a plan in passing is not a plan card
+    expect(isPlan("Your personal goal was checked on every tab and its plan written.", "The goal page shows only its own work, with a plan.")).toBe(false);
+    expect(isPlan("The testers page was trimmed to tester work and got a plan.")).toBe(false);
+    expect(isPlan("The Plan tab now opens on every objective.")).toBe(false);
   });
   it("checkLive reports the diagram on page-host pages only", async () => {
     const serve = (body: string) => (async () => new Response(body, { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;

@@ -1,4 +1,5 @@
 import type { CardFace } from "@/api/review-types";
+import type { OwnerPriority } from "@/api/inbox-types";
 
 /** E948-S69: a decision that asks "Do we / Should we …?" gets Yes: plan it and No: park it by itself. */
 export const DECIDE_QUESTION = /^(?:do|should|shall|will|can|would) (?:we|the team|i)\b[^?]*\?/i;
@@ -22,11 +23,22 @@ export function isDecisionCard(face: Pick<CardFace, "decision" | "options" | "ne
 /** the one word each kind of card shows first on its meta line, the same in every section name (docs/review-cards.md). */
 export const CARD_WORD = { decision: "Decision", review: "Review" } as const;
 
-/** E948-S103: the review cards split as the Inbox shows them: decisions wait on him (red), the rest is finished work (green). */
-export function splitDecisions<T extends { face?: Pick<CardFace, "decision" | "options" | "next"> | null }>(cards: T[] | undefined): { decisions: T[]; review: T[] } {
+/** E948-S132: a review card he called urgent or pressed for sits in the Urgent section, above every other section. */
+export const isUrgentReview = (i: { ownerPriority?: OwnerPriority; face?: { ready?: { why?: string } | null } | null }) => !!i.ownerPriority?.pressing || i.face?.ready?.why === "urgent";
+
+/**
+ * E948-S178 (the owner 22 Nov 20:57Z, vn_facd277a: "It's showing three, but there is only two waiting for review and one
+ * in Urgent. The one in Urgent is a red one ... it's being counted as one of the green ones"): Urgent is a red section,
+ * so every card in it counts red, once, and never in green. Green is only Done, waiting for your review.
+ */
+export const countsRed = (i: { ownerPriority?: OwnerPriority; face?: (Pick<CardFace, "decision" | "options" | "next"> & { ready?: { why?: string } | null }) | null }) =>
+  isDecisionCard(i.face) || isUrgentReview(i);
+
+/** E948-S103: the review cards split as the Inbox shows them: decisions and Urgent wait on him (red), the rest is finished work (green). */
+export function splitDecisions<T extends { ownerPriority?: OwnerPriority; face?: (Pick<CardFace, "decision" | "options" | "next"> & { ready?: { why?: string } | null }) | null }>(cards: T[] | undefined): { decisions: T[]; review: T[] } {
   const decisions: T[] = [];
   const review: T[] = [];
-  for (const c of cards ?? []) (isDecisionCard(c.face) ? decisions : review).push(c);
+  for (const c of cards ?? []) (countsRed(c) ? decisions : review).push(c);
   return { decisions, review };
 }
 

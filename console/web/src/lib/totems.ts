@@ -1,29 +1,23 @@
 import type { CampaignTotems, TotemSlide } from "@/api/types";
 import { safeHref, type LinkBase } from "@/lib/mdlinks";
 import { ownerName, socialWorld } from "@/lib/identity";
+import { wheelTabsOf } from "@/lib/wheelTabs";
 
 /**
- * a campaign page in the social skin has fixed
- * tabs, each a part of its epic file. Plan (its marketing plan, eight fixed sections; it took the Deck's place, the owner:
- * "shall we just keep the marketing plan and just have a normal web page"), Product (what this campaign pushes), Waiting on me, Pipeline (its posts), Tasks, Observations, History, Chat. Settings and personas sit
- * behind one header button. Old links land on the tab that now holds what they showed.
+ * a campaign page in the social skin (the social product's wheel) has fixed tabs, one per kind of node of that product's
+ * data graph its personas need (the owner: "the product type or the benefits type is an important type ... Because the
+ * personas need this totem in their graph. And then this totem in the graph gets exposed to the UX via these tabs"). The
+ * one list is the product's graph file, read through lib/wheelTabs.ts, never one written here: Plan
+ * (the campaign's marketing plan, eight fixed sections: campaigns only), Product (what it pushes, what it can do, what it costs), Benefits
+ * (what it does for its users), Social kit (posts a day, channels), Inbox, Chat, Pipeline (its posts), Tasks, Trackers (its
+ * objective's shortlists), Observations, History. Settings and personas sit behind one
+ * header button. Old links land on the tab that now holds what they showed.
  */
-// the same order as EpicTeam's objective (vn_15aa4467: "a very similar design to what we have in epic team"): plan,
-// product, inbox, chat first, then the campaign's own work.
-export const FIVE_TABS = ["plan", "product", "waiting", "chat", "pipeline", "work", "observations", "history"] as const;
-export type FiveTab = (typeof FIVE_TABS)[number] | "settings";
+const SOCIAL_WHEEL = wheelTabsOf("campaign");
+export const FIVE_TABS: readonly string[] = SOCIAL_WHEEL.map((t) => t.id);
+export type FiveTab = string;
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
-export const FIVE_LABELS: Record<(typeof FIVE_TABS)[number] | "settings", string> = {
-  plan: "Plan",
-  product: "Product",
-  waiting: "Inbox",
-  pipeline: "Pipeline",
-  work: "Tasks",
-  observations: "Observations",
-  history: "History",
-  chat: "Chat",
-  settings: "Settings and personas",
-};
+export const FIVE_LABELS: Record<string, string> = { ...Object.fromEntries(SOCIAL_WHEEL.map((t) => [t.id, t.label])), settings: "Settings and personas" };
 
 const OLD: Record<string, FiveTab> = {
   deck: "plan",
@@ -42,7 +36,7 @@ const OLD: Record<string, FiveTab> = {
 export function fiveTabFromParams(params: URLSearchParams): FiveTab {
   const t = params.get("tab") ?? "";
   if (t === "work" && params.get("view") === "posts") return "pipeline";
-  if ((FIVE_TABS as readonly string[]).includes(t)) return t as FiveTab;
+  if (FIVE_TABS.includes(t)) return t;
   return OLD[t] ?? (params.get("node") ? "work" : "plan");
 }
 

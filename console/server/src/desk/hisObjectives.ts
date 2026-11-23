@@ -37,6 +37,10 @@ export interface HisWords {
   source?: string;
   via?: string;
   link?: string;
+  /** on an older word: `replaced` (his newer word speaks to the same point or overrules it) or `stands` (another point, still his). */
+  state?: "replaced" | "stands" | "in force";
+  /** when it is replaced: the date of the word that replaced it. */
+  by?: string;
 }
 /** what the objectives list lacks, per objective id (or other world). */
 export interface HisWordsEntry {
@@ -46,8 +50,10 @@ export interface HisWordsEntry {
   match?: string[][];
   /** his newest words naming it. */
   after?: HisWords;
-  /** an aim he confirmed. */
+  /** an aim he confirmed (it holds only while it is newer than his newest words). */
   aim?: HisWords;
+  /** his older words on it, newest first, each marked replaced or stands (scripts/his_words.py refresh). */
+  earlier?: HisWords[];
   /** another world's own state (its spine's Status and Next action). */
   world?: { repo?: string; status?: string; next?: string; note?: string };
 }
@@ -102,17 +108,82 @@ export function readHisWords(reposRoot: string, repo: string): HisWordsFile | un
   return undefined;
 }
 
+/**
+ * His newest word wins: on each objective the words in
+ * force are his newest; an aim he confirmed holds only while it is newer than them. Every older word is shown marked,
+ * never mixed in: replaced (the newest speaks to the same point or overrules it) or stands (another point, still his).
+ */
+export const NEWEST_WORD_RULE =
+  "His newest word wins: on each objective the words marked in force are his newest and hold; an older word marked replaced no longer holds " +
+  "(never act on it or mix it in), one marked stands is another point that is still his.";
+export const NEWEST_HEAD = "His newest words first";
+
+/** the words in force on an objective: an aim he confirmed only while it is newer than his newest words, else those. */
+export function inForceWords(e: HisWordsEntry | undefined): HisWords | undefined {
+  const a = e?.after?.words ? e.after : undefined;
+  const m = e?.aim?.words ? e.aim : undefined;
+  if (m && (!a || (m.said ?? "") >= (a.said ?? ""))) return m;
+  return a;
+}
+
+/** the older words an objective's words in force replace (an aim they overtook first), newest first. */
+export function replacedWords(e: HisWordsEntry | undefined): HisWords[] {
+  const f = inForceWords(e);
+  const out: HisWords[] = [];
+  if (e?.aim?.words && f !== e.aim) out.push({ ...e.aim, state: "replaced", by: f?.said });
+  if (e?.after?.words && f !== e.after) out.push({ ...e.after, state: "replaced", by: f?.said });
+  for (const w of e?.earlier ?? []) if (w.state === "replaced" && w.words) out.push(w);
+  return out;
+}
+
+/** " · replaces 11-20: "…"" for the newest word it replaced, or "" (one short marker: the block rides on every message). */
+export function replacesMarker(e: HisWordsEntry | undefined, max = 70): string {
+  const r = replacedWords(e)[0];
+  return r ? ` · replaces ${r.said ? r.said.slice(5, 10) + " " : ""}"${cut(r.words, max)}"` : "";
+}
+
+/**
+ * A worker brief's section of his newest words on the objectives its brief names, newest first: the words in force, then
+ * each older one marked replaced or stands. Empty when the brief names none.
+ */
+export function newestWordsSection(f: HisWordsFile | undefined, text: string): string {
+  const named = (f?.objectives ?? []).filter((e) => touches(e, text) || names(e, text) || (e.name && text.includes(e.name)));
+  if (!named.length) return "";
+  const out = [`## ${NEWEST_HEAD} (${WORDS_FILE})`, NEWEST_WORD_RULE];
+  for (const e of named.slice(0, 4)) {
+    const w = inForceWords(e);
+    if (!w?.words) continue;
+    out.push(`- ${e.name ?? e.id}: in force ${w.said?.slice(0, 16) ?? ""}${w.via ? ` (${w.via})` : ""}: "${cut(w.words, 220)}"${w.link ? ` [source](${w.link})` : ""}`);
+    for (const r of [...replacedWords(e), ...(e.earlier ?? []).filter((x) => x.state === "stands")].slice(0, 4))
+      out.push(`  - ${r.state === "replaced" ? `replaced${r.by ? ` by his words of ${r.by.slice(0, 10)}` : ""}` : "stands"}: ${r.said?.slice(0, 16) ?? ""} "${cut(r.words, 140)}"`);
+  }
+  return out.length > 2 ? out.join("\n") + "\n" : "";
+}
+
+/**
+ * A wake's Chat section (campaign personas read the owner's words in 2 of 528 runs): his newest words on the objectives
+ * named in `text`, read before the wake plans, with the command that prints his notes on a row. Empty when he has none.
+ */
+export function chatSection(f: HisWordsFile | undefined, text: string, home: string): string {
+  const body = newestWordsSection(f, text).trim();
+  if (!body) return "";
+  return [
+    body.replace(`## ${NEWEST_HEAD}`, `## His words, the Chat tab (read before you plan): ${NEWEST_HEAD}`),
+    `Before you plan, also read his notes on each row you touch: \`python3 ~/github/${home}/scripts/card_notes.py words <row>\` (whole, newest first). Your result answers his newest word.`,
+  ].join("\n");
+}
+
 function wordsOf(e: HisWordsEntry | undefined, now: number): string {
   const parts: string[] = [];
-  if (e?.aim?.words) parts.push(`aim: "${cut(e.aim.words, 110)}"`);
-  const a = e?.after;
+  const a = inForceWords(e);
   if (a?.words) {
     const at = a.said ? Date.parse(a.said) : NaN;
     const day = a.said ? a.said.slice(5, 10) : "";
+    const what = a === e?.aim ? "aim" : "his words";
     parts.push(
       Number.isFinite(at) && now - at > WORDS_QUIET_MS
         ? `quiet: his last words ${day}: "${cut(a.words, 90)}"`
-        : `his words ${day}${a.via ? ` (${a.via})` : ""}: "${cut(a.words, 150)}"`,
+        : `${what} ${day}${a.via ? ` (${a.via})` : ""}, in force: "${cut(a.words, 150)}"${replacesMarker(e)}`,
     );
   } else parts.push("no words of his on it yet");
   return parts.join(" · ");
@@ -140,6 +211,7 @@ export function objectivesContext(f: HisWordsFile | undefined, input: Objectives
     CONTEXT_MARKER,
     `His ${lines.length} objectives live from the objectives screen (his order) and ${worlds.length ? `the other world${worlds.length > 1 ? "s" : ""} he names` : "no other world"}; his words from ${WORDS_FILE} (his voice notes${stale ? ", STALE: run scripts/his_words.py refresh" : ""}). Console context, not ${ownerName()}'s words.`,
     "Read his message against his objectives first, keep to them not the details; unsure which pursuit or what it changes: ask him one open question.",
+    NEWEST_WORD_RULE,
     priorityAskRule(ownerName()),
   ];
   // 2 = the message fully names it, 1 = it names its subject only, 0 = not named
@@ -159,7 +231,7 @@ export function objectivesContext(f: HisWordsFile | undefined, input: Objectives
   const body = sorted.map((r) => (r.touched ? r.full : r.short));
   if (sorted.some((r) => r.touched)) head.push(`His message names the first ${sorted.filter((r) => r.touched).length} (with his words); the rest follow in his order.`);
   let out = [...head, ...body, CONTEXT_END].join("\n");
-  if (out.length > CONTEXT_MAX_CHARS) out = [...head, ...body.map((l) => cut(l, Math.floor((CONTEXT_MAX_CHARS - 800) / body.length))), CONTEXT_END].join("\n");
+  if (out.length > CONTEXT_MAX_CHARS) out = [...head, ...body.map((l) => cut(l, Math.floor((CONTEXT_MAX_CHARS - 1000) / body.length))), CONTEXT_END].join("\n");
   return out;
 }
 

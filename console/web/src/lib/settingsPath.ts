@@ -37,8 +37,7 @@ function usePages(input: boolean): Page[] {
     { screen: "secrets", to: "/secrets", label: w.secrets, what: "add or replace a key", testId: "op-secrets", input: true },
     { screen: "services", to: "/connections", label: "Connections", what: "connect or remove a sign-in", testId: "op-connections", input: true },
     { screen: "teamSkills", to: "/team-skills", label: w.teamSkills, what: "add or remove a skill", testId: "op-team-skills", input: true },
-    // the owner looks for "who applied", so the entry says Applications.
-    { screen: "testers", to: "/testers", label: "Applications", what: "tester applications", testId: "op-applications", input: false },
+    // the owner: the applications are a tracker inside an objective, no menu entry.
     { screen: "testers", to: "/feedback", label: "Voice feedback", what: "voice notes from testers and customers", testId: "op-feedback", input: false },
     { screen: "yourAi", to: "/your-ai", label: "Your AI", what: "the AI your team runs on", testId: "op-your-ai", input: true },
     { screen: "credits", to: "/credits", label: "Credits", what: "top up your credits", testId: "op-credits", input: true },

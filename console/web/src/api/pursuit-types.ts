@@ -37,6 +37,8 @@ export interface Pursuit {
   epics?: PursuitEpic[];
   /** the milestones that run its epics and the teams on each. */
   milestones?: PursuitMilestone[];
+  /** his Daily briefing switch: its key results and tester table go into his 06:00 and 18:00 briefings. */
+  briefing?: boolean;
 }
 export interface PursuitEffort {
   tier: string;
@@ -114,6 +116,18 @@ export interface PursuitsBody {
   done?: { id: string; name: string; since?: string }[];
 }
 
+/** GET /api/scorecards/:id/where-we-are: an objective's one where-we-are, read first and rewritten last. */
+export interface WhereWeAre {
+  path: string;
+  present: boolean;
+  at?: string;
+  by?: string;
+  row?: string;
+  answer?: string;
+  open: string[];
+  changed: string[];
+}
+
 /** GET /api/scorecards: every pursuit a scorecard, the epics that carry it scorecards inside it. */
 export type ScorecardQueueState = "ready" | "running" | "waiting";
 export interface ScorecardQueueRow {
@@ -157,6 +171,10 @@ export interface ScorecardRow {
   measuredAt?: string;
   /** the evidence behind its colour: what the check reads and the link; absent: no evidence yet. */
   evidence?: { what: string; url: string };
+  /** where it came from: his words that asked for it, when, and the link to that note. */
+  from?: { said: string; when?: string; url?: string };
+  /** the key result that decides the objective: first in its table whatever its colour (the owner, vn_617e3481). */
+  decides?: boolean;
 }
 export interface ScorecardWork {
   code: string;
@@ -168,18 +186,54 @@ export interface ScorecardWork {
   path?: string;
   epicCode?: string;
 }
+/**
+ * GET /api/pursuits/:id/plan: an objective's Plan tab, the plan of its wheel: per key result how it gets to green (the
+ * approach, the steps, green when, if it stalls), from the `plan` block of docs/scorecards/<id>.json. Never a marketing
+ * plan, never the key results' numbers or tickets again.
+ */
+export interface WheelStep {
+  /** what we do. */
+  do: string;
+  /** what it changes on the way to green. */
+  changes?: string;
+  owner?: string;
+  by?: string;
+  row?: string;
+  done?: boolean;
+}
+/** one key result's plan: how it gets to green, never its numbers or its ticket list (those live on other tabs). */
+export interface KeyResultPlan {
+  /** the key result it is for, 1 = the first. */
+  kr: number;
+  how?: string;
+  steps: WheelStep[];
+  greenWhen?: string;
+  ifStuck?: string;
+}
+export interface WheelPlan {
+  id: string;
+  path: string;
+  present: boolean;
+  line?: string;
+  by?: string;
+  writtenBy?: string;
+  at?: string;
+  keyResults: KeyResultPlan[];
+  /** its campaign's own marketing plan, which stays on that campaign. */
+  campaign?: { repo: string; path: string };
+}
 export interface ScorecardNode {
   id: string;
   kind: "pursuit" | "epic";
   name: string;
   rank?: number | null;
   parked?: boolean;
-  /** `"pinned": false` in docs/pursuits.json: folded under More objectives in the sidebar. */
-  unpinned?: boolean;
   repo?: string;
   path?: string;
   code?: string;
   milestoneId?: string;
+  /** another objective shares that milestone: its Personas tab lists only the personas that name it. */
+  milestoneShared?: boolean;
   greens: number;
   total: number;
   state?: PursuitLineState;
@@ -210,6 +264,8 @@ export interface ScorecardNode {
   owner?: string;
   /** the idle mark: below green with no worker, no ask, no card. */
   idle?: { idle: boolean; reason: string };
+  /** its open tickets that hang under no key result: the page lists them under the key results. */
+  unplaced?: ScorecardWork[];
 }
 export interface ScorecardsBody {
   nodes: ScorecardNode[];

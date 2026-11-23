@@ -11,20 +11,24 @@ import { WordsBox } from "@/components/WordsBox";
 import { RedLineCards } from "@/components/redLineCards";
 import { ObjectiveName } from "@/components/objectiveName";
 import { shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
+import { FoldChevron } from "@/components/foldChevron";
 
 const LABEL: Record<OwnerPriority["level"], string> = {
   high: "High priority",
   normal: "Normal priority",
   low: "Low priority",
 };
+/**
+ * The owner, on an inbox card: "all greyed out". The objective a card
+ * moves is what he reads first in its meta line, so it is drawn in the card's own ink, never the faint grey of the age.
+ */
 const LOOK: Record<OwnerPriority["level"], string> = {
-  // the level is a grey word in the card's meta line.
-  high: "text-muted-foreground",
-  normal: "text-muted-foreground",
-  low: "text-muted-foreground opacity-80",
+  high: "text-foreground/90",
+  normal: "text-foreground/90",
+  low: "text-foreground/90",
 };
 /** the red marker of an item on the owner's red line. */
-const RED = "text-muted-foreground";
+const RED = "text-foreground/90";
 const RED_LABEL = "On the red line";
 /** a named line's marker names it ("Red line: Data-product flywheel"). */
 const redLabel = (r: NonNullable<OwnerPriority["redLine"]>) => (r.name ? `Red line: ${r.name}` : RED_LABEL);
@@ -71,13 +75,26 @@ function RankWords({ p, label }: { p: OwnerPriority; label: string }) {
  * why, with his words and the day he said them. Inside a wrapping flex row the why takes its own full-width line.
  * an item on his red line shows a red "On the red line" marker instead, and its why opens with the line.
  */
-export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; className?: string }) {
+/**
+ * E948-S168 (the owner 22 Nov 05:09Z, on an urgent card that read "High priority": "If something is being marked urgent,
+ * why is it not actually labeled urgent properly?"): an urgent card's meta line says Urgent, in the same grey word.
+ */
+export const URGENT_WORD = "Urgent";
+
+export function OwnerPriorityTag({ p, className, urgent }: { p?: OwnerPriority; className?: string; urgent?: boolean }) {
   const [open, setOpen] = useState(false);
-  if (!p) return null;
+  if (!p)
+    return urgent ? (
+      <span className={cn("shrink-0 text-xs font-medium text-muted-foreground", className)} data-testid="urgent-label">
+        {URGENT_WORD}
+      </span>
+    ) : null;
   const red = p.redLine;
   const hot = p.pressing;
   const first = p.objective?.n === 0;
-  const label = rankWhy(p);
+  const base = rankWhy(p);
+  // urgent says so first; a bare level ("High priority") gives way to it, a reason (said again, an objective) stays after it
+  const label = urgent ? (base === LABEL[p.level] ? URGENT_WORD : `${URGENT_WORD} · ${base}`) : base;
   const why = hot ? hot.why : red ? red.sentence : p.why;
   const words = hot ? hot.words : p.words;
   const said = hot ? hot.said : p.said;
@@ -94,6 +111,7 @@ export function OwnerPriorityTag({ p, className }: { p?: OwnerPriority; classNam
         }}
         data-testid="owner-priority"
         data-level={p.level}
+        {...(urgent ? { "data-urgent": "" } : {})}
         {...(red ? { "data-red-line": red.name ?? "" } : {})}
         {...(hot ? { "data-pressing": hot.kind } : {})}
         {...(p.objective ? { "data-objective": p.objective.n + 1 } : {})}
@@ -225,6 +243,7 @@ function OneRedLine({ r, onDeleted }: { r: RedLine; onDeleted: (name: string) =>
           counts of sit in the row, never in a strip under it. */}
       <div className="flex items-center gap-0.5 pl-2 pr-0.5">
         <button type="button" className="flex min-h-12 min-w-0 flex-1 items-center gap-2 py-1.5 text-left" aria-expanded={open} onClick={() => setOpen(!open)} title={r.sentence} data-testid="red-line-row">
+          <FoldChevron open={open} />
           <span className="inline-flex h-8 w-5 shrink-0 items-center justify-center text-muted-foreground sm:w-8" aria-hidden>
             <Flag className="h-4 w-4" strokeWidth={2} />
           </span>
@@ -273,6 +292,7 @@ function ListRedLine({ r, onDeleted }: { r: RedLine; onDeleted: (name: string) =
     <section data-testid="red-line" data-red-line-name={r.name ?? ""}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5">
         <button type="button" className="min-w-0 flex-1 basis-48 text-left text-sm" aria-expanded={open} onClick={() => setOpen(!open)} title={r.sentence} data-testid="red-line-row">
+          <FoldChevron open={open} className="mr-1.5" />
           <span className="text-foreground" data-testid="red-line-name">
             {r.name ?? r.sentence}
           </span>

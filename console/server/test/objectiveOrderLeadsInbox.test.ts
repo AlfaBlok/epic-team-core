@@ -30,6 +30,35 @@ const lines = JSON.stringify({ redLines: [{ name: "Acme's first tester", objecti
 const defs = parseObjectives(pursuits, words);
 const lookup = lookupOf(parsePriorities(levels, "repo1"), parseRedLines(lines, "repo1"), parsePressing(levels, "repo1"), defs);
 
+describe("an item files under the objective that owns its epic before any title word", () => {
+  // the owner asked why a card titled with the first objective's product sat there when its epic is the second's.
+  // the code repo serves both objectives, so it is neither one's own: only the spine tells.
+  const two = parseObjectives(
+    JSON.stringify({
+      pursuits: [
+        { id: "acme-live", name: "Acme live", epics: [{ repo: "acme", spine: "docs/acme.md" }, { repo: "repo1", spine: "docs/spines/epic-40.md" }] },
+        { id: "beta-channels", name: "Beta: every channel working", epics: [{ repo: "repo1", spine: "docs/spines/epic-46.md" }] },
+      ],
+    }),
+    JSON.stringify({ objectives: [{ id: "acme-live", name: "Acme live", match: [["acme"]] }, { id: "beta-channels", name: "Beta: every channel working", match: [["channel"]] }] }),
+  );
+
+  it("a card titled with Acme on the Beta epic's row files under beta-channels", () => {
+    const card = { repo: "repo1", ref: "E907-S41", path: "docs/spines/epic-46.md", title: "Acme social picture: a last-6-hours button" };
+    expect(objectiveOf(two, card)?.id).toBe("beta-channels");
+  });
+
+  it("an item no objective's spine or repo owns still files by its words", () => {
+    expect(objectiveOf(two, { repo: "repo1", ref: "E907-S42", path: "docs/spines/epic-6.md", title: "Acme memory search is slow" })?.id).toBe("acme-live");
+    expect(objectiveOf(two, { repo: "repo1", ref: "E907-S43", path: "docs/spines/epic-6.md", title: "Fix the deploy script" })).toBeUndefined();
+  });
+
+  it("the red line still comes first", () => {
+    const card = { repo: "repo1", ref: "E907-S41", path: "docs/spines/epic-46.md", title: "Social picture" };
+    expect(objectiveOf(two, card, "acme-live")?.id).toBe("acme-live");
+  });
+});
+
 describe("the inbox order comes from his objectives by itself", () => {
   it("reads his objectives in his order, with the names he uses, and never one that is not in the objectives file", () => {
     expect(defs.map((d) => [d.n, d.id, d.name])).toEqual([
@@ -46,8 +75,8 @@ describe("the inbox order comes from his objectives by itself", () => {
   it("finds an item's objective by its red line, its epic, its repo or his words, the first in his order", () => {
     expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S16" }, "acme-live")?.n).toBe(0);
     expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S31", path: "docs/spines/epic-46.md", title: "Fix the pricing page" })?.n).toBe(1);
-    // the first of his objectives it touches: a Beta epic's row about Acme testers moves his first objective
-    expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S32", path: "docs/spines/epic-46.md", title: "Each morning of Acme week one talk" })?.n).toBe(0);
+    // the epic's own objective comes before title words, so a Beta epic's row about Acme stays with Beta
+    expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S32", path: "docs/spines/epic-46.md", title: "Each morning of Acme week one talk" })?.n).toBe(1);
     expect(objectiveOf(defs, { repo: "acme-social", ref: "E907-S33", title: "Post the launch thread" })?.n).toBe(0);
     expect(objectiveOf(defs, { repo: "repo1", code: "E907-A1", question: "Can we post the Acmy testers call today?" })?.n).toBe(0);
     expect(objectiveOf(defs, { repo: "repo1", ref: "E907-S21", title: "Five Beta testers sign up" })?.n).toBe(1);
@@ -65,7 +94,7 @@ describe("the inbox order comes from his objectives by itself", () => {
     expect(objectiveOf(defs, { ...exa, path: "docs/spines/accounts.md" })?.n).toBe(2);
   });
 
-  it("puts his first objective first, then what is pressing, the red line and levels, each in his objectives' order", () => {
+  it("puts his objectives in his order first; pressing, the red line and levels order only inside one objective", () => {
     const items = [
       { id: "plain", repo: "repo1", ref: "E907-S29", title: "Tidy the logs" },
       { id: "vault", repo: "repo1", ref: "E907-S23", title: "Move every password" },
@@ -75,12 +104,13 @@ describe("the inbox order comes from his objectives by itself", () => {
       { id: "acme", repo: "repo1", ref: "E907-S15", title: "Acme tester welcome email" },
     ];
     const out = byMilestonePriority(items, new Map(), lookup);
-    expect(out.map((i) => i.id)).toEqual(["acme", "frustrated", "high", "beta", "vault", "plain"]);
+    // the owner asked: a higher objective's card comes first; frustrated and high move none of his objectives
+    expect(out.map((i) => i.id)).toEqual(["acme", "beta", "vault", "frustrated", "high", "plain"]);
     const pr = out.map((i) => i.priority!);
     expect([...pr].sort((a, b) => a - b)).toEqual(pr);
     // each card carries why it ranks there
     expect(out[0].ownerPriority?.objective).toEqual({ n: 0, id: "acme-live", name: "Five testers use Acme" });
-    expect(out[3].ownerPriority?.why).toBe("It moves your objective 2: 5 testers using Beta.");
+    expect(out[1].ownerPriority?.why).toBe("It moves your objective 2: 5 testers using Beta.");
     expect(out[5].ownerPriority).toBeUndefined();
   });
 

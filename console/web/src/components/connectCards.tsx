@@ -1,4 +1,5 @@
 import type { ConnectCard as ConnectItem } from "@/api/types";
+import { aboutFrom } from "@/lib/about";
 import { api } from "@/api";
 import { useQuery } from "@/lib/data";
 import { saysNeedle, useSearchNeedle } from "@/lib/inboxSearch";
@@ -53,6 +54,7 @@ function ConnectBody({ c }: { c: ConnectItem }) {
     <CardShell as="section" kind="connect" data-testid={`connect-${c.id}`}>
       <CardMeta
         kind="Connect"
+        about={aboutFrom(c.channel ? `connecting ${c.channel.name}` : undefined, c.title)}
         right={
           c.connected && (
             <Badge variant="green" data-testid="connect-state">

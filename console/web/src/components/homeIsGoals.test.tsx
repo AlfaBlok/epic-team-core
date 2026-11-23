@@ -97,7 +97,7 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     expect(screen.queryByTestId("project-campaigns")).toBeNull();
   });
 
-  it("the bar holds only Inbox, Chat and the mic; One-offs, Outcomes, Pages and Voice notes sit in the sidebar's Tools fold below the objectives", async () => {
+  it("the bar holds only Inbox, Chat and the mic; Pages, Post stats, Persona outcomes and Voice notes sit in the sidebar's Tools fold below the objectives", async () => {
     // the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
     // microphone. The other things are in the sidebar."
     at(SKINS.console, "/inbox");
@@ -106,8 +106,8 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     for (const gone of ["topbar-home", "topbar-more", "topbar-one-offs", "topbar-outcomes", "topbar-pages"]) expect(screen.queryByTestId(gone)).toBeNull();
     // the whole name stands with the mark again: the bar has room for it at 360 px
     expect(screen.getByTestId("topbar-brand-name").className).not.toMatch(/sr-only/);
-    // his approved sidebar: every page you read sits in one folded Tools list, in the mock-up's order:
-    // Voice notes, Pages, One-offs, Outcomes, the pages pinned by name, X stats.
+    // every page you read sits in one folded Tools list, in the owner's order of 22 Nov: Pages, Post
+    // stats, the pages pinned by name, Persona outcomes, Voice notes (kept, not first); One-offs is an objective now.
     const tools = (await screen.findAllByTestId("nav-pages"))[0];
     const toggle = within(tools).getByTestId("nav-pages-toggle");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
@@ -115,12 +115,12 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     fireEvent.click(toggle);
     await waitFor(() => expect(within(tools).getAllByRole("link").length).toBeGreaterThan(5));
     expect(within(tools).getAllByRole("link").slice(0, 6).map((a) => [a.textContent?.trim(), a.getAttribute("href")])).toEqual([
-      ["Voice notes", "/voice-notes"],
       ["Pages", "/pages"],
-      ["One-offs", "/one-offs"],
-      ["Outcomes", "/outcomes"],
-      ["Daily reports", "/daily"],
       ["Post stats", "/x-stats"],
+      ["Daily reports", "/daily"],
+      ["Persona outcomes", "/outcomes"],
+      ["Voice notes", "/voice-notes"],
+      ["Seats", "/seats"],
     ]);
     // below the objectives
     const goal = document.querySelector("[data-testid='sidebar-goal-sets']");

@@ -7,6 +7,7 @@ import type { DB } from "../db.js";
 import type { Milestone, Store } from "../store.js";
 import { DEFAULT_OWNER, ownerOf } from "../tenancy/owner.js";
 import { askKindOf, parseAsks } from "./asks.js";
+import { ABOUT_ON_LINE, aboutOf } from "./about.js";
 import { addToWaitingField, appendUnderWaiting, dropFromWaitingField, oneLine, replacementIn, sameText, type SpineWrite, type SpineWriter } from "./spineWrite.js";
 
 export { addToWaitingField, dropFromWaitingField };
@@ -62,6 +63,8 @@ export interface RaisedAsk {
   row?: string;
   /** the kind the caller names (`do`: a step only the owner can do); else read from the text. */
   kind?: "do" | "decide" | "approve" | "provide";
+  /** E948-S172: the card's topic in plain words (its `About:` line); else derived from the question. */
+  about?: string;
 }
 
 /**
@@ -82,6 +85,12 @@ export function askLine(code: string, a: RaisedAsk, date: string, owner: string 
     `- [ask ${code}: ${kind} @${owner} since ${date}${row}] ${fieldsApart(oneLine(a.question))}`,
     ...(a.proposedAction?.trim() ? [`recommend: ${oneLine(a.proposedAction)}`] : []),
     `context: raised by ${by} through the console API; the console wrote this line`,
+    // E948-S172: every card opens with its topic; the asker's words, else the plain topic of the question
+    ...(() => {
+      if (ABOUT_ON_LINE.test(` ${fieldsApart(oneLine(a.question))}`)) return [];
+      const t = aboutOf({ about: a.about, question: a.question });
+      return t ? [`about: ${t.about}`] : [];
+    })(),
   ].join(" — ");
 }
 

@@ -62,8 +62,6 @@ export interface Pursuit {
   /** its place in the owner's order, 1 first; parked pursuits have none. */
   rank: number | null;
   parked: boolean;
-  /** `"pinned": false` in the file: the sidebar shows it folded under More objectives, not in the pinned list. */
-  unpinned?: boolean;
   /** what its rank buys: wake pace, worker ceiling, stall watch patience, in plain words too. */
   effort: PursuitEffort;
   /** the epics that carry it (spines), each with its deck code when the spine has one. */
@@ -72,6 +70,8 @@ export interface Pursuit {
   goal?: PursuitGoal;
   /** the persona that owns the wheel (file `owner`, default the Delivery Manager): the idle watch wakes it. */
   owner?: string;
+  /** his Daily briefing switch: its key results (and its tester table) go into his 06:00 and 18:00 briefings. */
+  briefing?: boolean;
 }
 export interface PursuitGoal {
   now: number;
@@ -152,6 +152,8 @@ interface DeclaredLine {
   spine?: string;
   ids?: string[];
   check?: string;
+  /** green on this line turns the whole objective green (the owner: "the objective turns green once this key result is green"). */
+  decides?: boolean;
 }
 interface Declared {
   id: string;
@@ -165,13 +167,14 @@ interface Declared {
   /** the product it moves, by id in docs/scorecard/products.json; its kit is the product's. */
   product?: string;
   parked: boolean;
-  unpinned: boolean;
   epics: { repo: string; path: string }[];
   goal?: PursuitGoal;
   /** its owner persona: the one the idle watch wakes; default the Delivery Manager of the world holding it. */
   owner: string;
   /** the campaign spine that carries its plan (often another world's repo): the Plan tab reads it there, never a copy. */
   plan?: { repo: string; path: string };
+  /** `"briefing": true` in the file: in his 06:00 and 18:00 briefings. */
+  briefing?: boolean;
 }
 export interface PursuitKitRef {
   /** Repo-relative folder: kit.json, previews/*.webp; the fonts sit in its parent's fonts/. */
@@ -241,7 +244,7 @@ export function parsePursuits(text: string): PursuitsDoc {
       const label = str(x.label);
       const from = str(x.from);
       if (!label || !from) return [];
-      return [{ label, from, product: str(x.product), light: str(x.light), repo: str(x.repo), spine: str(x.spine), ids: strs(x.ids), check: str(x.check) }];
+      return [{ label, from, product: str(x.product), light: str(x.light), repo: str(x.repo), spine: str(x.spine), ids: strs(x.ids), check: str(x.check), ...(x.decides === true ? { decides: true } : {}) }];
     });
     const totems = (Array.isArray(o.totems) ? o.totems : []).flatMap((t): PursuitTotem[] => {
       const x = obj(t);
@@ -266,7 +269,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     const pr = str(obj(o.plan).repo);
     const pp = str(obj(o.plan).path);
     const plan = pr && pp && /^[\w./-]+\.md$/.test(pp) && !pp.includes("..") && !pp.startsWith("/") ? { repo: pr, path: pp } : undefined;
-    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, unpinned: o.pinned === false, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER }];
+    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER, ...(o.briefing === true ? { briefing: true } : {}) }];
   });
   const said = obj(doc.said);
   // retired milestones: each by its repo and spine, as the epics name theirs.
@@ -474,6 +477,20 @@ export function parkText(text: string, id: string, parked: boolean): string | nu
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
+/**
+ * The owner's "Daily briefing" switch on every objective page: on writes
+ * `"briefing": true` on the objective, off removes it; null when no such objective.
+ */
+export function briefingText(text: string, id: string, on: boolean): string | null {
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const p = list.find((x) => str(obj(x).id) === id);
+  if (!p) return null;
+  if (on) p.briefing = true;
+  else delete p.briefing;
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
 /** his active and inactive objective ids from the home repo's file (kept while its mtime holds); no file: undefined. */
 let idsMemo: { file: string; mtime: number; v: { live: string[]; off: string[] } } | undefined;
 export function objectiveIds(homeDir: string | undefined): { live: string[]; off: string[] } | undefined {
@@ -558,6 +575,8 @@ export async function lastMoveOf(
   watch: { repo: string; paths: string[] }[],
   repoDir: (name: string) => string | undefined,
   git: GitOut,
+  /** in a repo several objectives watch, whether a commit subject is this objective's; absent: every commit counts. */
+  mine?: (repo: string, subject: string) => boolean,
 ): Promise<PursuitMove | null> {
   let best: PursuitMove | null = null;
   for (const w of watch) {
@@ -574,6 +593,7 @@ export async function lastMoveOf(
       if (tab < 0) continue;
       const subject = line.slice(tab + 1).trim();
       if (NOT_MOVEMENT.test(subject)) continue;
+      if (mine && !mine(w.repo, subject)) continue;
       const at = new Date(Number(line.slice(0, tab)) * 1000).toISOString();
       if (!best || at > best.at) best = { at, repo: w.repo, subject };
       break;
@@ -592,6 +612,19 @@ export async function buildPursuits(
   const staleMs = doc.staleDays * 86_400_000;
   const pursuits: Pursuit[] = [];
   const ranks = ranksOf(doc);
+  // a repo several objectives watch: a commit moves only the objective whose epic code its subject names
+  // ("Moving, not stale" quoted the repo's latest commit, about other work).
+  const watchers = new Map<string, number>();
+  for (const d of doc.pursuits) for (const r of new Set(d.watch.map((w) => w.repo))) watchers.set(r, (watchers.get(r) ?? 0) + 1);
+  const mineOf = (d: Declared): ((repo: string, subject: string) => boolean) | undefined => {
+    const nums = d.epics.flatMap((e) => {
+      const m = /^#[^\n]*?\bEPIC-(\d+)\b/m.exec(o.spineText(e.repo, e.path) ?? "");
+      return m ? [m[1]] : [];
+    });
+    if (!nums.length) return undefined;
+    const re = new RegExp(`\\b(?:E(?:${nums.join("|")})-[SAG]?\\d|EPIC-(?:${nums.join("|")})\\b)`);
+    return (repo, subject) => (watchers.get(repo) ?? 0) < 2 || re.test(subject);
+  };
   for (const d of doc.pursuits) {
     const lines = d.lines.map((l): PursuitLine => {
       if (l.from === "light" || l.from === "board") return lightLine(l, o.board);
@@ -605,13 +638,13 @@ export async function buildPursuits(
       }
       return { label: l.label, state: "unknown", value: "unknown kind" };
     });
-    const lastMove = await lastMoveOf(d.watch, o.repoDir, o.git);
+    const lastMove = await lastMoveOf(d.watch, o.repoDir, o.git, mineOf(d));
     const motion = !lastMove ? "unknown" : now - Date.parse(lastMove.at) <= staleMs ? "moving" : "stalled";
     pursuits.push({
       id: d.id,
       name: d.name,
       greenWhen: d.greenWhen,
-      state: worst(lines),
+      state: d.lines.some((l, i) => l.decides && lines[i]?.state === "green") ? "green" : worst(lines),
       greens: lines.filter((l) => l.state === "green").length,
       total: lines.length,
       lines,
@@ -622,9 +655,9 @@ export async function buildPursuits(
       ...(d.product && products.get(d.product) ? { product: { id: d.product, name: products.get(d.product)!.name } } : {}),
       ...(d.goal ? { goal: d.goal } : {}),
       owner: d.owner,
+      ...(d.briefing ? { briefing: true } : {}),
       rank: ranks.get(d.id) ?? null,
       parked: d.parked,
-      ...(d.unpinned ? { unpinned: true } : {}),
       effort: effortOf(ranks.get(d.id) ?? null, d.parked, doc.effort),
       epics: d.epics.map((e) => {
         const text = o.spineText(e.repo, e.path);

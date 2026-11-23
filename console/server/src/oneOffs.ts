@@ -58,6 +58,10 @@ const EPIC_CODE = /^(EPIC-\d+|[A-Z][A-Z0-9]*-?\d+)\s*:/;
 const DONE_MEANS_TITLE = /^\s*[A-Z][A-Z0-9]*\d+-\d+\s*:/;
 /** a row folded into another is that other row's job: it never shows on its own. */
 const FOLDED_STATUS = /^\s*done\s*\(\s*folded\b/i;
+/** a row moved to the one-offs repo leaves a pointer behind: the row itself shows from that repo. */
+const MOVED_STATUS = /^\s*moved\b/i;
+/** the one-offs repo (the owner's 22 Nov notes): one-offs with no repo of their own live there. */
+export const ONE_OFFS_REPO = "one-offs";
 
 export function stageOf(status: string, owner: string): OneOffStage {
   const s = status.trim();
@@ -128,7 +132,7 @@ export function readOneOffs(repoDir: string, repo: string, now = new Date()): On
       if (!inSpine && !ONE_OFF_TITLE.test(plain)) continue;
       if (inSpine && DONE_MEANS_TITLE.test(plain)) continue;
       const status = l.col.status >= 0 ? stripInline(l.cells[l.col.status] ?? "") : "";
-      if (FOLDED_STATUS.test(status)) continue;
+      if (FOLDED_STATUS.test(status) || MOVED_STATUS.test(status)) continue;
       const owner = l.col.owner >= 0 ? (l.cells[l.col.owner] ?? "") : "";
       const stage = stageOf(status, owner);
       const date = isoDay(l.col.verified >= 0 ? l.cells[l.col.verified] : undefined);
@@ -161,16 +165,32 @@ export function readOneOffs(repoDir: string, repo: string, now = new Date()): On
   return { oneOffs: out, counts, spine: ONE_OFFS_SPINE, deliveredDays: DELIVERED_DAYS };
 }
 
-/** The home repo's one-offs, read at most every `ttlMs`. */
-export function createOneOffs(o: { reposRoot: string; home?: string; ttlMs?: number }) {
+const STAGE_ORDER: OneOffStage[] = ["your card", "stuck", "in work", "filed", "parked", "delivered"];
+
+/** one page from several repos' one-offs (the home repo and the one-offs repo), in the page's order. */
+export function mergeOneOffs(bodies: OneOffsBody[]): OneOffsBody {
+  const out = bodies.flatMap((b) => b.oneOffs);
+  out.sort((a, b) => STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage) || (b.date ?? "").localeCompare(a.date ?? "") || a.id.localeCompare(b.id));
+  const counts = { filed: 0, "in work": 0, stuck: 0, "your card": 0, delivered: 0, parked: 0 } as Record<OneOffStage, number>;
+  for (const x of out) counts[x.stage]++;
+  return { oneOffs: out, counts, spine: ONE_OFFS_SPINE, deliveredDays: DELIVERED_DAYS };
+}
+
+/** The home repo's and the one-offs repo's one-offs, read at most every `ttlMs`. */
+export function createOneOffs(o: { reposRoot: string; home?: string; oneOffsRepo?: string; ttlMs?: number }) {
   let memo: { at: number; body: OneOffsBody } | undefined;
   const ttl = o.ttlMs ?? 30_000;
   return {
     get(): OneOffsBody {
       if (memo && Date.now() - memo.at < ttl) return memo.body;
       const name = o.home ?? homeRepo();
-      const dir = resolveRepo(o.reposRoot, name)?.path;
-      const body = dir ? readOneOffs(dir, name) : { oneOffs: [], counts: { filed: 0, "in work": 0, stuck: 0, "your card": 0, delivered: 0, parked: 0 }, spine: ONE_OFFS_SPINE, deliveredDays: DELIVERED_DAYS };
+      const body = mergeOneOffs(
+        [name, o.oneOffsRepo ?? ONE_OFFS_REPO].flatMap((r, i, all) => {
+          if (all.indexOf(r) !== i) return [];
+          const dir = resolveRepo(o.reposRoot, r)?.path;
+          return dir ? [readOneOffs(dir, r)] : [];
+        }),
+      );
       memo = { at: Date.now(), body };
       return body;
     },

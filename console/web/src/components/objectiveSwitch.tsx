@@ -39,21 +39,71 @@ function useSwitch() {
  * Done (the owner on the same call: "this one we can mark as complete") keeps it in the file like an inactive one,
  * out of every list, and lists it under Done with an undo.
  */
-export function ObjectiveOffButton({ id }: { id: string }) {
+export function ObjectiveOffButton({ id, openBoxes = 0 }: { id: string; openBoxes?: number }) {
   const { data } = usePursuits();
   const s = useSwitch();
   if (!data?.pursuits.some((p) => p.id === id)) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <button type="button" className={btn} disabled={s.saving} onClick={() => void s.done(id, true)} title="Reached: kept under Done, out of Goals to set, the counts, the inbox and every wake" data-testid="objective-mark-done">
+      {/* Mark done only once every Done-means box of its epics is ticked: green key results alone are not done. */}
+      {openBoxes === 0 && <button type="button" className={btn} disabled={s.saving} onClick={() => void s.done(id, true)} title="Reached: kept under Done, out of Goals to set, the counts, the inbox and every wake" data-testid="objective-mark-done">
         Mark done
-      </button>
+      </button>}
       <button type="button" className={btn} disabled={s.saving} onClick={() => void s.run(id, false)} title="Kept, out of Goals to set, the counts, the inbox and every wake" data-testid="objective-switch-off">
         {s.saving ? "Saving…" : "Switch off"}
       </button>
       {s.error && (
         <span className="text-xs text-destructive" role="alert">
           {s.error}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * His Daily briefing switch (the owner, 22 Nov), on every objective page: on, this objective's key results
+ * (and its tester table, testers by email) go into his 06:00 and 18:00 WhatsApp briefings. Saved with the objective in
+ * docs/pursuits.json (`"briefing": true`, one commit), never only in the database.
+ */
+export function DailyBriefingSwitch({ id }: { id: string }) {
+  const { data } = usePursuits();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const p = data?.pursuits.find((x) => x.id === id);
+  if (!p) return null;
+  const on = !!p.briefing;
+  const flip = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await mutate(() => api.setPursuitBriefing(id, !on), "inbox");
+    } catch (e) {
+      setError(`Not saved: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2" data-testid="objective-briefing">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={saving}
+        onClick={() => void flip()}
+        title={on ? "In your 06:00 and 18:00 briefings: its key results and tester table" : "Not in your briefings: switch on to get its key results at 06:00 and 18:00"}
+        className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-2.5 text-xs text-foreground disabled:opacity-30 md:h-8"
+        data-testid="objective-briefing-switch"
+      >
+        <span aria-hidden className={`relative inline-block h-4 w-7 rounded-full transition-colors ${on ? "bg-emerald-600" : "bg-muted-foreground/30"}`}>
+          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-background transition-all ${on ? "left-3.5" : "left-0.5"}`} />
+        </span>
+        Daily briefing {saving ? "…" : on ? "on" : "off"}
+      </button>
+      {error && (
+        <span className="text-xs text-destructive" role="alert">
+          {error}
         </span>
       )}
     </span>

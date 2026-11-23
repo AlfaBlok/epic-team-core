@@ -6,6 +6,7 @@ import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { StalledActions } from "@/components/stalled";
 import { ownerName } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * the open ask codes of the page (from Waiting on you), so an old `blocked` run badge reads Needs you only while
@@ -186,6 +187,7 @@ export function DefectFold({ children, show = 2 }: { children: ReactNode[]; show
       )}
       {more > 0 && (
         <button type="button" className="justify-self-start text-xs text-muted-foreground hover:text-foreground hover:underline" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="defect-more">
+          <FoldChevron open={open} className="mr-1.5" />
           {open ? "Show fewer notes" : `and ${more} more ${more === 1 ? "note" : "notes"} for the Delivery Manager`}
         </button>
       )}

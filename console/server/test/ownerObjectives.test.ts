@@ -31,7 +31,7 @@ describe("his objectives first", () => {
     expect(lines[one]).toContain("Five teams use Acme every week");
     expect(lines[one]).toContain("2 of 3 key results green");
     expect(lines[one]).toContain("moved today: 1 turned green");
-    expect(lines[one]).toContain('his words 11-14: "the number one priority');
+    expect(lines[one]).toContain('his words 11-14, in force: "the number one priority');
     expect(lines[one + 1]).toMatch(/^2\. 🔴 Five teams use Widget .* not moved today \(waits on Sam's review: E907-S3\)/);
     expect(b).not.toContain("Parked one");
     expect(b).not.toContain("An epic");

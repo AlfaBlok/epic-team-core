@@ -48,7 +48,7 @@ describe("the walk-through", () => {
     );
     expect(screen.getByTestId("briefing-title").textContent).toBe("Briefing · 1 of 2");
     expect(screen.getByTestId("briefing-objective").textContent).toBe("1. Memo: 5 testers");
-    expect(screen.getAllByTestId("briefing-kr")).toHaveLength(2);
+    expect(screen.getAllByTestId("kr-item")).toHaveLength(2); // the objectives screen's three-column table
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Push Reddit harder this week." } });
     fireEvent.click(screen.getByTestId("briefing-file"));
     await waitFor(() => expect(screen.getByTestId("briefing-objective").textContent).toBe("2. EpicTeam: team browser fully operational"));

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, type BriefingPictures } from "@/api";
 import { useQuery } from "@/lib/data";
+import { worldId } from "@/lib/useSocial";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * The owner: "Where in the UI can I get access to the last snapshot of these
@@ -81,6 +83,38 @@ function Briefing({ b }: { b: BriefingPictures }) {
   );
 }
 
+/**
+ * The owner 22 Nov: "right now, I would like to know like the last 6 hours what's been happening. Maybe we need to press
+ * a button or something for that one to be created on the spot". One button above the briefings draws the last 6 hours
+ * now (posts per channel, when each last posted, red when longer ago than usual); a second tap draws it again.
+ */
+export function NowPicture({ hours = 6 }: { hours?: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "ok" | "failed">("idle");
+  const draw = async () => {
+    setState("loading");
+    const id = await worldId().catch(() => "");
+    if (!id) return setState("failed");
+    setUrl(`/api/tenants/${encodeURIComponent(id)}/social/now.png?hours=${hours}&at=${Date.now()}`);
+  };
+  return (
+    <div className="grid min-w-0 gap-1.5" data-testid="now-picture">
+      <button type="button" onClick={draw} disabled={state === "loading"} className={cn("justify-self-start rounded-md border px-3 py-1.5 text-sm font-medium", PHONE_TAP)} data-testid="now-picture-button">
+        {state === "loading" ? "Drawing the last 6 hours…" : url ? `Draw the last ${hours} hours again` : `Social: the last ${hours} hours, now`}
+      </button>
+      {!url && state === "failed" && <p className="text-xs text-destructive">It could not be drawn just now. Try again in a minute.</p>}
+      {url && (
+        <figure className={cn("grid min-w-0 gap-1", state === "loading" && "opacity-60")} data-testid="now-picture-open">
+          <a href={url} target="_blank" rel="noreferrer">
+            <img src={url} alt={`On social, the last ${hours} hours`} onLoad={() => setState("ok")} onError={() => setState("failed")} className="w-full max-w-2xl rounded-md border" />
+          </a>
+          {state === "failed" && <figcaption className="text-xs text-destructive">It could not be drawn just now. Try again in a minute.</figcaption>}
+        </figure>
+      )}
+    </div>
+  );
+}
+
 /** true once the page is idle after its first paint, so nothing here races the inbox or the sidebar's reads. */
 export function useAfterFirstPaint(delayMs = 1500): boolean {
   const [ready, setReady] = useState(false);
@@ -108,12 +142,14 @@ export function LastBriefings({ delayMs = 1500 }: { delayMs?: number }) {
   if (!last.length) return null;
   return (
     <section className="grid min-w-0 gap-3" aria-label="Last briefings" data-testid="last-briefings">
+      <NowPicture />
       {last.map((b) => (
         <Briefing key={b.briefing + b.at} b={b} />
       ))}
       {earlier.length > 0 && (
         <>
           <button type="button" onClick={() => setMore(!more)} className={cn("justify-self-start text-xs text-muted-foreground underline underline-offset-2", PHONE_TAP)} aria-expanded={more} data-testid="earlier-briefings">
+            <FoldChevron open={more} className="mr-1.5" />
             {more ? "Hide earlier briefings" : `Earlier briefings (${earlier.length})`}
           </button>
           {more && earlier.map((b) => <Briefing key={b.briefing + b.at} b={b} />)}

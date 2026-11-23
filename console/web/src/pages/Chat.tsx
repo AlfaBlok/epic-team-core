@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { useInRouterContext, useNavigate, useSearchParams } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { Link, useInRouterContext, useNavigate, useSearchParams } from "react-router-dom";
 import { briefingHref, isBriefMe } from "@/lib/briefing";
-import { ArrowDown, ExternalLink, Mic, Phone, Send, X } from "lucide-react";
+import { ArrowDown, ExternalLink, Loader2, Mic, Phone, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
 import { useOwnCall } from "@/voice/OwnCall";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Empty, ErrorBox, Loading, PHONE_TAP, RelTime, ThreadLink, threadHref } from "@/components/common";
+import { INBOX_PATH } from "@/components/inboxLine";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { invalidate, pollWhileVisible, useQuery } from "@/lib/data";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
@@ -36,6 +37,10 @@ export const CHAT_PAGE = 20;
 export const CHAT_POLL_STALE_MS = 1_000;
 /** the first read failed (console restarting, network gone): try again this soon, saying so, never a dead page. */
 export const CHAT_RETRY_MS = 3_000;
+/** the workspace's chat waits for its own server (409 world_needs_box): not an outage, so look again only this often. */
+export const CHAT_WAIT_BOX_MS = 180_000;
+/** the console said the chat waits for the workspace's own server. */
+export const waitsForBox = (e: unknown) => (e as { code?: string } | undefined)?.code === "world_needs_box";
 /** the chat's own state when it has nothing to show (never a blank panel). */
 export const CHAT_EMPTY = {
   loading: "Loading the chat…",
@@ -364,13 +369,82 @@ export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the n
  * under a send the console holds while T3 is down or slow: it is sent (the console has it and delivers it by itself),
  * never worded as a doubt (the owner, 18 Nov: "queued" read as not sent while the desk had his message).
  */
-export const QUEUED_NOTE = "✓ Sent · the desk reads it as soon as T3 answers";
+export const QUEUED_NOTE = "Sending · the desk gets it as soon as T3 answers";
 /** his voice note the desk does not have yet: said plainly on the note itself. */
 export const NOTE_RETRYING = "Voice note not delivered yet, retrying";
 export const NOTE_NOT_DELIVERED = "Voice note not delivered. Its words are kept and the team has been told";
+/**
+ * why a note is not in the desk's chat yet, from the console's last try (the owner saw only "retrying" for
+ * an hour while T3 restarted, and his newest bubble at the bottom looked failed): said in plain words under the note.
+ */
+export function noteWhy(error: string | undefined, t3?: "restarting" | "maintenance"): string {
+  const inner = /\((.+)\)\s*$/.exec(error ?? "")?.[1];
+  if (inner) return inner.charAt(0).toUpperCase() + inner.slice(1);
+  if (t3) return t3 === "maintenance" ? "T3 is down for planned maintenance" : "T3 is restarting";
+  return "The desk's chat has not taken it yet";
+}
+type UndeliveredNoteItem = NonNullable<DeskChat["undeliveredNotes"]>[number];
+
+/**
+ * his voice note the desk's chat does not hold yet, where he sent it: what is wrong in plain words, since when, and
+ * Send again (one re-send now under the note's one id; the console also re-sends it each minute by itself).
+ */
+function UndeliveredNote({ n, t3, base, onSent }: { n: UndeliveredNoteItem; t3?: "restarting" | "maintenance"; base?: string; onSent: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | undefined>();
+  const again = async () => {
+    setBusy(true);
+    setSaid(undefined);
+    try {
+      const r = await fetch(`${base || "/api/voice"}/notes/${encodeURIComponent(n.id)}/redeliver`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const j = (await r.json().catch(() => ({}))) as { delivered?: boolean; error?: { message?: string } };
+      if (!r.ok) setSaid(`Could not send it again: ${j.error?.message ?? `the console answered ${r.status}`}`);
+      else if (j.delivered) setSaid(SENT_MARK);
+      else setSaid("Sent again: the desk's chat has not taken it yet, the console keeps trying");
+      onSent();
+    } catch (e) {
+      setSaid(`Could not send it again: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <li className="flex justify-end" data-testid="chat-undelivered-note">
+      <div className="min-w-0 max-w-[92%] rounded-lg border border-destructive bg-primary/60 px-3 py-2 text-sm text-primary-foreground sm:max-w-[85%]">
+        <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{n.text}</p>
+        <div className="mt-1.5 rounded bg-background px-2 py-1.5 text-xs text-destructive" role="alert">
+          <span className="block" data-testid="chat-undelivered-state">{n.state === "failed" ? NOTE_NOT_DELIVERED : NOTE_RETRYING}</span>
+          <span className="block text-muted-foreground" data-testid="chat-undelivered-why">
+            {noteWhy(n.error, t3)} · sent <RelTime iso={n.at} />
+          </span>
+          <span className="mt-1 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" className={cn(PHONE_TAP, "h-8")} disabled={busy} pending={busy} pendingLabel="Sending…" onClick={() => void again()} data-testid="chat-undelivered-retry">
+              Send again
+            </Button>
+            {said && <span className="text-muted-foreground" data-testid="chat-undelivered-said">{said}</span>}
+          </span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/** his own message the desk's chat holds: the mark under it (pasted images included). */
+export const SENT_MARK = "✓ Sent";
+/** the undelivered notes placed in time among the messages: key = the id of the message each follows ("" = before all). */
+export function notesInTime<N extends { at: string }>(notes: N[] | undefined, messages: { id: string; at?: string }[]): Map<string, N[]> {
+  const out = new Map<string, N[]>();
+  for (const n of notes ?? []) {
+    const t = Date.parse(n.at);
+    let after = "";
+    for (const m of messages) if (m.at && Date.parse(m.at) <= t) after = m.id;
+    out.set(after, [...(out.get(after) ?? []), n]);
+  }
+  return out;
+}
 /** the same quiet lines in a customer's workspace, which never names our T3. */
 export const CUSTOMER_T3_DOWN_MESSAGE = { restarting: "The chat is reconnecting…", maintenance: "The chat is down for planned maintenance, reconnecting…" } as const;
-export const CUSTOMER_QUEUED_NOTE = "✓ Sent · the team reads it as soon as the chat is back";
+export const CUSTOMER_QUEUED_NOTE = "Sending · the team gets it as soon as the chat is back";
 
 /**
  * a message he sent that the transcript does not show yet. It shows at once ("sending…"), the console's reply
@@ -573,7 +647,7 @@ export function ChatView({
   // the first read failed (no chat to show yet): keep trying, the page says so meanwhile
   useEffect(() => {
     if (chat || !error) return;
-    const t = setTimeout(() => void load(), CHAT_RETRY_MS);
+    const t = setTimeout(() => void load(), waitsForBox(error) ? CHAT_WAIT_BOX_MS : CHAT_RETRY_MS);
     return () => clearTimeout(t);
   }, [chat, error, load]);
   // an answer from the console's last good read (T3 was slow): the fresh one is a moment away
@@ -746,7 +820,11 @@ export function ChatView({
             const ids = files.ids;
             if (!ids.length) return;
             files.clear();
-            void sendMessage(VOICE_FILES_NOTE, hint || undefined, `chat-files-${crypto.randomUUID?.() ?? Date.now()}`, ids).catch((e) => setSendFailed((e as Error).message));
+            // through the outbox like a typed send: his files show sending, then Sent, or Not sent with Retry
+            const all = older ? [...older.messages, ...(chat?.messages ?? [])] : (chat?.messages ?? []);
+            const o: OutboxItem = { crid: `chat-files-${crypto.randomUUID?.() ?? Date.now()}`, text: VOICE_FILES_NOTE, ...(hint ? { page: hint } : {}), ids, state: "sending", seen: all.map((m) => m.id) };
+            setOutbox((xs) => [...xs, o]);
+            deliver(o);
           },
           onSent: () => {
             stuck.current = true;
@@ -812,13 +890,18 @@ export function ChatView({
 
   const threadUrl = (id: string) => threadHref(id, chat?.environmentId);
   const short = who.replace(/^Team /, "").toLowerCase();
+  // a voice note the desk's chat lacks sits where he sent it, never below his newer messages
+  const notesAt = notesInTime(chat?.undeliveredNotes, shown);
+  const undeliveredBubble = (n: UndeliveredNoteItem) => (
+    <UndeliveredNote key={n.id} n={n} t3={chat?.t3} base={voiceBase} onSent={() => void load()} />
+  );
 
   return (
     <>
       {error && !chat && (
         <>
           {/* a workspace whose chat waits for its own server is reached fine: only its one line shows */}
-          {(error as { code?: string }).code !== "world_needs_box" && (
+          {!waitsForBox(error) && (
             <p role="status" className="mb-2 text-sm text-muted-foreground" data-testid="chat-retrying">
               Can't reach the console, retrying…
             </p>
@@ -874,8 +957,12 @@ export function ChatView({
                 {chat.stale || chat.unreachable || chat.t3 ? CHAT_EMPTY.loading : CHAT_EMPTY.empty}
               </li>
             )}
+            {notesAt.get("")?.map(undeliveredBubble)}
             {shown.map((m) => (
-              <Bubble key={m.id} m={m} threadUrl={threadUrl} customer={chat.customer} />
+              <Fragment key={m.id}>
+                <Bubble m={m} threadUrl={threadUrl} customer={chat.customer} />
+                {notesAt.get(m.id)?.map(undeliveredBubble)}
+              </Fragment>
             ))}
             {chat.queued?.map((q) => (
               <li key={q.id} className="flex justify-end" data-testid="chat-queued">
@@ -883,16 +970,8 @@ export function ChatView({
                   {q.page && <p className="mb-1 text-[11px] opacity-80 [overflow-wrap:anywhere]">about: {q.page}</p>}
                   <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{splitAttachments(q.text).text}</p>
                   <SentFiles files={splitAttachments(q.text).files} />
-                  <p className="mt-1 text-[11px] opacity-80">{chat.customer ? CUSTOMER_QUEUED_NOTE : QUEUED_NOTE}</p>
-                </div>
-              </li>
-            ))}
-            {chat.undeliveredNotes?.map((n) => (
-              <li key={n.id} className="flex justify-end" data-testid="chat-undelivered-note">
-                <div className="min-w-0 max-w-[92%] rounded-lg border border-destructive bg-primary/60 px-3 py-2 text-sm text-primary-foreground sm:max-w-[85%]">
-                  <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{n.text}</p>
-                  <p className="mt-1.5 rounded bg-background px-2 py-1.5 text-xs text-destructive" role="alert" data-testid="chat-undelivered-state">
-                    {n.state === "failed" ? NOTE_NOT_DELIVERED : NOTE_RETRYING}
+                  <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-queued-state">
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />{chat.customer ? CUSTOMER_QUEUED_NOTE : QUEUED_NOTE}
                   </p>
                 </div>
               </li>
@@ -915,8 +994,10 @@ export function ChatView({
                       </span>
                     </div>
                   ) : (
-                    <p className="mt-1 text-[11px] opacity-80" data-testid="chat-posting-state">
-                      {o.state === "sent" ? "✓ Sent" : o.ids?.length ? `sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "sending…"}
+                    // E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e: "instead of saying Sent, it stays spinning until it fully
+                    // has been sent"): it spins until the desk's chat holds it; ✓ Sent shows only on the message there
+                    <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-posting-state">
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />{o.ids?.length ? `Sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "Sending…"}
                     </p>
                   )}
                 </div>
@@ -1021,10 +1102,10 @@ function WorkingLine({ who, since }: { who: string; since?: string }) {
 
 /** what the bubble of a voice note on its way says under it. */
 export const POSTING_TEXT: Record<PostingNote["state"], string> = {
-  writing: "sending…",
-  safe: "✓ Sent · your words appear here in a few seconds",
-  sent: "✓ Sent",
-  kept: "saved on this phone, sends by itself",
+  writing: "Sending…",
+  safe: "Sending…",
+  sent: "Sending…",
+  kept: "Sending · saved on this phone, it goes by itself",
   failed: "not sent yet: Send again below",
 };
 
@@ -1037,8 +1118,9 @@ function PostingBubble({ p }: { p: PostingNote }) {
           <Mic className="h-3 w-3" aria-hidden /> <span className="font-medium">Voice note</span> · {clockOf(p.seconds)}
         </p>
         {p.words && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="chat-voice-posting-words">{p.words}</p>}
-        <p className="mt-1 text-[11px] opacity-80" data-testid="chat-voice-posting-state">
-          {POSTING_TEXT[p.state]}
+        {/* E948-S174: one spinner until the desk's chat holds the note; its ✓ Sent is the message's own mark there */}
+        <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-voice-posting-state">
+          {p.state !== "failed" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />}{POSTING_TEXT[p.state]}
         </p>
       </div>
     </li>
@@ -1091,11 +1173,67 @@ function Bubble({ m, threadUrl, customer }: { m: DeskMessage; threadUrl: (id: st
         <SentFiles files={sent.files} />
         <p className={cn("mt-1 text-[11px]", mine ? "opacity-80" : "text-muted-foreground")}>
           {m.status !== "completed" && "writing… "}
+          {mine && <span data-testid="chat-sent-mark">{SENT_MARK} · </span>}
           <RelTime iso={m.at} />
           {m.truncated && (customer ? " · cut short" : " · cut short, full text in T3")}
         </p>
         {!mine && m.status === "completed" && m.text.trim() && <ReplyPlay id={m.id} text={call?.rest ?? m.text} />}
+        {mine && <TicketLine m={m} />}
       </div>
     </li>
+  );
+}
+
+/**
+ * Where his words went, in his words (the owner, 22 Nov: "I've read this several times and I don't know what you're
+ * talking about"): under each message of his, the task it went to by its plain name and where it stands, linked to his inbox
+ * when its card waits there, or "Not picked up yet". No row codes, no "ticket" or "request".
+ */
+type Row = NonNullable<DeskMessage["rows"]>[number];
+export function plainStatus(status?: string): string | undefined {
+  const s = (status ?? "").toLowerCase();
+  if (!s) return undefined;
+  if (s === "review") return "in your inbox";
+  if (/^(ready|draft)/.test(s)) return "queued";
+  if (/^(doing|active|in[ _-]?progress|claimed|rework)/.test(s)) return "being worked on";
+  if (s === "blocked") return "waiting on an answer";
+  if (s === "monitoring") return "being watched";
+  if (/^(done|closed|approved)/.test(s)) return "done";
+  if (s === "parked") return "parked";
+  if (/^(superseded|folded)/.test(s)) return "merged into another task";
+  return undefined;
+}
+const rowName = (r: Row) => r.title || "a task";
+export function ticketLine(rows: DeskMessage["rows"]): string | undefined {
+  if (!rows) return undefined;
+  if (!rows.length) return "Not picked up yet";
+  const first = rows[0];
+  const st = plainStatus(first.status);
+  const head = `Your words went to: ${rowName(first)}${st ? ` (${st})` : ""}`;
+  return rows.length === 1 ? head : `${head}, and ${rows.length - 1} more`;
+}
+
+function TicketLine({ m }: { m: DeskMessage }) {
+  const line = ticketLine(m.rows);
+  if (!line || !m.request) return null;
+  const first = m.rows?.[0];
+  const routed = useInRouterContext();
+  const toInbox = first?.status?.toLowerCase() === "review";
+  return (
+    <p className="mt-0.5 text-xs opacity-90 [overflow-wrap:anywhere]" data-testid="chat-ticket-line" data-state={!m.rows?.length ? "none" : m.rows.length === 1 ? "one" : "many"} data-request={m.request}>
+      {toInbox ? (
+        routed ? (
+          <Link to={`/${INBOX_PATH}`} className="underline underline-offset-2">
+            {line}
+          </Link>
+        ) : (
+          <a href={`/${INBOX_PATH}`} className="underline underline-offset-2">
+            {line}
+          </a>
+        )
+      ) : (
+        line
+      )}
+    </p>
   );
 }

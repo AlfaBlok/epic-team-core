@@ -11,12 +11,12 @@ vi.mock("@/lib/gapFinder", async (orig) => ({ ...(await orig<typeof import("@/li
 
 /**
  * the card check pressed "Tools 17" on /gap-finder/2026-11-16 and nothing happened. A fold opened by
- * itself on one of its own pages could not be folded: every folded group (Tools, Settings, More objectives)
+ * itself on one of its own pages could not be folded: every folded group (Tools, Settings; no Other goals fold)
  * answers each press, on every page, its own pages included.
  */
-const node = (id: string, name: string, rank: number, unpinned?: boolean): ScorecardNode =>
-  ({ id, kind: "pursuit", name, rank, greens: 0, total: 1, spines: [], keyResults: [{ label: "One", state: "red", value: "0", kind: "key-result", work: [] }], rows: [], children: [], ...(unpinned ? { unpinned: true } : {}) }) as ScorecardNode;
-const body: ScorecardsBody = { nodes: [node("launch", "Acme: 5 testers", 1), node("books", "Books: accounts in order", 2, true)], spineInfo: {} };
+const node = (id: string, name: string, rank: number): ScorecardNode =>
+  ({ id, kind: "pursuit", name, rank, greens: 0, total: 1, spines: [], keyResults: [{ label: "One", state: "red", value: "0", kind: "key-result", work: [] }], rows: [], children: [] }) as ScorecardNode;
+const body: ScorecardsBody = { nodes: [node("launch", "Acme: 5 testers", 1), node("books", "Books: accounts in order", 2)], spineInfo: {} };
 
 afterEach(() => {
   cleanup();
@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 const PAGES = ["/gap-finder/2026-11-16", "/inbox", "/sets/launch", "/sets/books", "/runs", "/personas", "/"];
-const FOLDS = ["nav-pages-toggle", "nav-settings-toggle", "more-objectives-toggle"];
+const FOLDS = ["nav-pages-toggle", "nav-settings-toggle"]; // the Other goals fold is gone
 
 describe("every folded group of the sidebar opens and folds when pressed", () => {
   for (const page of PAGES) {
@@ -36,7 +36,8 @@ describe("every folded group of the sidebar opens and folds when pressed", () =>
           <SidebarNav />
         </MemoryRouter>,
       );
-      await screen.findByTestId("more-objectives-toggle");
+      await screen.findByTestId("nav-pages-toggle");
+      expect(screen.queryByTestId("nav-other-goals-toggle")).toBeNull();
       for (const id of FOLDS) {
         const before = screen.getByTestId(id).getAttribute("aria-expanded");
         fireEvent.click(screen.getByTestId(id));

@@ -220,13 +220,16 @@ export interface TreeLine {
 
 /** what the card shows (server review/face.ts). */
 export interface CardFace {
+  /** E948-S172 the card's topic, its first line `About: …`. */
+  about?: string;
   project: { name: string; url?: string };
   goal: { text: string; code: string };
   tasks: { done: number; total: number };
   title: string;
   taskGoal: string;
   delivered: { ok: boolean; text: string }[];
-  evidence: { url: string; label: string };
+  /** E948-S180 `look`: one plain line under the link, what to look at there. */
+  evidence: { url: string; label: string; look?: string };
   screenshot?: string;
   /** E948-S62 the quality check: his words beside the result point by point; the live screens (…/screenshot?width=390). */
   qc?: {
@@ -286,4 +289,26 @@ export interface ClosedCard extends ClosedCardRef {
   responseId?: string;
   /** Comments he added since. */
   comments: number;
+}
+
+/** a card he sent back that is not back in review yet (server: review/sentBack.ts, GET /api/sent-back-cards). */
+export interface SentBackCard {
+  id: string;
+  ref: string;
+  repo: string;
+  path: string;
+  milestoneId?: string;
+  title: string;
+  /** a worker is on it · sent back and queued · the team closed it without bringing it back. */
+  state: "in_progress" | "waiting" | "closed_by_team";
+  iteration: number;
+  /** his words when he sent it back. */
+  words?: string;
+  since?: string;
+  worker?: { run: string; persona?: string; host?: string; startedAt?: string; leaseUntil?: string; live: boolean };
+  why?: string;
+  /** folded into this row, which is being worked on. */
+  continuesIn?: string;
+  /** waiting on a timed check until then. */
+  checkAt?: string;
 }

@@ -5,7 +5,7 @@
  *
  *   section pill  ==  open cards drawn in it ([data-inbox-open], a Sent row is never one)
  *   top bar red   ==  Blocked on you + Decisions waiting on you      top bar green  ==  Done, waiting for your review
- *   (E948-S132: plus the Urgent section's cards, each counted red or green by its `data-inbox-tone`)
+ *   (E948-S178: plus every card of the Urgent section, red; a card there toned green is a mismatch)
  *
  *   menu Inbox red/green  ==  top bar red/green (E948-S141 iteration 2: phone and laptop read the same numbers)
  * The same function runs in the unit test (inboxCountsMatchCards.test.tsx) and on his live inbox after each release
@@ -51,9 +51,29 @@ export function openCardsDrawn(section: Element, tone?: "red" | "green"): number
   return n;
 }
 
+/**
+ * E948-S182 (the owner 22 Nov 23:5xZ: the kernel plan ask showed twice in Urgent and Urgent counted 2): one ask is one card.
+ * Each open card carries `data-card-key` (`ask:<repo>/<code>`, `row:<repo>/<row>`); the same key on two open cards of the
+ * inbox is a mismatch naming both, so a doubled card never passes as a right count.
+ */
+export const cardKey = (kind: "ask" | "row", repo: string | null | undefined, code: string | null | undefined) => (code ? `${kind}:${repo ?? ""}/${code.toUpperCase()}` : undefined);
+export function duplicateCards(root: ParentNode = document): string[] {
+  const seen = new Map<string, string[]>();
+  for (const id of COUNTED_SECTIONS) {
+    const section = root.querySelector(`[data-fold-section][data-testid="${id}"]`);
+    if (!section) continue;
+    for (const el of section.querySelectorAll("[data-inbox-open]")) {
+      if (el.closest("[data-fold-section]") !== section || el.querySelector('[data-testid="sent-row"]')) continue;
+      const key = el.getAttribute("data-card-key") ?? el.querySelector("[data-card-key]")?.getAttribute("data-card-key");
+      if (key) seen.set(key, [...(seen.get(key) ?? []), id]);
+    }
+  }
+  return [...seen].filter(([, at]) => at.length > 1).map(([key, at]) => `${key.replace(/^(ask|row):/, "")} shows ${at.length} cards (${at.join(", ")}): one ask is one card`);
+}
+
 export function inboxCountCheck(root: ParentNode = document): CountCheck {
   const sections: SectionCount[] = [];
-  const mismatches: string[] = [];
+  const mismatches: string[] = [...duplicateCards(root)];
   for (const id of COUNTED_SECTIONS) {
     const section = root.querySelector(`[data-fold-section][data-testid="${id}"]`);
     if (!section) continue;
@@ -70,16 +90,17 @@ export function inboxCountCheck(root: ParentNode = document): CountCheck {
     const green = pillOf(root, "topbar-review");
     const by = (id: string) => sections.find((s) => s.section === id);
     const known = (...ids: string[]) => ids.every((id) => !by(id) || !by(id)!.folded);
-    // E948-S132: the Urgent section's asks and decisions count red, its finished work green
+    // E948-S178 (the owner 22 Nov 20:57Z, vn_facd277a: "The one in Urgent is a red one ... it's being counted as one of the
+    // green ones"): Urgent is a red section, every card in it counts red, never green; green is Done, waiting for your review only
     const urgent = root.querySelector('[data-fold-section][data-testid="inbox-urgent"]');
-    const urgentRed = urgent ? openCardsDrawn(urgent, "red") : 0;
     const urgentGreen = urgent ? openCardsDrawn(urgent, "green") : 0;
-    const redCards = known("inbox-urgent", "waiting-on-you", "inbox-decisions") ? urgentRed + (by("waiting-on-you")?.cards ?? 0) + (by("inbox-decisions")?.cards ?? 0) : null;
-    const greenCards = known("inbox-urgent", "waiting-for-review") ? urgentGreen + (by("waiting-for-review")?.cards ?? 0) : null;
+    if (urgentGreen > 0) mismatches.push(`Urgent: ${urgentGreen} card${urgentGreen === 1 ? "" : "s"} counted green, Urgent counts red`);
+    const redCards = known("inbox-urgent", "waiting-on-you", "inbox-decisions") ? (by("inbox-urgent")?.cards ?? 0) + (by("waiting-on-you")?.cards ?? 0) + (by("inbox-decisions")?.cards ?? 0) : null;
+    const greenCards = known("waiting-for-review") ? (by("waiting-for-review")?.cards ?? 0) : null;
     topbar = { red, green, redCards, greenCards };
     // the sections are on this page only on the Inbox; elsewhere the top bar is not compared
     if (by("waiting-for-review") || by("waiting-on-you")) {
-      if (red !== null && redCards !== null && red !== redCards) mismatches.push(`top bar red: ${red}, ${redCards} open cards in Blocked on you and Decisions`);
+      if (red !== null && redCards !== null && red !== redCards) mismatches.push(`top bar red: ${red}, ${redCards} open cards in Urgent, Blocked on you and Decisions`);
       if (green !== null && greenCards !== null && green !== greenCards) mismatches.push(`top bar green: ${green}, ${greenCards} open cards in Done, waiting for your review`);
     }
   }

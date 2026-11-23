@@ -13,6 +13,7 @@ import { scorecardHref } from "@/lib/scorecards";
 import { useRoutes } from "@/lib/skin";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { byRingColour } from "@/lib/ringOrder";
 
 /**
  * The owner's pursuits: the big goals he wants to see through, each with its "green when" line, a scorecard read from
@@ -188,7 +189,7 @@ export function PursuitPanel({ p, linkName = false }: { p: Pursuit; linkName?: b
         </div>
       </div>
       <ul className="mt-3 divide-y divide-border border-t" data-testid="pursuit-lines">
-        {p.lines.map((l) => (
+        {byRingColour(p.lines).map((l) => (
           <Line key={l.label} l={l} />
         ))}
       </ul>

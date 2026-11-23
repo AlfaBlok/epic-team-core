@@ -106,6 +106,9 @@ describe("goal sets", () => {
     expect(set.file).toEqual({ path: "docs/scorecards/launch.json", present: true, proposal: "the shape proposal" });
     expect(set.rows[0]).toMatchObject({ label: "Paying customers", kind: "key-result", state: "red", target: "1" });
     expect(set.rows[1]).toMatchObject({ label: "Testers who applied", state: "red", value: "0 of 5" });
+    // a line read live is measured now: never "nothing measures this yet"; a declared row has no stamp
+    expect(set.rows[1].measuredAt).toBeTruthy();
+    expect(set.rows[0].measuredAt).toBeUndefined();
     // the live line it used is not listed twice, and the file's rows replace the other pursuit checks
     expect(set.rows.filter((r) => r.value === "0 of 5")).toHaveLength(1);
     expect(set.rows.find((r) => r.label === "Site answers")).toBeUndefined();
@@ -228,6 +231,25 @@ describe("goal sets", () => {
     const find = createWorkFinder(() => dir, (_r, rel) => files[rel]);
     expect(find("app", "E901-2")).toMatchObject({ kind: "done-means", title: "First customer pays", status: "open", state: "amber", epicCode: "EPIC-901" });
     expect(find("app", "E901-S4")).toMatchObject({ kind: "ticket", state: "red" });
+  });
+
+  it("tickets in another repo's layout are found: a root EPIC.md, a box-shaped row id, an EPIC-907-A5 ask, a table outside the ledger, a desk note", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "layouts-"));
+    fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "desk/inbox"), { recursive: true });
+    const files: Record<string, string> = {
+      "EPIC.md": `# EPIC: Home Choice\n\n${LEDGER(["| H907-S43 | Ticket worker | run | Start over with a process | done (approved) | x |"])}`,
+      "docs/EPIC-907-X.md": `# EPIC-907: Compute\n\n${LEDGER(["| C907-18 | Ticket worker | run | Tester isolation | done | x |"])}\n## Waiting on\n- [ask EPIC-907-A5 2026-11-19 @Sam] You decide: credit two times\n\n| Issue | Role | Owner | Title | Status | Next |\n|---|---|---|---|---|---|\n| E907-F10 | Ticket worker | none | Box DOD-5 proven | ready | x |\n`,
+      "desk/inbox/n.md": "---\nfrom: host1\nabout: Feedback key result is red\nstatus: answered\n---\nbody\n",
+    };
+    for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, rel), text);
+    const find = createWorkFinder(() => dir, (_r, rel) => files[rel]);
+    expect(find("home", "H907-S43")).toMatchObject({ kind: "ticket", title: "Start over with a process", state: "green", path: "EPIC.md" });
+    expect(find("ops", "C907-18")).toMatchObject({ kind: "ticket", status: "done", epicCode: "EPIC-907" });
+    expect(find("ops", "EPIC-907-A5")).toMatchObject({ kind: "ticket", state: "red", status: "waiting on an answer" });
+    expect(find("ops", "E907-F10")).toMatchObject({ kind: "ticket", title: "Box DOD-5 proven", status: "ready", state: "amber" });
+    expect(find("note", "app:desk/inbox/n.md")).toMatchObject({ kind: "ticket", title: "Desk note: Feedback key result is red", state: "green" });
+    expect(find("ops", "E907-F99")).toMatchObject({ kind: "unknown" });
   });
 
   it("the objectives mock-up: the file's key results (Done-means id, value, note, colour, work), the sidebar's child epics in short words, the spine named, a set folded into another", () => {

@@ -59,9 +59,10 @@ describe("priority and effort", () => {
     expect(doc.pursuits.find((p) => p.id === "tenants")!.epics).toHaveLength(2); // the path outside the repo is dropped
   });
 
-  // `"pinned": false` folds an objective under More objectives in the sidebar; it keeps its rank and effort.
-  it("reads pinned: false as unpinned, every other one stays pinned", () => {
-    expect(doc.pursuits.filter((p) => p.unpinned).map((p) => p.id)).toEqual(["late"]);
+  // the owner ("These are all objectives ... and they're sorted"): one list, no pinned and unpinned;
+  // an old `"pinned": false` changes nothing, the objective keeps its rank and effort.
+  it("keeps an old pinned: false in his one list, its rank kept", () => {
+    expect(doc.pursuits.map((p) => p.id)).toContain("late");
     expect(ranksOf(doc).get("late")).toBe(4);
   });
 

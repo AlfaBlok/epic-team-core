@@ -65,10 +65,10 @@ describe("Home opens on the chat in a paid team workspace", () => {
       ["Connect GitHub", "green"],
       ["Create a goal", "green"],
       ["Attach a persona", "amber"],
-      ["Run it", "red"],
       ["Connect MCP for WhatsApp", "amber"],
+      ["Run it", "red"],
     ]);
-    expect(screen.getAllByTestId("kr-light")).toHaveLength(5); // each key result its traffic light
+    expect(screen.getAllByTestId("kr-now")).toHaveLength(5); // each key result its coloured current cell, green first
     expect(screen.queryByText(/tap a key result/)).toBeNull(); // nothing to open: the chat works them
     expect(await screen.findByText("Chat with your team")).toBeTruthy();
     await waitFor(() => expect(desk).toHaveBeenCalledWith("et-dana", { limit: 20 }));
@@ -93,7 +93,7 @@ describe("Home opens on the chat in a paid team workspace", () => {
   it("its chat waiting for the workspace's own server says only that, never can't reach the console", async () => {
     vi.spyOn(api as Required<typeof api>, "getMe").mockResolvedValue(me("et-dana-side"));
     vi.spyOn(api, "getFirstObjective").mockResolvedValue({ firstObjective: false, workspace: "Side project", objectives: [] });
-    vi.spyOn(api, "getWorldDeskChat").mockRejectedValue(new ApiError(503, "Your team's chat starts when your workspace's own sealed server is ready.", "world_needs_box"));
+    vi.spyOn(api, "getWorldDeskChat").mockRejectedValue(new ApiError(409, "Your team's chat starts when your workspace's own sealed server is ready.", "world_needs_box"));
     home();
     expect(await screen.findByText(/own sealed server is ready/)).toBeTruthy();
     expect(screen.queryByTestId("chat-retrying")).toBeNull();

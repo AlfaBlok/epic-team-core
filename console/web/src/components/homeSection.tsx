@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FoldChevron } from "@/components/foldChevron";
 
 /** a Team home section's fold, kept per section in localStorage (default open). */
 const SECTION_STORE = "teamHome.section.";
@@ -198,7 +198,8 @@ export function FoldSection({
   /** No pill at 0 (the milestone pages' rule). */
   hideZero?: boolean;
   meta?: ReactNode;
-  /** the section's phone button (a call about its cards), shown open or folded. */
+  /** the section's phone button (a call about its cards): inside the section, on top of its cards, only once it is open
+   * (never on the heading line). */
   call?: ReactNode;
   actions?: ReactNode;
   bodyClassName?: string;
@@ -211,7 +212,7 @@ export function FoldSection({
   const stick = !!onToggle;
   const label = (
     <>
-      {onToggle && (open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />)}
+      {onToggle && <FoldChevron open={open} className="text-muted-foreground" />}
       <span className="min-w-0">{title}</span>
       {pill}
     </>
@@ -235,11 +236,15 @@ export function FoldSection({
           )}
         </h2>
         {meta}
-        {call}
         {open && actions}
       </div>
-      {open && children !== undefined && children !== null && children !== false && (
+      {open && ((children !== undefined && children !== null && children !== false) || !!call) && (
         <div className={cn("pt-2", bodyClassName)} data-testid={bodyTestId}>
+          {call && (
+            <div className="mb-2 flex items-center" data-section-call="">
+              {call}
+            </div>
+          )}
           {children}
         </div>
       )}

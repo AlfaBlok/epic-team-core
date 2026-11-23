@@ -5,20 +5,21 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { serve } from "@hono/node-server";
+import { inheritedSockets, serveOn } from "./systemdSockets.js";
 import { createApp } from "./app.js";
 import { defaultDbPath, openDb } from "./db.js";
 import { resolveRepo } from "./adapters/repos.js";
 import { prewarmSpines } from "./adapters/spines.js";
 import type { IndexerHandle } from "./indexer/launch.js";
 import { watchLoopLag } from "./loopLag.js";
+import { warmInbox } from "./warmInbox.js";
 import { milestoneRanks } from "./inbox/priority.js";
 import { readConfigFromEnv } from "./routes/read.js";
 import { createStore } from "./store.js";
 import { McpT3Client } from "./t3/client.js";
 import { gitRunner } from "./cycle/repoPull.js";
 import { envDispatcher } from "./t3/dispatcher.js";
-import { hostDispatchersFromEnv, sshMeminfo } from "./t3/hostDispatcher.js";
+import { hostDispatchersFromEnv, sshHostLoad, sshMeminfo } from "./t3/hostDispatcher.js";
 import { createWorkerRoom, memAvailableMb, roomyMaxFromEnv } from "./cycle/workerRoom.js";
 import { hostGit } from "./cycle/preWake.js";
 import { realScanner } from "./usage/collector.js";
@@ -108,6 +109,10 @@ const revision = (() => {
 let pressWorker: PressWorker | undefined;
 // shared staging (the hosted layer) sets CONSOLE_PASSIVE=1: this console reads a database another console owns.
 const passive = process.env.CONSOLE_PASSIVE === "1";
+// the inbox warm-up (started once the server listens); the tree warm-up waits for it. Off: CONSOLE_INBOX_WARM=0.
+const warmOn = process.env.CONSOLE_INBOX_WARM !== "0" && process.env.CONSOLE_PASSIVE !== "1";
+let releaseWarm: () => void = () => undefined;
+const inboxWarmed: Promise<void> = warmOn ? new Promise<void>((r) => (releaseWarm = r)) : Promise.resolve();
 const app = createApp(db, {
   passive,
   answers: { ack: process.env.CONSOLE_ANSWER_ACK === "done" ? "done" : "saved", onJobs: (j) => (answerJobs = j) },
@@ -153,7 +158,13 @@ const app = createApp(db, {
   // build the Epic Book once in the background, after the spines.py prewarm has had its turn.
   ...(process.env.CONSOLE_BOOK_PREWARM === "0" ? {} : { book: { prewarmAfterMs: 20_000, tickMs: 2 * 60_000 } }),
   // right after the start, read the milestone trees (focus milestones first) so the first open is warm.
-  ...(process.env.CONSOLE_TREE_WARM === "0" ? {} : { warmTrees: { afterMs: 0 } }),
+  // after the inbox's first-draw reads are warm (inboxWarmed below), so a release never makes the owner's inbox wait on them.
+  // and a minute later, with a pause between milestones: releases can come 1 to 3 min apart and the 45 s
+  // warm-up ran right when the owner (and the inbox load check) opened the inbox after each restart, so his first reads
+  // waited 3 to 9 s behind it; a release that lands within the minute now skips the warm-up it would have thrown away.
+  ...(process.env.CONSOLE_TREE_WARM === "0"
+    ? {}
+    : { warmTrees: { afterMs: Number(process.env.CONSOLE_TREE_WARM_AFTER_MS ?? 60_000), gapMs: 250, after: inboxWarmed } }),
   // the Epic Books' daily refresh (05:00Z, and at start when today's has not run): pull, capability probe, rebuild.
   // Never on staging or a dev copy (no push, and the probe would call production's Team Browser); CONSOLE_BOOK_REFRESH=0 turns it off.
   linkCheck: { tickMs: staging || devCopy || process.env.CONSOLE_LINK_CHECK === "0" ? 0 : 30 * 60_000 },
@@ -213,6 +224,8 @@ const app = createApp(db, {
     everyMs: staging || devCopy || process.env.CONSOLE_HOST_DISK === "0" ? 0 : 5 * 60_000,
     probe: vps3Ssh ? hooks.host.diskProbe(vps3Ssh) : undefined,
   },
+  // the worker server's CPU count, load and memory, read by the Hosts page's caps (cached with its other probes, ~15 s).
+  hostLoad: { probe: vps3Ssh ? sshHostLoad(vps3Ssh) : undefined },
   // every hour, the T3 MCP tokens' expiry (warn 5 days before); a 401 from T3 alerts at once. CONSOLE_T3_TOKEN_WATCH=0 turns it off.
   t3Tokens: { everyMs: staging || devCopy || process.env.CONSOLE_T3_TOKEN_WATCH === "0" ? 0 : 3600_000 },
   // every minute, the job servers' alerts from box/provision.py (the main server's the console dir); CONSOLE_JOB_SERVERS=0 turns it off.
@@ -288,7 +301,18 @@ const appFetch: typeof baseFetch = async (...a) => {
     inFlight--;
   }
 };
-const server = serve({ fetch: appFetch, hostname: host, port }, (info) => {
+// on production systemd holds the listening sockets (agent-team-console.socket) across a release's restart.
+const sockets = inheritedSockets();
+for (const k of ["LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"]) delete process.env[k]; // never handed on to a child
+if (sockets.size) console.log(`listening on the systemd sockets ${[...sockets.keys()].join(", ")} (held across restarts)`);
+const server = serveOn(sockets, "web", { fetch: appFetch, hostname: host, port }, (info) => {
+  // first thing after listening, the console asks itself for the inbox's and sidebar's first-draw reads until a
+  // whole pass answers under 2 s; then the other warmers start. /api/health `inboxWarm`; deploy.sh waits for it.
+  if (warmOn)
+    void warmInbox({ base: `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${info.port}`, log: (m) => console.log(m) }).then(
+      () => releaseWarm(),
+      () => releaseWarm(),
+    );
   console.log(
     `console server on http://${host}:${info.port} (db ${dbPath}, static ${staticDir}, cycle ${cycleEnabled ? "ON" : "off"}, public ${publicUrl}${hooks.host.modeNote({ devCopy, staging })})`,
   );
@@ -297,7 +321,7 @@ const server = serve({ fetch: appFetch, hostname: host, port }, (info) => {
 // the agent gateway (token only, D4), a second listener on loopback/tailnet; off unless CONSOLE_GATEWAY_PORT is set.
 const gw = gatewayConfigFromEnv();
 const gateway = gw
-  ? serve({ fetch: hooks.host.aliasRoutes(createGateway({ db, fetch: appFetch, dispatcher: gw.dispatcherCmd ? cliRunner(gw.dispatcherCmd) : undefined, extra: hooks.host.gatewayExtra(db) })), hostname: gw.host, port: gw.port }, (info) =>
+  ? serveOn(sockets, "gateway", { fetch: hooks.host.aliasRoutes(createGateway({ db, fetch: appFetch, dispatcher: gw.dispatcherCmd ? cliRunner(gw.dispatcherCmd) : undefined, extra: hooks.host.gatewayExtra(db) })), hostname: gw.host, port: gw.port }, (info) =>
       console.log(`agent gateway on http://${gw.host}:${info.port} (bearer tokens only${gw.dispatcherCmd ? ", dispatcher face on" : ""})`),
     )
   : undefined;

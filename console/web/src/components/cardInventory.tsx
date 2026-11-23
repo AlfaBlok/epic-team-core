@@ -1,3 +1,4 @@
+import { SentBackCardView } from "@/components/sentBack";
 import { useEffect, useState, type ReactNode } from "react";
 import type { PendingItem, ReviewItem, WaitingItem } from "@/api";
 import { FyiCard, MonitorAlertCard, StatusItemRow, WaitingCard } from "@/components/waiting";
@@ -23,7 +24,7 @@ export interface CardType {
   name: string;
   /** where he meets it */
   where: string;
-  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamIdeaCard" | "GoalTalkCard" | "CampaignGoalCard" | "AdvisorSetCard" | "ConnectCard";
+  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamIdeaCard" | "GoalTalkCard" | "CampaignGoalCard" | "AdvisorSetCard" | "ConnectCard" | "SentBackCardView";
   /**
    * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "understand the different types of cards that we have ... and have clarity
    * over the buttons"): what the card asks of him. A `decision` card's buttons are its options, each named by what happens
@@ -231,6 +232,8 @@ export const CARD_TYPES: CardType[] = [
       />
     ),
   },
+  // a card he sent back shows while a worker builds its next round: he swipes it away, his Voice and Text still work
+  { id: "sent-back", kind: "news", buttons: "Swipe or x takes it off the list. Voice · Text.", name: "Sent back: a card you sent back, a worker on it now", where: "Inbox, Sent back, in progress", component: "SentBackCardView", render: () => <SentBackCardView card={{ id: "rv_sample_sent_back", ref: "E907-S3", repo: "sample", path: "docs/spines/sample.md", title: "The sample page was made clearer.", state: "in_progress", iteration: 2, words: "Make it shorter, and show the picture first.", since: SINCE, worker: { run: "run_sample", persona: "Ticket worker", host: "host1", startedAt: SINCE, live: true } }} /> },
   { id: "review", kind: "review", buttons: "Mark complete · Park · Snooze · Voice · Text.", name: "Review: a finished task to accept or send back", where: "Inbox, Waiting for your review", component: "ReviewCard", render: () => <ReviewCard item={sampleReview()} /> },
   // E948-S53 (the owner, vn_ebf81fab: "Mark complete, close the goal"): the last open part of a goal says on its own button that it closes the goal; no live card may be one tonight, so the sample shows it
   {

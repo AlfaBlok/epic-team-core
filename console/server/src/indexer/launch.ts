@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import type { IndexerConfig } from "./core.js";
-import { identity } from "../identity.js";
+import { identity, sites } from "../identity.js";
 
 /**
  * the console starts its indexer (main.ts) as its own systemd user unit, niced and CPU-capped,
@@ -48,7 +48,7 @@ export function indexerEnv(c: IndexerConfig, parentPid: number, env: NodeJS.Proc
   const out: Record<string, string> = {};
   for (const k of keep) if (env[k] !== undefined) out[k] = env[k]!;
   // the console's identity travels in the config (E996-S29): main.ts sets it before the indexer's modules load.
-  out.CONSOLE_INDEXER_CONFIG = JSON.stringify({ ...c, identity: c.identity ?? identity() });
+  out.CONSOLE_INDEXER_CONFIG = JSON.stringify({ ...c, identity: c.identity ?? identity(), sites: c.sites ?? sites() });
   out.CONSOLE_INDEXER_PARENT = String(parentPid);
   return out;
 }

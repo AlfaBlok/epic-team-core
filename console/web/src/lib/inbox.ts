@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, type MilestoneStatusView, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
-import { useSharedQuery } from "@/lib/data";
+import { useRawWaiting, useSharedQuery } from "@/lib/data";
 import { useSnoozes } from "@/lib/snooze";
 import { answeredHere, answeredSlot, applyServerAnswers, useSentVersion } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
+import { foldReviews } from "@/lib/sameTopic";
 
 /**
  * every count of what waits
@@ -142,7 +143,10 @@ export function useReviewCards(o: { keep?: Keep } = {}) {
   // with the Gap finder switched off, its cards are on no list and in no count.
   const gapFinder = useGapFinder();
   const off = gapFinder?.on === false;
-  const data = useMemo(() => (off ? listed?.filter((i) => !fromGapFinder(i.face?.from)) : listed), [listed, off]);
+  // E948-S183: two review cards on one ticket, page or topic: the one shown first stays (lib/sameTopic.ts);
+  // E948-S187: a review card that came after an older ask on its topic shows on the ask's card, not here
+  const asks = useRawWaiting().data;
+  const data = useMemo(() => foldReviews(off ? listed?.filter((i) => !fromGapFinder(i.face?.from)) : listed, asks), [listed, off, asks]);
   const { entries } = useSnoozes();
   const g = useGone();
   useSentVersion(); // E948-S141: an answer here takes its card out of every count at once

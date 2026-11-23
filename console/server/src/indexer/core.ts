@@ -19,7 +19,7 @@ import { remoteSpinesRunner } from "./remoteSpines.js";
  * over every repo, was on the console's main thread every 2 min). It writes only console.db: spines_cache, the read
  * model's views, book_cache, and its heartbeat. The console reads those and asks for work through indexer_queue.
  */
-import type { Identity } from "../identity.js";
+import type { Identity, Sites } from "../identity.js";
 
 /**
  * How often the read model's pass looks at every repo: 30 s (was 5 s, the biggest single CPU cost on the main
@@ -61,6 +61,8 @@ export interface IndexerConfig {
   spinesRemote?: string;
   /** the console's identity (owner, home world …), set by main.ts before anything loads (E996-S29). */
   identity?: Partial<Identity>;
+  /** the console's sites (its own addresses …), set by main.ts the same way (E948-S180). */
+  sites?: Partial<Sites>;
 }
 
 export interface IndexerDeps {

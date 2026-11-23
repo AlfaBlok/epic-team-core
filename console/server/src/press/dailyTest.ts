@@ -131,7 +131,9 @@ export const cardFile = (r: TestRow) =>
     "delivered:",
     "  - ✓ The test card is there to press.",
     "  - ✓ Nothing real depends on it.",
-    `evidence: [Open the test page](${sites().teamUrl}/)`,
+    // the review gate holds a bare link to our own pages; land on this card and say what to look at
+    `evidence: [Open the test card](${sites().teamUrl}/?focus=${encodeURIComponent(r.card)})`,
+    "look: The test card the daily press test presses.",
     `screenshot: ${SHOT}`,
     "source: The daily press test raised it, to check that every button works.",
     "decision: Does every button work? The team recommends Mark complete.",

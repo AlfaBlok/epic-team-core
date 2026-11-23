@@ -3,6 +3,7 @@ import { objectivesRule } from "../objectives.js";
 import { MAP_RULE } from "../totemMap.js";
 import { ASK_LINE_FORMAT, ASK_TIER_ITEMS, FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, ASK_TYPE_RULES, ASK_WRITING_RULE, NO_COMMANDS_RULE, isDeliveryManager, isUnblocker, managerTriageRules, unblockerRules } from "../inbox/asks.js";
 import { WAKE_ENDING_RULE } from "./wakeEnding.js";
+import { CONTEXT_HEAD } from "./ticketContext.js";
 import { CARD_FIELDS_RULE, FEATURE_LIST_RULE } from "../review/cardRule.js";
 import { DEFAULT_RUBRIC, rubricRules, type RubricSettings, type RubricStamp } from "./rubric.js";
 import { LEFT_READY_RULE } from "./followUp.js";
@@ -22,7 +23,7 @@ const wakeCurl = (base: string, assignmentId: string, clientRequestId?: string) 
 export function wakeStub(
   base: string,
   assignmentId: string,
-  extra: { note?: string; noteBy?: string; preWake?: string; clientRequestId?: string } = {},
+  extra: { note?: string; noteBy?: string; preWake?: string; clientRequestId?: string; first?: string } = {},
 ): string {
   const note = extra.note?.trim();
   return [
@@ -39,6 +40,9 @@ export function wakeStub(
     ...(extra.preWake && /pull failed|unreadable/.test(extra.preWake)
       ? [`Console ${extra.preWake}. Your checkout may be stale: fix it if it is yours to fix (never reset others' work), else say so in your summary.`]
       : []),
+    // where the objective stands and the owner's newest word, here too: a persona that saves the fetched prompt
+    // without reading it still has them in its thread.
+    ...(extra.first?.trim() ? [extra.first.trim()] : []),
     `Run \`${wakeCurl(base, assignmentId, extra.clientRequestId)}\` and follow the prompt it returns exactly; it is your full instructions for this wake.`,
     extra.clientRequestId
       ? "If the request times out or fails, retry the same command (same clientRequestId: you get the same wake) up to 2 times; still failing, reply `outcome: failed: console unreachable` and stop."
@@ -59,6 +63,9 @@ export const START_FAIL_RULE =
   "`$EPICSPINE_DISPATCHER done <pick id> --fail --signal \"<the exact error>\"`, `pick` again (the broker now prefers another seat or host) and delegate the same child run with the same clientRequestId on the new pick. " +
   "If T3 says the provider could not start this turn (the console records the child `failed` with that text): `done <pick id> --fail --signal \"<the exact error>\"`, " +
   "then relaunch it ONCE as a new child run at once (steps 1-3: `pick` again, the broker prefers another seat; summary `<ticket id> retry of <old child run id>`); a second failure stays `failed`. " +
+  // one seat with no Fable credit never stops Fable work while others have it
+  "The same for a turn that fails `<model> requires usage credits` (that seat has no credit for that model, others do): `done <pick id> --fail --signal \"<the exact error>\"` " +
+  "(the broker blocks that model on that seat only), `pick --model <same model>` again and relaunch ONCE on the new seat with the same model; never ask the owner which model to use while a pick still finds a seat with its credit. " +
   "A row whose start still fails gets its reason: `not started <row>: start failed (<the error>)`.";
 
 /**
@@ -115,13 +122,13 @@ export function workerBriefRules(objectivesLine?: string, matchingViews: HisView
 }
 
 /** one `<owner>'s view: <topic>` entry in the memory service, as listed in the home repo's docs/his-views.json. */
-export type HisView = { id: string; title: string; topic: string; mined?: string; worlds?: string[]; tags?: string[]; three?: HisViewBullet[] };
-/** one of a view's three bullets: the point, his own words, their memory references (the owner: "too much context is just as bad as too little"). */
+export type HisView = { id: string; title: string; topic: string; mined?: string; worlds?: string[]; tags?: string[]; rocks?: HisViewBullet[]; three?: HisViewBullet[] };
+/** one of a view's rocks (3 to 5, the owner: "3, 4, 5, like whatever it actually is"; `three` is the older name): the point, his own words, their memory references (the owner: "too much context is just as bad as too little"). */
 export type HisViewBullet = { line: string; words: string; refs?: string[] };
 
-/** a view's three bullets as one line each: the point, his words, the references. */
+/** a view's rocks as one line each: the point, his words, the references. */
 const threeOf = (v: HisView): string =>
-  (v.three ?? []).map((b) => `- ${b.line}: ${b.words}${b.refs?.length ? ` (${b.refs.join(", ")})` : ""}`).join(" ");
+  (v.rocks ?? v.three ?? []).map((b) => `- ${b.line}: ${b.words}${b.refs?.length ? ` (${b.refs.join(", ")})` : ""}`).join(" ");
 
 /**
  * the views a row touches (the owner: "does every agent need to read this, or is it like agents
@@ -143,12 +150,12 @@ export function hisViewsFor(row: { repo?: string; title?: string }, views: HisVi
 export const hisViewRecipe = (views: HisView[] = []): string =>
   views.length === 0
     ? ""
-    : `${ownerName()}'s view on your row's topic, in three bullet points in his own words (plan on these first): ` +
-      views.map((v) => `\`${v.title}\`: ${threeOf(v) || "(no three bullets yet: write them first)"}`).join(" ") +
-      ` The full view stays in ${memoryName()} as the source, read only when the three are not enough: ` +
+    : `${ownerName()}'s view on your row's topic, in his fundamental requirements, 3 to 5 rocks in his own words (plan on these first): ` +
+      views.map((v) => `\`${v.title}\`: ${threeOf(v) || "(no rocks yet: write them first)"}`).join(" ") +
+      ` The full view stays in ${memoryName()} as the source, read only when the rocks are not enough: ` +
       views.map((v) => `\`python3 ~/github/${homeRepo()}/scripts/his_view.py ${v.topic}\``).join(", ") +
       " prints it (his words and an evidence reference on every line) and only his notes captured after it; read those, not every note again. " +
-      "A new wish of his on the topic: add it to the view with `store_memory` (his words and reference per line, `mined <ISO UTC>`), and to its three when it changes what matters most.";
+      "A new wish of his on the topic: add it to the view with `store_memory` (his words and reference per line, `mined <ISO UTC>`), and to its rocks when it is a new one that keeps coming up.";
 
 /** the scoped pointer every brief carries: whether one of the owner's views touches this row (most rows: none). */
 export const HIS_VIEW_POINTER =
@@ -160,10 +167,16 @@ export const HIS_VIEW_POINTER =
  * same ask sat on several rows, an iteration narrowed it and the card check judged only the newest quote. Every worker
  * reads all his notes on its row and on the rows the same ask sits on, whatever its brief quoted, and answers each.
  */
+/** where every brief gets the row's context to read first (the desk's lookup kept on the ticket). */
+export const CONTEXT_BRIEF_STEP = (base: string): string =>
+  `Then the brief opens with the row's \`## ${CONTEXT_HEAD}\` section: paste whole what \`curl -sS -G ${base}/api/ticket-context --data-urlencode repo=<row repo> --data-urlencode row=<row>\` returns ` +
+  `(the desk's lookup kept on the ticket when it was filed, docs/context/<row>.md: related tickets, pages, his past words, ${memoryName()} memory, each with its score); ` +
+  `a 404 says how to build it (\`ticket_context.py brief\`), then paste that.`;
+
 export const HIS_NOTES_RULE =
-  `Before you plan, read every note ${ownerName()} left on your row and on the rows the same ask sits on: ` +
+  `Before you plan, read each item of the \`${CONTEXT_HEAD}\` section your brief opens with (docs/context/<row>.md: what was already said and done on it; a newer word of his overtakes an older one), then every note ${ownerName()} left on your row and on the rows the same ask sits on: ` +
   `\`python3 ~/github/${homeRepo()}/scripts/card_notes.py words <your row> [--repo <repo>=<your checkout>]\` prints them whole, ` +
-  "oldest first, with the ones where he says it again on top. Your brief may quote only the newest: the older ones still count. " +
+  "newest first, with the ones where he says it again on top; his newest word wins: an older note marked replaced no longer holds (never mix it in), one marked stands is another point that still counts. Your brief may quote only the newest: the older ones that stand still count. " +
   "Your result answers each of his points (a point you do not deliver is a ✗ line on the card), never a narrower or wider version of it; " +
   "when he says it again (\"how many times\", \"still not\"), say back in one line what he keeps asking and cover it whole (root L-73). " +
   "The card check judges your card against every one of these notes.";
@@ -289,10 +302,11 @@ export function wakeProtocol(o: {
         "   For each worker (ready row):",
         `   0. If ${maxWorkers} child runs are already \`running\` for this milestone, stop launching: the remaining ready rows are \`${queuedCeiling(maxWorkers)}\`. Otherwise wait ${WORKER_PAUSE_S} s after the previous launch, then:`,
         // every worker is dispatched on the worker server; a null pick queues the row, never the main server launch.
-        "   1. `$EPICSPINE_DISPATCHER pick` → JSON. Workers run on " + workerHost().toUpperCase() + " only: never launch one on " + mainHost().toUpperCase() + " or through the console. " +
-          "If `id` is null and `retryable` is true, pick again in this turn after `retry_after_s`, doubling the wait, for about 15 min in total (a Monitor or until-loop, never a foreground sleep). " +
-          `Still null at the end, or not retryable: launch no more this wake: put \`N ready rows ${queuedNoSeat()}\` (N = rows not started, the reason = pick's reason field) in your finishing summary, ` +
-          "and finish `progressed` if you started any worker, else `monitoring`, with `retryAt` about now + 5 min either way (queued is waiting, not idle; never leave it to the next scheduled wake; a host cap usually clears within minutes).",
+        "   1. `$EPICSPINE_DISPATCHER pick` → JSON (a worker on Fable: `pick --model claude-fable-5-2`, so the seat still has Fable credit; seats meter Fable apart and some have none in their plan). Workers run on " + workerHost().toUpperCase() + " only: never launch one on " + mainHost().toUpperCase() + ". " +
+          `If \`id\` is null and \`retryable\` is true (a host's memory or load, seats, the team ceiling), do not wait or loop: hand that row and every ready row after it to the console's work queue, one call each, in the same order: ` +
+          `\`curl -sS -X POST ${base}/api/runs/${run.id}/workers ${h} -d ${j({ ticket: "<ticket id>", title: "<what it does, a few words>", brief: "<the whole brief you would give delegate_task, with <child run id> where the run id goes>", clientRequestId: "<ticket id>-" + run.id })}\` ` +
+          `(the console starts each on ${workerHost().toUpperCase()} the moment pick has room, in his objective order, inside every cap, with no wake of yours; Hosts shows each one and the limit holding it). ` +
+          `Name them \`queued (console): <rows>\` with pick's reason in your finishing summary and finish \`progressed\` if you started or queued any (queued is waiting, not idle). Not retryable: put \`N ready rows ${queuedNoSeat()}\` (the reason = pick's reason field) in your summary.`,
         `   2. Record it first: \`curl -sS -X POST ${base}/api/runs ${h} -d ${j({ assignmentId: assignment.id, parentRunId: run.id, seat: "<pick id>", outcome: "running", summary: "<ticket id> <what it does>", clientRequestId: "<ticket id>-<this wake run id>" })}\``,
         "      Start the summary with the ticket id it works on (e.g. `N10-6 ...`). Keep the returned id: the child run id.",
         "      A 409 `claimed` means the row already has a live session (another wake, desk or Delivery Manager runs a worker on it, or its row holds a live claim): skip that row, `$EPICSPINE_DISPATCHER done <pick id>`, and name it `skipped <row>: claimed by <holder>` in your summary.",
@@ -303,6 +317,7 @@ export function wakeProtocol(o: {
         ...(o.deckUrl
           ? [`      Its brief opens with the line \`${deckBriefLine(o.deckUrl)}\` and, when it names a Bound epic, \`This epic's deck: ${o.deckUrl}&epic=<that epic's EPIC-n>\`.`]
           : []),
+        `      ${CONTEXT_BRIEF_STEP(base)}`,
         "      Its brief must say: end every commit message with the trailer line `Run: <child run id>`; and, verbatim, the worker rules:",
         `      paste whole what \`curl -sS -G ${base}/api/worker-rules --data-urlencode repo=<row repo> --data-urlencode title=<row title>\` returns (plain text, one quoted rule a line, ${workerBriefRules(o.objectivesLine).length} rules, the owner's live objectives first), fetched fresh for each brief, never a copy kept from an earlier wake.`,
         ...(grants.length ? [`      ${GRANT_BRIEF_RULE}`] : []),

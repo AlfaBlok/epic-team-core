@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView, SentNote } from "./noteEngine";
-import { DEFAULT_MAX_MIN, KEPT_FAILED_TEXT, WAITING_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
+import { DEFAULT_MAX_MIN, EMPTY_RECORDING_TEXT, KEPT_FAILED_TEXT, WAITING_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
 import { useDeskVoiceBase } from "./deskBase";
 import { CancelNote, clockOf, LevelMeter, LiveDot, noteOn, outText, useNoteTab, type HeldNote } from "./NoteProvider";
 
@@ -102,6 +102,16 @@ export function withVoiceNote(typed: string, note: Pick<SentNote, "id" | "transc
   return `${words} (voice note ${note.id}${note.audio ? `, audio ${note.audio}` : ""})`;
 }
 
+/**
+ * E948-S174: the inbox card a pressed microphone sits in (its `data-inbox-card`, or the slot SentOr gives it), so Send
+ * collapses that card to its one row at once. A Sent row's own comment box is not a card: its note sends as before.
+ */
+export function cardSlotOf(el: Element | null | undefined): string | undefined {
+  const c = el?.closest?.("[data-card-slot],[data-inbox-card]");
+  if (!c || c.getAttribute("data-testid") === "sent-row" || c.closest("[data-testid='sent-row']")) return undefined;
+  return c.getAttribute("data-card-slot") ?? c.getAttribute("data-inbox-card") ?? undefined;
+}
+
 const IDLE: NoteView = { phase: "idle", elapsedS: 0, level: 0, costUsd: 0, estUsd: 0, usdPerMin: 0.003, maxMin: DEFAULT_MAX_MIN, segments: 0, uploaded: 0 };
 const nothing = () => () => undefined;
 const idle = () => IDLE;
@@ -140,6 +150,11 @@ export function useNote(props: {
   beforeSend?: () => void;
   /** Chat: more on the strip (Read the reply aloud). */
   extra?: ReactNode;
+  /**
+   * E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e: spinning "in two different places"): the chat draws the note's own
+   * bubble that spins until the desk's chat holds it, so the button and the strip show no second sending or Sent.
+   */
+  bubble?: boolean;
   api?: NotesApi;
   media?: NoteMedia;
   clock?: NoteClock;
@@ -211,15 +226,18 @@ export function useNote(props: {
   const capped = cap !== undefined && (st.monthUsd ?? 0) >= cap;
   if (capped && !busy && !out && v.phase === "idle") return { busy, view: v };
 
-  const start = () => {
+  const start = (at?: Element) => {
     const h = held ?? tab.note(props.origin, opts);
     hook(h);
+    if (card) h.slot = cardSlotOf(at);
     tab.started(h, loc ? loc.pathname + loc.search : undefined);
     void h.engine.start(props.page?.slice(0, 200));
   };
-  const send = () => {
+  const send = (at?: Element) => {
     props.beforeSend?.();
-    void held?.engine.finish();
+    if (!held) return;
+    if (card) held.slot = cardSlotOf(at) ?? held.slot;
+    tab.finish(held);
   };
 
   const button = (
@@ -230,11 +248,11 @@ export function useNote(props: {
       variant={on ? "destructive" : props.big ? "outline" : "ghost"}
       className={cn(PHONE_TAP, "shrink-0 gap-1.5", props.big ? "h-8 px-3 text-sm font-medium whitespace-nowrap [&_svg]:size-4 max-sm:flex-auto max-sm:justify-center" : on ? "max-sm:h-11 max-sm:px-3" : "max-sm:size-11 max-sm:px-0", card && !props.big && "h-8")}
       disabled={props.disabled || capped || sending || v.phase === "starting"}
-      pending={sending}
+      pending={sending && !props.bubble}
       pendingLabel={<span className="max-sm:sr-only">Sending…</span>}
       aria-label={on ? `Send the voice note to ${props.to}` : "Record a voice note"}
       title={capped ? "Voice is paused until the 1st: the month's cap is reached." : on ? "Tap to send the note" : "Tap to start a voice note, tap Send when you are done"}
-      onClick={() => (on ? send() : start())}
+      onClick={(e) => (on ? send(e.currentTarget) : start(e.currentTarget))}
     >
       {/* while recording it is a labelled red Send on a phone too, never mistaken for the box's own send. */}
       {on ? <SendHorizontal /> : <Mic />}
@@ -243,7 +261,8 @@ export function useNote(props: {
   );
 
   const failed = v.phase === "failed" || out?.state === "failed";
-  const show = on || sending || v.phase === "sent" || failed || !!out;
+  // the chat's bubble shows a note on its way; nothing heard has no bubble, so the strip still says so
+  const show = on || failed || !!out || (!props.bubble && (sending || v.phase === "sent")) || (v.phase === "sent" && v.note?.state === "empty");
   const strip = show ? (
     <div
       ref={setStripEl}
@@ -283,7 +302,9 @@ export function useNote(props: {
       {v.phase === "sent" && v.note && !card && (
         <span data-testid={`${tid}-sent`}>
           {v.note.state === "empty"
-            ? "Nothing was heard, so nothing was posted."
+            ? v.info === EMPTY_RECORDING_TEXT
+              ? `${EMPTY_RECORDING_TEXT}.`
+              : "Nothing was heard, so nothing was posted."
             : v.note.acceptedAt && !v.note.transcript
               ? `✓ Voice note sent · ${clockOf(v.note.seconds || v.elapsedS)}. Your words appear in the chat in a few seconds.`
               : `✓ Voice note sent · ${clockOf(v.note.seconds)} · ${money(v.note.costUsd)}. The desk answers it like typed text.`}

@@ -226,7 +226,7 @@ export function askLookupIn(
           milestoneId: m.id,
           milestoneTitle: m.title,
           href: host ? host.replace(/\/+$/, "") + rel : rel,
-          id: askItemId(checkout(m) ?? checkoutName(m.repo), found.rel, hit.row, hit.question),
+          id: askItemId(checkout(m) ?? checkoutName(m.repo), found.rel, hit.row, hit.question, hit.code),
           ...(world !== undefined ? { world } : {}),
           ...(open ? { card: cardOf(hit, found.rel) } : {}),
         });

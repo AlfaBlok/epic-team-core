@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/common";
 import { TeamPage } from "@/pages/Team";
 import { useOperatorPages } from "@/lib/settingsPath";
+import { TranscriptionSettings } from "@/components/transcriptionSettings";
 
 /**
  * Settings: only what the owner changes (root L-80, the owner: "settings is about things where the
- * user has to input something ... If the user is not inputting something, it's not a setting"): his red lines (edit,
+ * user has to input something... If the user is not inputting something, it's not a setting"): his red lines (edit,
  * delete), the pages where he adds or replaces something, and the project actions. Read-only pages (Seats, Hosts,
  * Applications, Voice feedback, the Dashboard) are in the menu's tools list; never add a read-only thing here.
  */
@@ -18,7 +19,10 @@ export function SettingsPage() {
         section="settings"
         dashboard={false}
         between={
-          pages.length > 0 && (
+          <>
+          {/* the model his voice notes are written out with, its paid backup, and what it cost (his own console only). */}
+          <TranscriptionSettings />
+          {pages.length > 0 && (
             <section className="mt-6" data-testid="operator-pages">
               <h2 className="mb-3 text-[15px] font-semibold">What you can change</h2>
               <div className="divide-y rounded-xl border bg-card">
@@ -32,7 +36,8 @@ export function SettingsPage() {
                 ))}
               </div>
             </section>
-          )
+          )}
+          </>
         }
       />
     </>

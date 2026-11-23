@@ -57,9 +57,14 @@ export const TEXT_WALL_PREFIX = "the evidence page opens with text";
 export const PLAN_WORDS = 80;
 const DIAGRAM =
   /<(svg|img|picture|video|canvas)\b|class\s*=\s*["'][^"']*\b(ps-diagram|diagram|wheel|flow)\b|<pre[^>]*class\s*=\s*["'][^"']*mermaid|[┌┐└┘│─╭╮╰╯▶►→⟶]{2,}/i;
-/** a card about a plan: its title, task goal or short name says plan, strategy, roadmap or proposal. */
+/** a card about a plan: its title, task goal or short name leads with plan, strategy, roadmap or proposal. */
 export const PLAN_WORDS_RE = /\b(plans?|strategy|strategies|roadmap|proposals?)\b/i;
-export const isPlan = (...texts: (string | undefined)[]) => texts.some((t) => !!t && PLAN_WORDS_RE.test(t));
+/** only a card whose plan word is what it is about counts, within its first PLAN_LEAD words
+ * ("A one-page plan was made", "Give you a roadmap"); a card that checked a page and mentions "its plan written", "got a
+ * plan" or "the Plan tab" later is not a plan card. Same rule as scripts/card_qc.py is_plan. */
+export const PLAN_LEAD = 5;
+const lead = (t: string) => t.replace(/\bplan tabs?\b/gi, " ").split(/\s+/).filter(Boolean).slice(0, PLAN_LEAD).join(" ");
+export const isPlan = (...texts: (string | undefined)[]) => texts.some((t) => !!t && PLAN_WORDS_RE.test(lead(t)));
 export const PLAN_DIAGRAM_PREFIX = "a plan opens with a diagram";
 
 /** true when the page shows a drawn diagram before PLAN_WORDS words of text; undefined when it is not HTML. */

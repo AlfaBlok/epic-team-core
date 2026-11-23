@@ -4,6 +4,7 @@ import type { CampaignBriefing } from "@/api/campaign-types";
 import { inline } from "@/lib/chatMarkdown";
 import { useQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * The owner's morning briefing is also kept on its campaign: open the campaign and see its key results, its Plan and
@@ -30,6 +31,7 @@ export function DailyBriefingPanel({ m }: { m: Milestone }) {
       {data.older.length > 0 && (
         <div className="grid gap-2 border-t pt-3">
           <button type="button" className="justify-self-start text-sm text-primary underline-offset-4 hover:underline" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="briefing-older-toggle">
+            <FoldChevron open={open} className="mr-1.5" />
             {open ? "Hide older briefings" : `Older briefings (${data.older.length})`}
           </button>
           {open && (

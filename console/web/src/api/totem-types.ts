@@ -46,11 +46,17 @@ export interface TrackerTable {
   for?: string;
   columns: string[];
   statuses: string[];
+  /** the columns on an entry's folded line; the rest show when it unfolds. None: every column. */
+  shown?: string[];
   from: "frame" | "product" | "own";
   open: boolean;
   yes?: string;
   rows: string[][];
   counts: { status: string; n: number }[];
+  /** entries kept on the table but out of its count (the team's own test sign-ups), per status. */
+  uncounted?: { status: string; n: number }[];
+  /** rows read from the console's database, never from the repo (a sign-ups table). */
+  source?: string;
   file: string;
 }
 export interface WheelTrackers {
@@ -58,4 +64,16 @@ export interface WheelTrackers {
   name: string;
   product?: string;
   tables: TrackerTable[];
+}
+/** GET /api/tenants/:id/campaigns/:mid/trackers: the tracker tables of the wheel a campaign serves (its objective, else
+ * each live objective of its product); none for a campaign outside the home product's repos. */
+export interface CampaignTrackers {
+  product: string | null;
+  wheels: WheelTrackers[];
+}
+/** GET /api/tenants/:id/campaigns/:mid/wheel-plan: the plan of the wheel a campaign serves, per key result (the same
+ * plan its objective's Plan tab shows), with each key result's name. */
+export interface CampaignWheelPlan {
+  product: string | null;
+  wheels: { id: string; name: string; plan: import("./pursuit-types").WheelPlan; keyResults: string[] }[];
 }

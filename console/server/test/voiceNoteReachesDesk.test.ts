@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb, type DB } from "../src/db.js";
 import { createVoice, type DeskPort } from "../src/voice/voice.js";
-import { createVoiceNotes, DELIVER_CHECK_MS, DELIVER_TRIES, ensureVoiceNoteRecTables, NOT_DELIVERED_RETRYING, type Transcriber } from "../src/voice/notes.js";
+import { createVoiceNotes, DELIVER_CHECK_MS, DELIVER_TRIES, ensureVoiceNoteRecTables, NOT_DELIVERED_RETRYING, noteRequestId, REID_AFTER, type Transcriber } from "../src/voice/notes.js";
 import { mountDesk } from "../src/desk/routes.js";
 import { undeliveredNote } from "../src/voice/undeliveredNote.js";
 
@@ -22,7 +22,7 @@ afterEach(() => {
   cleanup = undefined;
 });
 
-function setup(o: { pending?: boolean[]; inChat?: (sent: string[]) => boolean | undefined } = {}) {
+function setup(o: { pending?: boolean[]; inChat?: (sent: string[]) => boolean | "queued" | undefined } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "console-e42s135-"));
   const db: DB = openDb(path.join(dir, "console.db"));
   cleanup = () => {
@@ -111,7 +111,7 @@ describe("every Chat voice note reaches the desk, or he is told it did not", () 
     const id = await postNote(s);
     s.tick(DELIVER_CHECK_MS + 1000);
     await s.notes.deliverCheck();
-    expect(s.notes.undelivered().map((n) => [n.id, n.delivery, n.deliverError])).toEqual([[id, "retrying", NOT_DELIVERED_RETRYING]]);
+    expect(s.notes.undelivered().map((n) => [n.id, n.delivery, n.deliverError])).toEqual([[id, "retrying", `${NOT_DELIVERED_RETRYING} (T3 is busy and has not taken it yet)`]]);
     for (let i = 1; i < DELIVER_TRIES; i++) {
       s.tick(60_000);
       await s.notes.deliverCheck();
@@ -119,9 +119,66 @@ describe("every Chat voice note reaches the desk, or he is told it did not", () 
     expect(s.notes.get(id)?.delivery).toBe("retrying"); // 22 Nov: never "failed", his words are never given up
     expect(s.lines.map((l) => l.gaveUp)).toEqual([false, true]); // first miss and the stuck line, nothing in between
     s.tick(60_000);
-    expect(await s.notes.deliverCheck()).toMatchObject({ checked: 1, resent: 1 }); // still re-sent, under a fresh request id
-    expect(s.crids.at(-1)).toBe(`voice-note-chat-${id}-r${DELIVER_TRIES + 1}`);
+    expect(await s.notes.deliverCheck()).toMatchObject({ checked: 1, resent: 1 }); // still re-sent, under its one request id
+    expect(new Set(s.crids)).toEqual(new Set([noteRequestId(id)]));
     expect(s.lines.map((l) => l.gaveUp)).toEqual([false, true]);
+  });
+
+  it("a note still waiting to go in (held by the console, or in T3's queue) is never re-sent: no copies (22 Nov: 13 of one note)", async () => {
+    const s = setup({ pending: Array(DELIVER_TRIES + 5).fill(true), inChat: () => "queued" });
+    const id = await postNote(s);
+    const before = s.crids.length;
+    for (let i = 0; i < DELIVER_TRIES + 3; i++) {
+      s.tick(DELIVER_CHECK_MS + 60_000);
+      expect(await s.notes.deliverCheck()).toMatchObject({ checked: 1, resent: 0 });
+    }
+    expect(s.crids.length).toBe(before);
+    expect(s.notes.get(id)?.deliveredAt).toBeFalsy();
+    expect(s.lines).toEqual([]);
+  });
+
+  // (22 Nov vn_59852983, 06:50Z): T3 was stopped and then slow to start for 0.1.12 (06:08-07:34Z); every re-send it
+  // could not answer carried a fresh id past 10 tries, T3 kept each one, and 23 copies reached the desk at 07:35Z.
+  it("T3 down for 90 min: every re-send carries the note's one request id, so T3 keeps one copy", async () => {
+    // a T3 that takes each id once (its receipts), whether it answers in time or not, and runs them when it is back
+    const t3 = new Map<string, string>();
+    let up = false;
+    const s = setup({ inChat: () => undefined }); // down or slow: the thread cannot be read, so "cannot tell"
+    (s.desk.send as any).mockImplementation(async (text: string, _p?: string, crid?: string) => {
+      s.crids.push(crid);
+      if (!t3.has(crid!)) t3.set(crid!, text); // a slow T3 still takes the send; the answer never comes back in time
+      return { threadId: "thread_desk", pending: !up };
+    });
+    const id = await postNote(s);
+    for (let m = 0; m < 90; m++) {
+      s.tick(60_000);
+      await s.notes.deliverCheck();
+    }
+    up = true;
+    s.tick(60_000);
+    await s.notes.deliverCheck();
+    expect(s.crids.length).toBeGreaterThan(80); // it never stopped trying
+    expect(new Set(s.crids)).toEqual(new Set([noteRequestId(id)]));
+    expect([...t3.values()].filter((t) => t.includes(id))).toHaveLength(1); // one copy in the desk
+    expect(s.notes.get(id)?.deliveredAt).toBeTruthy();
+  });
+
+  it("a new request id only when the note is proved absent after REID_AFTER tries, checked again just before", async () => {
+    let absent: boolean | undefined = undefined;
+    const s = setup({ pending: Array(REID_AFTER * 3).fill(true), inChat: () => (absent ? false : undefined) });
+    const id = await postNote(s);
+    for (let m = 0; m < REID_AFTER + 5; m++) {
+      s.tick(60_000);
+      await s.notes.deliverCheck();
+    }
+    expect(new Set(s.crids)).toEqual(new Set([noteRequestId(id)])); // never re-ided while it cannot be told
+    absent = true; // T3 answers: not in the thread, not in its queue, not held
+    s.tick(60_000);
+    await s.notes.deliverCheck();
+    expect(s.crids.at(-1)).toBe(noteRequestId(id, 1));
+    s.tick(60_000);
+    await s.notes.deliverCheck();
+    expect(s.crids.at(-1)).toBe(noteRequestId(id, 1)); // the new id is kept, never one per minute
   });
 
   it("notes posted before the check existed count as delivered (never re-sent on the release)", () => {

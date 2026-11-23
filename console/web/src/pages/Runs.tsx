@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { api, type Assignment, type Milestone, type Persona, type Run, type RunOutcome } from "@/api";
 import { useQuery, useWaitingList } from "@/lib/data";
 import { isAnswerRun, isOrphanRun, nestRuns, runPersonaId, type RunNode } from "@/lib/derive";
@@ -23,6 +23,7 @@ import { ActiveAgentsSection } from "@/components/activeAgents";
 import { PriorityModeSection } from "@/components/priorityMode";
 import { RunHostsSection } from "@/components/runHosts";
 import { ownerName } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 const OUTCOMES: RunOutcome[] = ["running", "progressed", "blocked", "monitoring", "idle", "failed", "blank_report", "stopped", "deferred"];
 
@@ -174,7 +175,6 @@ function WakeLine({
   const cost = r.usage?.costUsd ?? r.usageLive?.costUsd;
   const where = m ? milestoneName(m) : r.milestoneId;
   const kids = node.children.length;
-  const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <>
       <li className={cn("min-w-0 border-b last:border-0", open && "bg-muted/40")} data-testid="wake-line" data-open={open || undefined} data-live={live || undefined}>
@@ -185,7 +185,7 @@ function WakeLine({
           onClick={onToggle}
           title={r.summary || undefined}
         >
-          <Chevron className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <FoldChevron open={open} />
           {live && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500" data-testid="wake-live" title="Running now" aria-label="running" />}
           {/* Phone: a long chip (Unblocker · answered 1 · left 0 · split 1) is clipped so age and summary still show; two
               chips (Monitoring + stalled) stay on the one line (OutcomeBadge's own group wraps elsewhere). */}

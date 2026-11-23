@@ -34,6 +34,8 @@ export interface SpineWrite {
   ms?: Record<string, number>;
   /** the ledger row a feedback write reopened (`active`), and its status before. */
   reopened?: { row: string; was: string };
+  /** the ask's line had moved: the file the item named, where the line was not any more (`path` is where it was found). */
+  movedFrom?: string;
 }
 
 /** What the writer needs to find the line again: the item as the inbox showed it. */
@@ -598,6 +600,8 @@ export type ScaffoldInput = {
   body: string;
 };
 type AnyInput = WriteInput | RevertInput | EditInput | ScaffoldInput;
+/** an input re-aimed at the file its ask line moved to (followMoved), so it is followed once, never in a loop. */
+type Relocated = { relocatedFrom?: string };
 /** A checkout that passed guards 1-5, and the step timer of the write in it. */
 type Ready = { g: Run; ms: Record<string, number>; t0: number; timed: <T>(step: string, p: Promise<T>) => Promise<T>; fetched: boolean };
 type Mode = "answer" | "change" | "revert" | "edit" | "scaffold";
@@ -1217,6 +1221,47 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     }
   }
 
+  /**
+   * The ask line moved to another spine of the same repo after the inbox read it (an owner's yes once looked in the
+   * epic the line had left, and sat queued). An ask is its repo + code: look for the code in every tracked markdown
+   * file of the checkout and write there, once.
+   * undefined = found nowhere else (the caller says why it skipped).
+   */
+  async function followMoved(c: Ready, o: WriteInput | RevertInput, mode: Mode, rel: string, date: string): Promise<SpineWrite | undefined> {
+    const code = o.target.code;
+    if (!code || o.target.source !== "ask" || (o as Relocated).relocatedFrom) return undefined;
+    const hit = await c.g(["grep", "-l", "-F", "-e", code, "--", "*.md"]);
+    // git grep exits 1 when nothing matches: no other file holds the code
+    const files = hit.ok ? hit.out.split("\n").map((f) => f.trim()).filter((f) => f && f !== rel && inside(o.repoDir, f)) : [];
+    const fits = (text: string): number => {
+      if (mode === "revert") return revertLine(text, (o as RevertInput).from, (o as RevertInput).to) === undefined ? 0 : 2;
+      const w = o as WriteInput;
+      const t = { ...w.target, line: undefined };
+      if (mode === "change") return changeAnswer(text, t, w.answer, date, w.owner, !!w.feedback).how === "missing" ? 0 : 2;
+      const how = applyAnswer(text, t, w.answer, date, w.owner, !!w.feedback).how;
+      return how === "flip" ? 2 : how === "already" ? 1 : 0;
+    };
+    let best: { file: string; score: number } | undefined;
+    for (const f of files) {
+      let text: string;
+      try {
+        text = fs.readFileSync(inside(o.repoDir, f)!, "utf8");
+      } catch {
+        continue;
+      }
+      const score = fits(text);
+      if (score > (best?.score ?? 0)) best = { file: f, score };
+      if (score === 2) break;
+    }
+    if (!best) return undefined;
+    const pol = pushPolicy(o.repoDir, best.file);
+    if (!pol.ok) return { status: "skipped", reason: pol.reason, path: best.file, movedFrom: rel };
+    const { line: _hint, ...target } = o.target;
+    const next: (WriteInput | RevertInput) & Relocated = { ...o, target: { ...target, path: best.file }, relocatedFrom: rel };
+    const w = await attempt(next, mode);
+    return { ...w, movedFrom: rel };
+  }
+
   async function attempt(o: AnyInput, mode: Mode, fetch = false): Promise<SpineWrite> {
     const rel = "edit" in o || "scaffold" in o ? o.path : o.target.path;
     const skip = (reason: string): SpineWrite => ({ status: "skipped", reason, ...(rel ? { path: rel } : {}) });
@@ -1272,14 +1317,14 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
 
     // Re-read and re-find the line now (the spine may have changed since the item was listed).
     const abs = inside(o.repoDir, rel)!;
+    const date = o.date ?? new Date().toISOString().slice(0, 10);
     let text: string;
     try {
       text = fs.readFileSync(abs, "utf8");
     } catch {
-      if (!("edit" in o)) return skip(`${rel} is not in the checkout any more`);
+      if (!("edit" in o)) return (await followMoved(c, o as WriteInput | RevertInput, mode, rel, date)) ?? skip(`${rel} is not in the checkout any more`);
       text = "";
     }
-    const date = o.date ?? new Date().toISOString().slice(0, 10);
     let next: string;
     let commitCode: string | undefined;
     let flip: { before: string; after: string } | undefined;
@@ -1298,13 +1343,13 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     } else if (mode === "revert") {
       const r = o as RevertInput;
       const t = revertLine(text, r.from, r.to);
-      if (t === undefined) return skip(`the answered line in ${rel} changed since it was written; nothing reverted`);
+      if (t === undefined) return (await followMoved(c, r, mode, rel, date)) ?? skip(`the answered line in ${rel} changed since it was written; nothing reverted`);
       // the ask is open again, so Current State's `Waiting on:` names it again.
       next = r.target.code ? restoreToWaitingField(t, r.target.code, r.owner ?? DEFAULT_OWNER) : t;
       commitCode = r.target.code;
     } else if (mode === "change") {
       const ch = changeAnswer(text, o.target, o.answer, date, o.owner, !!(o as WriteInput).feedback);
-      if (ch.how === "missing") return skip(`the answered line is not in ${rel} any more: the owner already acted on the answer; nothing changed`);
+      if (ch.how === "missing") return (await followMoved(c, o as WriteInput, mode, rel, date)) ?? skip(`the answered line is not in ${rel} any more: the owner already acted on the answer; nothing changed`);
       if (ch.how === "done") return skip(`the answered line in ${rel} is marked done: the owner already acted on the answer; nothing changed`);
       if (ch.how === "not_jordi") return skip(`the line in ${rel} is answered by ${ch.who}, not ${o.owner ?? DEFAULT_OWNER}: reverse it instead; nothing changed`);
       if (ch.how === "same") return { status: "written", reason: "the spine already has this answer", path: rel };
@@ -1314,7 +1359,15 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     } else {
       const w = o as WriteInput;
       const edit = applyAnswer(text, w.target, w.answer, date, w.owner, !!w.feedback);
-      if (edit.how === "missing") return skip(`the ask is not in ${rel} any more or its text changed (the spine moved on); nothing written`);
+      if (edit.how === "missing")
+        return (
+          (await followMoved(c, w, mode, rel, date)) ??
+          skip(
+            w.target.code && w.target.source === "ask"
+              ? `${w.target.code} is in no spine of this repo now (not in ${rel}, nor in any other file); your answer is kept and goes in when the ask is back`
+              : `the ask is not in ${rel} any more or its text changed (the spine moved on); nothing written`,
+          )
+        );
       if (edit.how === "already") return { status: "written", reason: "already answered in the spine", path: rel };
       next = edit.text;
       commitCode = edit.how === "flip" ? edit.code : undefined;

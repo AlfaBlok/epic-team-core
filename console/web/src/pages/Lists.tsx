@@ -149,11 +149,13 @@ export function TicketsPage() {
   );
 }
 
-function Load({ label, pct }: { label: string; pct?: number }) {
+function Load({ label, pct, none, testId }: { label: string; pct?: number; none?: string; testId?: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="w-14 shrink-0 text-muted-foreground">{label}</span>
-      {pct === undefined ? (
+    <div className="flex items-center gap-2 text-xs" data-testid={testId}>
+      <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
+      {none ? (
+        <span className="text-muted-foreground">{none}</span>
+      ) : pct === undefined ? (
         <span className="text-muted-foreground">not read</span>
       ) : (
         <>
@@ -161,6 +163,17 @@ function Load({ label, pct }: { label: string; pct?: number }) {
           <span className="w-10 shrink-0 whitespace-nowrap text-right tabular-nums">{Math.round(pct)}%</span>
         </>
       )}
+    </div>
+  );
+}
+
+/** Fable credit left this week (percent left, not used): a Fable run goes only to a seat with some left. */
+function FableLeft({ s }: { s: BoardSeat }) {
+  const refused = s.fableNote?.startsWith("refused until ") ? s.fableNote.slice("refused until ".length) : undefined;
+  const none = s.fableNote === "not in its plan" ? "none in its plan" : refused ? `none, back ${formatRelative(refused)}` : undefined;
+  return (
+    <div title={s.fableLeft === undefined ? undefined : "Fable credit left this week"}>
+      <Load label="Fable left" pct={s.fableLeft} none={none} testId="seat-fable" />
     </div>
   );
 }
@@ -226,6 +239,7 @@ function SeatCard({ s }: { s: BoardSeat }) {
       <div className="mt-auto flex flex-col gap-1 border-t pt-2">
         <Load label="5 hours" pct={s.usage5h} />
         <Load label="Week" pct={s.usageWeekly} />
+        <FableLeft s={s} />
       </div>
     </div>
   );
@@ -263,6 +277,7 @@ export function SeatsPage() {
             {count >= data.target
               ? `${count} subscriptions running, the ${data.target} the landing page shows.`
               : `${count} of the ${data.target} subscriptions the landing page shows are running today; ${data.target - count} more are not bought yet. ${count - data.signedIn > 0 ? `${count - data.signedIn} signed out.` : "All signed in."}`}
+            {data.fableSeats !== undefined && <> Fable credit left on {data.fableSeats} of {count}: Fable work goes only to those.</>}
             {data.readAt && <> Load read <RelTime iso={data.readAt} />.</>}
           </p>
           {count === 0 ? (

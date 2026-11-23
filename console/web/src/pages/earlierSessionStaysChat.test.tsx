@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type DeskChat, type DeskMessage } from "@/api";
-import { ChatPage, CHAT_EMPTY, CHAT_RETRY_MS, forgetChats, unreachableLine } from "@/pages/Chat";
+import { ChatPage, CHAT_EMPTY, CHAT_RETRY_MS, CHAT_WAIT_BOX_MS, forgetChats, unreachableLine } from "@/pages/Chat";
+import { ApiError } from "@/api/real";
 
 /**
  * the Team desk chat keeps its earlier
@@ -110,5 +111,19 @@ describe("T68-S1 a chat never shows blank", () => {
     expect(await screen.findByText("back again")).toBeTruthy();
     expect(screen.queryByTestId("chat-retrying")).toBeNull();
     expect(read.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // a chat waiting for the workspace's own server (409 world_needs_box) is not an outage: no 3 s poll
+  it("a chat waiting for its workspace's own server asks again only every few minutes, never every 3 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const read = vi.spyOn(api, "getDeskChat").mockRejectedValue(new ApiError(409, "Your team's chat starts when your workspace's own sealed server is ready.", "world_needs_box"));
+    renderChat();
+    expect(await screen.findByText(/own sealed server is ready/)).toBeTruthy();
+    expect(screen.queryByTestId("chat-retrying")).toBeNull();
+    const first = read.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(CHAT_RETRY_MS * 10);
+    expect(read.mock.calls.length).toBe(first);
+    await vi.advanceTimersByTimeAsync(CHAT_WAIT_BOX_MS);
+    expect(read.mock.calls.length).toBe(first + 1);
   });
 });

@@ -8,27 +8,29 @@ import { Label } from "@/components/ui/label";
 import { inline } from "@/lib/chatMarkdown";
 import { mutate, useQuery } from "@/lib/data";
 import { worldId } from "@/lib/useSocial";
-import { cn } from "@/lib/utils";
 import { DailyBriefingPanel } from "./DailyBriefing";
+import { WheelPlanView } from "@/components/wheelPlan";
 
 /**
- * The owner: "for any campaign ... this type of marketing plan needs to be there ... a normal web page with fixed
- * sections ... it's just one of the tabs when I have a campaign selected." The campaign's Plan tab: its eight fixed
- * sections in order, each a row of labelled boxes (diagrams first, words as labels), read from the campaign spine's
- * `## Plan` section (docs/campaign-plan.md). A section not written yet says so, so every campaign shows the same plan.
+ * The campaign's Plan tab is the plan of the wheel it serves. The owner (vn_f405ae72, 22 Nov): "It's not a marketing plan,
+ * man. It's the plan. It's the plan for the wheel, whatever the objective is." So it shows, per key result of the objective
+ * the campaign serves, how it gets to green (the same view and the same file as that objective's Plan tab),
+ * then the campaign's latest morning briefing. The campaign's eight-part brief stays in its spine for its writers.
  */
 export function PlanTab({ m }: { m: Milestone }) {
-  const { data, error, loading } = useQuery(async () => api.getCampaignPlan(await worldId(), m.id), [m.id]);
-  // the plan is the owner's to write (the Strategist still writes it when it wakes).
-  const [editing, setEditing] = useState(false);
+  const { data, error, loading } = useQuery(async () => api.getCampaignWheelPlan(await worldId(), m.id), [m.id]);
   if (error) return <ErrorBox error={error} />;
   if (loading || !data) return <Loading />;
-  if (editing) return <PlanEditor plan={data} onSave={async (w) => api.saveCampaignPlan(await worldId(), m.id, w)} onDone={() => setEditing(false)} />;
-  // the campaign's latest morning briefing first, then its Plan (its key results sit above the tabs).
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-10" data-testid="campaign-wheel-plan">
+      {data.wheels.length ? (
+        data.wheels.map((w) => <WheelPlanView key={w.id} anchor={`plan-${w.id}`} title={w.name} plan={w.plan} keyResults={w.keyResults.map((label) => ({ label }))} />)
+      ) : (
+        <p className="max-w-2xl rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground" data-testid="campaign-wheel-plan-none">
+          This campaign serves no objective yet, so it has no plan. Its plan is the plan of the objective it moves.
+        </p>
+      )}
       <DailyBriefingPanel m={m} />
-      <PlanView plan={data} onEdit={() => setEditing(true)} />
     </div>
   );
 }
@@ -97,14 +99,6 @@ export function PlanEditor({ plan, onSave, onDone }: { plan: MarketingPlan; onSa
       </div>
     </div>
   );
-}
-
-/** an objective's Plan tab: the same eight sections, from the campaign spine the objective names (GET /api/pursuits/:id/plan). */
-export function ObjectivePlanTab({ id }: { id: string }) {
-  const { data, error, loading } = useQuery(() => api.getObjectivePlan(id), [id]);
-  if (error) return <ErrorBox error={error} />;
-  if (loading || !data) return <Loading />;
-  return <PlanView plan={data} />;
 }
 
 const num = (s: string | undefined) => {
@@ -214,6 +208,128 @@ function Section({ s, n }: { s: MarketingPlanSection; n: number }) {
   );
 }
 
+/** wraps words into lines of at most `max` characters, at most `rows` lines (the last one cut with an ellipsis). */
+export function wrapWords(text: string, max: number, rows: number): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const w of text.replace(/[*_`]/g, "").split(/\s+/).filter(Boolean)) {
+    if (!cur) cur = w;
+    else if (cur.length + 1 + w.length <= max) cur += ` ${w}`;
+    else {
+      out.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) out.push(cur);
+  if (out.length > rows) {
+    const keep = out.slice(0, rows);
+    keep[rows - 1] = `${keep[rows - 1].slice(0, Math.max(0, max - 1)).replace(/[\s,.;:]+$/, "")}…`;
+    return keep;
+  }
+  return out;
+}
+
+interface FlowNode {
+  key: MarketingPlanSection["key"];
+  label: string;
+  text: string;
+  written: boolean;
+}
+
+/** the plan's shape in five stops: who we reach, what we say, where, what they get, the goal; built from its sections. */
+export function flowNodes(plan: MarketingPlan): FlowNode[] {
+  const by = (k: MarketingPlanSection["key"]) => plan.sections.find((s) => s.key === k);
+  const first = (k: MarketingPlanSection["key"]) => by(k)?.boxes[0]?.text || by(k)?.lead || "";
+  const count = (k: MarketingPlanSection["key"], one: string, many: string) => {
+    const n = by(k)?.boxes.length ?? 0;
+    return n ? `${n} ${n === 1 ? one : many}` : by(k)?.lead || "";
+  };
+  const channels = by("channels")?.boxes.map((b) => (b.label || b.text).split(/[\s,]/)[0]).filter(Boolean) ?? [];
+  const goal = by("goal")?.boxes.map((b) => b.text).join(", then ") || by("goal")?.lead || "";
+  const node = (key: MarketingPlanSection["key"], label: string, text: string): FlowNode => ({
+    key,
+    label,
+    text: text || "not written yet",
+    written: !!by(key)?.written && !!text,
+  });
+  return [
+    node("who", "Who", first("who")),
+    node("messages", "Message", count("messages", "message", "messages")),
+    node("channels", "Channels", channels.length ? channels.join(", ") : count("channels", "channel", "channels")),
+    node("offer", "Offer", by("offer")?.lead || first("offer")),
+    node("goal", "Goal", goal),
+  ];
+}
+
+/**
+ * The plan drawn before its words (root L-59, the owner: "when you tell me a plan, I expect to see a diagram"): who →
+ * message → channels → offer → goal, and the measure-and-change loop back to the messages. One line across on a laptop,
+ * a column on a phone. Each stop opens its section.
+ */
+function PlanFlow({ plan }: { plan: MarketingPlan }) {
+  const nodes = flowNodes(plan);
+  const loop = "measure every evening, then change the messages";
+  const box = (n: FlowNode, x: number, y: number, w: number, h: number, max: number, rows: number) => (
+    <a key={n.key} href={`#plan-${n.key}`} data-testid={`plan-flow-${n.key}`}>
+      <rect x={x} y={y} width={w} height={h} rx={6} className={n.written ? "fill-background stroke-foreground" : "fill-background stroke-muted-foreground"} strokeWidth={1.25} strokeDasharray={n.written ? undefined : "4 3"} />
+      <text x={x + 10} y={y + 17} fontSize={10.5} letterSpacing={0.6} className="fill-muted-foreground">
+        {n.label.toUpperCase()}
+      </text>
+      {wrapWords(n.text, max, rows).map((l, i) => (
+        <text key={i} x={x + 10} y={y + 36 + i * 16} fontSize={13} className={n.written ? "fill-foreground" : "fill-muted-foreground"}>
+          {l}
+        </text>
+      ))}
+    </a>
+  );
+  const arrow = "plan-flow-arrow";
+  // laptop: five boxes in a line, the loop drawn under them from Goal back to Message.
+  const W = 960, bw = 164, gap = (W - 5 * bw) / 4, by = 8, bh = 92;
+  const hx = (i: number) => i * (bw + gap);
+  // phone: five boxes in a column, the loop drawn on the right from Goal back up to Message.
+  const PW = 360, pbw = 280, pbh = 66, pgap = 20;
+  const vy = (i: number) => 4 + i * (pbh + pgap);
+  const PH = vy(4) + pbh + 8;
+  return (
+    <figure className="diagram my-1" data-testid="plan-flow" aria-label={`The plan: ${nodes.map((n) => `${n.label} ${n.text}`).join(", then ")}; ${loop}.`}>
+      <svg viewBox={`-2 0 ${W + 4} 150`} className="block h-auto w-full max-sm:hidden" role="img">
+        <defs>
+          <marker id={arrow} viewBox="0 0 10 10" refX={9} refY={5} markerWidth={7} markerHeight={7} orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" className="fill-foreground" />
+          </marker>
+        </defs>
+        {nodes.slice(1).map((_, i) => (
+          <line key={i} x1={hx(i) + bw + 2} y1={by + bh / 2} x2={hx(i + 1) - 3} y2={by + bh / 2} className="stroke-foreground" strokeWidth={1.25} markerEnd={`url(#${arrow})`} />
+        ))}
+        {nodes.map((n, i) => box(n, hx(i), by, bw, bh, 20, 3))}
+        <path d={`M ${hx(4) + bw / 2} ${by + bh + 2} V ${by + bh + 26} H ${hx(1) + bw / 2} V ${by + bh + 5}`} fill="none" className="stroke-emerald-700" strokeWidth={1.5} markerEnd={`url(#${arrow})`} />
+        <a href="#plan-measure">
+          <text x={(hx(1) + hx(4) + bw) / 2} y={by + bh + 44} textAnchor="middle" fontSize={12.5} className="fill-emerald-700">
+            {loop}
+          </text>
+        </a>
+      </svg>
+      <svg viewBox={`-2 0 ${PW + 4} ${PH}`} className="hidden h-auto w-full max-sm:block" role="img">
+        <defs>
+          <marker id={`${arrow}-p`} viewBox="0 0 10 10" refX={9} refY={5} markerWidth={7} markerHeight={7} orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" className="fill-foreground" />
+          </marker>
+        </defs>
+        {nodes.slice(1).map((_, i) => (
+          <line key={i} x1={pbw / 2} y1={vy(i) + pbh + 1} x2={pbw / 2} y2={vy(i + 1) - 2} className="stroke-foreground" strokeWidth={1.25} markerEnd={`url(#${arrow}-p)`} />
+        ))}
+        {nodes.map((n, i) => box(n, 0, vy(i), pbw, pbh, 34, 2))}
+        <path d={`M ${pbw + 2} ${vy(4) + pbh / 2} H ${pbw + 30} V ${vy(1) + pbh / 2} H ${pbw + 5}`} fill="none" className="stroke-emerald-700" strokeWidth={1.5} markerEnd={`url(#${arrow}-p)`} />
+        <a href="#plan-measure">
+          <text transform={`translate(${pbw + 46} ${(vy(1) + vy(4) + pbh) / 2}) rotate(90)`} textAnchor="middle" fontSize={12} className="fill-emerald-700">
+            measure every evening, then change
+          </text>
+        </a>
+      </svg>
+    </figure>
+  );
+}
+
 export function PlanView({ plan, onEdit }: { plan: MarketingPlan; onEdit?: () => void }) {
   const where =
     onEdit && plan.source === "none"
@@ -234,16 +350,7 @@ export function PlanView({ plan, onEdit }: { plan: MarketingPlan; onEdit?: () =>
             </Button>
           )}
         </div>
-        {/* the eight fixed sections as one line of steps: the plan's shape before its words. */}
-        <ol className="flex flex-wrap gap-1.5 text-xs" aria-label="The plan's sections">
-          {plan.sections.map((s, i) => (
-            <li key={s.key}>
-              <a href={`#plan-${s.key}`} className={cn("inline-block rounded-full border px-2 py-0.5", s.written ? "border-emerald-700/40 text-foreground" : "border-dashed text-muted-foreground")}>
-                {i + 1} {s.title}
-              </a>
-            </li>
-          ))}
-        </ol>
+        <PlanFlow plan={plan} />
         <p className="text-xs text-muted-foreground" data-testid="plan-source">
           {where}
           {plan.source !== "none" && plan.missing.length > 0 ? ` Missing: ${plan.missing.join(", ")}.` : ""}

@@ -190,7 +190,7 @@ describe("T35-S3 trees warm after a start", () => {
     const warmed = new Promise<{ milestones: number; ms: number }>((r) => (done = r));
     const app = createApp(db, {
       read: { reposRoot: root, seatsFile: path.join(root, "seats.json"), listThreads: async () => [], spines },
-      warmTrees: { afterMs: 0, onDone: done },
+      warmTrees: { afterMs: 0, gapMs: 25, onDone: done },
     });
     cleanup = () => {
       db.close();
@@ -207,6 +207,7 @@ describe("T35-S3 trees warm after a start", () => {
     expect(r.milestones).toBe(store.listMilestones().length);
     expect(order[0]).toBe("beta");
     expect(maxActive).toBe(1);
+    expect(r.ms).toBeGreaterThanOrEqual(25); // a pause between the two milestones
     // One run per repo the warm read; none for the settled one's repo unless the waiting list reads it.
     expect(order.filter((d) => d === "beta")).toHaveLength(1);
     expect(order.filter((d) => d === "alpha")).toHaveLength(1);

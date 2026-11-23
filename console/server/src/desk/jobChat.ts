@@ -188,7 +188,7 @@ export function createJobChat(db: DB, route: JobRoute, p: JobChatProfile) {
     async send(text: string, page?: string, clientRequestId?: string): Promise<{ threadId: string; pending: boolean }> {
       const body = text.trim();
       if (!body) throw new DeskError(400, "empty_message", "message is required");
-      if (!route.chat) throw new DeskError(503, "world_needs_box", "Your team's chat is not open on this console yet.");
+      if (!route.chat) throw new DeskError(409, "world_needs_box", "Your team's chat is not open on this console yet.");
       const dup = clientRequestId ? db.prepare("SELECT 1 FROM job_chat_messages WHERE chat_key = ? AND crid = ?").get(p.key, clientRequestId) : undefined;
       if (!dup) insert("user", body, { page, crid: clientRequestId });
       kick();

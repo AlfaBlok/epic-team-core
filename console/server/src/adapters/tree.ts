@@ -9,6 +9,7 @@ import { asksFor, isJordis, rowMatches, snoozedNow, type HumanAsk, type LocatedA
 import { DEFAULT_OWNER, DEFAULT_OWNER_INFO, isDefaultOwner, ownerPatterns, type OwnerInfo } from "../tenancy/owner.js";
 import { deployerName, ownerName } from "../identity.js";
 import { nightQueueSection } from "./nightQueue.js";
+import { withArchive } from "./spineArchive.js";
 
 /**
  * epic tree: the milestone's spine → child spines (spines.py --json) → Issue Ledger rows (backlogFor) →
@@ -46,6 +47,8 @@ export interface TreeNode {
   dependsOn?: string;
   /** ledger row's `Next action` cell when present, e.g. "Dispatch when #17-#19 are integrated". */
   nextAction?: string;
+  /** ledger row's date cell (`Last Verified` / `Updated`) when present, e.g. "2026-11-22". */
+  since?: string;
   /** ledger row's owner cell (`Owner` / `Who` / `Assignee` column) when present, e.g. "the owner". */
   owner?: string;
   /** ledger row's `Role` cell when present; `Mac agent` = Claude on the owner's Mac does it, never a server worker. */
@@ -513,8 +516,11 @@ function readyRules(ctx: Ctx, root: TreeNode): ReadyRules {
   });
   for (const s of ctx.spines?.nodes ?? []) {
     put(/^((?:EPIC|M)-?\d+)\b/i.exec(s.title ?? "")?.[1], s.current_state?.status ?? s.status);
-    const abs = inside(ctx.repoDir, norm(s.path));
-    for (const row of (abs ? readDoc(abs)?.ledger : undefined) ?? []) put(row.id, row.status);
+    // its ledger, then its archive: a row waiting on a finished row moved there is not blocked by it
+    for (const rel of withArchive(ctx.repoDir, norm(s.path))) {
+      const abs = inside(ctx.repoDir, rel);
+      for (const row of (abs ? readDoc(abs)?.ledger : undefined) ?? []) put(row.id, row.status);
+    }
   }
   return { openCodes: openAskCodes(ctx), askCodes, status, ownerCell: ownerPatterns(ctx.owner).ownerCell };
 }
@@ -711,6 +717,7 @@ function itemChildren(ctx: Ctx, rel: string, self: TreeNode, depth: number, anc:
     if (r.owner && !n.flags.some((f) => REF_FLAGS.includes(f))) n.owner = stripInline(r.owner);
     if (r.role && !n.flags.some((f) => REF_FLAGS.includes(f))) n.role = stripInline(r.role);
     if (r.nextAction && !n.flags.some((f) => REF_FLAGS.includes(f))) n.nextAction = stripInline(r.nextAction);
+    if (r.since && !n.flags.some((f) => REF_FLAGS.includes(f))) n.since = stripInline(r.since);
     const rowAsks = asks.filter((a) => !usedAsks.has(a) && rowMatches(a.row, r));
     rowAsks.forEach((a) => usedAsks.add(a));
     attach(n, rowAsks);

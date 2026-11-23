@@ -21,6 +21,9 @@ write("a.json", { product: "alpha", name: "Alpha", order: 1, repos: ["w"], objec
   { id: "bad", name: "Bad", shape: "blob", tab: "x", lives: {} },
 ] });
 write("c.json", { product: "gamma", name: "Gamma", order: 3, repos: [], objectives: ["gamma-live"], totems: [{ id: "marketing-plan", name: "Marketing plan", shape: "page", tab: "plan", lives: { plan: "its objective's plan entry" } }] });
+write("e.json", { product: "eps", name: "Eps", order: 5, repos: [], objectives: ["eps-live", "eps-two"], totems: [{ id: "plan", name: "Plan", shape: "page", tab: "plan", lives: { wheelPlan: "each objective's own" } }] });
+fs.mkdirSync(path.join(dir, "home/docs/scorecards"), { recursive: true });
+fs.writeFileSync(path.join(dir, "home/docs/scorecards/eps-two.json"), JSON.stringify({ keyResults: [], plan: { line: "Green by Friday", steps: [{ kr: 1, step: "Ship it", owner: "Ticket worker", by: "2026-11-28" }] } }));
 write("d.json", { product: "delta", name: "Delta", order: 4, repos: [], objectives: ["delta-live"], totems: [{ id: "marketing-plan", name: "Marketing plan", shape: "page", tab: "plan", lives: { plan: "its objective's plan entry" } }] });
 fs.writeFileSync(path.join(dir, "home/docs/pursuits.json"), JSON.stringify({ version: 1, pursuits: [
   { id: "gamma-live", name: "Gamma live", greenWhen: "live", plan: { repo: "w", path: "docs/spines/camp.md" } },
@@ -31,7 +34,7 @@ const repoDir = (r: string) => path.join(dir, r);
 
 describe("the product map", () => {
   it("reads every product in its order, keeps only well-formed totems", () => {
-    expect(maps.products.map((p) => p.product)).toEqual(["alpha", "beta", "gamma", "delta"]);
+    expect(maps.products.map((p) => p.product)).toEqual(["alpha", "beta", "gamma", "delta", "eps"]);
     expect(maps.products[0].totems.map((t) => t.id)).toEqual(["marketing-plan", "pricing", "missing", "launch-board"]);
     expect(maps.statement).toMatch(/read from at the start and write back to at the end/);
   });
@@ -41,6 +44,13 @@ describe("the product map", () => {
     const d = maps.products.find((p) => p.product === "delta")!.totems[0];
     expect(d.lives.note).toMatch(/no plan named yet/);
     expect(mapSection(maps, maps.products.find((p) => p.product === "gamma"))).toContain("w docs/spines/camp.md § Plan (its objective's plan entry in docs/pursuits.json)");
+  });
+  it("a wheel's plan totem is each objective's own plan in its key results file, never a campaign's marketing plan", () => {
+    const e = maps.products.find((p) => p.product === "eps")!.totems[0];
+    expect(e.lives.wheelPlan).toBe(true);
+    expect(e.lives.note).toMatch(/docs\/scorecards\/<objective id>\.json/);
+    expect(e.lives.note).toMatch(/written for eps-two$/);
+    expect(mapSection(maps, maps.products.find((p) => p.product === "eps"))).not.toMatch(/marketing/i);
   });
   it("picks the product by objective, then by repo", () => {
     expect(productFor(maps, { objective: "beta-live", repo: "w" })?.product).toBe("beta");

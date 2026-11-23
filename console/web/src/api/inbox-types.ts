@@ -162,7 +162,7 @@ export interface Asker {
 /** Save key result: the (value-free) answer and where the key went (`wake` says what reached the asker). */
 export interface SaveKeyResult extends OwnerResponse {
   /** deployed false = the app has no app on the app platform, so the key is in the secret store only (not set in an env). */
-  stored: { app: string; name: string; deployed?: boolean };
+  stored: { app: string; name: string; deployed?: boolean; vault?: string; where?: string };
 }
 
 /** the monitor alert an ask's buttons go through: the alert's milestone and the ask's code. */
@@ -172,6 +172,9 @@ export interface AskRelay {
 }
 
 export interface WaitingItem {
+  /** E948-S172 the card's topic in plain words, its first line `About: …` (the ask's own `about:`, else derived). */
+  about?: string;
+  aboutGiven?: true;
   /** an open ask his long voice note touched, until its owner rewrites it. */
   noteMark?: import("./review-types").NoteMark;
   id: string;
@@ -228,6 +231,13 @@ export interface WaitingItem {
   referencedBy?: AskReference[];
   /** Needs the owner rows with state superseded (only listed with includeSuperseded): the coded ask that replaced it, or `moot`. */
   supersededBy?: string;
+  /** E948-S183: an open ask on the same ticket, page or topic as another open card is folded into it (that card's id): one card per topic. */
+  foldedInto?: string;
+  /**
+   * E948-S187: review cards of the same work that reached the inbox after this ask: they join this card (their evidence
+   * and decision show on it) and his answer here answers their rows too. Set by the client (lib/sameTopic.ts).
+   */
+  joined?: JoinedReview[];
   /** Asks: 0-based line of the ask in `path` when read. */
   line?: number;
   answer?: string;
@@ -420,4 +430,16 @@ export interface SpokenRead {
   kind: "approve" | "deny" | "unclear" | "none";
   quote?: string;
   how?: "order" | "name" | "all" | "only" | "model";
+}
+
+/** E948-S187: a review card folded into an older ask on the same topic: what the ask's card shows of it. */
+export interface JoinedReview {
+  /** the review card's id (its answer goes there) and its row */
+  id: string;
+  ref?: string;
+  title?: string;
+  evidence?: { url: string; label: string; look?: string };
+  delivered?: { ok: boolean; text: string }[];
+  decision?: string;
+  options?: string[];
 }

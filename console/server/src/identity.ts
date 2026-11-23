@@ -31,6 +31,8 @@ export interface Identity {
   socialProduct: string;
   /** the app platform keys are also set in (an app's env), as people read it */
   deployer: string;
+  /** the password manager a pasted key goes into first, as people read it (unset: the console's own secret store) */
+  vault?: string;
 }
 
 export const NEUTRAL_IDENTITY: Identity = { owner: "the owner", homeWorld: "home", homeRepo: "team", mainHost: "main", workerHost: "worker", memory: "Memory", socialWorld: "social", opsRepo: "ops", org: "Acme", socialProduct: "SocialApp", deployer: "Deployer" };
@@ -58,6 +60,7 @@ function fromEnv(env: NodeJS.ProcessEnv): Partial<Identity> {
     org: id("CONSOLE_HOME_ORG"),
     socialProduct: v("CONSOLE_SOCIAL_PRODUCT"),
     deployer: v("CONSOLE_DEPLOYER_NAME"),
+    vault: v("CONSOLE_VAULT_NAME"),
   };
 }
 
@@ -76,6 +79,7 @@ export function identity(env: NodeJS.ProcessEnv = process.env): Identity {
     org: set.org ?? e.org ?? NEUTRAL_IDENTITY.org,
     socialProduct: set.socialProduct ?? e.socialProduct ?? NEUTRAL_IDENTITY.socialProduct,
     deployer: set.deployer ?? e.deployer ?? NEUTRAL_IDENTITY.deployer,
+    ...((set.vault ?? e.vault) ? { vault: set.vault ?? e.vault } : {}),
   };
 }
 
@@ -170,6 +174,10 @@ export interface Sites {
   tailnetNames: Record<string, string>;
   /** the reply voice server (voice/speak.ts) */
   replyVoiceUrl: string;
+  /** our own transcription server (voice/transcription.ts); "off" = none, the paid backup only. */
+  transcribeUrl: string;
+  /** the page with the model test behind the transcription accuracy and speed lines (Settings links it); none by default */
+  transcribeResultsUrl: string;
   /** who web push services may contact about this console (a mailto: URL) */
   contact: string;
   /** the mail sending account (Cloudflare Email Sending) for sign-up and reset mail (auth/emailAccess.ts); none by default = no mail */
@@ -178,15 +186,15 @@ export interface Sites {
   youtubeChannels: string;
   /** one-button connects (auth/connects.ts ConnectSpec): an account its owner connects with one tap; none by default */
   connects: import("./auth/connects.js").ConnectSpec[];
-  /** the console's state folder under the home directory (its database, job server state; stateDir()) */
+  /** the console's state folder under the home directory (its database, job server state; stateDir) */
   stateDir: string;
-  /** the seat broker's folder under the home directory (seats, the T3 token, providers, the watchdog pause; seatDir()) */
+  /** the seat broker's folder under the home directory (seats, the T3 token, providers, the watchdog pause; seatDir) */
   seatDir: string;
-  /** where every host keeps its checkouts (`<root>/<repo name>`; hostReposRoot()); empty: ~/github of the console */
+  /** where every host keeps its checkouts (`<root>/<repo name>`; hostReposRoot); empty: ~/github of the console */
   reposRoot: string;
   /** the cloud the seeded hosts rent from (the hosts table's provider) */
   hostProvider: string;
-  /** the console's own root-only key folder (one file per key name, read with sudo -n; keyFile()) */
+  /** the console's own root-only key folder (one file per key name, read with sudo -n; keyFile) */
   keyStore: string;
   /** the key store's names-only index (0644, no values; CONSOLE_SECRET_INDEX still wins) */
   keyIndex: string;
@@ -198,7 +206,7 @@ export interface Sites {
   bookQuestionsUrl: string;
   /** the servers' wheel (its wheel.json): its red key results wake their owner repo's Delivery Manager; none by default */
   serverWheelUrl: string;
-  /** how other hosts reach the main host over ssh (an ssh config alias) */
+  /** how other hosts reach the main host over ssh (a ssh config alias) */
   mainSsh: string;
   /** the epic that owns the daily press test: its spine in the home repo, its code and the row that runs the test */
   pressTest: { spine: string; epic: string; row: string };
@@ -215,6 +223,8 @@ export const NEUTRAL_SITES: Sites = {
   customerLogins: "",
   tailnetNames: {},
   replyVoiceUrl: "http://127.0.0.1:18940",
+  transcribeUrl: "http://127.0.0.1:18946",
+  transcribeResultsUrl: "",
   contact: "mailto:owner@example.com",
   mailAccount: "",
   youtubeChannels: "",
@@ -255,16 +265,16 @@ export function resetSites(): void {
   sitesSet = {};
 }
 
-/** the console's state folder (sites().stateDir under the home directory) */
+/** the console's state folder (sites.stateDir under the home directory) */
 export const stateDir = (home: string = os.homedir()): string => path.join(home, sites().stateDir);
 
-/** the seat broker's folder (sites().seatDir under the home directory) */
+/** the seat broker's folder (sites.seatDir under the home directory) */
 export const seatDir = (home: string = os.homedir()): string => path.join(home, sites().seatDir);
 
-/** the file of one key in the console's own key store (sites().keyStore) */
+/** the file of one key in the console's own key store (sites.keyStore) */
 export const keyFile = (name: string): string => `${sites().keyStore}/${name}`;
 
-/** the key store's names-only index: CONSOLE_SECRET_INDEX, else sites().keyIndex */
+/** the key store's names-only index: CONSOLE_SECRET_INDEX, else sites.keyIndex */
 export const keyIndexFile = (env: NodeJS.ProcessEnv = process.env): string => env.CONSOLE_SECRET_INDEX || sites().keyIndex;
 
 /** the folder every host keeps its checkouts in (`<root>/<repo name>`, the same path on each host) */

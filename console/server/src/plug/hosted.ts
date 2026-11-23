@@ -137,6 +137,8 @@ export interface ServicesContext {
   options?: object;
   /** where the repo checkouts live (a services plug may read a file of the home repo). */
   reposRoot?: string;
+  /** wake the owner of a run (its milestone's Delivery Manager) with a note; absent when the cycle is off. */
+  wakeRun?: (runId: string, note: string) => Promise<{ runId: string } | { error: string } | undefined>;
 }
 
 /** A the memory service helper's answer wording (hosted: a hosted services module AskWorder). */
@@ -271,6 +273,16 @@ export interface HostsViewContext {
   hostOf: (assignmentId: string) => HostId | undefined;
   runT3State: (runId: string) => RunT3State | undefined;
   staleRunMs?: number;
+  /** the worker server's `nproc; cat /proc/loadavg /proc/meminfo` (its load and memory caps). */
+  hostLoad?: () => Promise<string>;
+  /** the per-goal worker ceiling and its value while seats and memory have room. */
+  maxWorkers?: { base: number; roomy: number };
+  /** every unpaused goal's ready rows (the Hosts waiting queue). */
+  readyRows?: () => Promise<{ id: string; title: string; repo?: string; nextAction?: string; since?: string }[]>;
+  /** a queued child run's ticket and title (the console's work queue). */
+  workerLaunch?: (runId: string) => { ticket?: string | null; title?: string | null } | undefined;
+  /** cards he sent back that no worker is on and the queue does not hold yet, each with the one thing holding it (the fallback). */
+  sentBack?: () => { ref: string; repo: string; title: string; since?: string; why: string; startsAt?: string }[];
 }
 
 /** the worker server's disk watch as core uses it (hosted: status/hostDisk.ts). */

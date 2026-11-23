@@ -2,6 +2,7 @@ import { stripInline } from "../adapters/markdown.js";
 import { isClosed, statusWordOf, type TreeNode } from "../adapters/tree.js";
 import { rowMatches, type LocatedAsk } from "./asks.js";
 import { DEFAULT_OWNER, ownerPatterns } from "../tenancy/owner.js";
+import { ownerName } from "../identity.js";
 
 /**
  * free-text asks: a ledger row assigned to the owner (owner cell `the owner`) with an open status and no coded ask on
@@ -119,4 +120,28 @@ export function expandRanges(text: string): string {
     if (!(to > from) || to - from > 50) return all;
     return Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${from + i}`).join(" ");
   });
+}
+
+/**
+ * the Delivery Manager, 23 Nov: the ask gate held ledger rows blocked on another world as if they were asks to the
+ * owner, asking for an About line and an action for him. A row that waits on another world
+ * or another team is never his item. Either its file has a reference line `- [waits on <repo>/<code> row <id>]` for it
+ * (whatever that ask's state), or its status says so (`blocked (another world: …)`, `blocked (waits on infra-repo …)`).
+ * Only `[ask …]` lines are asks; such a row is its Delivery Manager's to chase.
+ */
+/** `waits on <someone>` in a status, where the someone is not the owner ("waits on the owner", "waits on him"). */
+function waitsOnOther(status: string): boolean {
+  const m = /\bwaits?\s+on\s+(.+)$/i.exec(status);
+  if (!m) return false;
+  const who = m[1]!.trim().toLowerCase();
+  const owner = ownerName().toLowerCase();
+  return !(who.startsWith(owner) || /^(the owner|him|you|his)\b/.test(who) || ownerPatterns().ownerCell.test(m[1]!.trim()));
+}
+const WAITS_ROW_LINE = /^\s*[-*]\s+\[waits?\s+on\s+[^\]]*?\brow\s+([^\s\]]+)\s*\]/i;
+export function waitsElsewhere(n: Pick<TreeNode, "id" | "status">, lines: string[] | undefined): boolean {
+  const status = stripInline(n.status ?? "");
+  if (/\banother (world|team|repo)\b/i.test(status) || waitsOnOther(status)) return true;
+  const id = (n.id ?? "").toLowerCase();
+  if (!id) return false;
+  return (lines ?? []).some((l) => WAITS_ROW_LINE.exec(l)?.[1]?.replace(/[.,;:)]+$/, "").toLowerCase() === id);
 }

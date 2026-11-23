@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
-import { XStatsPage } from "@/components/xStats";
+import { XStatsFreshness, XStatsPage } from "@/components/xStats";
 import type { XStatsBody } from "@/api/pages-types";
 
 /** The team's X accounts: the answer first, a box per account with the change since the day before, each post's counts. */
@@ -48,5 +48,27 @@ describe("x stats page", () => {
     vi.spyOn(api, "getXStats").mockResolvedValue({ dates: [], day: null, history: [] });
     render(<MemoryRouter><XStatsPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("No X stats stored yet.")).toBeTruthy());
+  });
+});
+
+describe("Post stats says how fresh it is", () => {
+  it("last refresh, cadence, settings and how to add an account; a read over a day old is late", () => {
+    const now = Date.parse("2026-11-22T19:00:00Z");
+    render(
+      <MemoryRouter>
+        <XStatsFreshness readAt="2026-11-22T16:35:20Z" now={now} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("x-stats-last-refresh").textContent).not.toMatch(/late/);
+    expect(screen.getByTestId("x-stats-cadence").textContent).toMatch(/Once a day at 17:35 Berlin time/);
+    expect(screen.getByTestId("x-stats-settings").textContent).toMatch(/Connections/);
+    expect(screen.getByTestId("x-stats-add-account").textContent).toMatch(/Add @handle to Post stats/);
+    cleanup();
+    render(
+      <MemoryRouter>
+        <XStatsFreshness readAt="2026-11-20T16:35:20Z" now={now} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("x-stats-last-refresh").textContent).toMatch(/late, the daily read missed/);
   });
 });

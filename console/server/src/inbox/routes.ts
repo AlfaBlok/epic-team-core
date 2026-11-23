@@ -1,3 +1,4 @@
+import { repoRowIds } from "../status/rowIds.js";
 import { saysYes } from "./priorityAsk.js";
 import { HIS_WORDS_MAX } from "../hisWords.js";
 import { addGrant, grantPrefix } from "../approvals.js";
@@ -14,6 +15,9 @@ import { CycleError, type Cycle } from "../cycle/service.js";
 import type { Run } from "../store.js";
 import { answerWakeMessage, askerFor, epicRunState, requestReads, type Asker } from "./asker.js";
 import type { HeldAsk } from "./askGate.js";
+import { heldToRoute, type HeldOfGoal } from "./heldRoute.js";
+import { isDeliveryManager } from "./asks.js";
+import { homeRepo } from "../identity.js";
 import { isDm, NO_OWNER, ownerFor, qualifiedCode, VERB, waitingAndHeld, waitingForMilestone, waitingOnJordi, withThreadEnvironments, type Owner, type WaitingDeps, type WaitingItem } from "./waiting.js";
 import { pendingItems } from "../status/compute.js";
 import { listRepos, resolveRepo } from "../adapters/repos.js";
@@ -38,6 +42,7 @@ import { closingEdit, findSettles, settleLine, type Judge, type Settled, type Se
 import { AttachError, ATTACH_MAX_PER_MESSAGE } from "../desk/attachLimits.js";
 import type { Attachments } from "../desk/attachments.js";
 import { addAcceptedAskRow } from "../review/followups.js";
+import { withAbout } from "./about.js";
 import { deployerName, opsRepo, ownerName } from "../identity.js";
 
 /**
@@ -120,7 +125,7 @@ export interface JordiResponse {
 export interface WakeResult {
   notified: "woken" | "steered" | "queued" | "skipped" | "off" | "failed";
   runId?: string;
-  mode?: "steer" | "auto" | "thread";
+  mode?: "steer" | "auto" | "thread" | "held" | "handled";
   reason?: string;
   /** The asker it went to (or would have). */
   persona?: string;
@@ -200,13 +205,15 @@ const secretIn = (raw: unknown): { value: string; milestoneId?: string; wake: bo
 };
 /** a steps page's private box, through the ask's key path (`ok` carries names only, never the value). */
 export type PasteKey = (i: { repo: string; spine: string; ask: string; app: string; name: string; value: string; file?: boolean }) => Promise<
-  { ok: true; stored: { app: string; name: string; deployed: boolean } } | { ok: false; status: 400 | 403 | 404 | 409 | 502; code: string; message: string }
+  { ok: true; stored: { app: string; name: string; deployed: boolean; vault?: string; where?: string } } | { ok: false; status: 400 | 403 | 404 | 409 | 502; code: string; message: string }
 >;
 /** the answer a key ask gets in the spine (never the value). */
 export const KEY_PROVIDED_ANSWER = "key provided in the console (stored with secret put, value never shown)";
 /** the same for a world on its own secret store (backend `tenant`). */
 export const KEY_PROVIDED_WORLD_ANSWER = "key provided in the console (stored in the world's secret store, value never shown)";
-export const isKeyProvidedAnswer = (t: string) => t === KEY_PROVIDED_ANSWER || t === KEY_PROVIDED_WORLD_ANSWER;
+/** the answer when the key was saved in the owner's vault and read back before the card closed. */
+export const keyVaultAnswer = (vault: string, where?: string) => `key provided in the console (saved in your ${vault}${where ? `, ${where},` : ""} and read back, value never shown)`;
+export const isKeyProvidedAnswer = (t: string) => t === KEY_PROVIDED_ANSWER || t === KEY_PROVIDED_WORLD_ANSWER || /^key provided in the console \(saved in your .+ and read back, value never shown\)$/.test(t);
 
 /** a queued answer re-tries its steer this often, for this long. */
 export const STEER_RETRY_MS = 5_000;
@@ -667,7 +674,7 @@ export function mountInbox(
       label: item.code,
       group: true,
       edit: (text, date) => {
-        const a = addAcceptedAskRow(text, { code: item.code!, question: item.question ?? item.title ?? "", ...(item.asker?.personaName ? { persona: item.asker.personaName } : {}) }, date, ownerOf(o.db, r.milestoneId).handle);
+        const a = addAcceptedAskRow(text, { code: item.code!, question: item.question ?? item.title ?? "", ...(item.asker?.personaName ? { persona: item.asker.personaName } : {}) }, date, ownerOf(o.db, r.milestoneId).handle, repoRowIds(repoDir));
         if ("skip" in a) return a;
         ref = a.ref;
         return { text: a.text, msg: `${a.ref} ready: ${ownerName()} accepted ${item.code} (via console)`, body: `${stripQ(item.question ?? "")}\n\nAccepted on the console: his accept is the ready stamp (root L-37), so this is a ready row the team delivers.` };
@@ -860,7 +867,10 @@ export function mountInbox(
       try {
         const run = await cycle.runNow(a.id, { instructions: text(false), instructionsBy: ownerName() });
         // a wake that started meanwhile got the answer queued into its thread (start guard): a steer, not a wake
-        return run.startGuard === "queued" ? { notified: "steered", runId: run.id, mode: "steer" } : { notified: "woken", runId: run.id };
+        if (run.startGuard === "queued") return { notified: "steered", runId: run.id, mode: "steer" };
+        // held for the next wake, or the same answer already reached a wake: no new wake
+        if (run.startGuard === "held" || run.startGuard === "handled") return { notified: "steered", runId: run.id, mode: run.startGuard };
+        return { notified: "woken", runId: run.id };
       } catch (e) {
         if (e instanceof CycleError && e.code === "already_running") return steer(cycle.liveRun(a.id));
         return { notified: e instanceof CycleError && ["settled", "cycle_disabled"].includes(e.code) ? "skipped" : "failed", reason: errText(e) };
@@ -944,9 +954,11 @@ export function mountInbox(
    * whatever its id (repo, file, row and wording make the id; a reworded line or the answered tag changes it). His
    * written answer to the same file and code, given since the ask was opened, answers it.
    */
-  const answeredByCode = (byCode: Map<string, JordiResponse>, it: Pick<WaitingItem, "source" | "path" | "code" | "since">, unique: (path: string, code: string) => boolean): JordiResponse | undefined => {
-    if (it.source !== "ask" || !it.code || !it.path || !unique(it.path, it.code)) return undefined;
-    const r = byCode.get(`${it.path}\u0000${it.code}`);
+  // E948-S182: by repo and code, not file: a line moved to another epic is the same ask (E906-A12 showed twice after E906-S228).
+  const codeKey = (repo?: string | null, code?: string | null) => (code ? `${repo ?? ""}\u0000${code.toUpperCase()}` : "");
+  const answeredByCode = (byCode: Map<string, JordiResponse>, it: Pick<WaitingItem, "source" | "path" | "code" | "since" | "repo">, unique: (repo: string, code: string) => boolean): JordiResponse | undefined => {
+    if (it.source !== "ask" || !it.code || !it.path || !unique(it.repo ?? "", it.code)) return undefined;
+    const r = byCode.get(codeKey(it.repo, it.code));
     if (!r) return undefined;
     const opened = it.since ? Date.parse(it.since) : NaN;
     return Number.isFinite(opened) && Date.parse(r.createdAt) < opened ? undefined : r;
@@ -954,12 +966,12 @@ export function mountInbox(
   /** a code that names one ask in its file (two asks can share a code: those still match by question). */
   const uniqueCodes = (all: WaitingItem[]) => {
     const n = new Map<string, number>();
-    for (const i of all) if (i.source === "ask" && i.code && i.path) n.set(`${i.path}\u0000${i.code}`, (n.get(`${i.path}\u0000${i.code}`) ?? 0) + 1);
-    return (path: string, code: string) => n.get(`${path}\u0000${code}`) === 1;
+    for (const i of all) if (i.source === "ask" && i.code && i.path) n.set(codeKey(i.repo, i.code), (n.get(codeKey(i.repo, i.code)) ?? 0) + 1);
+    return (repo: string, code: string) => n.get(codeKey(repo, code)) === 1;
   };
   const writtenByCode = (): Map<string, JordiResponse> => {
     const m = new Map<string, JordiResponse>();
-    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && r.item.path && !m.has(`${r.item.path}\u0000${r.item.code}`)) m.set(`${r.item.path}\u0000${r.item.code}`, r);
+    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && r.item.path && !m.has(codeKey(r.item.repo, r.item.code))) m.set(codeKey(r.item.repo, r.item.code), r);
     return m;
   };
   const withResponses = (all: WaitingItem[], scope: { milestoneId?: string; nodeKey?: string; adhoc?: boolean } = {}) => {
@@ -977,17 +989,21 @@ export function mountInbox(
     const answeredLines = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done")).map((i) => qkey(i.path, i.question)));
     // E948-S155: an ask reworded between his press and the answered line keeps its code: the line carries the answer, so
     // the stored copy of the old wording never comes back as a second card (one ask showed twice, two wordings).
-    const ckey = (path?: string, code?: string | null) => (code ? `${path ?? ""}\u0000${code}` : "");
-    const answeredCodes = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done") && i.code).map((i) => ckey(i.path, i.code)));
+    // E948-S182: keyed by repo and code, so a moved line is still the same ask.
+    const answeredCodes = new Set(items.filter((i) => i.source === "ask" && (i.state === "answered" || i.state === "done") && i.code).map((i) => codeKey(i.repo, i.code)));
+    // every code the list holds as a live line, whatever its state: a stored record of that code never comes back as a second card
+    const listedCodes = new Set(items.filter((i) => i.source === "ask" && i.code).map((i) => codeKey(i.repo, i.code)));
     const byCode = new Map<string, JordiResponse>();
-    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && !byCode.has(ckey(r.item.path, r.item.code))) byCode.set(ckey(r.item.path, r.item.code), r);
+    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && !byCode.has(codeKey(r.item.repo, r.item.code))) byCode.set(codeKey(r.item.repo, r.item.code), r);
     const unique = uniqueCodes(items);
     const shownByCode = new Set<string>();
     const out = items.flatMap((it): (WaitingItem & { response?: JordiResponse })[] => {
-      const r = latest.get(it.id) ?? (it.state === "answered" || it.state === "done" ? (byQuestion.get(qkey(it.path, it.question)) ?? (it.source === "ask" && it.code ? byCode.get(ckey(it.path, it.code)) : undefined)) : undefined);
+      const byId = latest.get(it.id) ?? (it.legacyId ? latest.get(it.legacyId) : undefined);
+      const r = byId ?? (it.state === "answered" || it.state === "done" ? (byQuestion.get(qkey(it.path, it.question)) ?? (it.source === "ask" && it.code ? byCode.get(codeKey(it.repo, it.code)) : undefined)) : undefined);
       // an open coded ask whose code he already answered (written) since it was opened is answered, whatever
-      // its id now (a reworded line, or a view older than the answered line, has another id): never an open card again.
-      const sameCode = !r && it.state === "open" ? answeredByCode(byCode, it, unique) : undefined;
+      // its id now (a reworded line, or a view older than the answered line): never an open card again. E948-S182: a coded
+      // ask keeps one id, so his written answer may be found by that id too; the same rule holds.
+      const sameCode = it.state === "open" && (!r || r.spine?.status === "written") ? answeredByCode(byCode, it, unique) : undefined;
       if (sameCode) shownByCode.add(sameCode.id);
       if (sameCode) return [{ ...it, state: "answered" as const, answer: answerWord(sameCode.kind, sameCode.text), response: withOwnerRun(sameCode, it) }];
       if (!r) return [it];
@@ -1000,11 +1016,11 @@ export function mountInbox(
       return [{ ...it, ...kind, ...(now ? { state: "answered" as const, answer: now } : {}), response: withOwnerRun(r, it) }];
     });
     if (scope.adhoc) return out;
-    const present = new Set(items.map((i) => i.id));
+    const present = new Set(items.flatMap((i) => (i.legacyId ? [i.id, i.legacyId] : [i.id])));
     for (const [id, r] of latest) {
       // no Needs the owner rows are read here (they were a DB store of asks); an answered spine line is its own card.
       if (present.has(id) || shownByCode.has(r.id) || r.spine?.status !== "written" || r.item.source === "needs_jordi") continue;
-      if (answeredLines.has(qkey(r.item.path, r.item.question)) || answeredCodes.has(ckey(r.item.path, r.item.code))) continue;
+      if (answeredLines.has(qkey(r.item.path, r.item.question)) || answeredCodes.has(codeKey(r.item.repo, r.item.code)) || listedCodes.has(codeKey(r.item.repo, r.item.code))) continue;
       if (!inScope(r, scope)) continue;
       if (Date.now() - Date.parse(r.spine.at ?? r.createdAt) > DONE_SHOWN_MS) continue;
       out.push({ ...(r.item as WaitingItem), state: "done", answer: answerWord(r.kind, r.text), response: r });
@@ -1026,7 +1042,18 @@ export function mountInbox(
     }
     const byRule: Record<string, number> = {};
     for (const h of held) byRule[h.rule] = (byRule[h.rule] ?? 0) + 1;
-    return c.json({ count: held.length, byRule, held });
+    // the held asks other goals' managers left (off, or 2 h untouched), which the home goal's Delivery Manager now takes
+    const ms = store.listMilestones().filter((x) => !x.settledAt && !x.paused && x.repo);
+    const root = (x: (typeof ms)[number]) => /(^|\/)root\.md$/i.test(x.path ?? "");
+    const home = ms.find((x) => root(x) && resolveRepo(o.deps.reposRoot, x.repo)?.name === homeRepo()) ?? ms.find(root) ?? ms[0];
+    const goals: HeldOfGoal[] = ms.map((m) => ({
+      milestoneId: m.id,
+      title: m.title,
+      managerOn: store.listAssignments({ milestoneId: m.id }).some((a) => a.enabled && !a.parkedAt && isDeliveryManager(store.getPersona(a.personaId)?.name)),
+      held: held.filter((h) => h.milestoneId === m.id),
+    }));
+    const routed = home ? heldToRoute(goals, home.id).map(({ code, repo, path, line, question, goal, why, hours }) => ({ code, repo, path, line, question, goal, why, hours })) : [];
+    return c.json({ count: held.length, byRule, held, ...(home ? { home: { milestoneId: home.id, title: home.title } } : {}), routed });
   });
 
   api.get("/waiting-on-owner", async (c) => {
@@ -1068,7 +1095,8 @@ export function mountInbox(
     const full = await Promise.all(withRubric(db, byMilestonePriority(items, storeRanks(store), worldPriorities(store, o.deps.reposRoot))).map(async (it) => (wantsAsker(it) ? { ...it, asker: await askerOf(it) } : it)));
     // the web app's Inbox asks for `view=list` (done and superseded items as one-line rows, no second copy
     // of each item inside its answer): 1.78 MB became ~0.2 MB. Agents' curl without `view` still get every field.
-    return c.json(wantsListView((n) => c.req.query(n)) ? listView(full as unknown as Record<string, unknown>[]) : full);
+    const topical = full.map(withAbout);
+    return c.json(wantsListView((n) => c.req.query(n)) ? listView(topical as unknown as Record<string, unknown>[]) : topical);
   });
 
   /**
@@ -1083,7 +1111,7 @@ export function mountInbox(
     const read = await itemsIn({ milestoneId, includeSettled: true, includeSuperseded: true });
     const found = withResponses(read.items, { milestoneId }).find((it) => it.id === id);
     if (!found) return err(c, 404, "not_found", `item ${id} not found`);
-    const [it] = withRubric(db, [found]);
+    const [it] = withRubric(db, [found]).map(withAbout);
     return c.json(wantsAsker(it) ? { ...it, asker: await withinBudget(askerFor({ ...o.deps, store: requestReads(o.deps.store) }, it), ASKER_BUDGET_MS) } : it);
   });
 
@@ -1464,7 +1492,7 @@ export function mountInbox(
    * checks, the same answered line and approval mirror, the same `secret put`. The value is never returned.
    */
   type KeyResult =
-    | { ok: true; body: unknown; stored: { app: string; name: string; deployed: boolean } }
+    | { ok: true; body: unknown; stored: { app: string; name: string; deployed: boolean; vault?: string; where?: string } }
     | { ok: false; status: 400 | 403 | 404 | 409 | 502; code: string; message: string; body?: unknown };
   async function storeKey(item: WaitingItem, value: string, wake: boolean, file = false): Promise<KeyResult> {
     const no = (status: 400 | 403 | 404 | 409 | 502, code: string, message: string): KeyResult => ({ ok: false, status, code, message });
@@ -1479,7 +1507,7 @@ export function mountInbox(
     const refused = o.keys?.refuse(world, item.secret.app);
     if (refused) return no(403, "world_scope", `nothing stored: ${refused}`);
     const inWorldStore = o.keys?.backend(world) === hooks.keys.worldBackend;
-    const keyAnswer = inWorldStore ? KEY_PROVIDED_WORLD_ANSWER : KEY_PROVIDED_ANSWER;
+
     const target = {
       id: item.id,
       source: "ask" as const,
@@ -1490,7 +1518,14 @@ export function mountInbox(
       ...(item.line !== undefined ? { line: item.line } : {}),
     };
 
-    // 1. The answered line first (secret's approval check reads it).
+    // 0. ("it was supposed to make it into the vault, it didn't. But the card closed"): where the
+    // world keeps a vault, the key is saved there and read back by name before anything closes the card; a vault that
+    // refuses leaves the card open, nothing written, with why.
+    const first = o.keys?.saveFirst ? await o.keys.saveFirst(world, { app: item.secret.app, name: item.secret.name, value: p.value, source: `a paste on the console (ask ${item.code})` }) : undefined;
+    if (first && !first.ok) return no(502, "secret_put_failed", `not saved: ${scrub(first.err, p.value)}. The card stays open: paste the key once more`);
+    const keyAnswer = inWorldStore ? KEY_PROVIDED_WORLD_ANSWER : first?.ok ? keyVaultAnswer(first.vault, first.where) : KEY_PROVIDED_ANSWER;
+
+    // 1. The answered line (secret's approval check reads it).
     const w = await spineWriter.answer({ repoDir: repo.path, target, answer: keyAnswer, label: item.id, ...signedBy(item.milestoneId) });
     if (w.status !== "written" || !w.before || !w.after)
       return no(w.status === "failed" ? 502 : 409, w.status === "failed" ? "git_failed" : "conflict",
@@ -1506,7 +1541,7 @@ export function mountInbox(
     const docsDir = path.dirname(path.join(repo.path, item.path));
     // an app with no the app platform app gets the key in the store only (put again without --the app platform).
     // a key file (several lines) is stored only, `--multiline`: the app platform env holds one line per name.
-    const putIn = { app: item.secret.app, name: item.secret.name, approved: item.code, docsDir, value: p.value, ...(file ? { deployed: false, multiline: true } : {}) };
+    const putIn = { app: item.secret.app, name: item.secret.name, approved: item.code, docsDir, value: p.value, ...(file ? { deployed: false, multiline: true } : {}), ...(first?.ok ? { vaultSaved: first.vault } : {}) };
     const put = o.keys ? await o.keys.store(world, putIn) : await hooks.keys.putWithFallback(secretPut, putIn);
     const asker = put.ok ? await askerFor(o.deps, item) : undefined;
     const rid = `jr_${randomUUID()}`;
@@ -1533,9 +1568,11 @@ export function mountInbox(
     o.readModel?.patch({ kind: "answered", id: item.id }); // the card and every count change at once
     const answered = await notifyAsker(getResponse(rid)!, {
       wake: p.wake,
-      answer: `key ${item.secret.app} ${item.secret.name} saved in the console (${inWorldStore ? hooks.keys.worldStoredMessage(world) : put.deployed ? `stored with secret put, set in ${deployerName()}` : hooks.keys.storedNoDeploy(item.secret.app)})`,
+      answer: put.vault
+        ? `key ${item.secret.app} ${item.secret.name} saved in ${put.vault} (${put.mirrorErr ? `the secret store's working copy was not written: ${put.mirrorErr}` : `working copy in the secret store${put.deployed ? `, set in ${deployerName()}` : ""}`})`
+        : `key ${item.secret.app} ${item.secret.name} saved in the console (${inWorldStore ? hooks.keys.worldStoredMessage(world) : put.deployed ? `stored with secret put, set in ${deployerName()}` : hooks.keys.storedNoDeploy(item.secret.app)})`,
     });
-    const stored = { app: item.secret.app, name: item.secret.name, deployed: put.deployed };
+    const stored = { app: item.secret.app, name: item.secret.name, deployed: put.deployed, ...(put.vault ? { vault: put.vault } : {}), ...(first?.ok && first.where ? { where: first.where } : {}) };
     return { ok: true, body: { ...answered, stored }, stored };
   }
 
@@ -1549,8 +1586,8 @@ export function mountInbox(
     // the stored view first (ms); with none, one live read (this lookup used to answer empty here)
     const all = storedItems(milestoneId) ?? (await waitingOnJordi(o.deps, { ...(milestoneId ? { milestoneId } : {}), includeSuperseded: true }));
     const item = all.find((i) => i.id === itemId);
-    if (!item || item.source !== "ask" || !item.code || !item.path || !uniqueCodes(all)(item.path, item.code)) return c.json(direct);
-    return c.json(listResponses({ milestoneId }).filter((r) => r.item.code === item.code && r.item.path === item.path));
+    if (!item || item.source !== "ask" || !item.code || !item.path || !uniqueCodes(all)(item.repo ?? "", item.code)) return c.json(direct);
+    return c.json(listResponses({ milestoneId }).filter((r) => r.item.code?.toUpperCase() === item.code!.toUpperCase() && (r.item.repo ?? "") === (item.repo ?? "")));
   });
   api.post("/owner-responses/:id/deliver", async (c) => {
     settlePending(true); // an answer the asker's PR has put in the spine since is settled first

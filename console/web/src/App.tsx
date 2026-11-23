@@ -3,6 +3,7 @@ import { Layout } from "@/components/Layout";
 import { CallProvider, CallWidget } from "@/voice/CallProvider";
 import { NoteProvider, NoteWidget } from "@/voice/NoteProvider";
 import { NewBuild } from "@/components/NewBuild";
+import { InPlaceLinks } from "@/components/InPlaceLinks";
 import { DASHBOARD_PATH, SETTINGS_PATH } from "@/lib/settingsPath";
 import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, ON_DEVICE_PATH, X_STATS_PATH } from "@/lib/routePaths";
 import { BookIndexRedirect, BookToDeck } from "@/pages/BookRedirect";
@@ -12,6 +13,7 @@ import { HomePage } from "@/components/homeView";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/components/pursuits";
 import { PRODUCT_DEF_PATH, PRODUCTS_PATH, SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
+import { OBJECTIVE_SEARCH_PATH } from "@/lib/objectiveSearch";
 import { Empty } from "@/components/common";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { type ScreenId, type Skin, SkinProvider, skinFromFlag, useRoutes, useSkin, useWords } from "@/lib/skin";
@@ -40,6 +42,7 @@ const SpinesPage = lazyPage(() => import("@/pages/Spines"), "SpinesPage");
 const VoiceFeedbackPage = lazyPage(() => import("@/pages/VoiceFeedback"), "VoiceFeedbackPage");
 const TeamSkillsPage = lazyPage(() => import("@/pages/TeamSkills"), "TeamSkillsPage");
 const RunsPage = lazyPage(() => import("@/pages/Runs"), "RunsPage");
+const SearchPage = lazyPage(() => import("@/pages/Search"), "SearchPage");
 const PriorityModePage = lazyPage(() => import("@/components/priorityShortcut"), "PriorityModePage");
 const ChatPage = lazyPage(() => import("@/pages/Chat"), "ChatPage");
 const ReportPage = lazyPage(() => import("@/pages/Report"), "ReportPage");
@@ -138,7 +141,7 @@ const CORE_ROUTES: ScreenRoute[] = [
   // his voice notes in one place, a product filter, each with the rows made from it (docs/voice-notes/index.json).
   { screen: "book", path: VOICE_NOTES_PATH, element: <VoiceNotesPage /> },
   // the team's X accounts: likes, replies, reposts and views per post, one file a day (data/x-stats).
-  { screen: "book", path: X_STATS_PATH, element: <XStatsPage /> },
+  { screen: "postStats", path: X_STATS_PATH, element: <XStatsPage /> },
   // each pursuit's own page: its scorecard and its social kit, under the same top bar.
   // in a skin without them (the social one) an old pursuit link opens its objective, /sets/<id>.
   { screen: "goalSets", path: PURSUIT_PATH, element: <OldPursuitRoute page={<PursuitPage />} /> },
@@ -147,6 +150,8 @@ const CORE_ROUTES: ScreenRoute[] = [
   // the goal sets: every set in one place with the combined inbox and the team desk, and each set's own page.
   { screen: "goalSets", path: SCORECARDS_PATH, element: <GoalSetsPage /> },
   { screen: "goalSets", path: SCORECARD_PATH, element: <GoalSetPage /> },
+  // one search across his objectives, key results and tickets (the sidebar's Search).
+  { screen: "goalSets", path: OBJECTIVE_SEARCH_PATH, element: <SearchPage /> },
   // the Products section: each product defined once (its deck and its kit), the objectives on it name it.
   { screen: "goalSets", path: PRODUCTS_PATH, element: <ProductsPage /> },
   { screen: "goalSets", path: PRODUCT_DEF_PATH, element: <ProductDefPage /> },
@@ -222,6 +227,8 @@ export function App({ skin = skinFromFlag() }: { skin?: Skin }) {
           <NoteProvider>
             <BrowserRouter>
               <AppRoutes />
+              {/* the installed app: a link that would open a new window opens in place, so Back returns to the card. */}
+              <InPlaceLinks />
               <CallWidget />
               <NoteWidget />
               {/* an open page (the installed app) picks up a new deploy: reloads when safe, else a Reload bar. */}

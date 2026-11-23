@@ -31,6 +31,8 @@ const startIn = z.object({ focus: z.object({ section: z.string().trim().min(1).m
 const toolIn = z.object({ name: z.string().min(1).max(60), args: z.record(z.unknown()).optional() });
 const settingsIn = z.object({
   enabled: z.boolean().optional(),
+  /** voice calls on or off for every world (voice notes stay on). */
+  calls: z.boolean().optional(),
   model: z.string().trim().min(3).max(80).optional(),
   monthCapUsd: z.number().positive().max(500).optional(),
   quietHangupS: z.number().int().min(20).max(600).optional(),
@@ -66,7 +68,7 @@ export function mountVoice(api: Hono, voice: Voice, o: { world: () => string | u
       if (!inWorld()) return c.json({ error: { code: "world_scope", message: `voice settings are ${homeWorld()}'s` } }, 403);
       const p = settingsIn.safeParse(await body(c));
       if (!p.success) return bad(c, "enabled (boolean), model (string), monthCapUsd (number), quietHangupS (20..600), historyTokens (0 or 2000..28000), world (a world's own cap or switch)");
-      const offOnly = p.data.enabled === false && p.data.model === undefined && p.data.monthCapUsd === undefined && p.data.quietHangupS === undefined && p.data.historyTokens === undefined;
+      const offOnly = (p.data.enabled === false || (p.data.enabled === undefined && p.data.calls === false)) && p.data.calls !== true && p.data.model === undefined && p.data.monthCapUsd === undefined && p.data.quietHangupS === undefined && p.data.historyTokens === undefined;
       if (!offOnly) {
         const why = notJordi((n) => c.req.header(n));
         if (why) return c.json({ error: { code: "jordi_only", message: `anyone may switch voice off; switching it on, the model and the cap are ${ownerName()}'s (${why})` } }, 403);
@@ -80,6 +82,7 @@ export function mountVoice(api: Hono, voice: Voice, o: { world: () => string | u
         return c.json(o.worldVoice(p.data.world).state());
       }
       if (p.data.enabled !== undefined) voice.setEnabled(p.data.enabled);
+      if (p.data.calls !== undefined) voice.setCalls(p.data.calls);
       if (p.data.model) voice.setModel(p.data.model);
       if (p.data.monthCapUsd) voice.setMonthCap(p.data.monthCapUsd);
       if (p.data.quietHangupS) voice.setQuietHangup(p.data.quietHangupS);

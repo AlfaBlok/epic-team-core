@@ -236,7 +236,8 @@ export function CardFeedback({
   const [sending, setSending] = useState(false);
   const [line, setLine] = useState<string>();
   const files = useChatAttach({ enabled: !disabled, disabled: sending });
-  const go = async (text: string, via: "text" | "voice") => {
+  /** true once sent, else why not (E948-S174: a voice note's row says the card's own reason) */
+  const go = async (text: string, via: "text" | "voice"): Promise<true | string> => {
     setSending(true);
     setLine(undefined);
     try {
@@ -252,7 +253,7 @@ export function CardFeedback({
       // typed words stay in the box, so Not sent is true; a voice note's own line says where his words went
       // (his memory, and the Team desk when the card refuses them), so the card never says Not sent over it.
       setLine(via === "text" ? `Not sent: ${(e as Error).message}` : undefined);
-      return false;
+      return (e as Error).message || "the card did not take it";
     } finally {
       setSending(false);
     }
@@ -264,7 +265,8 @@ export function CardFeedback({
     typed: words,
     big: true,
     deliver: async (reply) => {
-      if (!(await go(reply, "voice"))) throw new Error("the card did not take it");
+      const r = await go(reply, "voice");
+      if (r !== true) throw new Error(r);
     },
     disabled: disabled || sending,
   });

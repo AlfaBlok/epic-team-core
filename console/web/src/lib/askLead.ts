@@ -138,9 +138,16 @@ const LEAD_URL = /^\s*(?:mac page\s*:\s*)?https?:\/\/\S+(?:\s*\([^)]*\))?(?:\s+a
 /** the ask's text without the page link it opens with, its own "You do:" and its Why. */
 function askText(item: { question?: string; title?: string }): string {
   let text = (item.question || item.title || "").replace(/\s+/g, " ").trim();
-  for (let i = 0; i < 2; i++) text = text.replace(LEAD_MD, "").replace(LEAD_URL, "").replace(OWN, "");
+  // E948-S168: a leading "Urgent." is the card's label (its Urgent section says it), never its heading
+  for (let i = 0; i < 2; i++) text = text.replace(LEAD_MD, "").replace(LEAD_URL, "").replace(URGENT_LEAD, "").replace(OWN, "");
   return strip(splitWhy(text).head);
 }
+
+/**
+ * E948-S168 (the owner 22 Nov 05:09Z: "If something is being marked urgent, why is it not actually labeled urgent
+ * properly?"): `Urgent.`, `URGENT:` or `**Urgent** -` at the start is a label, not words of the card.
+ */
+export const URGENT_LEAD = /^\s*(?:\*\*|__)?\s*urgent\s*(?:\*\*|__)?\s*(?:[.:!]+|\s[—–-])\s*(?:\*\*|__)?\s*/i;
 
 /** the page link an ask opens with, for the card's one green link. */
 export function askLeadUrl(item: { question?: string; title?: string }): string | undefined {

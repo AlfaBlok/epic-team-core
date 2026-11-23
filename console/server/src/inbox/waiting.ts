@@ -15,7 +15,7 @@ import type { Milestone, Store } from "../store.js";
 import { isTeamMilestone, TEAM_LABEL } from "../team/teamState.js";
 import type { Asker } from "./asker.js";
 import { scanTree, refKey, unblockRefs, waitingOnLineRefs, waitingOnTextLine, type AskReference, type RowAt } from "./refs.js";
-import { citesRows, jordiLine, laterStep, openForJordi, rowHasAsk, rowLabel, rowTitle } from "./freeText.js";
+import { citesRows, jordiLine, laterStep, openForJordi, rowHasAsk, rowLabel, rowTitle, waitsElsewhere } from "./freeText.js";
 import { DEFAULT_OWNER, ownerPatterns, type OwnerInfo } from "../tenancy/owner.js";
 import { decideChoices } from "./decideChoices.js";
 import { advisories, snoozedNow, citedAskCodes, isJordis, missingFields, rowMatches, stripJordi, type AskKind, type LocatedAsk, type SecretTarget } from "./asks.js";
@@ -25,8 +25,10 @@ const STAMPED = new Set(["ready", "active", "blocked", "deferred", "review", "do
 
 /** one thing blocked on the owner, from a Needs the owner row or a spine (red node, `Waiting on:` line, `[ask: …]`). */
 export interface WaitingItem {
-  /** Stable: the Needs the owner id, else `wj_` + hash(repo, file, kind, node/question). */
+  /** Stable: the Needs the owner id, a coded ask `wj_` + hash(repo, code) (E948-S182), else `wj_` + hash(repo, file, kind, node/question). */
   id: string;
+  /** coded asks: the path id it had before E948-S182, so answers stored under it still find their card. */
+  legacyId?: string;
   /** open asks: a long voice note of the owner's touched it (updated, or stale) and its owner has not rewritten it yet. */
   noteMark?: NoteMark;
   /** ask = skill human-ask line (`## Waiting on`); heuristic = red node / free-text `Waiting on:` / Needs column. */
@@ -121,6 +123,10 @@ export interface WaitingItem {
   title: string;
   ask: AskKind;
   question: string;
+  /** E948-S172: the card's topic in plain words, shown first as `About: …` (the ask's `about:`, else derived: inbox/about.ts). */
+  about?: string;
+  /** the about was written on the ask line (not derived). */
+  aboutGiven?: true;
   /** Raw status / gate / proposed-action text behind the item. */
   detail?: string;
   proposedAction?: string;
@@ -226,8 +232,38 @@ export interface WaitingDeps {
 }
 
 const hash = (...parts: string[]) => "wj_" + createHash("sha1").update(parts.join("\u0000")).digest("hex").slice(0, 16);
-/** the id of a human ask's waiting item (repo checkout name, spine path, row, question), as the inbox gives it. */
-export const askItemId = (repo: string, rel: string, row: string | null | undefined, question: string) => hash(repo, rel, "ask", row ?? "", question);
+/** the id an ask had before E948-S182 (repo, spine path, row, question): a moved or reworded line got a new one. */
+export const askLegacyId = (repo: string, rel: string, row: string | null | undefined, question: string) => hash(repo, rel, "ask", row ?? "", question);
+/**
+ * the id of a human ask's waiting item, as the inbox gives it. E948-S182 (the owner 22 Nov 23:5xZ: E906-A16 showed twice in
+ * Urgent after its line moved from EPIC-906 to EPIC-9105): a coded ask is one card per repo and code, wherever its line
+ * sits, so a moved or reworded line keeps its card. An ask with no code keeps the path id.
+ */
+export const askItemId = (repo: string, rel: string, row: string | null | undefined, question: string, code?: string | null) =>
+  code ? hash(repo, "ask-code", code.toUpperCase()) : askLegacyId(repo, rel, row, question);
+/** a spine file holds a line for this ask code (`[ask CODE`, `[answered CODE`, `[feedback CODE` …), read fresh from disk. */
+export const ASK_LINE_OF = (code: string) => new RegExp(`\\[[a-z]+\\s+${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "i");
+export function askLineIn(repoDir: string, rel: string, code: string): boolean {
+  const abs = inside(repoDir, rel);
+  if (!abs) return false;
+  try {
+    return ASK_LINE_OF(code).test(fs.readFileSync(abs, "utf8"));
+  } catch {
+    return false;
+  }
+}
+/**
+ * E948-S182: two records of one coded ask (one repo, one code) at different paths: the one whose file no longer holds the
+ * line is the old record (a tree read before the move) and closes; both live is a real duplicate in the spines and both
+ * stay (the inbox census names it). `live` reads the file. Returns which to keep: "a", "b" or "both".
+ */
+export function samePairKeep(a: Pick<WaitingItem, "path">, b: Pick<WaitingItem, "path">, live: (path: string) => boolean): "a" | "b" | "both" {
+  if (!a.path || !b.path || a.path === b.path) return "both";
+  const la = live(a.path), lb = live(b.path);
+  if (la && !lb) return "a";
+  if (lb && !la) return "b";
+  return la ? "both" : "a";
+}
 export const isDm = (name?: string) => !!name && /delivery[\s-]*manager/i.test(name);
 const NONE = /^(none|nothing|nobody|no one|n\/a|-|—)(?![\w-])/i;
 /** `Waiting on: nobody (the owner: none open). Workers: …`: the line says outright the owner is not waited on (`ownerPatterns.none`). */
@@ -699,7 +735,8 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             }
           }
           if (gate) {
-            held.push({ ...(a.code ? { code: a.code } : {}), repo: repo.name, path: rel, ...(a.line !== undefined ? { line: a.line } : {}), question: a.question, reason: gate });
+            const heldSince = await sinceAt(rel, a.line);
+            held.push({ ...(a.code ? { code: a.code } : {}), repo: repo.name, path: rel, ...(a.line !== undefined ? { line: a.line } : {}), question: a.question, reason: gate, ...(heldSince ? { since: heldSince } : {}) });
             continue;
           }
           const missing = missingFields(a);
@@ -708,8 +745,20 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           const choices = decideChoices(a);
           const readerNote = overdueNote ?? (!fyi && a.state === "open" && a.line !== undefined ? dryRunNote(linesOf(rel)?.[a.line], dryRunsOf(d.reposRoot)) : undefined);
           const noteMark = a.state === "open" && a.code ? activeMark(marksOf(rel), a.code, a.question) : undefined;
+          // E948-S182: one card per repo and code. A second record of the code at another path keeps the live line's;
+          // two live lines of one code (a real duplicate) or a code twice in one file keep their path ids.
+          let id = askItemId(repo.name, rel, a.row, a.question, a.code);
+          const legacyId = askLegacyId(repo.name, rel, a.row, a.question);
+          const twin = a.code ? out.findIndex((x) => x.id === id) : -1;
+          if (twin >= 0) {
+            const keep = samePairKeep(out[twin]!, { path: rel }, (p) => askLineIn(repo.path, p, a.code!));
+            if (keep === "a") continue;
+            if (keep === "b") out.splice(twin, 1);
+            else id = legacyId;
+          }
           out.push({
-            id: askItemId(repo.name, rel, a.row, a.question),
+            id,
+            ...(id !== legacyId ? { legacyId } : {}),
             ...(noteMark ? { noteMark } : {}),
             source: "ask",
             state: a.doneAt !== undefined ? "done" : a.state,
@@ -743,6 +792,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             title: row ? `${row.node.id === "draft" ? "" : `${row.node.id} `}${stripInline(row.node.title)}`.trim() : stripInline(v.node.title),
             ask: a.ask,
             question: a.question,
+            ...(a.about ? { about: a.about, aboutGiven: true as const } : {}),
             // E948-S69: a Decide card always has its choices: the listed options, else buttons built from the question.
             ...(choices.options.length ? { options: choices.options } : {}),
             ...(choices.derived && choices.options.length ? { optionsDerived: true as const } : {}),
@@ -885,6 +935,7 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
       // row or by their own file's Waiting on. Each is a future gate ("Coming up") or a guessed item (`futureGate`).
       // Rows sharing an id in one file (all-`draft` Issue cells): told apart by their position among them.
       const sameId = (v: Visit) => visits.filter((x) => x.rowFile === v.rowFile && x.node.kind !== "dod" && x.node.id === v.node.id);
+      const gate0 = (n: TreeNode) => !!n.needs && namesJordi(n.needs, who);
       const nextWithJordi = (n: TreeNode) => {
         const w = statusWordOf(n.status);
         return (w === "ready" || w === "active") && namesJordi(n.needs, who);
@@ -895,6 +946,8 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         if (n.color !== "red" && !nextWithJordi(n)) continue;
         if (n.path && waitingPaths.has(n.path)) continue;
         const rowFile = v.rowFile ?? n.path;
+        // a row blocked on another world (its `[waits on <repo>/<code> row <id>]` line, or its status) is not his.
+        if (v.rowFile && !(gate0(n)) && waitsElsewhere(n, linesOf(v.rowFile))) continue;
         const twins = sameId(v);
         const nth = twins.length > 1 ? twins.indexOf(v) : 0;
         const line = rowFile && v.rowFile ? rowLine(linesOf(rowFile) ?? [], n.id, nth) : undefined;
@@ -945,7 +998,8 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           continue;
         }
         if (o.releaseAt !== undefined) expiresAt = Math.min(expiresAt ?? Infinity, o.releaseAt);
-        held.push({ repo: repo.name, path: it.path, line: it.line, question: it.question, reason: why });
+        const heldSince = await sinceAt(it.path, it.line);
+        held.push({ repo: repo.name, path: it.path, line: it.line, question: it.question, reason: why, ...(heldSince ? { since: heldSince } : {}) });
         out.splice(i, 1);
       }
       const byKey = spineItemsMemo.get(tree) ?? new Map();
@@ -1130,6 +1184,28 @@ export async function waitingAndDefects(
   const items: WaitingItem[] = [];
   for (const it of lists.flat()) {
     const first = seen.get(it.id);
+    // E948-S182: two milestones of one repo can read the tree at different moments: the old path's record of a moved
+    // ask gives way to the record whose file holds the line now (one card, the live one).
+    if (first && first.source === "ask" && it.source === "ask" && first.code && it.repo && first.path !== it.path) {
+      const dir = resolveRepo(d.reposRoot, it.repo)?.path;
+      const keep = dir ? samePairKeep(first, it, (p) => askLineIn(dir, p, it.code ?? first.code!)) : "a";
+      // both lines live: a real duplicate in the spines, listed apart by its path id (the census names it)
+      if (keep === "both" && it.legacyId && !seen.has(it.legacyId)) {
+        const apart = { ...it, id: it.legacyId };
+        delete apart.legacyId;
+        seen.set(apart.id, apart);
+        items.push(apart);
+        continue;
+      }
+      if (keep === "b") {
+        const at = items.indexOf(first);
+        const also = [...new Set([first.milestoneId, ...(first.alsoIn ?? []), ...(it.alsoIn ?? [])].filter((x) => x && x !== it.milestoneId))];
+        const next = { ...it, ...(also.length ? { alsoIn: also } : {}) };
+        items[at] = next;
+        seen.set(it.id, next);
+        continue;
+      }
+    }
     if (first) {
       // a spine shared by two milestones lists the item once, but it is in both milestones' counts.
       if (it.milestoneId !== first.milestoneId && !first.alsoIn?.includes(it.milestoneId)) first.alsoIn = [...(first.alsoIn ?? []), it.milestoneId];

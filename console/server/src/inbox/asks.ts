@@ -8,6 +8,8 @@ import { proseLines, stripInline } from "../adapters/markdown.js";
 import { IMPROVEMENT_QUESTION, isImprovementLabel, type Improvement } from "./improvement.js";
 import { isPriorityLabel, OBJECTIVE_SEG, priorityAskRule } from "./priorityAsk.js";
 import { DEFAULT_OWNER, ownerPatterns } from "../tenancy/owner.js";
+import { URGENT_LEAD } from "../review/ready.js";
+import { unglueAboutText } from "./about.js";
 import { deployerName, homeRepo, mainHost, opsRepo, ownerName, sites } from "../identity.js";
 
 /**
@@ -298,7 +300,8 @@ export const HUMAN_FORMAT_RULE =
 export const ASK_LINE_FORMAT =
   `\`- [ask <CODE>: decide|approve|provide|do @${ownerName()} since <YYYY-MM-DD> row <id>] You approve|decide|do: <one thing> Why: <one line> — context: <why this comes up> — ` +
   `impact: <what it unblocks, cost of waiting> — risk: <what could go wrong if yes; rollback> — recommend: <what and why> — why ${ownerName()}: <why not an agent> — ` +
-  "options (decide) / steps (do): … — secret (provide a key): <app> <NAME> — unblocks: <rows> — details: <link>`";
+  "options (decide) / steps (do): … — secret (provide a key): <app> <NAME> — unblocks: <rows> — details: <link> — " +
+  "about: <the topic in his words, 8 words or fewer, e.g. your reply to Dad: his card opens with About: <it>, and a new ask without it is held, E948-S172>`";
 /**
  * how whoever raises an ask writes it; in ASK_TYPE_RULES (every persona) and WORKER_TIER_RULE
  * (every worker's proposed ask). whatgpt_v3 folded keys, a token widening, a redirect and a future QR scan in one ask.
@@ -371,6 +374,8 @@ export interface HumanAsk {
   risk?: string | null;
   /** `why the owner:` (`why <who>:`): why an agent cannot decide it. */
   why?: string | null;
+  /** E948-S172 `about:` the card's topic in his words ("your reply to Dad"), its first line: `About: …`. */
+  about?: string | null;
   /** `secret: <app> <NAME>` on an ask of any kind: where the key goes (the console card shows a private paste box; E996-S29: any kind, not only provide). */
   secret?: SecretTarget | null;
   since: string | null;
@@ -685,7 +690,7 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
         ask.escalatedNote = stripInline(esc[1]) || undefined;
         continue;
       }
-      const kv = /^\s*(options?|recommend(?:s|ation)?|context|details|answer|feedback|steps?|unblocks?|effort|impact|risks?|secret|why(?:\s+@?[\w.-]+)?)\s*:\s*(.*)$/i.exec(seg);
+      const kv = /^\s*(options?|recommend(?:s|ation)?|context|details|answer|feedback|steps?|unblocks?|effort|impact|risks?|secret|about|why(?:\s+@?[\w.-]+)?)\s*:\s*(.*)$/i.exec(seg);
       if (!kv) {
         ask.question = `${ask.question} — ${stripInline(seg)}`;
         continue;
@@ -700,6 +705,7 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
       else if (key === "impact") ask.impact = stripInline(val) || null;
       else if (key.startsWith("risk")) ask.risk = stripInline(val) || null;
       else if (key.startsWith("why")) ask.why = stripInline(val) || null;
+      else if (key === "about") ask.about = stripInline(val) || null;
       // tolerant; a malformed `secret:` is dropped (the card stays an ordinary ask).
       else if (key === "secret") ask.secret = parseSecretTarget(val) ?? null;
       else if (key.startsWith("step")) {
@@ -724,6 +730,8 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
     // E948-S155: a line written with " - " between its fields (the console API's flat ask) keeps its urgent label in the question.
     // only marked, never cut out: the card's id is made from its question, and an answer already given must stay on it.
     if (URGENT_ON_LINE.test(ask.question)) ask.urgent = true;
+    // E948-S168: an ask that opens with "Urgent." (the desk's mark for his urgent note) is an urgent ask too
+    if (URGENT_LEAD.test(stripInline(ask.question))) ask.urgent = true;
     if (ask.question) out.push(ask);
   });
   return out;
@@ -845,6 +853,20 @@ export function unglueSnooze<T extends HumanAsk>(a: T): T {
   return out;
 }
 
+/** E948-S172: a spines.py that does not know `about:` glues it to the field before it (or the question): take it off. */
+export function unglueAbout<T extends HumanAsk>(a: T): T {
+  const keys = ["question", "recommend", "context", "contextText", "impact", "risk", "why", "steps", "unblocks", "effort", "answer"] as const;
+  let out = a;
+  for (const k of keys) {
+    const v = a[k];
+    if (typeof v !== "string") continue;
+    const u = unglueAboutText(v);
+    if (u.about === undefined) continue;
+    out = { ...out, [k]: u.text, about: u.about || null };
+  }
+  return out;
+}
+
 /** the same for `label: needs Mac agent`: take it off the field spines.py glued it to, and mark the ask. */
 export function unglueLabel<T extends HumanAsk>(a: T): T {
   const keys = ["question", "recommend", "context", "contextText", "impact", "risk", "why", "steps", "unblocks", "effort", "answer"] as const;
@@ -898,7 +920,7 @@ export function asksFor(repoDir: string, rel: string, spinesWaitingOn?: unknown)
     const viaSpines: LocatedAsk[] = spinesWaitingOn
       .map((e) => (e && typeof e === "object" ? fromSpinesEntry(e as Record<string, unknown>) : undefined))
       .filter((a): a is HumanAsk => !!a)
-      .map((a) => unglueLabel(unglueSnooze(a)))
+      .map((a) => unglueAbout(unglueLabel(unglueSnooze(a))))
       .map(({ snoozedUntil: fromSpines, macAgent: macFromSpines, ...a }) => {
         const twin = parsed.find((p) => (a.code && p.code === a.code) || stripInline(p.question) === stripInline(a.question));
         const line = twin?.line ?? lines.findIndex((l) => TAG.test(l) && l.includes(a.question.slice(0, 40)));
@@ -917,6 +939,8 @@ export function asksFor(repoDir: string, rel: string, spinesWaitingOn?: unknown)
           ...(twin?.impact && !a.impact ? { impact: twin.impact } : {}),
           ...(twin?.risk && !a.risk ? { risk: twin.risk } : {}),
           ...(twin?.why && !a.why ? { why: twin.why } : {}),
+          // E948-S172: the About line, from the file as it is now
+          ...(twin?.about && !a.about ? { about: twin.about } : {}),
           ...(twin?.secret && !a.secret ? { secret: twin.secret } : {}),
           ...(twin?.stepsLink ? { stepsLink: twin.stepsLink } : {}),
           // spines.py drops the answered date; the markdown twin's `[answered <code> <date>]` carries it.

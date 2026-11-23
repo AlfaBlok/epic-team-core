@@ -4,6 +4,7 @@ import { resolveRepo } from "../adapters/repos.js";
 import { deriveMilestone } from "../adapters/milestone.js";
 import type { Tree, TreeNode } from "../adapters/tree.js";
 import { createFreshness, gitOut, narrativeAge, type FreshnessOptions, type GitOut } from "../freshness.js";
+import { workspaceDataDir } from "../workspaceData.js";
 
 /**
  * a push from anywhere (a T3 thread, a wake, the desk, another host) shows in the console (within
@@ -18,6 +19,13 @@ export const FRESHNESS_POLL_MS = 5 * 60_000;
  * keeps polling). A push now shows within ~5 min; the Refresh button still pulls at once.
  */
 export const FRESHNESS_OPEN_MAX_AGE_MS = 5 * 60_000;
+/**
+ * The owner's workspace data repo (his objectives and scorecards, linked into the home checkout) has no
+ * milestone, so the poll above never asked it and it moved only with the 15-min background sync: a change to his objectives
+ * showed up to 30 min late. It is asked every minute (one `ls-remote`, pulled only when main moved), so a change
+ * to his objectives shows within about a minute.
+ */
+export const DATA_POLL_MS = 60_000;
 
 /** pull on open, GET /milestones/:id/freshness, POST /milestones/:id/refresh, GET /freshness (Team footer). */
 export interface FreshnessMount extends FreshnessOptions {
@@ -27,6 +35,10 @@ export interface FreshnessMount extends FreshnessOptions {
   pollMs?: number;
   /** true = GET /waiting-on-owner starts the pull on open but does not wait for it (it answers from the read model). */
   noWaitOn?: () => boolean;
+  /** the workspace data repos' poll interval (default DATA_POLL_MS = 1 min; 0 = off). */
+  dataPollMs?: number;
+  /** the workspace data checkouts to poll (default: the data checkout each live repo's docs/workspace-data.json names). */
+  dataDirs?: () => string[];
 }
 
 export function mountFreshness(
@@ -41,7 +53,19 @@ export function mountFreshness(
   const dirOf = (m: Milestone | undefined) => (m ? resolveRepo(o.reposRoot, m.repo)?.path : undefined);
   /** Repos with an unsettled milestone (one poll per repo, not per milestone). */
   const liveDirs = () => o.store.listMilestones().flatMap((m) => dirOf(m) ?? []);
-  if (o.enabled) fresh.start(pollMs, liveDirs);
+  /** The data checkouts the live repos point to (docs/workspace-data.json); a repo with no pointer adds none. */
+  const dataDirs =
+    o.dataDirs ??
+    (() => [...new Set(liveDirs())].flatMap((d) => {
+      const data = workspaceDataDir(d);
+      return data && data !== d ? [data] : [];
+    }));
+  if (o.enabled) {
+    fresh.start(pollMs, liveDirs);
+    // never skipped for a recent pull: one ls-remote a minute is the whole cost
+    // and a move by the background sync or a hand pull drops the objectives caches too (watchHead)
+    fresh.start(o.dataPollMs ?? DATA_POLL_MS, dataDirs, 0, true);
+  }
 
   // Pull on open: GET of a milestone (summary, tree, waiting, status,...) when its repo's last pull is > 5 min old (was 60 s).
   const onOpen: MiddlewareHandler = async (c, next) => {
@@ -96,7 +120,7 @@ export function mountFreshness(
 
   // Team footer: no pulls; the oldest 'synced' time over the repos with an unsettled milestone.
   api.get("/freshness", async (c) => {
-    const repos = await Promise.all([...new Set(liveDirs())].map((d) => fresh.status(d)));
+    const repos = await Promise.all([...new Set([...liveDirs(), ...dataDirs()])].map((d) => fresh.status(d)));
     const times = repos.flatMap((r) => (r.syncedAt ? [r.syncedAt] : [])).sort();
     return c.json({ repos, ...(times.length ? { oldestSyncedAt: times[0] } : {}) });
   });

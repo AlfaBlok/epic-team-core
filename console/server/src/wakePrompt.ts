@@ -57,6 +57,26 @@ export function maxWorkersFromEnv(raw = process.env.CONSOLE_MAX_WORKERS_PER_MILE
 export const queuedCeiling = (max: number) => `queued: worker ceiling ${max}`;
 export const queuedNoSeat = (reason = "<pick reason>") => `queued: no seat with headroom (${reason})`;
 
+/** at most this many ready rows are listed in a wake's dispatch order (the rest follow in the ledger's order). */
+export const DISPATCH_ORDER_MAX = 40;
+
+/**
+ * (the owner asked: "is the order of my objectives used at all?"): the wake's ready rows in his
+ * objectives' order, so a higher objective's row gets a worker slot first and the rows left queued are the lower ones.
+ * Empty when no ready row moves an objective (the ledger's order stands).
+ */
+export function dispatchOrderSection(rows: { id: string; objective?: { n: number; name: string } }[]): string {
+  if (!rows.some((r) => r.objective)) return "";
+  const shown = rows.slice(0, DISPATCH_ORDER_MAX);
+  return [
+    "## Dispatch order (his objectives)",
+    `Start ready rows in this order, one worker each, until the ceiling or the seats run out: a row of a higher objective of ${ownerName()}'s gets a worker slot before a lower one, and the rows left queued are the lowest. ` +
+      "A row on none of his objectives waits behind every row that moves one. Skip a row this list names only for a reason the rules above give (claimed, blocked, not yours).",
+    ...shown.map((r, i) => `${i + 1}. ${r.id}: ${r.objective ? `objective ${r.objective.n + 1}, ${r.objective.name}` : "on none of his objectives"}`),
+    ...(rows.length > shown.length ? [`… ${rows.length - shown.length} more ready rows after these, in the ledger's order.`] : []),
+  ].join("\n");
+}
+
 /**
  * dispatch drains the ready queue. `available` in `$EPICSPINE_DISPATCHER status` counts ELIGIBLE seats, not free
  * slots; the broker has no per-seat cap, so several workers may share a seat and only `pick` returning a null id stops us.
@@ -102,7 +122,7 @@ export const NO_SELF_READY =
  */
 export const VOICE_SPILL_RULE =
   `${ownerName()}'s words reach you about one item (a voice note on a card, his answer, a feedback note, your brief) but often say more: handle your part, then never let the rest drop. ` +
-  "Each other part (another row, ask, epic or product) either goes into that row yourself when it is in your scope and write rule (his words quoted, L-37), or to the Team desk: " +
+  "Each other part (another row, ask, epic or product) either goes into that row yourself when it is in your scope and write rule (his words quoted, L-37; a part with no row of its own yet says \`part of <the row his note is on>\`, so his note stays on one row), or to the Team desk: " +
   `one note \`python3 ~/github/${homeRepo()}/scripts/desk_note.py send --to <the world's home repo checkout> --from <world> --reply-to <that repo> --about \"Also in ${ownerName()}'s note <vn id or where>: <topics>\" --body \"<his words, then each part in one line>\"\` ` +
   "(the Delivery Manager places it on its next wake). Name what you handed on in your summary (`also: <part> → <row or desk note>`).";
 
@@ -119,15 +139,15 @@ export const LOGIN_RULE =
 /**
  * how a console change reaches the live console: straight, one release step, no staging copy to park on and no promote
  * to wait for (the owner removed staging until there is a second server). The release keeps its safety: a DB backup before
- * the swap, a health check that rolls back by itself, a one-step rollback and the release log. In every worker brief.
+ * the swap, a health check that rolls back by itself, a one-step rollback and the release log. No release hour (the owner,
+ * 2026-11-22: "I never approved any hourly delay ... remove it."). In every worker brief.
  */
 export const RELEASE_RULE =
-  "Console releases go straight to production: build the release from main and run `hosted/console/scripts/deploy.sh --release <tarball> --to <console host>`; " +
-  "it backs up the database, swaps, checks health and rolls back by itself when the health check fails. At most one release an hour: inside the hour it parks " +
-  "and the flush timer ships the newest within 15 min after the hour opens, so never retry it. `deploy.sh --rollback --by <run id> --reason <why>` puts the previous release back at once. " +
-  "There is no staging step: never park a change for staging, never wait for a promote; say `live <sha>` on the row only after the live revision shows it. " +
-  "`--incident <what is broken>` skips the hour for a real incident only (customers cannot sign in, pay, load their site or lose data, or a security hole is open), and is logged. " +
-  "A fix of something the owner said again also skips the hour: add `--said-again <his note id>` (or `auto`) and name that note or its row in your commit; the build host checks it, and the console host refuses the skip while its load is red or in its morning quiet hours unless he spoke in the last hour.";
+  "Console releases go straight to production when they are ready: build the release from main and run `hosted/console/scripts/deploy.sh --release <tarball> --to <console host>`; " +
+  "it goes live at once (no release hour, no quiet hours: the owner never approved a wait), one deploy at a time, backs up the database, swaps, checks health and rolls back by itself when the health check fails. " +
+  "`deploy.sh --rollback --by <run id> --reason <why>` puts the previous release back at once. " +
+  "There is no staging step: never park a change for staging or for a later slot, never wait for a promote; say `live <sha>` on the row only after the live revision shows it. " +
+  "`--incident <what is broken>` only labels a real incident's release in the log.";
 
 /** the write rule of an assignment with write on: only within its scope. */
 export const scopedWriteRule = (scope: string) =>
@@ -350,4 +370,30 @@ export function buildWakePrompt(
     "- If your remit or write rule does not let you edit the spine, put these same lines in your run summary instead.",
   ];
   return lines.join("\n");
+}
+
+/**
+ * A persona that names one objective (several objectives share one milestone, one Delivery Manager each).
+ * Its Delivery Manager is the objective's manager: it works that objective's epics only, aims at its key results green, under the milestone's spine; the rest of the milestone
+ * belongs to other personas. Any other persona (a whole-team one: Prioritizer, Strategist, Performance, Learning
+ * harvester, Epic Spine health, Alignment) only has its home there: that objective's Personas tab lists it, and it
+ * keeps serving every objective its remit names (the owner: "they serve all").
+ */
+export function objectiveSection(id: string, o?: { name: string; epics: string[] }, onlyThis = true): string {
+  const what = `${o ? `${o.name} (\`${id}\` in docs/pursuits.json)` : `\`${id}\` in docs/pursuits.json`}`;
+  if (!onlyThis)
+    return [
+      "## Your home objective",
+      `- ${what}: its Personas tab lists you. You still serve every objective your remit names; this only says where you show.`,
+    ].join("\n");
+  return [
+    "## Your objective: you are its objective manager",
+    `- ${what}: you work this objective only, never the milestone's other objectives.`,
+    ...(o?.epics.length ? [`- Its epics (bind and dispatch from these): ${o.epics.join(" · ")}`] : []),
+    "- Its key results, plan and tickets are its Key results and Plan tabs; a row of another objective is left to that objective's own personas.",
+    // the owner, 23 Nov 11:21Z: "These guys wake up and their goal is to get the things to green and they dispatch ... as needed"
+    "- Your aim is its key results green, not tickets closed. Each wake, before the steps above: list its key results that are not green; for each, the next open step of its plan; start a worker on the row that is that step (a step with no row gets one first); a red key result with nothing moving it and no step that could is an ask, the same wake.",
+    "- Ask the owner only what only he can answer (a decision, a login, his taste); everything else you settle yourself and do.",
+    "- Your report opens with each key result: green, or red and what you started on it, or red and the ask it waits on.",
+  ].join("\n");
 }

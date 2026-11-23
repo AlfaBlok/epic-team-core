@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { useGapFinderQuery } from "@/lib/gapFinder";
 import { githubRepoUrl, homeOrg, memoryName, homeRepo, socialProduct } from "@/lib/identity";
 import { GAP_FINDER_PATH } from "@/lib/routePaths";
+import { FoldChevron } from "@/components/foldChevron";
 export { GAP_FINDER_PATH };
 
 /**
@@ -220,7 +221,9 @@ export function NoteChecks({ notes, limit = 30 }: { notes?: NoteCheck[]; limit?:
         const c = noteTally(n);
         return (
           <details key={n.id} className="min-w-0 rounded-lg border bg-card px-3 py-2" data-testid="gap-finder-note" open={c.missed > 0 || undefined}>
-            <summary className="cursor-pointer list-none">
+            <summary className="flex cursor-pointer list-none items-start gap-2">
+              <FoldChevron className="mt-[3px]" />
+              <span className="min-w-0 flex-1">
               <span className="block text-xs text-muted-foreground">
                 {n.where} · {noteWhen(n.recordedAt)}
                 {n.minutes ? ` · ${n.minutes} min` : ""} · checked {noteWhen(n.checkedAt)}
@@ -235,6 +238,7 @@ export function NoteChecks({ notes, limit = 30 }: { notes?: NoteCheck[]; limit?:
                       {c[k]} {k}
                     </span>
                   ))}
+              </span>
               </span>
             </summary>
             {n.memoryNote && <p className="mt-1 text-xs text-muted-foreground">{n.memoryNote}</p>}
@@ -370,6 +374,7 @@ function RunPage({ file }: { file: string }) {
     <div className="flex min-w-0 flex-col gap-3" data-testid="gap-finder-run-page">
       <Back run />
       <button type="button" className="self-start text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setWhereOpen(!whereOpen)} aria-expanded={whereOpen} data-testid="gap-finder-where-toggle">
+        <FoldChevron open={whereOpen} className="mr-1.5" />
         {whereOpen ? "Hide where the Gap finder lives" : "Where the Gap finder lives: its settings, its findings, who reads them"}
       </button>
       {whereOpen && <GapFinderWhere compact />}

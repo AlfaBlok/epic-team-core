@@ -32,7 +32,7 @@ describe("T88-S25 onboarding scorecard", () => {
     expect(d.textContent).toContain("X and Reddit signed in only on the platform's browser, not yet on your team's own.");
     expect(d.textContent).toContain("How we know.");
     // iteration 2: a red step names the one thing that turns it green, and what the check read
-    expect(screen.getByTestId("onboarding-accounts-fix").textContent).toContain("Sign in to X once in your own browser");
+    expect(screen.getByTestId("onboarding-accounts-fix").textContent).toContain("your team signs in to X itself");
     expect(screen.getByTestId("onboarding-accounts-proof").textContent).toContain("Lent browser only: X and Reddit.");
     expect(screen.getByTestId("onboarding-tile-x").textContent).toContain("only on the platform's browser");
     expect(screen.getByTestId("onboarding-tile-x").getAttribute("data-state")).toBe("yellow");

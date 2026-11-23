@@ -2,10 +2,12 @@ import { api } from "@/api";
 import type { Goal, GoalLight, GoalLine } from "@/api/company-types";
 import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
+import { byRingColour } from "@/lib/ringOrder";
 
 /**
  * the owner ("I want to see a list of key results and traffic light for each"): the goal on top ("5 testers using
- * SocialApp", its "0 of 5" at the right), then each key result on one line, its number against its target and a traffic light; the rule
+ * SocialApp", its "0 of 5" at the right), then its key results as a table, key result, target, current in its colour,
+ * green first, then amber, then red (vn_68cda1fe); the rule
  * in one small line under them. Read only, from the goal's one source (docs/goals/<name>.json via GET /api/goals).
  */
 
@@ -30,17 +32,24 @@ function Dot({ light, big }: { light: GoalLight; big?: boolean }) {
   );
 }
 
+const TINT: Record<GoalLight, string> = { green: "hsl(142 72% 29% / 0.12)", amber: "hsl(38 92% 50% / 0.16)", red: "hsl(0 72% 51% / 0.12)" };
+const INK: Record<GoalLight, string> = { green: "hsl(142 72% 26%)", amber: "hsl(30 90% 35%)", red: "hsl(0 72% 42%)" };
+const COLS = "grid-cols-[minmax(0,1fr)_minmax(0,5.5rem)_minmax(0,5.5rem)] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_minmax(0,9rem)]";
+
+/** one key result as a table row: what it is, its target (and by when), where it is now in its colour (vn_68cda1fe). */
 function KeyResult({ k }: { k: GoalLine }) {
   return (
-    <li className="flex min-h-11 min-w-0 items-center gap-3 py-1.5" data-testid="goal-kr" data-id={k.id} data-light={k.light} title={k.why}>
-      <Dot light={k.light} />
-      <span className="min-w-0 flex-1 text-[15px] leading-snug">
+    <li className={cn("grid min-h-11 min-w-0 items-stretch gap-x-2 sm:gap-x-3", COLS)} data-testid="goal-kr" data-id={k.id} data-light={k.light} title={k.why}>
+      <span className="min-w-0 py-2 text-[15px] leading-snug">
         {k.label}
         <span className="sr-only">: {WORD[k.light]}, {k.why}</span>
       </span>
-      <span className="shrink-0 text-right text-[15px] font-semibold tabular-nums" data-testid="goal-kr-count">
-        {goalCount(k)}
-        <span className="ml-1 text-xs font-normal text-muted-foreground">by {shortDay(k.by)}</span>
+      <span className="py-2 text-[15px] tabular-nums" data-testid="goal-kr-target">
+        {k.target}
+        <span className="ml-1 text-xs text-muted-foreground">by {shortDay(k.by)}</span>
+      </span>
+      <span className="px-2 py-2 text-[15px] font-semibold tabular-nums" style={{ background: TINT[k.light], color: INK[k.light] }} data-testid="goal-kr-count">
+        {k.now === null ? "?" : k.now}
       </span>
     </li>
   );
@@ -62,7 +71,12 @@ export function GoalBlock({ g, className }: { g: Goal; className?: string }) {
       </h2>
       {g.keyResults.length > 0 && (
         <ul className="mt-2 divide-y border-t" data-testid="goal-krs">
-          {g.keyResults.map((k) => (
+          <li aria-hidden="true" className={cn("grid gap-x-2 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:gap-x-3", COLS)} data-testid="goal-krs-head">
+            <span className="py-1.5">Key result</span>
+            <span className="py-1.5">Target</span>
+            <span className="px-2 py-1.5">Current</span>
+          </li>
+          {byRingColour(g.keyResults.map((k) => ({ ...k, state: k.light }))).map((k) => (
             <KeyResult key={k.id} k={k} />
           ))}
         </ul>

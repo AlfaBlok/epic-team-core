@@ -36,6 +36,11 @@ export interface TotemLives {
    * source the Plan tab reads too), to that campaign spine's `## Plan` section; none named: a note, shown empty.
    */
   plan?: boolean;
+  /**
+   * the wheel's plan: each objective's
+   * own `plan` block in docs/scorecards/<id>.json, how its key results get to green; resolved to a note naming where.
+   */
+  wheelPlan?: boolean;
 }
 export interface Totem {
   id: string;
@@ -90,6 +95,7 @@ function parseTotem(v: unknown): Totem[] {
     ...(str(l.board) ? { board: str(l.board) } : {}),
     ...(str(l.note) ? { note: str(l.note) } : {}),
     ...(l.plan ? { plan: true } : {}),
+    ...(l.wheelPlan ? { wheelPlan: true } : {}),
   };
   return [{ id, name, shape: shape as TotemShape, tab, lives, ...(str(o.live) ? { live: str(o.live) } : {}), ...(str(o.read) ? { read: str(o.read) } : {}), ...(str(o.write) ? { write: str(o.write) } : {}) }];
 }
@@ -163,11 +169,31 @@ export function readMaps(homeDir: string | undefined): TotemMaps {
   }
   for (const p of products)
     p.totems = p.totems.map((t) => {
+      if (t.lives.wheelPlan) {
+        const written = p.objectives.filter((o) => wheelPlanWritten(homeDir, o));
+        return {
+          ...t,
+          lives: {
+            note: `each objective's own plan, per key result how it gets to green (how, steps, green when, if it stalls; never its numbers or tickets again): the \`plan.keyResults\` block of docs/scorecards/<objective id>.json (GET /api/pursuits/<id>/plan); ${written.length ? `written for ${written.join(", ")}` : "none written yet"}`,
+            wheelPlan: true,
+          },
+        };
+      }
       if (!t.lives.plan) return t;
       const at = p.objectives.map((o) => plans.get(o)).find(Boolean);
       return { ...t, lives: at ? { repo: at.repo, path: at.path, section: "Plan", plan: true } : { note: "no plan named yet (its objective has no plan entry in docs/pursuits.json)", plan: true } };
     });
   return { statement, every, products };
+}
+
+/** an objective's wheel plan has a line or a step in its key results file. */
+function wheelPlanWritten(homeDir: string, id: string): boolean {
+  try {
+    const plan = (JSON.parse(fs.readFileSync(path.join(homeDir, "docs/scorecards", `${id}.json`), "utf8")) as { plan?: { line?: unknown; steps?: unknown; keyResults?: unknown } }).plan;
+    return !!plan && ((typeof plan.line === "string" && !!plan.line.trim()) || (Array.isArray(plan.keyResults) && plan.keyResults.length > 0) || (Array.isArray(plan.steps) && plan.steps.length > 0));
+  } catch {
+    return false;
+  }
 }
 
 /** the product whose map holds this objective, else the first whose repos hold the milestone's repo. */
@@ -212,8 +238,10 @@ export function mapSection(maps: TotemMaps, p: ProductMap | undefined): string {
 
 /** the worker brief's rule: one line, the same map by its script (the brief is plain text, its row's product varies). */
 export const MAP_RULE =
+  `First and last, your objective's where-we-are (its Context tab): \`python3 ~/github/${homeRepo()}/scripts/where_we_are.py for <your row> --repo <your checkout>\` prints it; ` +
+  "read it before anything else, and make rewriting it your run's last step (the `where_we_are.py write` command it prints: the answer now, the open questions, one line of what you changed). " +
   `Read the map before you plan, write back into it when you finish (root L-77): \`python3 ~/github/${homeRepo()}/scripts/totems.py for <your row's repo>\` prints your product's totems ` +
-  "(the hardwired nodes of its data graph: marketing plan, pricing, launch board and the others, each with where it lives and its tab). Read the ones your step touches first; " +
+  "(the hardwired nodes of its data graph: the plan, pricing, launch board and the others, each with where it lives and its tab). Read the ones your step touches first; " +
   "at the end write what you learned or changed back into the totem it belongs to, in the same commit (another world's totem: a desk note, never an edit). A totem that is empty is a gap: say so on your row.";
 
 // ---------- a totem's content, for its tab ----------

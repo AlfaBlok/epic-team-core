@@ -9,6 +9,7 @@ import { bookStore, followBook } from "../src/book/service.js";
 import type { Book } from "../src/book/build.js";
 import { createIndexer } from "../src/indexer/core.js";
 import { indexerEnv, unitArgs, INDEXER_LIMITS } from "../src/indexer/launch.js";
+import { sites } from "../src/identity.js";
 import { BEAT_KEY, T3_KEY, ensureIndexerTables, indexerBeat, kvGet, kvSet, sendToIndexer, takeIndexerMsgs } from "../src/indexer/queue.js";
 import { persistedSpinesRunner, persistingRunner, seedFrom } from "../src/indexer/spinesCache.js";
 import { createReadModelHost } from "../src/readModel/host.js";
@@ -223,6 +224,8 @@ describe("T6-S64 launch", () => {
   it("runs the indexer niced and CPU-capped, with no secret from the console's env", () => {
     const env = indexerEnv({ dbPath: "/d", reposRoot: "/r" }, 42, { PATH: "/bin", HOME: "/h", CONSOLE_AUTH_SECRET: "s", GITHUB_TOKEN: "t", OPENAI_API_KEY: "k" });
     expect(Object.keys(env).sort()).toEqual(["CONSOLE_INDEXER_CONFIG", "CONSOLE_INDEXER_PARENT", "HOME", "PATH"]);
+    // E948-S180: the console's sites travel with its identity, so the indexer's review gate knows the console's own pages
+    expect(JSON.parse(env.CONSOLE_INDEXER_CONFIG).sites.teamUrl).toBe(sites().teamUrl);
     const args = unitArgs("agent-team-console-indexer-8750", "/app/dist/indexer.mjs", env, "/app");
     expect(args).toContain(`--property=Nice=${INDEXER_LIMITS.nice}`);
     expect(args).toContain(`--property=CPUQuota=${INDEXER_LIMITS.cpuQuota}`);

@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb, type DB } from "../src/db.js";
 import type { T3Client } from "../src/t3/client.js";
 import { createStore } from "../src/store.js";
 import { createCycle } from "../src/cycle/service.js";
 import type { Tree, TreeNode } from "../src/adapters/tree.js";
-import { dataHash, wakeFingerprint } from "../src/cycle/skipUnchanged.js";
+import { dataHash, dataHashAsync, wakeFingerprint } from "../src/cycle/skipUnchanged.js";
 import { parseWakeParts } from "../src/cycle/wakeWhy.js";
 
 /** a change under the repo's data/ counts as news, so the cadence wake runs (no skip). */
@@ -208,6 +208,30 @@ describe("T34-S13 generic persona templates (PLAN-11 E11-3)", () => {
       else process.env.PERSONA_TEMPLATES_DIR = prev;
       t.cleanup();
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dataHash keeps the event loop free", () => {
+  it("async gives the same hash as sync, an unchanged tree is not read again, a change is seen", async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "console-e48s171-h-"));
+    try {
+      fs.mkdirSync(path.join(repo, "data/a"), { recursive: true });
+      fs.writeFileSync(path.join(repo, "data/a/x.json"), "{}");
+      fs.writeFileSync(path.join(repo, "data/big.bin"), Buffer.alloc(20 << 20, 7));
+      const h1 = dataHash(repo);
+      expect(await dataHashAsync(repo)).toBe(h1);
+      // unchanged stat: the memo answers without reading a file
+      const reads = vi.spyOn(fs.promises, "readFile");
+      expect(await dataHashAsync(repo)).toBe(h1);
+      expect(reads).not.toHaveBeenCalled();
+      reads.mockRestore();
+      fs.writeFileSync(path.join(repo, "data/a/x.json"), "{\"k\":2}");
+      const h2 = await dataHashAsync(repo);
+      expect(h2).not.toBe(h1);
+      expect(dataHash(repo)).toBe(h2);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
     }
   });
 });

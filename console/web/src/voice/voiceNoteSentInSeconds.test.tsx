@@ -76,7 +76,9 @@ const chat = (messages: DeskChat["messages"]): DeskChat => ({ available: true, t
 const voiceOn = async () => ({ enabled: true, monthUsd: 0.2, limits: { monthCapUsd: 25 } });
 
 describe("a voice note is Sent in seconds", () => {
-  it("shows ✓ Sent as soon as the console has the audio, before the words, and reports tap stop to Sent", async () => {
+  // E948-S174 / E942-S151 iteration 2 (the owner 22 Nov, vn_3b3cf02e: "instead of saying Sent, it stays spinning until it
+  // fully has been sent"): the bubble spins until the desk's chat holds the note; ✓ Sent is the message's own mark there.
+  it("spins Sending as soon as the console has the audio, never ✓ Sent before the chat holds the note, and reports tap stop to Sent", async () => {
     const f = fakes();
     let messages: DeskChat["messages"] = [];
     const load = vi.fn(async () => chat(messages));
@@ -91,14 +93,17 @@ describe("a voice note is Sent in seconds", () => {
     await f.advance(7);
     await act(async () => void fireEvent.click(screen.getByTestId("note-button")));
     await waitFor(() => expect(screen.getByTestId("chat-voice-posting").dataset.state).toBe("safe"));
-    expect(screen.getByTestId("chat-voice-posting-state").textContent).toContain("✓ Sent");
+    expect(screen.getByTestId("chat-voice-posting-state").textContent).toBe("Sending…");
     expect(screen.queryByTestId("chat-voice-posting-words")).toBeNull();
-    expect(screen.getByTestId("note-sent").textContent).toContain("✓ Voice note sent");
+    // one spinner: the strip under the box says no second Sent
+    expect(screen.queryByTestId("note-sent")).toBeNull();
+    expect(screen.queryByText(/✓/)).toBeNull();
     expect(f.api.timing).toHaveBeenCalledWith("vn_1", expect.any(Number), expect.objectContaining({ stopMs: expect.any(Number), uploadMs: expect.any(Number) }));
     // the console posts his words: the transcript holds the note and the bubble goes
     messages = [{ id: "m1", role: "user", text: "🎙 Voice note (Chat), 2026-11-18 18:00Z · 0 min 07 s · $0.0004 (gpt-4o-mini-transcribe) · vn_1\nAudio: /api/voice/notes/vn_1/audio\n\nhello desk", at: new Date().toISOString(), status: "completed" }] as DeskChat["messages"];
     await act(async () => void (await load()));
     await waitFor(() => expect(screen.queryByTestId("chat-voice-posting")).toBeNull(), { timeout: 4000 });
+    expect(screen.getByTestId("chat-sent-mark").textContent).toContain("✓ Sent");
   });
 
   it("the part goes up while he talks; at stop only its tail is sent, and that one request brings Sent", async () => {
@@ -132,7 +137,7 @@ describe("a voice note is Sent in seconds", () => {
     ]);
     await f.advance(9);
     await act(async () => void fireEvent.click(screen.getByTestId("note-button")));
-    await waitFor(() => expect(screen.getByTestId("note-strip").dataset.phase).toBe("sent"));
+    await waitFor(() => expect(screen.getByTestId("chat-voice-posting").dataset.state).toBe("safe"));
     const [, , tail, , , more] = api.segment.mock.calls[0];
     expect(more).toMatchObject({ earlyBytes: 39_000, accept: { segments: 1, skip: [] } });
     expect(tail.size).toBe(4); // only what was not up yet ("part")

@@ -62,17 +62,21 @@ describe("T96-S8 the copy-paste detector", () => {
   });
 });
 
-describe("the one named exception: the Sync browser auth command", () => {
+describe("the Mac auth-sync he rejected is refused everywhere; the one named exception is the Mac list runner", () => {
   const sync = `curl -sSL http://host1:8750/auth-sync/as${"1".repeat(32)}.sh | sh`;
-  it("the marked copy box passes, the bare command is still found, an unknown name is reported", () => {
-    expect(copyPasteInHtml(`<code>${sync}</code>`)).toHaveLength(1);
-    expect(copyPasteInHtml(`<code data-owner-command="sync-browser-auth">${sync}</code>`)).toEqual([]);
-    expect(copyPasteInHtml(`<code data-owner-command="anything-else">brew install x</code>`).map((f) => f.kind)).toEqual(["exception", "code"]);
+  it("its command, its button and a step sending him to run it are refused whatever the markers", () => {
+    expect(copyPasteInHtml(`<code>${sync}</code>`)[0].kind).toBe("mac-auth-sync");
+    expect(copyPasteInHtml(`<code data-owner-command="sync-browser-auth" data-runs-on="On your Mac" data-tested-in="zsh and bash">${sync}</code>`)[0].kind).toBe("mac-auth-sync");
+    expect(copyPasteInHtml(`<button>Get command</button>`)[0].kind).toBe("mac-auth-sync");
+    expect(copyPasteInText(`Run \`${sync}\` runs on: your Mac, tested in zsh and bash`)[0].kind).toBe("mac-auth-sync");
+    expect(copyPasteInText("Press Re-sync on the x.com row and run the one command it gives you on your Mac")[0].kind).toBe("mac-auth-sync");
+    expect(copyPasteProblem(copyPasteInText("Press Sync browser auth"))).toBeDefined();
+    expect(copyPasteInText("The team signs in itself with the Team Browser.")).toEqual([]);
   });
-  it("in an ask's text by `owner-command: <name>`; the list holds only that one name", () => {
-    expect(copyPasteInText(`Run \`${sync}\` (owner-command: sync-browser-auth)`)).toEqual([]);
+  it("an unknown name is reported; the list holds only the Mac list runner", () => {
+    expect(copyPasteInHtml(`<code data-owner-command="anything-else">brew install x</code>`).map((f) => f.kind)).toEqual(["exception", "code"]);
     expect(copyPasteInText("Run `brew install x` owner-command: my-own").map((f) => f.kind)).toEqual(["exception", "inline"]);
-    expect(Object.keys(OWNER_COMMANDS)).toEqual(["sync-browser-auth", "run-mac-list"]);
+    expect(Object.keys(OWNER_COMMANDS)).toEqual(["run-mac-list"]);
     const run = "curl -fsSL http://host1:9196/mac/go.sh | sh";
     expect(copyPasteInHtml(`<pre data-owner-command="run-mac-list">${run}</pre>`)).toEqual([]);
     expect(copyPasteInHtml(`<pre>${run}</pre>`)).toHaveLength(1);

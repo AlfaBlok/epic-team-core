@@ -4,9 +4,11 @@ import { HIS_VIEW_POINTER, hisViewRecipe, hisViewsFor, workerBriefRules, X_LINKS
 // the owner's view rides only in the brief of a row on its topic, never in every brief.
 const views: HisView[] = [
   { id: "weather-place-house", title: "Sam's view: weather and place for the house", topic: "weather house", worlds: ["home_search"], tags: ["weather", "climate", "humid"],
-    three: [
+    rocks: [
       { line: "Weather first", words: '"I care that it\'s too hot"', refs: ["Log/2026-11-15.md#^e-ca35fc"] },
+      { line: "A quality spot", words: '"It has to be a quality spot"', refs: ["Log/2026-11-17.md#^e-53a71f"] },
       { line: "A place that excites him", words: '"closer to the sea or water"', refs: ["Log/2026-11-15.md#^e-5b0e92"] },
+      { line: "Fit first, then cost", words: '"places that actually fit if you forget about the cost"', refs: ["Log/2026-11-17.md#^e-7fd65e"] },
       { line: "Affordable and for good", words: '"at an affordable price"', refs: ["Log/2026-11-14.md#^e-b4c48e"] },
     ] },
 ];
@@ -21,11 +23,18 @@ describe("his view recipe, scoped to the row's topic", () => {
     expect(r).toContain("scripts/his_view.py weather house");
     expect(r).toContain("weather and place for the house");
     expect(r).toContain("store_memory");
-    // his three bullets ride whole in the brief, before the pointer to the full view
+    // his rocks (3 to 5) ride whole in the brief, before the pointer to the full view
     expect(r).toContain('- Weather first: "I care that it\'s too hot" (Log/2026-11-15.md#^e-ca35fc)');
     expect(r).toContain("- Affordable and for good");
+    expect(r).toContain("- A quality spot");
+    expect(r).toContain("3 to 5 rocks");
     expect(r.indexOf("Affordable and for good")).toBeLessThan(r.indexOf("The full view"));
     expect(rules[rules.length - 1]).toBe(X_LINKS_RULE);
+  });
+
+  it("a view written with the older `three` field still rides", () => {
+    const old: HisView[] = [{ ...views[0], rocks: undefined, three: [{ line: "Weather first", words: '"too hot"', refs: [] }] }];
+    expect(hisViewRecipe(old)).toContain('- Weather first: "too hot"');
   });
 
   it("a console row does not", () => {

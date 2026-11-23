@@ -24,6 +24,10 @@ export interface BoardSeat {
   state: "working" | "free" | "limited" | "signed_out" | "unknown";
   usage5h?: number;
   usageWeekly?: number;
+  /** Fable credit left this week, percent (100 - its Fable weekly use); 0 when its plan has none or Fable was refused on it; absent while its usage is not read. */
+  fableLeft?: number;
+  /** why no Fable is left: `not in its plan` (its usage has no Fable row) or `refused until <ISO>` (a run failed "requires usage credits"). */
+  fableNote?: string;
   limitedUntil?: string;
   /** turns running on it now (the broker's count). */
   running: number;
@@ -42,7 +46,19 @@ export interface SeatBoard {
   workingNow: number;
   personas: number;
   runs24h: number;
+  /** seats with Fable credit left now (the broker gives a Fable run only one of these). */
+  fableSeats: number;
   readAt?: string;
+}
+
+/** a seat's Fable credit left, from its usage's model rows and the broker's `model_blocked` (a "requires usage credits" refusal). */
+export function fableOf(s: Seat, rs: Record<string, any>, now = Date.now()): { fableLeft?: number; fableNote?: string } {
+  const until = rs?.model_blocked?.Fable;
+  if (typeof until === "string" && Date.parse(until) > now) return { fableLeft: 0, fableNote: `refused until ${until}` };
+  if (!s.modelWeekly) return {};
+  const f = s.modelWeekly.find((m) => m.model.toLowerCase() === "fable");
+  if (!f) return { fableLeft: 0, fableNote: "not in its plan" };
+  return f.pct === undefined ? {} : { fableLeft: Math.max(0, Math.round(100 - f.pct)) };
 }
 
 export const SEAT_TARGET = 20;
@@ -131,6 +147,7 @@ export function seatBoard(seatsRaw: unknown, db: Database.Database | undefined, 
       state,
       usage5h: s.usage5h,
       usageWeekly: s.usageWeekly,
+      ...fableOf(s, rs, now.getTime()),
       limitedUntil: s.resetsAt.limitedUntil,
       running,
       now: tally(mine.filter((r) => r.open)),
@@ -147,6 +164,7 @@ export function seatBoard(seatsRaw: unknown, db: Database.Database | undefined, 
     workingNow: out.filter((s) => s.state === "working").length,
     personas: names.size,
     runs24h: out.reduce((n, s) => n + s.runs24h, 0),
+    fableSeats: out.filter((s) => (s.fableLeft ?? 0) > 0 && s.state !== "signed_out").length,
     readAt: typeof (seatsRaw as { updated?: unknown })?.updated === "string" ? (seatsRaw as { updated: string }).updated : undefined,
   };
 }

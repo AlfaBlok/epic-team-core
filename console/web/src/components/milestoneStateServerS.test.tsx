@@ -15,8 +15,8 @@ import { timelineGroups } from "@/lib/derive";
  * status object (GET /api/milestones/:id/status); the web only renders it.
  */
 
-// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
-beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
+// with objectives the sidebar lists no other goals; these tests read the goal list of a workspace with none yet.
+beforeEach(() => void vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

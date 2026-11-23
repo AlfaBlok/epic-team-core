@@ -122,6 +122,8 @@ export interface LedgerRow {
   dependsOn?: string;
   /** raw `Next action` cell (e.g. "Dispatch when #17-#19 are integrated"): the node page shows it. */
   nextAction?: string;
+  /** raw date cell (`Last Verified` / `Updated` / `Since`), e.g. "2026-11-22". */
+  since?: string;
   /** First markdown link to a `.md` file in the row (id cell first), relative to the doc. */
   link?: string;
   /** "ledger" for Issue Ledger / Phases / Child Epics tables, else the lowercased heading keyword ("queue", "backlog", …). */
@@ -143,6 +145,8 @@ const ROLE_COL = /^role$/i;
 const NEEDS_COL = /^(needs|gate|gated by|blocked by|waiting on|human gate|approval)$/i;
 const DEPENDS_COL = /^(depends on|depends|dependencies|deps|blocked on)$/i;
 const NEXT_COL = /^(next action|next step|next)$/i;
+/** the row's date cell (`Last Verified`, `Updated`, `Since`): when it last moved, so the Hosts waiting queue can say since when. */
+const SINCE_COL = /^(last verified|verified|last updated|updated|since)$/i;
 
 function ledgerRows(markdown: string): LedgerRow[] {
   const out: LedgerRow[] = [];
@@ -159,6 +163,7 @@ function ledgerRows(markdown: string): LedgerRow[] {
       const iNeeds = col(h, NEEDS_COL);
       const iDeps = col(h, DEPENDS_COL);
       const iNext = col(h, NEXT_COL);
+      const iSince = col(h, SINCE_COL);
       for (const r of t.rows) {
         const id = r.cells[0];
         if (!id) continue;
@@ -172,6 +177,7 @@ function ledgerRows(markdown: string): LedgerRow[] {
           ...(iNeeds >= 0 && r.cells[iNeeds] ? { needs: r.cells[iNeeds] } : {}),
           ...(iDeps >= 0 && r.cells[iDeps] ? { dependsOn: r.cells[iDeps] } : {}),
           ...(iNext >= 0 && r.cells[iNext] ? { nextAction: r.cells[iNext] } : {}),
+          ...(iSince >= 0 && r.cells[iSince] ? { since: r.cells[iSince] } : {}),
           link: mdLink(r.raw),
           source: isLedger ? "ledger" : q ? q[1].toLowerCase() : "ledger",
         });

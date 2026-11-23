@@ -64,6 +64,8 @@ export interface Assignment {
   nextWakeAt?: string;
   /** never been switched on; attached off and only ever woken by Run now, if at all. */
   neverOn?: boolean;
+  /** the objective (docs/pursuits.json id) this assignment works; several objectives can share one milestone. */
+  objective?: string;
   createdAt: string;
 }
 /** blank_report: the T3 turn completed and the persona never reported. */
@@ -135,6 +137,8 @@ export interface Run {
   launchHost?: HostId;
   /** the host the run's agent ran on, as recorded (launch or the creating agent); absent on older rows. */
   host?: HostId;
+  /** where a world's own route ran it (`job`, `sandbox:<host>`); absent = a T3 thread on a shared host. */
+  route?: string;
   /** the wake reported idle while these steps read ready (stored as idle; the milestone names the disagreement). */
   readyIgnored?: string[];
   /** this ended wake and the ones before it gave the same report (same outcome, same summary bar numbers/times/ids), n in a row (≥ 4). */
@@ -152,11 +156,15 @@ export interface Run {
   notional?: boolean;
 }
 /** what the run-end pack check found: the roles it validated as, one issue line per problem (`<sha7> <validator line>`). */
-/** a Run now (any starter) that met this running wake: `queued` its note into the wake's thread, or `already_running` (no note, or the queue failed). */
+/**
+ * a Run now (any starter) that met this running wake: `queued` its note into the wake's live turn (steer), `held` it for the
+ * next wake (the turn could not take it; never T3's own queue), `handled` (the same note already reached a wake), or
+ * `already_running` (no note).
+ */
 export interface StartGuard {
   at: string;
   by: string;
-  action: "queued" | "already_running";
+  action: "queued" | "held" | "handled" | "already_running";
   note?: string;
   reason?: string;
 }
@@ -321,6 +329,7 @@ const toAssignment = (r: Row): Assignment => ({
   retryRunId: opt(r.retry_run_id),
   nextWakeAt: r.enabled ? earliest(r.next_run_at, r.retry_at) : opt(r.next_run_at),
   neverOn: !r.ever_on,
+  objective: opt(r.objective),
   createdAt: r.created_at,
 });
 /**
@@ -377,6 +386,7 @@ const toRun = (r: Row): Run => ({
   ...(r.deferred ? { deferred: JSON.parse(r.deferred) as Deferral } : {}),
   ...(r.launch_host ? { launchHost: r.launch_host as HostId } : {}),
   ...(r.host === mainHost() || r.host === workerHost() ? { host: r.host as HostId } : {}),
+  ...(r.route ? { route: r.route as string } : {}),
   ...(r.ready_ignored ? { readyIgnored: JSON.parse(r.ready_ignored) as string[] } : {}),
   ...(r.repeating ? { repeating: r.repeating as number, ...(r.repeat_since ? { repeatSince: r.repeat_since } : {}) } : {}),
   ...(r.stalled ? { stalled: r.stalled as string } : {}),
@@ -692,6 +702,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
       nextRunAt?: string | null;
       writeEnabled?: boolean;
       writeScope?: string;
+      objective?: string;
       /** given when the team repo's state/assignments.json already carries the entry. */
       id?: string;
       createdAt?: string;
@@ -703,8 +714,8 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
       const writeScope = input.writeScope ?? (writeEnabled ? DEFAULT_WRITE_SCOPE : "");
       const id = input.id ?? newId("as");
       db.prepare(
-        `INSERT INTO assignments (id, milestone_id, persona_id, cadence, enabled, t3_scheduled_task_id, last_run_at, next_run_at, write_enabled, write_scope, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO assignments (id, milestone_id, persona_id, cadence, enabled, t3_scheduled_task_id, last_run_at, next_run_at, write_enabled, write_scope, objective, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.milestoneId,
@@ -716,6 +727,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
         input.nextRunAt ?? null,
         writeEnabled ? 1 : 0,
         writeScope,
+        input.objective || null,
         input.createdAt ?? now(),
       );
       return getAssignment(id)!;
@@ -736,6 +748,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
         writeScope?: string;
         retryAt?: string | null;
         retryRunId?: string | null;
+        objective?: string | null;
       },
     ) {
       const cur = getAssignment(id);
@@ -759,6 +772,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
         write_scope: p.writeScope,
         retry_at: p.retryAt,
         retry_run_id: p.retryRunId,
+        objective: p.objective === "" ? null : p.objective,
       });
       return getAssignment(id);
     },
@@ -973,6 +987,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
         deferred?: Deferral | null;
         launchHost?: HostId | null;
         host?: HostId | null;
+        route?: string | null;
         readyIgnored?: string[] | null;
         repeating?: number | null;
         repeatSince?: string | null;
@@ -1009,6 +1024,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
         deferred: p.deferred === undefined ? undefined : p.deferred && JSON.stringify(p.deferred),
         launch_host: p.launchHost,
         host: p.host,
+        route: p.route,
         ready_ignored: p.readyIgnored === undefined ? undefined : p.readyIgnored && JSON.stringify(p.readyIgnored),
         repeating: p.repeating,
         repeat_since: p.repeatSince,

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { turnerOf } from "./personaGaps.js";
 import path from "node:path";
-import { ledgerLines } from "./review/rows.js";
+import { ledgerLines, splitRow } from "./review/rows.js";
+import { archiveEpicCode, isArchiveRel } from "./adapters/spineArchive.js";
 import { FOLDS_FILE, foldMap, parseFolds } from "./folds.js";
 import { doneMeansOf, epicHeading, type PursuitsBody } from "./pursuits.js";
 
@@ -74,6 +75,11 @@ export interface ScorecardRow {
    * reads and where the owner opens it, named at the source in its set's file. Absent: nothing readable shows this
    * colour yet; the screen says so and the hosted check lists it for the next wake. */
   evidence?: KrEvidence;
+  /** where a key result came from: his words, when, the link to his note. */
+  from?: KrFrom;
+  /** the key result that decides the objective (the owner, vn_617e3481: "the first, the key result is a house was
+   * bought"): pinned at the top of its table whatever its colour. */
+  decides?: boolean;
 }
 /** one link to the evidence behind a key result's colour. `url` is absolute, or a console path ("/sets/…"). */
 export interface KrEvidence {
@@ -86,6 +92,18 @@ export function krEvidence(e: unknown): KrEvidence | undefined {
   const { what, url } = e as Record<string, unknown>;
   if (typeof url !== "string" || !/^(https?:\/\/|\/)\S+$/.test(url.trim())) return undefined;
   return { what: typeof what === "string" && what.trim() ? what.trim() : "the evidence", url: url.trim() };
+}
+
+/** where a key result came from (the owner, vn_243861c3: "I don't know where it's coming from"): the words of
+ * the note its `targetFrom` quotes, when and a link to the note; none when the file names no source. */
+export interface KrFrom { said: string; when?: string; url?: string }
+export function krFrom(targetFrom: unknown, fromUrl: unknown): KrFrom | undefined {
+  if (typeof targetFrom !== "string" || !targetFrom.trim()) return undefined;
+  const t = targetFrom.trim();
+  const q = /"([^"]{3,})"/.exec(t);
+  const when = /(\d{1,2} Nov(?:ember)?(?: 2026)?|\d{4}-\d\d-\d\d)(?:,? (\d\d:\d\dZ))?/.exec(t);
+  const url = typeof fromUrl === "string" && /^https?:\/\/\S+$/.test(fromUrl.trim()) ? fromUrl.trim() : undefined;
+  return { said: q ? q[1].trim() : t, ...(when ? { when: [when[1], when[2]].filter(Boolean).join(" ") } : {}), ...(url ? { url } : {}) };
 }
 
 /** a key result's `live` spec in its set's file: `kind` names the source, the rest is the source's own settings. */
@@ -159,13 +177,13 @@ export interface ScorecardNode {
   /** pursuit: its rank (1 first; null parked). */
   rank?: number | null;
   parked?: boolean;
-  /** `"pinned": false` in docs/pursuits.json: folded under More objectives in the sidebar. */
-  unpinned?: boolean;
   repo?: string;
   path?: string;
   code?: string;
   /** the milestone whose chat (repo desk) this scorecard talks to. */
   milestoneId?: string;
+  /** another objective shares that milestone: its Personas tab lists only the personas that name this objective. */
+  milestoneShared?: boolean;
   /** green lines / lines (pursuit) or Done-means boxes ticked / boxes (epic). */
   greens: number;
   total: number;
@@ -205,6 +223,11 @@ export interface ScorecardNode {
   owner?: string;
   /** set by the idle watch: below all-green with no worker, no ask and no card: it must move. */
   idle?: { idle: boolean; reason: string; nudgedAt?: string; runId?: string };
+  /**
+   * Its open tickets (ready, running, waiting or in review, in its epics) that no key result of any objective lists in its
+   * `work`: every ticket hangs under a key result; the page and every wake name them.
+   */
+  unplaced?: WorkLink[];
 }
 export interface ScorecardsBody {
   nodes: ScorecardNode[];
@@ -285,7 +308,7 @@ export interface ScorecardFile {
   /** where the shape came from. */
   proposal?: string;
   /** the key results: label, the Done-means id it measures, value, note (due date, aim), colour, work codes. */
-  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string; evidence?: unknown; posts?: number; readings?: number }[];
+  keyResults?: { label: string; doneMeans?: string; value?: string; note?: string; target?: string; colour?: RowState; work?: string[]; live?: LiveSpec; measuredAt?: string; evidence?: unknown; targetFrom?: string; fromUrl?: string; decides?: boolean; posts?: number; readings?: number }[];
   /** "repo CODE" of the epic whose Goal sentence is the objective. */
   spine?: string;
   /** the child epics the sidebar shows, short names: { epic: "EPIC-907" or a spine path, name }. */
@@ -451,7 +474,6 @@ export function buildScorecards(
       name: p.name,
       rank: p.rank ?? null,
       ...(p.parked ? { parked: true } : {}),
-      ...(p.unpinned ? { unpinned: true } : {}),
       milestoneId: children.find((c) => c.milestoneId)?.milestoneId ?? p.milestones?.[0]?.id,
       greens: p.greens,
       total: p.total,
@@ -463,6 +485,9 @@ export function buildScorecards(
       ...withTurner(pursuitRows(p, children)),
     };
   });
+  placeTickets(nodes, spineInfo);
+  // several objectives on one milestone (the home root spine runs eight): each one's Personas tab lists only its own
+  for (const n of nodes) if (n.milestoneId && nodes.some((o) => o !== n && o.milestoneId === n.milestoneId)) n.milestoneShared = true;
   return { nodes, spineInfo, ...(body.retiredMilestones?.length ? { retired: body.retiredMilestones } : {}) };
 
   /** a wheel without a persona does not turn: the pursuit's milestone has no Delivery Manager on. */
@@ -493,6 +518,8 @@ export function buildScorecards(
         ...(r.source ? { source: r.source } : {}),
         ...(r.by ? { by: r.by } : {}),
         ...(r.note || live?.note ? { note: r.note ?? live?.note } : {}),
+        // a line read live is measured now (it read "nothing measures this yet" though its check reads it).
+        ...(live ? { measuredAt: new Date().toISOString() } : {}),
         work: (Array.isArray(r.work) ? r.work : []).filter((c): c is string => typeof c === "string" && !!c.trim()).map((c) => {
           const m = /^([\w.-]+):(.+)$/.exec(c.trim());
           const [rr, code] = m ? [m[1], m[2]] : [repo, c.trim()];
@@ -533,6 +560,8 @@ export function buildScorecards(
         // a ticked box is read from its spine now; otherwise the daily measure's stamp, none when nothing measures it
         ...(ticked ? { measuredAt: new Date().toISOString() } : typeof k.measuredAt === "string" && k.measuredAt ? { measuredAt: k.measuredAt } : {}),
         ...(krEvidence(k.evidence) ? { evidence: krEvidence(k.evidence) } : {}),
+        ...(krFrom(k.targetFrom, k.fromUrl) ? { from: krFrom(k.targetFrom, k.fromUrl) } : {}),
+        ...(k.decides === true ? { decides: true } : {}),
         work,
       };
     });
@@ -563,6 +592,34 @@ export function buildScorecards(
       file: { path: rel, present: !!doc, ...(doc?.proposal ? { proposal: doc.proposal } : {}) },
       ...(teams ? { teams } : {}),
     };
+  }
+}
+
+/**
+ * Every ticket hangs under a key result: a pursuit's open tickets (its epics' rows ready, running, waiting or in
+ * review) that no key result of any objective lists go on its `unplaced` list. A ticket may hang under another objective's
+ * key result (a kernel row in the health epic that moves multi-tenant), so the lists of every objective count.
+ */
+export function placeTickets(nodes: ScorecardNode[], spineInfo: Record<string, SpineInfo>): void {
+  const placed = new Set<string>();
+  for (const n of nodes) for (const k of n.keyResults ?? []) for (const w of k.work ?? []) placed.add(`${w.repo}:${w.code}`);
+  for (const n of nodes) {
+    if (n.kind !== "pursuit" || !n.keyResults?.length) continue;
+    const seen = new Set<string>();
+    const out: WorkLink[] = [];
+    for (const key of n.spines) {
+      const info = spineInfo[key];
+      if (!info) continue;
+      const open = [...info.queue.map((q) => ({ code: q.code, title: q.title, status: q.state })), ...(info.review ?? []).map((code) => ({ code, title: undefined as string | undefined, status: "review" }))];
+      for (const r of open) {
+        const id = `${info.repo}:${r.code}`;
+        if (placed.has(id) || seen.has(id)) continue;
+        seen.add(id);
+        out.push({ code: r.code, repo: info.repo, ...(r.title ? { title: r.title } : {}), status: r.status, kind: "ticket", state: workState("ticket", r.status), path: info.path, ...(info.code ? { epicCode: info.code } : {}) });
+      }
+    }
+    if (out.length) n.unplaced = out;
+    else delete n.unplaced;
   }
 }
 
@@ -623,24 +680,54 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
     const dir = repoDir(repo);
     if (!dir) return [];
     const out: string[] = [];
-    for (const sub of ["docs/spines", "docs"]) {
+    // a repo whose spine sits at its root (EPIC.md there, child epics in epics/) was never read, so its tickets showed
+    // "not found" on the objective page.
+    for (const sub of ["docs/spines", "docs", "epics", ""]) {
       try {
-        for (const f of fs.readdirSync(path.join(dir, sub))) if (f.endsWith(".md")) out.push(`${sub}/${f}`);
+        for (const f of fs.readdirSync(path.join(dir, sub))) if (f.endsWith(".md")) out.push(sub ? `${sub}/${f}` : f);
       } catch {
         /* no such folder */
       }
     }
-    return out;
+    // an epic's archive (its finished rows) is read last: the ledger wins for a row in both
+    return [...out.filter((f) => !isArchiveRel(f)), ...out.filter(isArchiveRel)];
+  };
+  // a desk note handed to another world (`note:<repo>:<path>`): open until that world answers it.
+  const note = (repo: string, rel: string): WorkLink => {
+    const code = `note:${repo}:${rel}`;
+    const dir = repoDir(repo);
+    if (!dir || rel.includes("..") || !rel.endsWith(".md")) return { code, repo, kind: "unknown" };
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(dir, rel), "utf8");
+    } catch {
+      return { code, repo, kind: "unknown" };
+    }
+    const head = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
+    const field = (k: string) => new RegExp(`^${k}:\\s*(.*)$`, "m").exec(head)?.[1]?.trim();
+    const status = field("status") || "open";
+    const closed = /^(answered|done|closed|placed)\b/i.test(status);
+    return { code, repo, kind: "ticket", title: `Desk note: ${(field("about") ?? path.basename(rel, ".md")).slice(0, 120)}`, status, state: closed ? "green" : "amber", path: rel };
   };
   return (repo: string, code: string): WorkLink => {
+    if (repo === "note") {
+      const m = /^([\w.-]+):(.+)$/.exec(code);
+      if (m) return note(m[1], m[2]);
+    }
     const epic = /^EPIC-\w+$/.test(code);
-    // a Done-means id (letters, a dash, a number, no S/A/G): its box in the spine that holds it.
+    // a Done-means id (letters, a dash, a number, no S/A/G): its box in the spine that holds it; a row with such an id
+    // (C907-18) when no box has it.
     const box = /^[A-Z][A-Z0-9]*-\d+$/.test(code);
-    // an ask (E907-A1): work waiting on an answer, red, its words from the ask line when one is written.
-    const ask = /^[A-Z][A-Z0-9]*-A\d+$/.test(code);
+    // an ask (E907-A1, EPIC-907-A5, C907-14-A2): work waiting on an answer, red, its words from the ask line when one is written.
+    const ask = /^[A-Z][A-Z0-9]*(?:-\d+)?-A\d+$/.test(code);
+    // a row that sits in a table outside the ledger section (rows left under Waiting on): the last resort.
+    let loose: WorkLink | undefined;
     for (const rel of list(repo)) {
       const text = read(repo, rel);
       if (!text) continue;
+      // an archive holds only finished ledger rows, never an epic, a Done-means box or an open ask
+      const archived = isArchiveRel(rel);
+      if (archived && (ask || epic)) continue;
       if (ask) {
         if (!text.includes(code)) continue;
         const line = text.split("\n").find((l) => l.includes(`[ask ${code}`) || l.includes(`[${code}`));
@@ -655,23 +742,61 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
         const status = `${dm.done} of ${dm.total} done`;
         return { code, repo, kind: "epic", title: h.title, status, state: workState("epic", status), path: rel, epicCode: code };
       }
-      if (box) {
+      if (box && !archived) {
         if (!text.includes(code)) continue;
         const b = readSpineInfo(repo, rel, text).boxes.find((x) => x.id === code);
-        if (!b) continue;
-        const h = epicHeading(text);
-        return { code, repo, kind: "done-means", title: b.text, status: b.done ? "done" : "open", state: b.done ? "green" : "amber", path: rel, ...(h.code ? { epicCode: h.code } : {}) };
+        if (b) {
+          const h = epicHeading(text);
+          return { code, repo, kind: "done-means", title: b.text, status: b.done ? "done" : "open", state: b.done ? "green" : "amber", path: rel, ...(h.code ? { epicCode: h.code } : {}) };
+        }
       }
       if (!text.includes(code)) continue;
       const row = ledgerLines(text).find((r) => r.id === code);
-      if (!row) continue;
+      if (!row) {
+        loose ??= tableRow(repo, rel, text, code);
+        continue;
+      }
       const status = row.col.status >= 0 ? strip(row.cells[row.col.status] ?? "") : "";
-      const h = epicHeading(text);
+      const h = rowEpicHeading(text);
       const word = status.split(/[\s(;,]/)[0] || status;
       return { code, repo, kind: "ticket", title: rowTitle(row.col.title >= 0 ? (row.cells[row.col.title] ?? code) : code), status: word, state: workState("ticket", word), path: rel, ...(h.code ? { epicCode: h.code } : {}) };
     }
-    return { code, repo, kind: "unknown" };
+    return loose ?? { code, repo, kind: "unknown" };
   };
+}
+
+/** the epic a row's file belongs to: its own heading, or for an archive the epic its `Archive of:` line names. */
+function rowEpicHeading(text: string): { code?: string; title?: string } {
+  const h = epicHeading(text);
+  const of = archiveEpicCode(text);
+  return of ? { ...h, code: of } : h;
+}
+
+/** a ticket row in any table of a spine (first cell the code, a Status column), wherever its section sits. */
+function tableRow(repo: string, rel: string, text: string, code: string): WorkLink | undefined {
+  const lines = text.split("\n");
+  let headers: string[] | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (!l.startsWith("|")) {
+      headers = undefined;
+      continue;
+    }
+    if (/^\|?\s*:?-{3,}/.test(lines[i + 1] ?? "")) {
+      headers = splitRow(l).map((x) => strip(x).toLowerCase());
+      i++;
+      continue;
+    }
+    const cells = splitRow(l);
+    if (!headers || strip(cells[0] ?? "") !== code) continue;
+    const status = headers.findIndex((x) => x === "status" || x === "state");
+    if (status < 0) continue;
+    const title = headers.findIndex((x) => /^(title|task|item|description|scope|summary)$/.test(x));
+    const word = strip(cells[status] ?? "").split(/[\s(;,]/)[0] ?? "";
+    const h = rowEpicHeading(text);
+    return { code, repo, kind: "ticket", title: rowTitle(title >= 0 ? (cells[title] ?? code) : code), status: word, state: workState("ticket", word), path: rel, ...(h.code ? { epicCode: h.code } : {}) };
+  }
+  return undefined;
 }
 
 /**

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ownerName } from "./identity.js";
-import type { HisWordsFile } from "./desk/hisObjectives.js";
+import { homeRepo, ownerName } from "./identity.js";
+import { inForceWords, NEWEST_WORD_RULE, replacedWords, type HisWordsFile } from "./desk/hisObjectives.js";
 import { redLinesFile } from "./inbox/jordiPriority.js";
 
 /**
@@ -28,12 +28,20 @@ export interface ObjectiveNode {
   objective?: string;
   greens: number;
   total: number;
-  keyResults?: { label?: string; state?: string; value?: string; target?: string; evidence?: { what: string; url: string } }[];
+  keyResults?: { label?: string; state?: string; value?: string; target?: string; evidence?: { what: string; url: string }; work?: TicketRef[] }[];
+  /** its open tickets that hang under no key result. */
+  unplaced?: TicketRef[];
   /** another objective's page shows this one inside it: listed with that one, not on its own. */
   foldedInto?: string;
   /** the screen's own colour (the worst key result); read first. */
   state?: string;
   idle?: { idle: boolean; reason?: string };
+}
+export interface TicketRef {
+  code: string;
+  repo?: string;
+  kind?: string;
+  state?: string;
 }
 export interface ObjectivesInput {
   nodes: ObjectiveNode[];
@@ -50,7 +58,7 @@ export interface RedLine {
 
 export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
 /** the block rides on every wake: kept short. */
-export const OBJECTIVES_MAX_CHARS = 2_400;
+export const OBJECTIVES_MAX_CHARS = 3_600; // room for each objective's tickets line
 
 const DOT: Record<string, string> = { green: "🟢", amber: "🟡", red: "🔴" };
 const cut = (s: string | undefined, max: number) => {
@@ -59,12 +67,16 @@ const cut = (s: string | undefined, max: number) => {
 };
 
 /** the first line of every plan and report: which objective this moves. */
+/** every ticket hangs under a key result: the wake places each one its line names. */
+export const TICKETS_RULE =
+  "Every open ticket hangs under one key result: a key result's `work` list in its scorecard names it. A line below naming tickets under none: put each in the `work` of the key result it moves (`python3 scripts/kr_tickets.py place <row> <objective id> <key result number>`), or close it when it moves none.";
 export const OBJECTIVE_LINE = "`Objective: <its name>: how this step moves it`";
 /** How every objective is named (the owner: "they have to be short and they need to be well clear"),
  * carried by the worker rule, every wake's objectives block and the desk's; scripts/objectives_check.py fails a name that breaks it. */
 export const OBJECTIVE_NAME_RULE =
-  "Name an objective `Product: short goal`: the product it belongs to first, a colon, then 2 to 5 plain words " +
-  "(`Acme: 5 testers`, `Acme: team browser fully operational`), the owner's words where he said them, no two names alike; " +
+  "Name an objective `Product: short goal`: the product it belongs to first, a colon, then 2 to 6 plain words starting with a verb " +
+  "with a capital letter (`Acme: Get 5 testers`, `Acme: Get the team browser fully working`), the owner's words where he said them, no two names alike; " +
+  "every key result line starts with a capital letter too; " +
   "the name goes in docs/pursuits.json `name`, the longer sentence stays in its green-when.";
 export const OBJECTIVES_RULE =
   `Objectives first: before any work reread ${ownerName()}'s objectives below (his order, live; the same list opens every wake prompt and is served at GET /api/objectives). ` +
@@ -80,15 +92,53 @@ interface Line {
   light: string;
   krs: string;
   today: string;
+  /** its tickets: how many open ones hang under its key results, and the ones under none by code. */
+  tickets?: string;
   words?: string;
+}
+
+/** a key result's open tickets (done ones left out), by code. */
+export function openTickets(work: TicketRef[] | undefined): string[] {
+  return [...new Set((work ?? []).filter((w) => (w.kind ?? "ticket") === "ticket" && w.state !== "green").map((w) => w.code))];
+}
+
+/**
+ * the brief's key result line for one row: every worker knows which key result its ticket moves, or that it
+ * hangs under none yet and how to place it. `repo` is the row's repo folder name.
+ */
+export function keyResultLines(input: ObjectivesInput | undefined, row: string, repo: string, planOf?: (objective: string, kr: number) => string): string {
+  const hits: string[] = [];
+  for (const n of input?.nodes ?? []) {
+    if (n.kind !== "pursuit") continue;
+    (n.keyResults ?? []).forEach((k, i) => {
+      if (!(k.work ?? []).some((w) => w.code === row && (!w.repo || w.repo === repo))) return;
+      hits.push(`Key result: ${n.headline || n.name}: ${k.label ?? ""} (key result ${n.id}#${i}). Your work moves it; say how in your report.`);
+      // its plan (the objective's Plan tab): the worker builds the step it is on, the way the plan says (vn_9c02d869).
+      if (planOf) hits.push(`The plan for this key result (its objective's Plan tab; your row is one of its steps, build it the way the plan says, and say in your report what moved):\n${planOf(n.id, i + 1)}`);
+    });
+  }
+  return hits.length
+    ? hits.join("\n")
+    : `Key result: none yet. ${row} hangs under no key result: before you plan, put it under the key result it moves (\`python3 ~/github/${homeRepo()}/scripts/kr_tickets.py place ${row} <objective id> <n>${repo === homeRepo() ? "" : ` --repo ${repo}`}\`), or say in your report why it moves none.`;
+}
+
+/** "4 open tickets under its key results; 2 under none: E907-S1, E907-S2". */
+export function ticketsLine(n: Pick<ObjectiveNode, "keyResults" | "unplaced">): string | undefined {
+  if (!n.keyResults?.length) return undefined;
+  const under = new Set(n.keyResults.flatMap((k) => openTickets(k.work)));
+  const none = (n.unplaced ?? []).map((w) => w.code);
+  const head = `${under.size} open ticket${under.size === 1 ? "" : "s"} under its key results`;
+  if (!none.length) return `${head}, none under no key result`;
+  return `${head}; ${none.length} under none: ${none.slice(0, 4).join(", ")}${none.length > 4 ? ` +${none.length - 4}` : ""}`;
 }
 
 /** one entry per objective (top-level pursuit nodes, his order, parked ones left out). */
 export function objectiveLines(input: ObjectivesInput | undefined, plot?: HisWordsFile): Line[] {
-  const words = new Map<string, { words: string; said?: string }>();
+  const words = new Map<string, { words: string; said?: string; replaces: string }>();
   for (const p of plot?.objectives ?? []) {
-    const w = p.aim?.words ? p.aim : p.after; // an aim he confirmed first, else his newest words naming it
-    if (w?.words) words.set(p.id, { words: w.words, said: w.said });
+    const w = inForceWords(p); // his newest word wins: an aim only while it is newer than his newest words
+    const r = replacedWords(p)[0]; // the older word it replaces: named before the quote, so a cut line still shows it
+    if (w?.words) words.set(p.id, { words: w.words, said: w.said, replaces: r ? ` (replaces his word${r.said ? ` of ${r.said.slice(5, 10)}` : ""})` : "" });
   }
   const all = (input?.nodes ?? []).filter((n) => n.kind === "pursuit" && !n.parked && n.rank != null);
   const nodes = all.filter((n) => !n.foldedInto).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
@@ -107,6 +157,7 @@ export function objectiveLines(input: ObjectivesInput | undefined, plot?: HisWor
           ? `moved today: ${t} turned green`
           : `not moved today${n.idle?.reason ? ` (${cut(n.idle.reason, 70)})` : ""}`;
     const w = words.get(n.id);
+    const tickets = ticketsLine(n);
     return {
       id: n.id,
       rank: i + 1,
@@ -114,7 +165,8 @@ export function objectiveLines(input: ObjectivesInput | undefined, plot?: HisWor
       light,
       krs: `${greens} of ${total} key results green`,
       today,
-      ...(w ? { words: `his words${w.said ? ` ${w.said.slice(5, 10)}` : ""}: "${cut(w.words, 110)}"` } : {}),
+      ...(tickets ? { tickets } : {}),
+      ...(w ? { words: `his words${w.said ? ` ${w.said.slice(5, 10)}` : ""}, in force${w.replaces}: "${cut(w.words, 110)}"` } : {}),
     };
   });
 }
@@ -128,7 +180,7 @@ export function objectiveCards(input: ObjectivesInput | undefined, plot?: HisWor
   name: string;
   light: string;
   krs: string;
-  keyResults: { label: string; state?: string; value?: string; target?: string }[];
+  keyResults: { label: string; state?: string; value?: string; target?: string; tickets?: string[] }[];
   stands: string;
   words?: string;
   said?: string;
@@ -136,7 +188,7 @@ export function objectiveCards(input: ObjectivesInput | undefined, plot?: HisWor
   const nodes = new Map((input?.nodes ?? []).map((n) => [n.id, n]));
   const said = new Map<string, { words: string; said?: string }>();
   for (const p of plot?.objectives ?? []) {
-    const w = p.aim?.words ? p.aim : p.after;
+    const w = inForceWords(p);
     if (w?.words) said.set(p.id, { words: w.words, said: w.said });
   }
   return objectiveLines(input, plot).map((l) => {
@@ -149,7 +201,7 @@ export function objectiveCards(input: ObjectivesInput | undefined, plot?: HisWor
       name: l.name,
       light: l.light,
       krs: l.krs,
-      keyResults: (n?.keyResults ?? []).map((k) => ({ label: k.label ?? "", ...(k.state ? { state: k.state } : {}), ...(k.value ? { value: k.value } : {}), ...(k.target ? { target: k.target } : {}), ...(k.evidence ? { evidence: k.evidence.what } : {}) })),
+      keyResults: (n?.keyResults ?? []).map((k) => ({ label: k.label ?? "", ...(k.state ? { state: k.state } : {}), ...(k.value ? { value: k.value } : {}), ...(k.target ? { target: k.target } : {}), ...(k.evidence ? { evidence: k.evidence.what } : {}), ...(openTickets(k.work).length ? { tickets: openTickets(k.work) } : {}) })),
       stands,
       ...(w ? { words: w.words, ...(w.said ? { said: w.said } : {}) } : {}),
     };
@@ -161,7 +213,7 @@ function alsoHis(plot?: HisWordsFile): string[] {
   return (plot?.objectives ?? [])
     .filter((p) => p.world)
     .map((p) => {
-      const w = p.aim?.words ? p.aim : p.after;
+      const w = inForceWords(p);
       return `${p.name ?? p.id} (its own world ${p.world?.repo ?? "?"}: notes only)${w?.words ? `: "${cut(w.words, 90)}"` : ""}`;
     });
 }
@@ -182,16 +234,20 @@ export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWo
   if (!lines.length) return "";
   const head = [
     OBJECTIVES_HEAD,
-    `${ownerName()}'s objectives, his order, live from the objectives screen (docs/pursuits.json; his newest words from docs/his-words.json, read from his voice notes). Every wake and every worker reads this same list.`,
+    `${ownerName()}'s objectives, his order, live from the objectives screen (docs/pursuits.json; his newest words from docs/his-words.json, read from his voice notes and the desk chat). Every wake and every worker reads this same list.`,
+    NEWEST_WORD_RULE,
     `Before you plan, ask which objective it moves: the first line of your plan, of each worker brief you write and of your report is ${OBJECTIVE_LINE} (none: \`Objective: none, <why>\`, and it waits behind work that moves one). Remove fluff rather than add it.`,
     OBJECTIVE_NAME_RULE,
+    TICKETS_RULE,
   ];
-  const body = lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${l.name}`, l.krs, l.today, l.words].filter(Boolean).join(" · "));
+  const body = lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${l.name}`, l.krs, l.today, l.tickets, l.words].filter(Boolean).join(" · "));
   const also = alsoHis(plot);
   const reds = redLineWords(red, lines);
   const tail = [...(also.length ? [`Also his: ${also.join(" · ")}`] : []), ...(reds ? [`Red lines (docs/pursuits.json): ${reds}`] : [])];
   let out = [...head, ...body, ...tail].join("\n");
-  if (out.length > OBJECTIVES_MAX_CHARS) out = [...head, ...body.map((b) => cut(b, 150)), ...tail.map((t) => cut(t, 220))].join("\n");
+  // too long: each part is cut on its own, so neither its tickets nor his words in force (and what they replace) are cut away
+  const short = () => lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${cut(l.name, 50)}`, l.krs, cut(l.today, 30), l.tickets && cut(l.tickets, 70), l.words && cut(l.words, 100)].filter(Boolean).join(" · "));
+  if (out.length > OBJECTIVES_MAX_CHARS) out = [...head, ...short(), ...tail.map((t) => cut(t, 220))].join("\n");
   return out;
 }
 

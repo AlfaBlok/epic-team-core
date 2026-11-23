@@ -7,7 +7,7 @@ import { openDb } from "../src/db.js";
 import { identity, resetIdentity, resetSites, setIdentity, setSites, sites } from "../src/identity.js";
 import { identityIndex, identityScript, originFile, withIdentity, withOrigin } from "../src/identityPage.js";
 
-const ID = { owner: "Sam", homeWorld: "acme", homeRepo: "acme_team", mainHost: "main", workerHost: "worker", memory: "Memory", socialWorld: "social", opsRepo: "ops", org: "Acme", socialProduct: "SocialApp", deployer: "Deployer" };
+const ID = { owner: "Sam", homeWorld: "acme", homeRepo: "acme_team", mainHost: "main", workerHost: "worker", memory: "Memory", socialWorld: "social", opsRepo: "ops", org: "Acme", socialProduct: "SocialApp", deployer: "Deployer", vault: "Vault" };
 
 describe("the app page carries the identity", () => {
   const saved = identity();
@@ -19,7 +19,7 @@ describe("the app page carries the identity", () => {
   it("puts one script first in the head, before the bundle, once", () => {
     const html = `<!doctype html><html><head><meta charset="UTF-8"><script type="module" src="/assets/a.js"></script></head><body></body></html>`;
     const out = withIdentity(html, ID);
-    expect(out).toContain(`<head><script>window.__IDENTITY__={"owner":"Sam","homeWorld":"acme","homeRepo":"acme_team","mainHost":"main","workerHost":"worker","memory":"Memory","socialWorld":"social","opsRepo":"ops","org":"Acme","socialProduct":"SocialApp","deployer":"Deployer","sites":{"teamUrl":"https://team.example.com",`);
+    expect(out).toContain(`<head><script>window.__IDENTITY__={"owner":"Sam","homeWorld":"acme","homeRepo":"acme_team","mainHost":"main","workerHost":"worker","memory":"Memory","socialWorld":"social","opsRepo":"ops","org":"Acme","socialProduct":"SocialApp","deployer":"Deployer","vault":"Vault","sites":{"teamUrl":"https://team.example.com",`);
     expect(out).toMatch(/"bookQuestionsUrl":""\}\}<\/script><meta charset/);
     expect(out.indexOf("__IDENTITY__")).toBeLessThan(out.indexOf("/assets/a.js"));
     expect(withIdentity(out, ID)).toBe(out);
@@ -49,7 +49,7 @@ describe("the app page carries the identity", () => {
       const app = createApp(openDb(":memory:"), { staticDir: dir });
       const res = await app.request("/some/page");
       expect(res.status).toBe(200);
-      expect(await res.text()).toContain(`window.__IDENTITY__={"owner":"Sam","homeWorld":"acme","homeRepo":"acme_team","mainHost":"main","workerHost":"worker","memory":"Memory","socialWorld":"social","opsRepo":"ops","org":"Acme","socialProduct":"SocialApp","deployer":"Deployer","sites":{`);
+      expect(await res.text()).toContain(`window.__IDENTITY__={"owner":"Sam","homeWorld":"acme","homeRepo":"acme_team","mainHost":"main","workerHost":"worker","memory":"Memory","socialWorld":"social","opsRepo":"ops","org":"Acme","socialProduct":"SocialApp","deployer":"Deployer","vault":"Vault","sites":{`);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

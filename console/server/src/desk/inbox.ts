@@ -114,6 +114,13 @@ export function parseNote(file: string, text: string): DeskNote | undefined {
   };
 }
 
+/**
+ * every sweep (urgent notes, desk-note pass, wake news) re-read and re-parsed every world's inbox, about 2,000
+ * files and 8 MB on 22 Nov, synchronously (up to 0.9 s of one blocked event loop); a note is parsed again only when its
+ * file's mtime or size changes.
+ */
+const noteCache = new Map<string, { sig: string; note: DeskNote | undefined }>();
+
 /** Every note in the checkout's desk inbox (README and files without frontmatter skipped), oldest name first. */
 export function readInbox(checkoutDir: string): DeskNote[] {
   const dir = path.join(checkoutDir, DESK_INBOX_DIR);
@@ -124,14 +131,24 @@ export function readInbox(checkoutDir: string): DeskNote[] {
     return [];
   }
   const out: DeskNote[] = [];
+  const seen = new Set<string>();
   for (const n of names.sort()) {
+    const f = path.join(dir, n);
+    seen.add(f);
     try {
-      const note = parseNote(`${DESK_INBOX_DIR}/${n}`, fs.readFileSync(path.join(dir, n), "utf8"));
-      if (note) out.push(note);
+      const st = fs.statSync(f);
+      const sig = `${st.mtimeMs}:${st.size}`;
+      let hit = noteCache.get(f);
+      if (!hit || hit.sig !== sig) {
+        hit = { sig, note: parseNote(`${DESK_INBOX_DIR}/${n}`, fs.readFileSync(f, "utf8")) };
+        noteCache.set(f, hit);
+      }
+      if (hit.note) out.push({ ...hit.note });
     } catch {
       /* unreadable: skipped */
     }
   }
+  for (const f of noteCache.keys()) if (f.startsWith(dir + path.sep) && !seen.has(f)) noteCache.delete(f); // gone from the inbox
   return out;
 }
 

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { requestIdOf, type RequestRow, type RequestRows } from "./requests.js";
 import { classifyRefusal, refusalText } from "../cycle/capRefusal.js";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import type { Store, Persona } from "../store.js";
@@ -196,6 +197,10 @@ export interface DeskMessage {
    */
   note?: string;
   truncated?: boolean;
+  /** his message's request id (one request, one ticket row; desk/requests.ts requestIdOf). */
+  request?: string;
+  /** the ticket rows holding that request id now; [] = on no row yet; unset = not read yet. */
+  rows?: RequestRow[];
   /** the item's position in the T3 thread (`?before=<position>` pages older messages). */
   position?: number;
 }
@@ -266,6 +271,8 @@ export function readChat(chat: Pick<ChatSession, "view" | "earlier">, o: ViewOpt
 
 export interface SessionDeps {
   db: DB;
+  /** which ticket rows hold each request id (one request, one row); unset = his messages show no ticket line. */
+  requestRows?: RequestRows;
   store: Store;
   /** a desk persona made on first need also gets its file in the world's team repo (best effort, logged). */
   personaCreated?: (p: Persona, world: string) => void;
@@ -524,7 +531,9 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     }
     const hint = m.role === "user" ? PAGE_PREFIX.exec(m.text) : null;
     const said = m.role === "user" ? splitSince(hint ? m.text.slice(hint[0].length) : m.text) : { text: dropLabelLine(m.text) };
-    return { ...base, kind: "message", text: said.text, ...(hint ? { page: hint[1] } : {}), ...(said.since ? { since: said.since } : {}) };
+    const request = m.role === "user" ? requestIdOf(m.itemId, said.text) : undefined;
+    const rows = request ? d.requestRows?.rowsOf(request) : undefined;
+    return { ...base, kind: "message", text: said.text, ...(hint ? { page: hint[1] } : {}), ...(said.since ? { since: said.since } : {}), ...(request ? { request } : {}), ...(rows ? { rows } : {}) };
   };
 
   // ---- the one session of this key ----
@@ -847,11 +856,15 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   }
 
   /** the owner's own messages in the live thread (plumbing excluded, page hint stripped), oldest first. */
-  async function jordiMessages(): Promise<{ text: string; at?: string; position: number }[]> {
+  async function jordiMessages(): Promise<{ text: string; at?: string; position: number; request?: string }[]> {
     const s = current();
     if (!s || !d.t3) return [];
     const all = [...(await refresh(s.threadId)).values()].filter((m) => m.role === "user").sort((a, b) => a.position - b.position);
-    return all.filter((m) => !isPlumbing(m.text)).map((m) => ({ text: splitSince(m.text.replace(PAGE_PREFIX, "")).text, at: m.updatedAt, position: m.position }));
+    return all.filter((m) => !isPlumbing(m.text)).map((m) => {
+      const text = splitSince(m.text.replace(PAGE_PREFIX, "")).text;
+      const request = requestIdOf(m.itemId, text);
+      return { text, at: m.updatedAt, position: m.position, ...(request ? { request } : {}) };
+    });
   }
 
   /** The newest user-role message in the live thread, plumbing included (the stamp guard needs to know whose it is). */
@@ -910,10 +923,16 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     d.db.prepare("SELECT * FROM desk_outbox WHERE desk_key = ? AND sent_at IS NULL AND failed_at IS NULL ORDER BY seq").all(p.key) as OutboxRow[];
   const queued = (): QueuedMessage[] =>
     unsent().map((r) => ({ id: `queued-${r.seq}`, text: r.text, ...(r.page ? { page: r.page } : {}), at: r.created_at }));
-  /** Store a send for later (a retried request with the same clientRequestId is stored once). */
+  /**
+   * Store a send for later (a retried request with the same clientRequestId is stored once). A held send that failed is
+   * held again by its retry (a voice note keeps one request id for life, so a failed row must not swallow it);
+   * one already sent stays sent (T3 drops the repeat).
+   */
   function enqueue(clientRequestId: string, text: string, page: string | undefined, message: string) {
     d.db
-      .prepare("INSERT OR IGNORE INTO desk_outbox (desk_key, client_request_id, text, page, message, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO desk_outbox (desk_key, client_request_id, text, page, message, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(client_request_id) DO UPDATE SET failed_at = NULL, error = NULL WHERE sent_at IS NULL AND failed_at IS NOT NULL",
+      )
       .run(p.key, clientRequestId, text, page ?? null, message, iso());
     console.log(`desk ${p.key}: T3 is down, send ${clientRequestId} queued`);
   }

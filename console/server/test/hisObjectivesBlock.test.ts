@@ -62,3 +62,65 @@ describe("no invented name", () => {
     expect(dropLabelLine("Done: the plot of land by the lake.")).toBe("Done: the plot of land by the lake.");
   });
 });
+
+// his newest word wins at wake, at the desk and in every worker brief; older words marked, never mixed in.
+import { chatSection, inForceWords, newestWordsSection, replacesMarker, NEWEST_HEAD } from "../src/desk/hisObjectives.js";
+import { objectivesBlock } from "../src/objectives.js";
+import { workerMessage } from "../src/cycle/workerLaunch.js";
+
+describe("his newest word wins", () => {
+  const house = {
+    id: "buy-house",
+    name: "House: Buy a house",
+    match: [["house"]],
+    aim: { words: "a house in Tenerife south", said: "2026-11-10T00:00Z" },
+    after: { words: "buying a house is the number one objective", said: "2026-11-22T20:20Z", via: "voice note" },
+    earlier: [
+      { words: "the house search is on the Canary Islands", said: "2026-11-18T10:00Z", state: "replaced" as const, by: "2026-11-22T20:20Z" },
+      { words: "he kicked me out of the house", said: "2026-11-22T16:39Z", state: "stands" as const },
+    ],
+  };
+  it("an older aim never beats his newer words, and the words in force say what they replace", () => {
+    expect(inForceWords(house)?.words).toBe("buying a house is the number one objective");
+    expect(replacesMarker(house)).toContain('replaces 11-10 "a house in Tenerife south"');
+    expect(inForceWords({ ...house, aim: { words: "new aim", said: "2026-11-23T00:00Z" } })?.words).toBe("new aim");
+  });
+  it("the wake's objectives block shows the newest word in force with what it replaces", () => {
+    const b = objectivesBlock({ nodes: [{ id: "buy-house", kind: "pursuit", name: "House: Buy a house", rank: 1, greens: 0, total: 2 }] } as never, { objectives: [house] });
+    expect(b).toContain("His newest word wins");
+    expect(b).toContain('in force (replaces his word of 11-10): "buying a house is the number one objective"');
+    expect(b).not.toMatch(/his words[^\n]*Tenerife south"[^\n]*in force/);
+  });
+  it("a block too long for its budget still shows his words in force and what they replace on every line", () => {
+    const long = "x".repeat(400);
+    const nodes = Array.from({ length: 12 }, (_, i) => ({ id: i ? `o${i}` : "buy-house", kind: "pursuit", name: i ? `Acme: Goal ${i} ${long}` : "House: Buy a house", rank: i + 1, greens: 0, total: 2 }));
+    const b = objectivesBlock({ nodes } as never, { objectives: [house] });
+    const line = b.split("\n").find((l) => l.startsWith("1. "))!;
+    expect(line).toContain("in force (replaces his word of 11-10)");
+  });
+  it("a worker brief naming the objective opens with his newest words, older ones marked", () => {
+    const s = newestWordsSection({ objectives: [house] }, "Row E907-S3: the house objective's key results");
+    expect(s.startsWith(`## ${NEWEST_HEAD}`)).toBe(true);
+    expect(s.indexOf("in force 2026-11-22T20:20")).toBeLessThan(s.indexOf("replaced by his words of 2026-11-22"));
+    expect(s).toContain('stands: 2026-11-22T16:39 "he kicked me out of the house"');
+    const m = workerMessage({ base: "http://x", runId: "r", parentRunId: "p", ticket: "E907-S3", brief: "Do the house key results.", newest: s });
+    expect(m.indexOf(NEWEST_HEAD)).toBeLessThan(m.indexOf("Do the house key results."));
+    expect(newestWordsSection({ objectives: [house] }, "nothing about it")).toBe("");
+  });
+  it("a campaign wake under no objective gets his words as the Chat tab, read before it plans", () => {
+    const s = chatSection({ objectives: [house] }, "House: Buy a house", "home-repo");
+    expect(s.startsWith(`## His words, the Chat tab (read before you plan): ${NEWEST_HEAD}`)).toBe(true);
+    expect(s).toContain("buying a house is the number one objective");
+    expect(s).toContain("scripts/card_notes.py words <row>");
+    expect(chatSection({ objectives: [house] }, "nothing about it", "home-repo")).toBe("");
+  });
+});
+
+import { wakeStub } from "../src/cycle/prompts.js";
+describe("the wake message itself carries where we are and his newest word", () => {
+  it("puts the first lines before the fetch, so a persona that never reads the fetched prompt still has them", () => {
+    const s = wakeStub("http://x", "as_1", { clientRequestId: "run_1", first: "Read first (House: Buy a house):\n- Where we are now: two viewings booked" });
+    expect(s.indexOf("Where we are now: two viewings booked")).toBeLessThan(s.indexOf("/api/assignments/as_1/wake"));
+    expect(wakeStub("http://x", "as_1", { first: "  " })).not.toContain("Read first");
+  });
+});

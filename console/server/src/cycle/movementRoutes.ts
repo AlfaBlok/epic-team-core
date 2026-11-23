@@ -131,7 +131,7 @@ export function createMovement(d: MovementDeps) {
       try {
         const run = await d.runNow(assignmentId, stallNote(fires));
         // a wake still running gets the note queued (startGuard "queued"), never a second wake
-        const queued = run.startGuard === "queued";
+        const queued = run.startGuard === "queued" || run.startGuard === "held" || run.startGuard === "handled";
         fired.push({ assignmentId, runId: run.id, epics: fires.map((f) => f.path), ...(queued ? { queued } : {}) });
         d.log?.(`stall watch: ${queued ? "note queued into running" : "Run now"} ${assignmentId} → ${run.id} (${fires.map((f) => f.path).join(", ")})`);
       } catch (e) {

@@ -13,7 +13,7 @@ w("docs/totems/every-product.json", { totems: [], trackers: { tables: [{ id: "in
 w("docs/totems/a.json", { product: "alpha", name: "Alpha", objectives: ["alpha-live"], totems: [], trackers: { tables: [{ id: "editors", name: "Video editors", columns: ["Name", "Status"] }] } });
 w("docs/totems/b.json", { product: "beta", name: "Beta", objectives: [], totems: [], trackers: { tables: [{ id: "venues", name: "Venues", columns: ["Name", "Status"] }] } });
 w("docs/trackers/alpha-live/influencers.csv", 'Name,Where,Status,Reply\nAna,"X, YouTube",contacted,\nBo,LinkedIn,replied,"yes, a quote"\nCy,X,contacted,\n');
-w("docs/trackers/alpha-live/tables.json", { tables: [{ id: "podcasts", name: "Podcasts", columns: ["Name", "Status"], yes: "" }, { id: "editors", name: "dup", columns: ["Name", "Status"] }] });
+w("docs/trackers/alpha-live/tables.json", { tables: [{ id: "podcasts", name: "Podcasts", columns: ["Name", "Status", "Where"], shown: ["Status", "Nope"], yes: "" }, { id: "editors", name: "dup", columns: ["Name", "Status"] }] });
 
 describe("wheelTrackers", () => {
   it("gives a wheel the frame's tables first, then its product's, then its own; the frame ships empty", () => {
@@ -25,6 +25,9 @@ describe("wheelTrackers", () => {
     expect(inf.rows).toEqual([["Ana", "X, YouTube", "contacted", ""], ["Bo", "LinkedIn", "replied", "yes, a quote"], ["Cy", "X", "contacted", ""]]);
     expect(inf.counts).toEqual([{ status: "contacted", n: 2 }, { status: "replied", n: 1 }]);
     expect(t.tables[1].rows).toEqual([]);
+    // a table's folded line names its columns, the name always first; none named: every column
+    expect(t.tables[2].shown).toEqual(["Name", "Status"]);
+    expect(inf.shown).toBeUndefined();
   });
   it("keeps a Wave column as plain data and shows no wave file", () => {
     const h = fs.mkdtempSync(path.join(os.tmpdir(), "trackers-wave-"));

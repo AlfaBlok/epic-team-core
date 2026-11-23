@@ -2,10 +2,10 @@ import { createContext, useContext, useEffect, useState, type FormEvent, type Re
 import { BundleButtons, SEAT_WORDS, usePlan } from "./buyPlan";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Building2, Presentation, ChevronDown, ChevronRight, Bot, GitFork, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, MessagesSquare, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, Ticket, Zap, ListChecks, Crosshair, Pin, Armchair, Server, UserPlus, AudioLines, LayoutDashboard, KeyRound, Sparkles, Coins, Globe } from "lucide-react";
+import { Activity, BarChart3, Building2, Presentation, Bot, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, ListChecks, Crosshair, Pin, Armchair, Server, KeyRound, Sparkles, Coins, Globe, Search as SearchIcon } from "lucide-react";
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
 import { OtherWorldsPill } from "@/components/otherWorlds";
-import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type WorldCounts } from "@/api";
+import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type ReviewItem, type WorldCounts } from "@/api";
 import { useQuery, useSharedQuery } from "@/lib/data";
 import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { useSnoozes } from "@/lib/snooze";
@@ -28,7 +28,7 @@ import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
 import { COMPANY_PATH } from "@/lib/company";
-import { GAP_FINDER_PATH, NEW_CAMPAIGN_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
+import { GAP_FINDER_PATH, NEW_CAMPAIGN_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
 import { SETTINGS_PATH, useOperatorPages, useToolPages } from "@/lib/settingsPath";
 import { useCompanyView } from "@/lib/companyView";
 import { useGapFinder } from "@/lib/gapFinder";
@@ -38,12 +38,14 @@ import { campaignMilestones, useCampaigns } from "@/lib/campaign";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import { PERFORMANCE_PATH, PRODUCT_PATH } from "@/pages/social/nav";
 import { MESSAGES_PATH, useMessages } from "@/lib/messages";
+import { OBJECTIVE_SEARCH_PATH } from "@/lib/objectiveSearch";
 import { CountPill, PILL_TITLES } from "@/components/homeSection";
 import { AfterCloseNote } from "@/components/afterClose";
 import { TopBarVoice } from "@/voice/TopBarVoice";
 import { knownWorld } from "@/lib/useSocial";
 import { deskVoiceBase } from "@/voice/deskBase";
 import { homeWorld } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 // The New milestone dialog loads its script the first time it opens, not with the first screen.
 const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
@@ -276,6 +278,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           Product
         </NavLink>
       )}
+      {/* Post stats in the social skin too (the owner, 22 Nov: "I don't mind having it in both places"). */}
+      {shows("postStats") && campaigns && (
+        <NavLink to={`/${X_STATS_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-x-stats">
+          <BarChart3 className="h-4 w-4" />
+          Post stats
+        </NavLink>
+      )}
       {/* Messages (DMs) under Pipeline (social) or Chat (console), in a world with a social repo; its pill counts the chats that need the owner. */}
       {shows("messages") && <MessagesNav onNavigate={onNavigate} />}
     </>
@@ -299,7 +308,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           data-testid="sidebar-more-toggle"
           onClick={() => setMoreOpen(!moreOpen)}
         >
-          {moreOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <FoldChevron open={moreOpen} />
           More
           <span className="ml-auto text-xs">{moreOpen ? "" : "all else"}</span>
         </button>
@@ -310,7 +319,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const rootLink = (m: Milestone) => <MilestoneGoalLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={milestoneInbox(statuses, allCards, m.id, snoozing)} onNavigate={onNavigate} />;
 
   // ---- the console skin's sidebar as the owner approved it ("Yes: build it" on the mock-up):
-  // Inbox and Chat, his objectives (pinned in his order, then one folded More objectives), Tools folded, Settings
+  // Inbox and Chat, his objectives (one list in his order, no Other goals), Tools folded, Settings
   // folded, Worlds last. Nothing is removed: every page keeps its entry, inside a fold.
   const { pathname } = useLocation();
   const hasObjectives = shows("goalSets") && topObjectives(sets.data?.nodes).length > 0;
@@ -325,23 +334,20 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {hasObjectives ? ADD_OBJECTIVE : w.addMilestone}
     </button>
   );
-  // every goal no objective holds (the house, travel, hair) sits in More objectives, his focus ones first.
+  // the goal links: shown only while there are no objectives yet (a fresh workspace); with objectives, none.
   const goalLinks = [
     ...page.roots.map(rootLink),
     ...page.rest.map(rootLink),
     ...(page.hidden > 0 ? [<LoadMore key="load-more" hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} testId="sidebar-load-more" />] : []),
   ];
-  const goalsAsk = new Set([...roots, ...rest].flatMap((m) => blockedItems(statusOf(statuses, m.id), { snoozing }).map((i) => i.id))).size;
-  const goalsReview = [...roots, ...rest].reduce((n, m) => n + reviewOf(allCards, m.id), 0);
-  // Tools: every page you read, nothing to change there (settings are only what he changes), in the mock-up's order.
+  // Tools: every page you read, nothing to change there (settings are only what he changes), in his order of 22 Nov
+  // (his tool-by-tool note): Runs left for the top, Spines, Threads, Tickets, Voice feedback, Dashboard and Applications
+  // left the menu (their pages still open by address), One-offs became an objective, the Company map sits under the objectives.
   const tools: ToolEntry[] = [
     ...consoleTools(shows, !!gapFinder?.on, pinnedPages.data?.pinned),
-    ...(shows("spines") ? [{ to: "/spines", label: w.spines, icon: GitFork, testId: "nav-spines" }] : []),
-    ...(shows("runs") ? [{ to: "/runs", label: w.runs, icon: Activity, testId: "nav-runs" }] : []),
-    ...(shows("threads") ? [{ to: "/threads", label: w.threads, icon: MessagesSquare, testId: "nav-threads" }] : []),
-    ...(shows("tickets") ? [{ to: "/tickets", label: w.tickets, icon: Ticket, testId: "nav-tickets" }] : []),
-    ...toolPages.map((p) => ({ to: p.to, label: p.label, icon: TOOL_ICONS[p.testId] ?? Files, testId: `nav-tool-${p.testId.slice(3)}` })),
+    ...toolPages.filter((p) => TOOL_KEEP.has(p.testId)).map((p) => ({ to: p.to, label: p.label, icon: TOOL_ICONS[p.testId] ?? Files, testId: `nav-tool-${p.testId.slice(3)}` })),
   ];
+  const companyMap = companyMapPin(pinnedPages.data?.pinned);
   // Settings: only what he changes (settings are only what he changes): personas he switches, priority mode, keys, sign-ins, skills, credits.
   const settings: ToolEntry[] = [
     ...(shows("settings") ? [{ to: `/${SETTINGS_PATH}`, label: "All settings", icon: Settings, testId: "nav-settings-link", end: true }] : []),
@@ -356,20 +362,22 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const consoleMenu = (
     <>
       {hasObjectives ? (
-        <SidebarGoalSetsOf
-          data={sets.data}
-          onNavigate={onNavigate}
-          more={{
-            links: goalLinks.length ? [<div key="goals" className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-milestones">{goalLinks}</div>] : [],
-            count: roots.length + rest.length,
-            ask: goalsAsk,
-            review: goalsReview,
-            loading: restLoading,
-            active: [...roots, ...rest].some((m) => pathname.startsWith(`/milestones/${m.id}`) || pathname.startsWith(`/milestones/${encodeURIComponent(m.id)}`)),
-          }}
-          footer={addGoal}
-          products={false}
-        />
+        <>
+          <SidebarGoalSetsOf
+            data={sets.data}
+            onNavigate={onNavigate}
+            footer={
+              <>
+                {addGoal}
+                {companyMap && <CompanyMapLink pin={companyMap} onNavigate={onNavigate} />}
+              </>
+            }
+            products={false}
+          />
+          {/* (the owner, 22 Nov: "I don't want to see a single word, a single objective that doesn't
+              have key results"): no Other goals fold. A goal no objective holds is not in the sidebar; each old one became
+              a full objective with key results or was retired (docs/pursuits.json retired), its page kept at its link. */}
+        </>
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-milestones">
           <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground" data-testid="sidebar-focus-heading">
@@ -469,6 +477,21 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             <Pills chat={counts?.chat} ids={{ chat: "chat-unread" }} />
           </NavLink>
         )}
+        {/* Runs high (the owner, 22 Nov: "Runs I would make much higher. That's the one I actually use the most"). */}
+        {shows("runs") && !campaigns && (
+          <NavLink to="/runs" className={itemClass} onClick={onNavigate} data-testid="nav-runs">
+            <Activity className="h-4 w-4" />
+            {w.runs}
+          </NavLink>
+        )}
+        {/* the owner (vn_de2da36f): "a search feature ... across all the objectives and all the key results and
+            all the tickets attached to them ... in the top left section with inbox, chat, runs, messages": the console skin, after Runs (Inbox stays first). */}
+        {shows("goalSets") && !campaigns && (
+          <NavLink to={`/${OBJECTIVE_SEARCH_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-search">
+            <SearchIcon className="h-4 w-4" />
+            Search
+          </NavLink>
+        )}
         {/* the Company view, an extra lens beside the Team home (his one inbox stays). */}
         {shows("company") && companyView && (
           <NavLink to={`/${COMPANY_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-company">
@@ -510,7 +533,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             data-testid="other-milestones-toggle"
             onClick={() => setOthersOpen(!othersOpen)}
           >
-            {othersOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            <FoldChevron open={othersOpen} />
             {campaigns ? `Other ${w.milestonesWord}` : MORE_GOALS} ({rest.length})
             {!othersOpen && restLoading && <CountLoading className="ml-auto" />}
             {!othersOpen && (
@@ -543,12 +566,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       )}
 
       <nav className="mt-auto grid min-w-0 grid-cols-1 gap-0.5 border-t pt-3" aria-label="Console pages" data-testid="nav-pages">
-        {shows("spines") && (
-          <NavLink to="/spines" className={itemClass} onClick={onNavigate}>
-            <GitFork className="h-4 w-4" />
-            {w.spines}
-          </NavLink>
-        )}
         {shows("personas") && (
           <NavLink to="/personas" className={itemClass} onClick={onNavigate}>
             <Bot className="h-4 w-4" />
@@ -568,19 +585,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             Priority mode
           </NavLink>
         )}
-        {shows("threads") && (
-          <NavLink to="/threads" className={itemClass} onClick={onNavigate}>
-            <MessagesSquare className="h-4 w-4" />
-            {w.threads}
-          </NavLink>
-        )}
-        {shows("tickets") && (
-          <NavLink to="/tickets" className={itemClass} onClick={onNavigate}>
-            <Ticket className="h-4 w-4" />
-            {w.tickets}
-          </NavLink>
-        )}
-        {toolPages.map((p) => {
+        {toolPages.filter((p) => TOOL_KEEP.has(p.testId)).map((p) => {
           const Icon = TOOL_ICONS[p.testId] ?? Files;
           return (
             <NavLink key={p.to} to={p.to} className={itemClass} onClick={onNavigate} data-testid={`nav-tool-${p.testId.slice(3)}`}>
@@ -694,10 +699,34 @@ export function SidebarWarm() {
 const TOOL_ICONS: Record<string, typeof Files> = {
   "op-seats": Armchair,
   "op-hosts": Server,
-  "op-applications": UserPlus,
-  "op-feedback": AudioLines,
-  "op-dashboard": LayoutDashboard,
 };
+/**
+ * the read-only pages kept in Tools (the owner, 22 Nov: "Seats, I would leave. Hosts, I would leave"). Applications
+ * ("This doesn't belong here ... you need to give me an option for it"), Voice feedback ("I don't get voice feedback") and
+ * Dashboard ("a legacy thing") left the menu; their pages still open by address.
+ */
+export const TOOL_KEEP: ReadonlySet<string> = new Set(["op-seats", "op-hosts"]);
+
+/** the Company map's pin (slug company): it is no tool, it sits under the objectives as the map of all of them. */
+export const companyMapPin = <P extends { slug?: string }>(pinned: P[] | undefined): P | undefined => pinned?.find((p) => p.slug === "company");
+
+/** under the objectives: the Company map, named for what it is (his 22 Nov note: "is this a tool? ... more about the full context"). */
+function CompanyMapLink({ pin, onNavigate }: { pin: { slug?: string; url: string; title?: string }; onNavigate?: () => void }) {
+  return (
+    <a
+      href={pin.slug ? `/${pin.slug}` : pin.url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+      onClick={onNavigate}
+      data-testid="nav-company-map"
+      title="Every product and its goals on one map"
+    >
+      <Building2 className="h-4 w-4" />
+      All products on one map
+    </a>
+  );
+}
 
 /** the console's add button under the objectives ("Add project becomes Add objective"). */
 export const ADD_OBJECTIVE = "Add objective";
@@ -705,21 +734,22 @@ export const ADD_OBJECTIVE = "Add objective";
 type ToolEntry = { to: string; label: string; icon: typeof Files; testId: string; end?: boolean; external?: boolean; title?: string };
 
 /**
- * the Tools fold's pages in the approved mock-up's order: Voice notes (one entry; a pinned page named "… voice
- * notes" folds into it), Pages, One-offs, Outcomes, the other pages he pinned by name, X stats, Gap finder.
+ * the Tools fold's pages in the owner's order of 22 Nov: Pages, Post stats, the pages he pinned by name
+ * (the Company map leaves for the objectives), Persona outcomes, Voice notes (kept, "not make it the first one"; a pinned
+ * page named "… voice notes" folds into it), Gap finder. One-offs left: it is the objective "Handle one-offs" now.
  */
 export function consoleTools(shows: (s: ScreenId) => boolean, gapFinderOn: boolean, pinned: { name?: string; slug?: string; url: string; title?: string }[] | undefined): ToolEntry[] {
   const pages = morePages(shows, false, gapFinderOn);
   const by = (id: string) => pages.filter((p) => p.testId === id);
   const pins: ToolEntry[] = (pinned ?? [])
-    .filter((p) => !isVoiceNotesPin(p))
+    .filter((p) => !isVoiceNotesPin(p) && p.slug !== "company")
     .map((p) => ({ to: p.slug ? `/${p.slug}` : p.url, label: p.name ?? p.title ?? p.url, icon: Pin, testId: "nav-pinned-page", external: true, title: p.title }));
   if (!pages.length) return pins;
-  return [...by("nav-voice-notes"), ...by("nav-pages-list"), ...by("nav-one-offs"), ...by("nav-outcomes"), ...pins, ...by("nav-x-stats"), ...by("nav-gap-finder")];
+  return [...by("nav-pages-list"), ...by("nav-x-stats"), ...pins, ...by("nav-outcomes"), ...by("nav-voice-notes"), ...by("nav-gap-finder")];
 }
 
 /** one folded group of the console's sidebar (Tools, Settings): a header with its count, its pages when open. */
-function SidebarFold({ label, items, open, onToggle, onNavigate, testId, className, children }: { label: string; items: ToolEntry[]; open: boolean; onToggle: () => void; onNavigate?: () => void; testId: string; className?: string; children?: ReactNode }) {
+function SidebarFold({ label, items, open, onToggle, onNavigate, testId, className, children, count, badge }: { label: string; items: ToolEntry[]; open: boolean; onToggle: () => void; onNavigate?: () => void; testId: string; className?: string; children?: ReactNode; count?: number; badge?: ReactNode }) {
   if (!items.length && !children) return null;
   return (
     <nav className={cn("grid min-w-0 grid-cols-1 gap-0.5 pt-3", className)} aria-label={label} data-testid={testId}>
@@ -730,9 +760,10 @@ function SidebarFold({ label, items, open, onToggle, onNavigate, testId, classNa
         data-testid={`${testId}-toggle`}
         onClick={onToggle}
       >
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <FoldChevron open={open} />
         {label}
-        <span className="text-xs tabular-nums" data-testid={`${testId}-count`}>{items.length}</span>
+        <span className="text-xs tabular-nums" data-testid={`${testId}-count`}>{count ?? items.length}</span>
+        {!open && badge}
       </button>
       {open && (
         <div className="grid min-w-0 grid-cols-1 gap-0.5 pl-3" data-testid={`${testId}-list`}>
@@ -858,7 +889,7 @@ export function AccountBlock() {
 }
 
 type StatusBatch = { needsYou?: number | null; items?: PendingItem[] } | undefined;
-type Cards = { id: string; milestoneId?: string }[] | undefined;
+type Cards = Pick<ReviewItem, "id" | "milestoneId" | "ownerPriority" | "face">[] | undefined;
 
 /**
  * the social menu's pinned campaigns under their project's name,
@@ -899,7 +930,7 @@ function ProjectGroups({ roots, statuses, cards, onNavigate, link }: { roots: Mi
                 {worldMark(p.name)}
               </span>
               <span className="min-w-0 flex-1 truncate font-medium uppercase tracking-wider">{p.name}</span>
-              <Pills needsYou={blockedItems(statuses, { keep: keepIn(p), snoozing }).length} review={reviewCards(cards, { keep: keepIn(p) }).length} ids={{ needsYou: `project-${p.repo}-needs-you`, review: `project-${p.repo}-review` }} />
+              <Pills needsYou={blockedItems(statuses, { keep: keepIn(p), snoozing }).length + splitDecisions(reviewCards(cards, { keep: keepIn(p) })).decisions.length} review={splitDecisions(reviewCards(cards, { keep: keepIn(p) })).review.length} ids={{ needsYou: `project-${p.repo}-needs-you`, review: `project-${p.repo}-review` }} />
             </button>
             {ms.map(link)}
           </div>
@@ -947,7 +978,7 @@ export function ProjectSwitcher({ statuses, cards, onNavigate }: { statuses: Sta
                   {worldMark(p.name)}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                <Pills needsYou={blockedItems(statuses, { keep: keepIn(p), snoozing }).length} review={reviewCards(cards, { keep: keepIn(p) }).length} ids={{ needsYou: `project-${p.repo}-needs-you`, review: `project-${p.repo}-review` }} />
+                <Pills needsYou={blockedItems(statuses, { keep: keepIn(p), snoozing }).length + splitDecisions(reviewCards(cards, { keep: keepIn(p) })).decisions.length} review={splitDecisions(reviewCards(cards, { keep: keepIn(p) })).review.length} ids={{ needsYou: `project-${p.repo}-needs-you`, review: `project-${p.repo}-review` }} />
               </button>
             </li>
           );
@@ -1334,8 +1365,8 @@ export function morePages(shows: (s: ScreenId) => boolean, socialSkin: boolean, 
   const gap: MorePage[] = gapFinderOn ? [{ to: `/${GAP_FINDER_PATH}`, label: "Gap finder", icon: Radar, testId: "nav-gap-finder" }] : [];
   if (socialSkin) return gap;
   return [
-    { to: `/${ONE_OFFS_PATH}`, label: "One-offs", icon: Zap, testId: "nav-one-offs" },
-    { to: `/${OUTCOMES_PATH}`, label: "Outcomes", icon: ListChecks, testId: "nav-outcomes" },
+    // his 22 Nov note: "Outcomes ... remove it. Unless we're using this for persona outcomes": it is, so it says so.
+    { to: `/${OUTCOMES_PATH}`, label: "Persona outcomes", icon: ListChecks, testId: "nav-outcomes" },
     { to: `/${PAGES_PATH}`, label: "Pages", icon: Files, testId: "nav-pages-list" },
     { to: `/${VOICE_NOTES_PATH}`, label: "Voice notes", icon: Mic, testId: "nav-voice-notes" },
     { to: `/${X_STATS_PATH}`, label: "Post stats", icon: BarChart3, testId: "nav-x-stats" },

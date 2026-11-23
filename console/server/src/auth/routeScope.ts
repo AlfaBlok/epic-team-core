@@ -192,6 +192,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // a world's own secret backend (secrets/worlds.ts): names of its keys only, writes to its own store; worldStoreEncryptedPer.test.ts
   ["GET|POST", /^\/api\/secrets$/],
   ["POST", /^\/api\/secrets\/check$/],
+  // the linked data repo's key names and whether each was filled from the owner's vault (states, never a value)
+  ["GET|POST", /^\/api\/secrets\/from-repo$/],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/secret$`)],
   // what the social skin (the social site, a world's login) calls, found by the shadow on Campaigns. Campaigns and the
   // social writes key on the path's world (social/campaigns.ts `world`/`candidates`, social/write.ts `target`: worldRepos +
@@ -216,6 +218,11 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // the campaign's daily briefings (the morning talk kept on its campaign), through the same campaignMilestone;
   // only records naming that campaign's repo and remote are read (social/dailyBriefing.ts). dailyBriefing.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/briefings$`)],
+  // the campaign's Trackers tab: the tracker tables of the wheel it serves, through the same campaignMilestone; empty for a
+  // campaign outside the home product's own repos.
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/trackers$`)],
+  // the campaign's Plan tab: the plan of the wheel it serves (the same campaignWheels as Trackers), read only.
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/wheel-plan$`)],
   // the owner writes the Plan's eight sections (the campaign's own spine, through the same campaignMilestone).
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/plan/sections$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/(slide|slide/keep|slide/undo|observation|product-note)$`)], // product-note, a Product tab slide note
@@ -297,7 +304,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/(presses|owner-responses)/${ID}/undo$`)],
   // a press's state, so the page can say it landed (or why not); a world reads only its own presses (mount.ts)
   ["GET", new RegExp(`^/api/presses/${ID}$`)],
-  ["GET", /^\/api\/closed-cards$/],
+  ["GET", /^\/api\/(closed-cards|sent-back-cards)$/],
   // the pills. counts.ts reads the request-scoped store's milestones, its world's status view (viewWorld) and review rows
   // (worldGuard), and only that world's chats (its desk key + its milestones' keys); chat/seen marks the caller's desk or one of
   // its own milestones (another world's id is a 404). unreadRule.test.ts (both directions)
@@ -348,6 +355,10 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // option A: Voice notes from the memory service (a hosted services module) act only on the caller's world (servicesWorld, as
   // services: only the platform names another with ?world=); the OAuth callback finds its world by the one-time state and
   // refuses a caller that may not act for it; writes are the owner's. voiceNotesMemorySign.test.ts
+  // the files a wheel tab homes and opening one (homeFiles.ts): read from the home repo's map, answered only to the home
+  // world and the owner's social world (a campaign's History), any other world 404 in the handler. homeFiles.test.ts
+  ["GET", /^\/api\/homes\/[\w-]+\/[\w-]+$/],
+  ["GET", /^\/api\/homes\/file\/[\w.-]+\/.+$/],
   ["GET", /^\/api\/connections\/memory(\/callback)?$/],
   ["POST", /^\/api\/connections\/memory\/(connect|test|disconnect|backfill)$/],
   ["PUT", /^\/api\/connections\/memory\/settings$/],
@@ -381,7 +392,7 @@ export const DOOR_SAFE: [string, RegExp][] = [
   ["GET|POST", /^\/api\/review-items$/],
   ["GET", /^\/api\/review-goals(\/closed)?$/],
   ["POST", /^\/api\/(review-goals\/reopen|closed-cards\/comment|review-items\/reopen)$/],
-  ["GET", /^\/api\/closed-cards$/],
+  ["GET", /^\/api\/(closed-cards|sent-back-cards)$/],
   ["POST", new RegExp(`^/api/review-items/${ID}/(recheck|approve|complete|relaunch|deny|snooze)$`)],
   ["GET", new RegExp(`^/api/review-items/${ID}/screenshot$`)],
   ["POST", new RegExp(`^/api/(presses|owner-responses)/${ID}/undo$`)],
@@ -425,6 +436,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["DELETE", new RegExp(`^/api/access/tokens/${ID}$`)],
   ["GET", /^\/api\/access\/events$/],
   ["POST", /^\/api\/secrets$/],
+  ["POST", /^\/api\/secrets\/from-repo$/], // Fill again: the owner's login
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/secret$`)],
   ["POST", /^\/api\/mcp\/services$/],
   ["DELETE", new RegExp(`^/api/mcp/services/${ID}$`)],

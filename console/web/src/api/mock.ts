@@ -803,6 +803,10 @@ const mockMail = () => ({
         spineInfo: {},
       });
     },
+    // the sample's where-we-are: one written, the rest none yet.
+    async whereWeAre(id: string) {
+      return ok({ path: `docs/scorecards/${id}.md`, present: false, open: [], changed: [] });
+    },
     // every goal turns in the sample .
     async personaGaps() {
       return ok({ ok: true, gaps: [], checked: { objectives: SAMPLE_PURSUITS.pursuits.length, milestones: 0 }, at: new Date(0).toISOString() });
@@ -859,6 +863,11 @@ const mockMail = () => ({
       } else body.inactive = (body.inactive ?? []).filter((x) => x.id !== id);
       return ok({ ok: true as const });
     },
+    async setPursuitBriefing(id: string, on: boolean) {
+      const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
+      if (p) p.briefing = on || undefined;
+      return ok({ ok: true as const });
+    },
     async setPursuitDone(id: string, done: boolean) {
       const body = SAMPLE_PURSUITS;
       if (done) {
@@ -878,6 +887,10 @@ const mockMail = () => ({
     // one-off pages, a sample group.
     async listPages() {
       return ok(SAMPLE_PAGES);
+    },
+    // the files a tab homes: none in the sample.
+    async homeTab(product: string, tab: string) {
+      return ok({ product, tab, label: tab, repos: [], patterns: [], homed: 0, covered: 0, entries: [] });
     },
     async listPinnedPages() {
       return ok({ pinned: SAMPLE_PAGES.pinned ?? [] });
@@ -1470,16 +1483,68 @@ const mockMail = () => ({
     async getCampaignTotems() {
       return ok(mockTotems());
     },
-    /** a campaign with no plan written yet: every fixed section says so. */
-    async getObjectivePlan() {
-      return ok(unwrittenPlan());
+    /** a campaign's Plan tab: the plan of the wheel it serves, one key result with two steps. */
+    async getCampaignWheelPlan() {
+      return ok({
+        product: "Notes",
+        wheels: [
+          {
+            id: "notes-channels",
+            name: "Notes: Get every channel working",
+            keyResults: ["Every channel posted in the last 7 days"],
+            plan: {
+              id: "notes-channels",
+              path: "docs/scorecards/notes-channels.json",
+              present: true,
+              line: "Get LinkedIn posting, then every channel.",
+              keyResults: [{ kr: 1, how: "Post on LinkedIn first, then add X.", steps: [{ do: "LinkedIn posts every day", owner: "Engager", by: "2026-11-25", done: true }, { do: "X posts every day", owner: "Engager", by: "2026-11-28" }], greenWhen: "Every channel posted this week." }],
+            },
+          },
+        ],
+      });
+    },
+    /** a campaign's Trackers tab: its wheel's Influencers shortlist, two entries. */
+    async getCampaignTrackers() {
+      return ok({
+        product: "Notes",
+        wheels: [
+          {
+            wheel: "notes-channels",
+            name: "Notes: Get every channel working",
+            product: "notes",
+            tables: [{ id: "influencers", name: "Influencers", for: "people to invite as testers", columns: ["Name", "Where", "Status"], statuses: ["candidate", "contacted"], from: "own" as const, open: true, rows: [["Ada", "X", "candidate"], ["Bo", "Reddit", "contacted"]], counts: [{ status: "candidate", n: 1 }, { status: "contacted", n: 1 }], file: "docs/trackers/notes-channels/influencers.csv" }],
+          },
+        ],
+      });
+    },
+    /** an objective's wheel plan: how its first key result gets to green, one step done. */
+    async getObjectivePlan(id: string) {
+      return ok({
+        id,
+        path: `docs/scorecards/${id}.json`,
+        present: true,
+        line: "Get the first key result green this week, then the rest.",
+        by: "2026-12-05",
+        keyResults: [
+          {
+            kr: 1,
+            how: "Fix the one thing that blocks it first, then prove it on a real day.",
+            steps: [
+              { do: "Write the first step", changes: "everyone knows what comes first", owner: "Delivery Manager", by: "2026-11-24", done: true },
+              { do: "Ship the fix", changes: "the blocker is gone", owner: "Ticket worker", by: "2026-11-26", row: "E907-S3" },
+            ],
+            greenWhen: "a whole day runs with no miss",
+            ifStuck: "ask for the one decision that unblocks it",
+          },
+        ],
+      });
     },
     async getTotems() {
       return ok({
         statement: "Each product's data graph is the known map its personas read from at the start and write back to at the end.",
         every: { totems: [], grows: [] },
         products: [{ product: "notes", name: "Notes", repos: ["notes"], objectives: ["notes-live"], grows: [], totems: [
-          { id: "marketing-plan", name: "Marketing plan", shape: "page" as const, tab: "plan", lives: {} },
+          { id: "plan", name: "Plan", shape: "page" as const, tab: "plan", lives: {} },
           { id: "pricing", name: "Pricing", shape: "page" as const, tab: "pricing", lives: {} },
           { id: "launch-board", name: "Launch board", shape: "table" as const, tab: "launch", lives: { board: "notes" } },
         ] }],
@@ -1596,6 +1661,9 @@ const mockMail = () => ({
       return ok({});
     },
     async listClosedCards() {
+      return ok([]);
+    },
+    async listSentBackCards() {
       return ok([]);
     },
     async completeReviewItem(id: string, _pick: { start?: number[]; park?: number[]; why?: string[] }) {

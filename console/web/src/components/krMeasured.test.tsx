@@ -3,12 +3,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ScorecardRow } from "@/api/pursuit-types";
-import { KeyResultSheet, krMeasured } from "@/components/goalSets";
+import { KeyResultSheet, krAnswer, krMeasured } from "@/components/goalSets";
 
 afterEach(cleanup);
 const NOW = Date.parse("2026-11-16T06:00:00Z");
 
 describe("krMeasured", () => {
+  it("a row its check reads is measured, never 'nothing measures this yet'", () => {
+    const m = krMeasured({ source: "scripts/kr_measures.py" });
+    expect(m.never).toBe(false);
+    expect(m.stale).toBe(false);
+    expect(m.words).toContain("read by scripts/kr_measures.py");
+  });
   it("names the hours since its measure and stays fresh inside a day", () => {
     expect(krMeasured({ measuredAt: "2026-11-16T03:00:00Z" }, NOW)).toEqual({ words: "measured 3 h ago", stale: false, never: false });
   });
@@ -36,5 +42,13 @@ describe("KeyResultSheet stale rows", () => {
     expect(items[1].className).toMatch(/grayscale/);
     expect(screen.getByTestId("kr-summary").textContent).toMatch(/1 stale, greyed/);
     expect(screen.getAllByTestId("kr-measured").map((e) => e.textContent)).toContain("nothing measures this yet");
+  });
+});
+
+describe("krAnswer counts a ready ticket as work", () => {
+  it("a key result with a ready row is not 'nothing working on it'", () => {
+    const r = { label: "A home", kind: "key-result", state: "red", value: "0", work: [{ code: "E907-S3", repo: "home", kind: "ticket", status: "ready" }] } as ScorecardRow;
+    expect(krAnswer([r])).not.toContain("nothing working");
+    expect(krAnswer([{ ...r, work: [] }])).toContain("nothing working on it");
   });
 });

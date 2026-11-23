@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import type { SocialData, SocialInsight } from "@/api/types";
 import { useSectionOpen } from "@/components/homeSection";
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,11 @@ import { LimitControl, ListPane, limitList, useListLimit } from "@/components/li
 import { DigestPage } from "@/pages/Digest";
 import { ReportPage } from "@/pages/Report";
 import { dayLabel, FeedbackBox, OutLink, PostActions, PostBadge, SocialScreen, WriteNoteLine } from "./parts";
+import { FoldChevron } from "@/components/foldChevron";
+import { HomeFilesList, useHomeTab } from "@/components/wheelPages";
+import type { HomeEntry } from "@/api/pages-types";
+import { sameRepo } from "@/lib/repoNames";
+import { repoKey } from "@/lib/scorecards";
 
 /**
  * History (deck v3 slide 15): everything we posted, with its link, numbers and your feedback. Feedback after the
@@ -76,7 +80,7 @@ export function WhatsWorking({ s }: { s: SocialData | undefined }) {
   return (
     <section className="rounded-lg border px-3 py-2" data-testid="whats-working">
       <button type="button" className="flex w-full items-center gap-1.5 text-left text-sm font-medium" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+        <FoldChevron open={open} />
         What's working · {lines.length} active
         <span className="font-normal text-muted-foreground">· Reporter, weekly{since ? ` · ${since}` : ""}</span>
       </button>
@@ -99,6 +103,44 @@ export function WhatsWorking({ s }: { s: SocialData | undefined }) {
   );
 }
 
+/**
+ * The files History homes (weekly logs, outcome notes; the product's map in docs/totems), for this campaign: its own
+ * spine's logs first, then every other homed file of its repo (the root log, the daily outcomes, the logs of campaigns
+ * that have no page now), so no file of the repo is missing from any of its campaigns. No campaign named: the repo's.
+ */
+export function historyFilesOf(entries: HomeEntry[] | undefined, repo: string | null | undefined, campaignPath: string | undefined): { own: HomeEntry[]; rest: HomeEntry[] } {
+  if (!entries || !repo) return { own: [], rest: [] };
+  const mine = entries.filter((e) => sameRepo(e.repo, repo) || repoKey(e.repo) === repoKey(repo));
+  const own = campaignPath?.replace(/^\.\//, "");
+  if (!own) return { own: mine, rest: [] };
+  return { own: mine.filter((e) => e.spine === own), rest: mine.filter((e) => e.spine !== own) };
+}
+
+export function HistoryFiles({ s }: { s: SocialData | undefined }) {
+  return <HistoryFilesFor repo={s?.repo} path={s?.campaign?.path} campaign={!!s?.campaign} />;
+}
+
+/** a campaign's (or a repo's) homed History files: its own weekly logs, then the rest of its repo's in a fold. */
+export function HistoryFilesFor({ repo, path, campaign }: { repo: string | null | undefined; path: string | undefined; campaign: boolean }) {
+  const q = useHomeTab("all", "history");
+  const { own, rest } = useMemo(() => historyFilesOf(q.data?.entries, repo, path), [q.data, repo, path]);
+  const [open, setOpen] = useSectionOpen("history-files-rest", false);
+  return (
+    <div className="grid gap-2">
+      <HomeFilesList entries={own} loading={q.loading} title={campaign ? "This campaign's weekly logs" : "Weekly logs and notes"} empty="No weekly log kept for this campaign yet." testId="history-files" />
+      {rest.length > 0 && (
+        <section className="grid gap-2" data-testid="history-files-rest" data-count={rest.length}>
+          <button type="button" className="flex w-full items-center gap-1.5 text-left text-sm font-medium" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="history-files-rest-toggle">
+            <FoldChevron open={open} />
+            The rest of this repo's logs and notes <span className="font-normal tabular-nums text-muted-foreground">{rest.length}</span>
+          </button>
+          {open && <HomeFilesList entries={rest} title="Logs and notes" empty="" testId="history-files-rest-list" />}
+        </section>
+      )}
+    </div>
+  );
+}
+
 export function HistoryPage() {
   const { social, error, write, busy, note } = useSocialScreen();
   const [kind, setKind] = useState<Kind>("all");
@@ -117,6 +159,7 @@ export function HistoryPage() {
       {() => (
         <div className="grid gap-3">
           <WhatsWorking s={social} />
+          <HistoryFiles s={social} />
           <WriteNoteLine note={note && rows.some((p) => isLive(p) && (note.scope === p.id || note.scope === `${p.id}#feedback`)) ? undefined : note} />
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Kind">

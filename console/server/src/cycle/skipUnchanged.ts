@@ -4,6 +4,7 @@ import path from "node:path";
 import type { OpenAsk, Run } from "../store.js";
 import type { Grant } from "./grants.js";
 import { newsPart } from "./wakeNews.js";
+import { stateDir } from "../identity.js";
 
 /**
  * an Unblocker cadence wake with nothing new since its last check is not started. Since "nothing new" is
@@ -152,8 +153,71 @@ export const DATA_FILE_CAP = 5000;
  * hash of every file under `<repoDir>/data/` (repo-relative path + content), order-independent; "" when there
  * is no data/ directory. Personas write typed files there (posts, ideas, feedback), so a change under data/ is news
  * for the next cadence wake, like a spine edit.
+ *
+ * A social world's data/ held 809 MB in 732 files, and every wake check read and hashed all of it on the console's
+ * one thread (a 9.3 s freeze in a 200 s profile; the owner's inbox waited behind it). Now the files'
+ * stat (path, size, mtime, ctime, inode) is checked first and an unchanged tree returns the hash it had (kept in memory
+ * and in a small file, so a restart does not read it all again); a changed tree is read with async reads that yield
+ * between files and chunks. The hash itself is the same as before, so no wake sees news from this change.
  */
 export function dataHash(repoDir: string, cap = DATA_FILE_CAP): string {
+  const t = dataTree(repoDir, cap);
+  if (!t) return "";
+  const memo = memoGet(repoDir, t.sig);
+  if (memo) return memo;
+  const h = createHash("sha256");
+  for (const p of t.files) {
+    let body: Buffer | string;
+    try {
+      body = fs.readFileSync(path.join(repoDir, p));
+    } catch {
+      body = "\u0001missing";
+    }
+    h.update(`${p}\0`).update(body).update("\0");
+  }
+  h.update(`#${t.total}`);
+  return memoSet(repoDir, t.sig, h.digest("hex").slice(0, 32));
+}
+
+/** dataHash without blocking the event loop: the same hash, async reads, a yield every ~8 MB hashed. */
+export async function dataHashAsync(repoDir: string, cap = DATA_FILE_CAP): Promise<string> {
+  const t = dataTree(repoDir, cap);
+  if (!t) return "";
+  const memo = memoGet(repoDir, t.sig);
+  if (memo) return memo;
+  const inFlight = hashing.get(repoDir);
+  if (inFlight && inFlight.sig === t.sig) return inFlight.p;
+  const p = (async () => {
+    const h = createHash("sha256");
+    const CHUNK = 8 << 20;
+    for (const rel of t.files) {
+      let body: Buffer | string;
+      try {
+        body = await fs.promises.readFile(path.join(repoDir, rel));
+      } catch {
+        body = "\u0001missing";
+      }
+      h.update(`${rel}\0`);
+      if (typeof body === "string" || body.length <= CHUNK) h.update(body);
+      else
+        for (let i = 0; i < body.length; i += CHUNK) {
+          h.update(body.subarray(i, i + CHUNK));
+          await new Promise((r) => setImmediate(r));
+        }
+      h.update("\0");
+      await new Promise((r) => setImmediate(r));
+    }
+    h.update(`#${t.total}`);
+    return memoSet(repoDir, t.sig, h.digest("hex").slice(0, 32));
+  })().finally(() => hashing.delete(repoDir));
+  hashing.set(repoDir, { sig: t.sig, p });
+  return p;
+}
+
+const hashing = new Map<string, { sig: string; p: Promise<string> }>();
+
+/** the data/ files in hash order (capped), their count and a signature of their stat; undefined without data/. */
+function dataTree(repoDir: string, cap: number): { files: string[]; total: number; sig: string } | undefined {
   const root = path.join(repoDir, "data");
   const files: string[] = [];
   let total = 0;
@@ -175,23 +239,58 @@ export function dataHash(repoDir: string, cap = DATA_FILE_CAP): string {
     }
   };
   try {
-    if (!fs.statSync(root).isDirectory()) return "";
+    if (!fs.statSync(root).isDirectory()) return undefined;
   } catch {
-    return "";
+    return undefined;
   }
   walk(root);
-  const h = createHash("sha256");
-  for (const p of files.sort().slice(0, cap)) {
-    let body: Buffer | string;
+  const kept = files.sort().slice(0, cap);
+  const sig = createHash("sha256");
+  for (const p of kept) {
     try {
-      body = fs.readFileSync(path.join(repoDir, p));
+      const st = fs.statSync(path.join(repoDir, p), { bigint: true });
+      sig.update(`${p}\0${st.size}\0${st.mtimeNs}\0${st.ctimeNs}\0${st.ino}\n`);
     } catch {
-      body = "\u0001missing";
+      sig.update(`${p}\0missing\n`);
     }
-    h.update(`${p}\0`).update(body).update("\0");
   }
-  h.update(`#${total}`);
-  return h.digest("hex").slice(0, 32);
+  sig.update(`#${total}`);
+  return { files: kept, total, sig: sig.digest("hex") };
+}
+
+/** repo dir → { stat signature, hash }; kept in a small JSON file so the first wake check after a restart is cheap too. */
+let memo: Map<string, { sig: string; hash: string }> | undefined;
+const memoFile = () => process.env.CONSOLE_DATA_HASH_MEMO ?? path.join(stateDir(), "data-hash.json");
+function memoMap() {
+  if (memo) return memo;
+  memo = new Map();
+  if (process.env.CONSOLE_DATA_HASH_MEMO === "off") return memo;
+  try {
+    for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(memoFile(), "utf8")) as Record<string, { sig: string; hash: string }>)) memo.set(k, v);
+  } catch {
+    /* no memo yet */
+  }
+  return memo;
+}
+function memoGet(repoDir: string, sig: string): string | undefined {
+  const m = memoMap().get(repoDir);
+  return m && m.sig === sig ? m.hash : undefined;
+}
+function memoSet(repoDir: string, sig: string, hash: string): string {
+  const m = memoMap();
+  m.delete(repoDir);
+  m.set(repoDir, { sig, hash });
+  while (m.size > 200) m.delete(m.keys().next().value as string); // test repos come and go; keep the newest
+  if (process.env.CONSOLE_DATA_HASH_MEMO !== "off")
+    try {
+      const f = memoFile();
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(`${f}.tmp`, JSON.stringify(Object.fromEntries(m)));
+      fs.renameSync(`${f}.tmp`, f);
+    } catch {
+      /* the memo is only a speed-up */
+    }
+  return hash;
 }
 
 /** "worked" ids (same rule as the web's workedTicketIds): first word of a running child run's summary with a digit. */

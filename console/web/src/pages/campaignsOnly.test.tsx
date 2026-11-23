@@ -21,8 +21,8 @@ afterEach(() => {
   forgetOtherWorlds();
 });
 beforeEach(() => localStorage.clear());
-// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
-beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
+// with objectives the sidebar lists no other goals; these tests read the goal list of a workspace with none yet.
+beforeEach(() => void vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never));
 
 globalThis.ResizeObserver ??= class {
   observe() {}

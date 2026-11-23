@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { aboutFrom } from "@/lib/about";
 import { goLink, SnoozeDropdown } from "@/components/waiting";
 import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
 import type { SnoozeChoice } from "@/api";
@@ -195,7 +196,7 @@ function AskSetBody({ group, readOnly }: { group: AskSetGroup; readOnly?: string
   return (
     <section className={CARD_FRAME} data-card-shell="ask-set" data-testid="ask-set" data-persona={group.persona}>
       {/* the set is as old as its oldest recommendation, right after the kind word as on every card */}
-      <CardMeta kind="Decision" since={group.items.map((i) => i.since).filter((x): x is string => !!x).sort()[0]} sinceWhat="issued">
+      <CardMeta kind="Decision" about={group.items[0]?.about ?? aboutFrom(group.items[0]?.title)} since={group.items.map((i) => i.since).filter((x): x is string => !!x).sort()[0]} sinceWhat="issued">
         {project && <span>{project}</span>}
         <span>
           {group.items.length} from the {group.persona}

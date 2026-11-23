@@ -133,7 +133,7 @@ const joinRow = (cells: string[]) => `| ${cells.join(" | ")} |`;
  * Add one ledger row per pick to the table that holds row `ref` (after its last row), each depending on `ref`, and set
  * `ref`'s followups to the started codes (the suggestions are rows now). Only those lines change; no picks, no edit.
  */
-export function writeFollowups(text: string, ref: string, picks: FollowupPick[], date: string, who = ownerName()): FollowupEdit {
+export function writeFollowups(text: string, ref: string, picks: FollowupPick[], date: string, who = ownerName(), taken: string[] = []): FollowupEdit {
   if (!picks.length) return { text, rows: [] };
   const raw = text.split("\n");
   const bare = (i: number) => raw[i].replace(/\r$/, "");
@@ -159,7 +159,7 @@ export function writeFollowups(text: string, ref: string, picks: FollowupPick[],
   const made: FollowupRow[] = [];
   const lines: string[] = [];
   for (const p of picks) {
-    const code = nextCode(text, followupBase(ref), made.map((r) => r.ref));
+    const code = nextCode(text, followupBase(ref), [...taken, ...made.map((r) => r.ref)]);
     const status = p.start ? ("ready" as const) : ("draft" as const);
     const title = cellText(`${p.title}${p.why ? ` (${p.why})` : ""}: follow-up of ${ref}`);
     const cells = headers.map((h, i) => {
@@ -301,12 +301,12 @@ export interface SwitchOn {
  * the owner switched a follow-up on: one `ready` row at the end of the goal's Issue Ledger (his switch is his ready stamp,
  * root L-37), quoting his words, and one Decisions row saying so. Undefined code: the next `E<n>-S<k>` of the goal.
  */
-export function addSwitchedOnRow(text: string, goalCode: string, on: SwitchOn, date: string, who = ownerName()): { text: string; ref: string } | { skip: string } {
+export function addSwitchedOnRow(text: string, goalCode: string, on: SwitchOn, date: string, who = ownerName(), taken: string[] = []): { text: string; ref: string } | { skip: string } {
   const raw = text.split("\n");
   const t = tableUnder(raw, /^##\s+(issue ledger|ledger|backlog)\b/i);
   if (!t) return { skip: `${goalCode} has no Issue Ledger table` };
   const n = /^EPIC-(\d+)$/.exec(goalCode)?.[1];
-  const ref = nextCode(text, n ? `E${n}-S0` : `${goalCode}-S0`);
+  const ref = nextCode(text, n ? `E${n}-S0` : `${goalCode}-S0`, taken);
   const quote = on.quote ? ` Your words: ${on.quote}` : "";
   const title = cellText(`${on.title}${on.why ? `. Why: ${on.why}` : ""}.${quote}`);
   const cr = raw[t.end].endsWith("\r") ? "\r" : "";
@@ -514,7 +514,7 @@ export function recommendationTitle(question: string): string {
  * L-37): one `ready` row at the end of the spine's Issue Ledger naming the ask, and one Decisions row saying so. Skipped
  * (no second row) when a row for this ask is in the ledger already, so a retried answer job never adds two.
  */
-export function addAcceptedAskRow(text: string, ask: { code: string; question: string; persona?: string }, date: string, who = ownerName()): { text: string; ref: string } | { skip: string } {
+export function addAcceptedAskRow(text: string, ask: { code: string; question: string; persona?: string }, date: string, who = ownerName(), taken: string[] = []): { text: string; ref: string } | { skip: string } {
   const goal = goalOfAsk(ask.code);
   if (!goal) return { skip: `${ask.code} names no goal to put the row in` };
   const mark = `${who} accepted ${ask.code}`;
@@ -523,7 +523,7 @@ export function addAcceptedAskRow(text: string, ask: { code: string; question: s
   if (!t) return { skip: `the spine of ${ask.code} has no Issue Ledger table` };
   for (let i = t.head + 2; i <= t.end; i++) if (raw[i].includes(`${mark} `)) return { skip: `row ${stripInline(splitRow(raw[i].replace(/\r$/, ""))[0] ?? "")} is there already for ${ask.code}` };
   const n = /^EPIC-(\d+)$/.exec(goal)?.[1];
-  const ref = nextCode(text, n ? `E${n}-S0` : `${goal}-S0`);
+  const ref = nextCode(text, n ? `E${n}-S0` : `${goal}-S0`, taken);
   const what = recommendationTitle(ask.question);
   const from = ask.persona ? ` (${ask.persona}'s recommendation)` : "";
   const title = cellText(`${what}${from}: ${who} accepted it in ${ask.code}, deliver it.`);

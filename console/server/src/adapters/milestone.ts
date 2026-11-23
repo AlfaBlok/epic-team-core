@@ -50,6 +50,8 @@ export interface Ticket {
   dependsOn?: string;
   /** backlog rows: the row's `Next action` cell, when the table has one. */
   nextAction?: string;
+  /** backlog rows: the row's date cell (`Last Verified` / `Updated`), when the table has one. */
+  since?: string;
   /**
    * Backlog rows: "ledger" (Issue Ledger / Phases / Child Epics), the work-item heading ("queue", "backlog", …),
    * "ticket file" suffix when enriched from a linked ticket file (e.g. "ledger · ticket file"),
@@ -181,6 +183,7 @@ export function backlogFor(reposRoot: string, m: MilestoneRef, known?: Repo): Ti
       if (!prev.needs && r.needs) prev.needs = r.needs;
       if (!prev.dependsOn && r.dependsOn) prev.dependsOn = r.dependsOn;
       if (!prev.nextAction && r.nextAction) prev.nextAction = r.nextAction;
+      if (!prev.since && r.since) prev.since = r.since;
       if (prev.status === "—" && r.status) Object.assign(prev, normalizeStatus(r.status));
       if (!prev.path) {
         const f = fileFor(r.id, r.link);
@@ -199,6 +202,7 @@ export function backlogFor(reposRoot: string, m: MilestoneRef, known?: Repo): Ti
       ...(r.needs ? { needs: r.needs } : {}),
       ...(r.dependsOn ? { dependsOn: r.dependsOn } : {}),
       ...(r.nextAction ? { nextAction: r.nextAction } : {}),
+      ...(r.since ? { since: r.since } : {}),
       source: r.source,
     };
     const f = fileFor(r.id, r.link);

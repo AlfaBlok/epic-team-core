@@ -3,6 +3,7 @@ import { phantomRefProblem } from "./phantomRefs.js";
 import { decideButtonsProblem, decideChoices } from "./decideChoices.js";
 import { untappableProblem } from "./untappable.js";
 import { outageProblem } from "./outageAsk.js";
+import { ABOUT_FROM, aboutProblem, NO_ABOUT, NO_ABOUT_FIX } from "./about.js";
 /**
  * the gate every ask to the owner passes, where it is
  * raised (POST /needs-owner) and where the console reads it from a spine (inbox/waiting.ts). An ask that fails is never
@@ -49,6 +50,10 @@ import { outageProblem } from "./outageAsk.js";
  *    whose subject is that incident (a GitHub token, sign-in, login or key) is held under the one alarm, and when the
  *    alarm closes every ask held under it closes with it (inbox/outageAsk.ts). The owner: "cards are being duplicated
  *    ... really annoying" (six asks for one token in one outage).
+ * 15. (E948-S172, spine asks raised from ABOUT_FROM, 2026-11-23) It says what it is about: `— about: <topic>`, plain
+ *    words, 8 or fewer ("your reply to Dad"), which opens his card as `About: …`; else held as "card needs rewriting: no
+ *    About line". Older asks show a derived one (inbox/about.ts). His vn_106f5727: "can you not just put ... somewhere
+ *    there that says what's the topic ... I keep saying this, can you please do it".
  */
 
 /** The fields of an ask the gate reads (LocatedAsk / HumanAsk carry them all). */
@@ -72,6 +77,8 @@ export interface GateAsk {
   macAgent?: unknown;
   /** a runbook link inside `steps:` (rule 11). */
   stepsLink?: string;
+  /** E948-S172 `about:` the card's topic (rule 15). */
+  about?: string | null;
   /** The ask's `since` date: undefined = a new ask (the API path), null/older than ASK_GATE_FROM = an old line, left alone. */
   since?: string | null;
 }
@@ -135,7 +142,16 @@ export function askGateProblem(a: GateAsk): string | undefined {
   if (a.state && a.state !== "open") return undefined;
   // 11. no link to where he acts: held whatever its date, after the other rules' reasons (E948-S85).
   // 14. a duplicate of the one GitHub sign-in alarm comes first: rewriting it would not make it his.
-  return outageProblem(a) ?? wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a);
+  return outageProblem(a) ?? wordsOrButtonsProblem(a) ?? linkProblem(a) ?? choiceLinkProblem(a) ?? tappableProblem(a) ?? aboutLineProblem(a);
+}
+
+/** 15. a spine ask raised from ABOUT_FROM with no plain `about:` (E948-S172); the console's own raise writes one. */
+export function aboutLineProblem(a: GateAsk): string | undefined {
+  if (a.state && a.state !== "open") return undefined;
+  if (!a.since || a.since < ABOUT_FROM) return undefined;
+  const p = aboutProblem(a.about);
+  if (!p) return undefined;
+  return p === NO_ABOUT ? `${NO_ABOUT}: ${NO_ABOUT_FIX}` : `${NO_ABOUT}: ${p}; ${NO_ABOUT_FIX}`;
 }
 
 /** A button that is only a yes or a no (with its next step: "Yes, build it", "No: drop it"). */
@@ -289,6 +305,8 @@ export interface HeldAsk {
   line?: number;
   question: string;
   reason: string;
+  /** when the held words were committed (git blame of the line): a hold older than 2 hours is routed on. */
+  since?: string;
 }
 
 /** The Delivery Manager's wake section: asks held back from the owner's inbox by the gate. */

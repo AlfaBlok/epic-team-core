@@ -123,7 +123,7 @@ export function readyDraftRow(text: string, ref: string): string {
  * The spine edit for one accepted suggestion: a new ready row and its Decisions row (his name, the suggestion quoted),
  * or, for a suggestion that already has a row, that row readied and a Decisions row. `ref` is the row that carries it.
  */
-export function acceptOnSpine(text: string, item: AdvisorItem, set: AdvisorSet, o: { date: string; who: string; words?: string; source: string }): { text: string; ref: string } | { skip: string } {
+export function acceptOnSpine(text: string, item: AdvisorItem, set: AdvisorSet, o: { date: string; who: string; words?: string; source: string; taken?: string[] }): { text: string; ref: string } | { skip: string } {
   const from = `the ${ADVISOR_BY}'s suggestions for the week of ${set.weekLabel ?? set.week}`;
   const quote = `"${item.title}"${o.words ? `, and his words "${o.words}"` : ""}`;
   if (item.row) {
@@ -141,7 +141,7 @@ export function acceptOnSpine(text: string, item: AdvisorItem, set: AdvisorSet, 
   }
   const code = goalCodeOf(text);
   if (!code) return { skip: `${item.spine} has no EPIC-n heading` };
-  const r = addSwitchedOnRow(text, code, { title: `${ADVISOR_BY}: ${item.title}`, ...(item.why ? { why: item.why } : {}), quote, from: { ref: from, rel: o.source } }, o.date, o.who);
+  const r = addSwitchedOnRow(text, code, { title: `${ADVISOR_BY}: ${item.title}`, ...(item.why ? { why: item.why } : {}), quote, from: { ref: from, rel: o.source } }, o.date, o.who, o.taken);
   return r;
 }
 

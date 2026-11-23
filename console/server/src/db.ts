@@ -307,10 +307,14 @@ export function migrate(db: DB): void {
  * runs.usage_live = tokens so far of a run still working (JSON RunUsage, live: true), cleared when its usage lands.
  * runs.host = the host the run's agent ran on (the main server | the worker server), recorded at launch by the console or sent by the
  * agent that created the run; NULL on older rows (runHosts.ts places them from launch_host, environment id, parent).
+ * runs.route = where a world's own route ran the run: `job` (a job server of its own) or `sandbox:<host>` (its world
+ * sandbox on that host); NULL = a T3 thread on a shared host (or an older row).
  * jordi_responses.settles = JSON of the other open asks the same answer closed (written in their spines) and the
  * maybes (inbox/settles.ts), once per answer; NULL = not run (off, or the answer was not an ask).
+ * assignments.objective = the objective (docs/pursuits.json id) the assignment works; its Personas tab lists it.
  */
 const COLUMNS: [table: string, column: string, type: string][] = [
+  ["assignments", "objective", "TEXT"],
   ["runs", "self_readied", "TEXT"],
   ["runs", "note_ack", "TEXT"],
   ["runs", "pre_wake", "TEXT"],
@@ -337,6 +341,7 @@ const COLUMNS: [table: string, column: string, type: string][] = [
   ["milestones", "big_root", "INTEGER"],
   ["runs", "usage_live", "TEXT"],
   ["runs", "host", "TEXT"],
+  ["runs", "route", "TEXT"],
   ["jordi_responses", "settles", "TEXT"],
 ];
 function ensureColumns(db: DB) {

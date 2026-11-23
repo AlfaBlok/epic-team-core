@@ -71,4 +71,16 @@ describe("the last briefings on Home", () => {
     expect(m.querySelector("[data-testid=briefing-delivery]")?.textContent).toBe("Delivered to your phone");
     expect(e.querySelector("[data-testid=briefing-delivery]")).toBeNull();
   });
+
+  it("a button draws the last 6 hours on the spot, above the briefings", async () => {
+    (api as { getBriefingPictures?: unknown }).getBriefingPictures = vi.fn(async () => ({ briefings: all }));
+    render(<LastBriefings delayMs={0} />);
+    await waitFor(() => expect(screen.getByTestId("now-picture-button")).toBeTruthy());
+    expect(screen.queryByTestId("now-picture-open")).toBeNull();
+    (api as { getMe?: unknown }).getMe = vi.fn(async () => ({ tenant: { id: "w1" } }));
+    fireEvent.click(screen.getByTestId("now-picture-button"));
+    await waitFor(() => expect(screen.getByTestId("now-picture-open")).toBeTruthy());
+    const img = screen.getByTestId("now-picture-open").querySelector("img")!;
+    expect(img.getAttribute("src")).toMatch(/^\/api\/tenants\/w1\/social\/now\.png\?hours=6&at=\d+$/);
+  });
 });

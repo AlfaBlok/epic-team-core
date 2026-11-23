@@ -9,12 +9,13 @@ import { SidebarNav } from "@/components/Layout";
 /**
  * the owner's yes ("Yes: build it") on the sidebar mock-up ("we need to harmonize the
  * sidebar ... maybe we can have like pinned and non-pinned ... The settings should be expandable"): Inbox and Chat, his
- * objectives pinned in his order then one folded More objectives, Tools folded, Settings folded (only what he changes,
+ * objectives in his order in one list (the owner, "These are all objectives ... and they're sorted"), then one folded
+ * Other goals for the goals no objective holds, Tools folded, Settings folded (only what he changes,
  * settings are only what he changes), worlds last.
  */
-const node = (id: string, name: string, rank: number, unpinned?: boolean): ScorecardNode =>
-  ({ id, kind: "pursuit", name, rank, greens: 0, total: 1, spines: [], keyResults: [{ label: "One", state: "red", value: "0", kind: "key-result", work: [] }], rows: [], children: [], ...(unpinned ? { unpinned: true } : {}) }) as ScorecardNode;
-const body: ScorecardsBody = { nodes: [node("launch", "Acme: 5 testers", 1), node("books", "Books: accounts in order", 2, true), node("servers", "Acme: servers run themselves", 3)], spineInfo: {} };
+const node = (id: string, name: string, rank: number): ScorecardNode =>
+  ({ id, kind: "pursuit", name, rank, greens: 0, total: 1, spines: [], keyResults: [{ label: "One", state: "red", value: "0", kind: "key-result", work: [] }], rows: [], children: [] }) as ScorecardNode;
+const body: ScorecardsBody = { nodes: [node("launch", "Acme: 5 testers", 1), node("books", "Books: accounts in order", 2), node("servers", "Acme: servers run themselves", 3)], spineInfo: {} };
 
 afterEach(() => {
   cleanup();
@@ -23,15 +24,17 @@ afterEach(() => {
 });
 
 describe("the sidebar he approved", () => {
-  it("pins his objectives in his order, folds the unpinned ones and the other goals into More objectives, and Add objective", async () => {
+  it("lists every objective in his order in one list, then Add objective; the other goals fold apart", async () => {
     vi.spyOn(api, "listScorecards").mockResolvedValue(body);
     render(
       <MemoryRouter>
         <SidebarNav />
       </MemoryRouter>,
     );
-    const pinned = await screen.findByTestId("sidebar-pinned-objectives");
-    expect(within(pinned).getAllByTestId("sidebar-set").map((x) => x.dataset.set)).toEqual(["launch", "servers"]);
+    const pinned = await screen.findByTestId("sidebar-objectives");
+    // one list in his order: an objective once marked unpinned sits in it too
+    expect(within(pinned).getAllByTestId("sidebar-set").map((x) => x.dataset.set)).toEqual(["launch", "books", "servers"]);
+    expect(screen.queryByText(/More objectives/)).toBeNull();
     // option A (the owner's pick): no numbers; the ring, then the product word over the goal on one left edge, no box
     expect(within(pinned).queryAllByTestId("sidebar-set-nr")).toEqual([]);
     for (const li of within(pinned).getAllByTestId("sidebar-set")) {
@@ -45,15 +48,15 @@ describe("the sidebar he approved", () => {
     expect(screen.getByTestId("sidebar-goal-sets-all").textContent).toMatch(/^Objectives/);
     expect(screen.queryByTestId("sidebar-products")).toBeNull();
     expect(screen.getByTestId("add-milestone").textContent).toBe("Add objective");
-    const toggle = screen.getByTestId("more-objectives-toggle");
+    const toggle = await screen.findByTestId("nav-other-goals-toggle");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("sidebar-more-objectives")).toBeNull();
+    expect(toggle.textContent).toMatch(/^Other goals/);
     fireEvent.click(toggle);
-    const more = screen.getByTestId("sidebar-more-objectives");
-    expect(within(more).getAllByTestId("sidebar-set").map((x) => x.dataset.set)).toEqual(["books"]);
-    // the goals no objective holds follow (the house, travel, hair): the mock's milestones
-    await waitFor(() => expect(within(more).getAllByTestId("big-root").length).toBeGreaterThan(0));
-    expect(Number(within(toggle).getByTestId("more-objectives-count").textContent)).toBe(1 + within(more).getAllByTestId("big-root").length);
+    const other = screen.getByTestId("nav-other-goals");
+    expect(within(other).queryAllByTestId("sidebar-set")).toHaveLength(0);
+    // the goals no objective holds (the mock's milestones), never an objective
+    await waitFor(() => expect(within(other).getAllByTestId("big-root").length).toBeGreaterThan(0));
+    expect(Number(within(toggle).getByTestId("nav-other-goals-count").textContent)).toBe(within(other).getAllByTestId("big-root").length);
   });
 
   it("Tools and Settings are folded; Settings holds only what he changes, the pages he reads are Tools", async () => {
@@ -71,7 +74,12 @@ describe("the sidebar he approved", () => {
     fireEvent.click(within(settings).getByTestId("nav-settings-toggle"));
     const names = (el: HTMLElement) => within(el).getAllByRole("link").map((a) => a.textContent?.trim());
     await waitFor(() => expect(names(tools)).toContain("Voice notes"));
-    for (const t of ["Spines", "Runs", "Threads", "Tickets", "Seats", "Hosts", "Dashboard"]) expect(names(tools)).toContain(t);
+    // the owner's 22 Nov verdicts: Seats and Hosts stay, Runs went up to the top, the rest left the menu.
+    for (const t of ["Pages", "Post stats", "Persona outcomes", "Seats", "Hosts"]) expect(names(tools)).toContain(t);
+    for (const t of ["Spines", "Runs", "Threads", "Tickets", "Dashboard", "Applications", "Voice feedback", "One-offs", "Outcomes"]) expect(names(tools)).not.toContain(t);
+    const main = screen.getByTestId("nav-main");
+    expect(within(main).getAllByRole("link").map((a) => a.textContent?.trim())).toContain("Runs");
+    expect(names(tools)[0]).not.toBe("Voice notes");
     for (const t of ["All settings", "Personas", "Priority mode", "Secrets", "Connections", "Credits"]) expect(names(settings)).toContain(t);
     for (const t of ["Seats", "Hosts", "Runs", "Spines", "Dashboard"]) expect(names(settings)).not.toContain(t);
     expect(within(settings).getByText(/Dark mode|Light mode/)).toBeTruthy();

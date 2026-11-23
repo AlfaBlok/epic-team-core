@@ -1,6 +1,8 @@
 import type { ReviewItem } from "./review-types";
 import type { ApiClient } from "./client";
 import type { ChatRead, EgressStatus, Me } from "./types";
+import type { OwnerResponse } from "./inbox-types";
+import { answerJoined, joinedFor } from "@/lib/sameTopic";
 import { landed, UNDO_MS } from "@/lib/press";
 import { workerHost } from "../lib/identity";
 
@@ -23,6 +25,8 @@ export class ApiError extends Error {
 export const CALL_TIMEOUT_MS = 30_000;
 /** Asset uploads (multipart) may take longer on a slow link. */
 const UPLOAD_TIMEOUT_MS = 5 * 60_000;
+/** a key paste waits for the vault save and its read back (about a minute), never our 30 s. */
+export const KEY_SAVE_TIMEOUT_MS = UPLOAD_TIMEOUT_MS;
 export const TIMEOUT_MESSAGE = "The console did not answer in 30 s. Try again.";
 
 const timedOut = (e: unknown) => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
@@ -67,7 +71,14 @@ export function takeEarly(path: string): Promise<unknown> | undefined {
   return Date.now() - e.at < EARLY_FRESH_MS ? e.p : undefined;
 }
 
-function call<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
+/**
+ * `retryTransient`: a write that is safe to send again only when the console never answered it (a proxy 502/503/504
+ * while it restarts, a dropped connection), never after our own 30 s timeout (the console may still be working on it).
+ * A key paste that met a release swap answered 502 once; the card now waits it out.
+ */
+type CallOpts = { idempotent?: boolean; retryTransient?: boolean; headers?: Record<string, string>; timeoutMs?: number };
+
+function call<T>(method: string, path: string, body?: unknown, o: CallOpts = {}): Promise<T> {
   if (method !== "GET" || o.headers) return callOnce<T>(method, path, body, o);
   const found = inFlight.get(path);
   if (found) return found as Promise<T>;
@@ -77,8 +88,8 @@ function call<T>(method: string, path: string, body?: unknown, o: { idempotent?:
   return p;
 }
 
-async function callOnce<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
-  if (method !== "GET" && !o.idempotent) return attempt<T>(method, path, body, o.headers);
+async function callOnce<T>(method: string, path: string, body?: unknown, o: CallOpts = {}): Promise<T> {
+  if (method !== "GET" && !o.idempotent && !o.retryTransient) return attempt<T>(method, path, body, o.headers, o.timeoutMs);
   // a GET that meets a restarting console (proxy 502/503/504, connection refused) waits and tries again with
   // backoff for ~60 s; the page keeps its last good data and the layout shows one quiet "reconnecting" line meanwhile.
   // Only after the budget is spent does the error reach the page. Writes are never retried (they may have landed), except
@@ -88,7 +99,7 @@ async function callOnce<T>(method: string, path: string, body?: unknown, o: { id
   try {
     for (let i = 0; ; i++) {
       try {
-        return await attempt<T>(method, path, body, o.headers);
+        return await attempt<T>(method, path, body, o.headers, o.timeoutMs);
       } catch (e) {
         const retry = isTransient(e) || (!!o.idempotent && e instanceof ApiError && e.code === "timeout");
         if (!retry || i >= RETRY_DELAYS_MS.length) throw e;
@@ -113,16 +124,16 @@ async function press<T>(method: string, path: string, body?: unknown, o: { undo?
   return landed<T>(first, path, (id) => call("GET", `/presses/${encodeURIComponent(id)}`), (msg) => new ApiError(502, msg, "press_failed"));
 }
 
-async function attempt<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+async function attempt<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>, timeoutMs?: number): Promise<T> {
   // a FormData body (asset upload) goes as multipart; the browser sets its content type.
   // a Blob body (a chat attachment) goes as its raw bytes; the caller sets its content type.
   const form = (typeof FormData !== "undefined" && body instanceof FormData) || (typeof Blob !== "undefined" && body instanceof Blob);
-  const signal = AbortSignal.timeout(form ? UPLOAD_TIMEOUT_MS : CALL_TIMEOUT_MS);
+  const signal = AbortSignal.timeout(timeoutMs ?? (form ? UPLOAD_TIMEOUT_MS : CALL_TIMEOUT_MS));
   try {
     return await send<T>(method, path, body, form, signal, headers);
   } catch (e) {
     // Same shape as a failed answer (ApiError), with a plain message; the page shows it with its retry.
-    if (signal.aborted && timedOut(e)) throw new ApiError(504, form ? "The console did not answer in 5 min. Try again." : TIMEOUT_MESSAGE, "timeout");
+    if (signal.aborted && timedOut(e)) throw new ApiError(504, form || timeoutMs ? "The console did not answer in 5 min. Try again." : TIMEOUT_MESSAGE, "timeout");
     throw e;
   }
 }
@@ -237,8 +248,11 @@ async function sendMessage(input: unknown, url = "/api/messages") {
 const query = (f: object) => new URLSearchParams(Object.entries(f).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1])).toString();
 
 /** Fetch-based client against the console server (`/api`). */
+/** E948-S187: answers he took back with Bring it back in this tab (their joined review cards get nothing). */
+const undoneAnswers = new Set<string>();
+
 export function createRealClient(): ApiClient {
-  return {
+  const client: ApiClient = {
     listMilestones: (opts) => call("GET", `/milestones${opts?.includeSettled ? "?includeSettled=true" : ""}`),
     settleMilestone: (id) => call("POST", `/milestones/${id}/settle`),
     unsettleMilestone: (id) => call("POST", `/milestones/${id}/unsettle`),
@@ -310,11 +324,13 @@ export function createRealClient(): ApiClient {
     listBuilding: () => call("GET", "/building"),
     listPursuits: () => call("GET", "/pursuits"),
     listScorecards: () => call("GET", "/scorecards"),
+    whereWeAre: (id) => call("GET", `/scorecards/${encodeURIComponent(id)}/where-we-are`),
     personaGaps: () => call("GET", "/persona-gaps"),
     reorderPursuits: (ids) => call("POST", "/pursuits/order", { ids }),
     parkPursuit: (id, parked) => call("POST", `/pursuits/${encodeURIComponent(id)}/park`, { parked }),
     setPursuitActive: (id, active) => call("POST", `/pursuits/${encodeURIComponent(id)}/active`, { active }),
     setPursuitDone: (id, done) => call("POST", `/pursuits/${encodeURIComponent(id)}/done`, { done }),
+    setPursuitBriefing: (id, on) => call("POST", `/pursuits/${encodeURIComponent(id)}/briefing`, { on }),
     listOneOffs: () => call("GET", "/one-offs"),
     listOutcomes: (f) => {
       const q = new URLSearchParams(Object.entries(f ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
@@ -330,6 +346,7 @@ export function createRealClient(): ApiClient {
     answerTeamCard: (id, a) => call("POST", `/inbox/team-cards/${encodeURIComponent(id)}/answer`, a),
     advisorVerdict: (id, v) => call("POST", `/inbox/team-cards/${encodeURIComponent(id)}/advisor`, v),
     listPages: () => call("GET", "/pages"),
+    homeTab: (product, tab) => call("GET", `/homes/${encodeURIComponent(product)}/${encodeURIComponent(tab)}`),
     listPinnedPages: () => call("GET", "/pages/pinned"),
     pinnedPageStatus: (port) => call("GET", `/pages/pinned/${port}/status`),
     refreshPinnedPage: (port) => call("POST", `/pages/pinned/${port}/refresh`),
@@ -375,9 +392,17 @@ export function createRealClient(): ApiClient {
     searchInbox: (q) => callOnce("GET", `/inbox/search?${query({ q })}`),
     getWaitingItem: (id, milestoneId) => call("GET", `/waiting-on-owner/${encodeURIComponent(id)}${milestoneId ? `?${query({ milestoneId })}` : ""}`),
     // one key per answer: a request the network or a restart dropped is sent again with it (stored once).
-    respondToWaiting: (itemId, { relay, ...input }) =>
-      call("POST", `${askPath(itemId, relay)}/respond`, { ...input, clientKey: input.clientKey ?? newClientKey() }, { idempotent: true, headers: { "x-undo-ms": String(UNDO_MS) } }),
-    saveKey: (itemId, { relay, ...input }) => call("POST", `${askPath(itemId, relay)}/secret`, input),
+    // E948-S187: his answer on an ask a newer review card joined answers that card's row too (lib/sameTopic.ts answerJoined)
+    respondToWaiting: async (itemId, { relay, ...input }) => {
+      const r = await call<OwnerResponse>("POST", `${askPath(itemId, relay)}/respond`, { ...input, clientKey: input.clientKey ?? newClientKey() }, { idempotent: true, headers: { "x-undo-ms": String(UNDO_MS) } });
+      const joined = joinedFor(itemId);
+      // after the answer's own Bring it back window: an answer he took back reaches no joined card
+      if (joined.length && !(r as { alreadyAnswered?: boolean }).alreadyAnswered)
+        void answerJoined(itemId, joined, input.kind, input.text, client, () => new Promise<boolean>((ok) => setTimeout(() => ok(undoneAnswers.has(r.id)), UNDO_MS + 1500)));
+      return r;
+    },
+    // the key is saved in the vault and read back before the card closes (about a minute): the card waits for it
+    saveKey: (itemId, { relay, ...input }) => call("POST", `${askPath(itemId, relay)}/secret`, input, { retryTransient: true, timeoutMs: KEY_SAVE_TIMEOUT_MS }),
     snoozeWaiting: (itemId, { relay, ...input }) => press("POST", `${askPath(itemId, relay)}/snooze`, input),
     redeliverResponse: (id) => call("POST", `/owner-responses/${encodeURIComponent(id)}/deliver`, undefined, { idempotent: true }), // a repeat joins the running job
     changeResponse: (id, input) => call("POST", `/owner-responses/${encodeURIComponent(id)}/change`, input),
@@ -486,6 +511,8 @@ export function createRealClient(): ApiClient {
     setCampaignPlan: (tenantId, id, plan) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan`, { plan }),
     saveOnePager: (tenantId, id, fields) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/onepager`, { fields }),
     getCampaignTotems: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/totems`),
+    getCampaignTrackers: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/trackers`),
+    getCampaignWheelPlan: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/wheel-plan`),
     getCampaignPlan: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan`),
     getCampaignBriefings: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/briefings`),
     saveCampaignPlan: (tenantId, id, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan/sections`, input),
@@ -539,10 +566,11 @@ export function createRealClient(): ApiClient {
     denyReviewItem: (id, reason, attachments) => press("POST", `/review-items/${encodeURIComponent(id)}/deny`, { reason, ...(attachments?.length ? { attachments } : {}) }, { undo: !id.startsWith("post~") }),
     undoPress: (id) => call("POST", `/presses/${encodeURIComponent(id)}/undo`),
     listAnsweredPresses: () => call("GET", "/presses/answered"),
-    undoAnswer: (id) => call("POST", `/owner-responses/${encodeURIComponent(id)}/undo`),
+    undoAnswer: (id) => (undoneAnswers.add(id), call("POST", `/owner-responses/${encodeURIComponent(id)}/undo`)),
     reopenReviewRow: (card) => press("POST", "/review-items/reopen", card),
     commentClosedCard: (input) => press("POST", "/closed-cards/comment", input),
     listClosedCards: () => call("GET", "/closed-cards"),
+    listSentBackCards: () => call("GET", "/sent-back-cards"),
     getMilestoneBook: (key) => call("GET", `/book/${encodeURIComponent(key)}`),
     getBigRocks: () => call("GET", "/rocks"),
     getMilestoneArc: (id: string) => call("GET", `/milestones/${encodeURIComponent(id)}/arc`),
@@ -571,4 +599,5 @@ export function createRealClient(): ApiClient {
     listSignedInCheck: () => call("GET", "/auth/check"),
     listEgress: (posting) => call<{ egresses: EgressStatus[] }>("GET", `/auth/egress${posting ? "?posting=1" : ""}`).then((r) => r.egresses),
   };
+  return client;
 }

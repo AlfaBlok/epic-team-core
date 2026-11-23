@@ -24,7 +24,7 @@ export function useStoredFlag(key: string): [boolean, (v: boolean) => void] {
 }
 
 /**
- * a sidebar fold (Tools, Settings, More objectives) that opens by itself while the page shown is one of its own
+ * a sidebar fold (Tools, Settings, Other goals) that opens by itself while the page shown is one of its own
  * (`auto`), yet always answers a press (on the Gap finder page Tools was held open by the page, so
  * pressing it did nothing). A press is the owner's word for this page: it wins until he moves to another page,
  * and it is kept in this browser's localStorage under `key` as the fold's default.

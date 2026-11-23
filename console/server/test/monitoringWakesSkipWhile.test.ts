@@ -39,7 +39,7 @@ const node = (id: string, p: string, children: TreeNode[] = []): TreeNode => ({
   key: id, id, kind: "spine", title: id, status: "active", color: "grey", path: p, children, flags: [],
 });
 
-function setup() {
+function setup(extra: Record<string, unknown> = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "console-e8s22-"));
   const repo = path.join(dir, "repo");
   fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
@@ -58,7 +58,7 @@ function setup() {
     async status() { return { name: "pool", capacity: 2, available: 0 }; },
   };
   const t3 = new FakeT3();
-  const cycle = createCycle(db, store, { enabled: true, t3, dispatcher: disp, publicUrl: "http://x", treeFor, treeTodo: async () => "## To do", repoDir: () => repo });
+  const cycle = createCycle(db, store, { enabled: true, t3, dispatcher: disp, publicUrl: "http://x", treeFor, treeTodo: async () => "## To do", repoDir: () => repo, ...extra });
   cleanup = () => { cycle.stop(); db.close(); fs.rmSync(dir, { recursive: true, force: true }); };
   const m = store.createMilestone({ title: "M", repo: "home_repo", path: "docs/epic.md", owner: "", paused: false });
   const p = store.createPersona({ name: "Responder", remit: "reply", skills: [], model: "claude-opus-5-5", mayWrite: true, host: "host1" });
@@ -128,6 +128,19 @@ describe("T8-S22 monitoring wakes skip while the next check is not due", () => {
     expect(t.top().filter((r) => r.outcome === "running")).toHaveLength(1);
   });
 
+  it("a Publisher's cadence wake never gives way to its timed check (its cadence is the catch-up pace), and covers it", async () => {
+    const t = setup({ wakeGate: async () => ({ work: true, why: "scheduled P-1 (slot 2026-11-23T02:00:00Z) due" }) });
+    t.store.updatePersona(t.p.id, { name: "Publisher", remit: "post each scheduled item in its slot", skipUnchanged: true });
+    t.due();
+    await t.cycle.tickCadence();
+    await t.persona({ outcome: "idle" });
+    t.store.updateAssignment(t.a.id, { retryAt: new Date(Date.now() + 20 * MIN).toISOString(), retryRunId: null });
+    t.due();
+    expect(await t.cycle.tickCadence()).toEqual([t.a.id]);
+    expect(t.top()[0].summary).not.toMatch(/replaces this cadence wake/);
+    expect(t.store.getAssignment(t.a.id)!.retryAt ?? null).toBeNull();
+  });
+
   it("a check further than the hour away does not hold the cadence wake back (it wakes or fp-skips as usual)", async () => {
     const t = setup();
     t.due();
@@ -183,6 +196,7 @@ describe("T8-S22 cadenceSkipDecision / timedCheck", () => {
     expect(timedCheckReplaces("2026-10-24T11:50:00.000Z", new Date(now + 60 * MIN), n)).toBe("2026-10-24T11:50:00.000Z");
     expect(timedCheckReplaces("2026-10-24T13:30:00.000Z", new Date(now + 120 * MIN), n)).toBeUndefined();
     expect(timedCheckReplaces("2026-10-24T12:40:00.000Z", new Date(now + 30 * MIN), n)).toBeUndefined();
+    expect(timedCheckReplaces("2026-10-24T12:20:00.000Z", new Date(now + 60 * MIN), n, true)).toBeUndefined(); // a Publisher keeps its cadence
   });
   it("cadenceAfterTimedWake: interval moves a full interval on; fixed time keeps its slot", () => {
     const n = new Date(now);

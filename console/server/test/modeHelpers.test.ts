@@ -559,6 +559,7 @@ describe("cross-tenant refusal over every route (E22-1 evidence)", () => {
           // B's own closed cards (its world's presses only); comment and reopen check the body (400 on an empty one)
           // and act only on a repo B's milestones read (A's repo is a 404, undoWindowCardPress.test.ts)
           "GET /api/closed-cards",
+          "GET /api/sent-back-cards", // the cards B sent back that are not back in review: its own world's rows, presses and runs only
           "POST /api/closed-cards/comment",
           "POST /api/review-items/reopen",
           // B's own asked-no-row list (its own milestones only: routeJudge2.test.ts)

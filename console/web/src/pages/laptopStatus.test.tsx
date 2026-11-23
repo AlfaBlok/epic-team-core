@@ -47,7 +47,7 @@ describe("T34-S13 laptop online status on Sign-ins", () => {
     vi.spyOn(api, "listAuthSites").mockResolvedValue([]);
     const egress = vi.spyOn(api, "listEgress").mockResolvedValue([{ name: "decodo", state: "online" }]);
     page();
-    await screen.findByText(/No synced sites yet/);
+    await screen.findByText("Each sign-in the team makes shows here.");
     await vi.waitFor(() => expect(egress).toHaveBeenCalled());
     expect(screen.queryByTestId("laptop-status")).toBeNull();
     cleanup();

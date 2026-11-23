@@ -495,9 +495,11 @@ describe("API: answer lands in the spine, state read from the spine, wake lists 
     const stale = await call("POST", `/api/waiting-on-owner/${ask.id}/respond`, { kind: "answer", text: "two", milestoneId: m.id }); // old id (double click)
     expect(stale).toMatchObject({ status: 200, json: { id: r.json.id } });
     const answeredId = after.id;
-    expect(answeredId).not.toBe(ask.id);
+    // E948-S182: a coded ask keeps its card id when its line is answered (one ask, one card, by repo and code)
+    expect(answeredId).toBe(ask.id);
     const again = await call("POST", `/api/waiting-on-owner/${answeredId}/respond`, { kind: "answer", text: "two", milestoneId: m.id });
-    expect(again.json.spine).toMatchObject({ status: "written", reason: "already answered in the spine" });
+    // the same card id: his stored answer back, written once, nothing new committed
+    expect(again).toMatchObject({ status: 200, json: { id: r.json.id, spine: { status: "written" } } });
     expect(originHead()).toBe(head);
 
     // Wake: the answered line is listed for the owner; the milestone is not parked even though rows read red.
@@ -550,7 +552,7 @@ describe("API: answer lands in the spine, state read from the spine, wake lists 
     commitAll(repo, "stale open copy");
     const all = (await items(call, m.id)).filter((i) => i.code === "E909-A1");
     expect(all).toHaveLength(1);
-    expect(all[0].id).not.toBe(ask.id);
+    expect(all[0].id).toBe(ask.id); // E948-S182: the same code is the same card id, reworded or not
     expect(all[0]).toMatchObject({ state: "answered", answer: "one", response: { id: r.json.id } });
     // a press on that card: his stored answer back, marked, and nothing written twice
     const before = read("docs/spines/root.md");

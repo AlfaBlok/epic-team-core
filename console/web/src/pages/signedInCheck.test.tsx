@@ -35,12 +35,15 @@ describe("T86-S2 the hourly signed-in check on Browser auth", () => {
     const x = within(screen.getByTestId("check-x"));
     expect(x.getByText("signed out")).toBeTruthy();
     expect(x.getByText("in your inbox")).toBeTruthy();
-    expect(x.getByText(FIX)).toBeTruthy();
+    // the Browser's old Mac step never shows; the team signs in again itself
+    expect(x.queryByText(FIX)).toBeNull();
+    expect(x.getByText("The team signs in again itself.")).toBeTruthy();
     const reddit = within(screen.getByTestId("check-reddit"));
     expect(reddit.getByText("signed in")).toBeTruthy();
     expect(screen.getByTestId("check-reddit").textContent).not.toMatch(/Sync/);
     expect(within(screen.getByTestId("check-instagram")).getByText("not synced")).toBeTruthy();
-    expect(screen.getByTestId("check-instagram").textContent).toMatch(/Sign in to instagram\.com/);
+    expect(screen.getByTestId("check-instagram").textContent).toMatch(/The team signs in again itself/);
+    expect(document.body.textContent).not.toMatch(/run the command|press Sync/);
     expect(within(screen.getByTestId("check-youtube")).getByText("by its API")).toBeTruthy();
   });
 
@@ -68,7 +71,7 @@ describe("T86-S2 the hourly signed-in check on Browser auth", () => {
         <BrowserAuthPage />
       </MemoryRouter>,
     );
-    await screen.findByText(/No synced sites yet/);
+    await screen.findByText("Each sign-in the team makes shows here.");
     expect(screen.queryByTestId("signed-in-check")).toBeNull();
   });
 });
@@ -87,16 +90,16 @@ describe("the Browser auth page opens with its answer in two accents", () => {
     ...o,
   });
 
-  it("says how many logins are in sync and which need a Re-sync", () => {
+  it("says how many sign-ins are good and which the team signs in to again", () => {
     const reddit = site({});
     const airbnb = site({ id: "a", pattern: "*.airbnb.com", session: "dead" });
     const x = site({ id: "x", pattern: "*.x.com", accounts: ["OpsDesk"] });
-    expect(authPunchline([])).toMatch(/No logins synced yet/);
-    expect(authPunchline([reddit])).toBe("The 1 synced login is in sync.");
-    expect(authPunchline([reddit, x])).toBe("All 2 synced logins are in sync.");
-    expect(authPunchline([reddit, airbnb, x])).toBe("2 of 3 logins in sync, 1 needs a Re-sync: airbnb.com.");
+    expect(authPunchline([])).toBe("No sign-ins yet. The team signs in itself.");
+    expect(authPunchline([reddit])).toBe("The 1 sign-in is good.");
+    expect(authPunchline([reddit, x])).toBe("All 2 sign-ins are good.");
+    expect(authPunchline([reddit, airbnb, x])).toBe("2 of 3 sign-ins good, the team signs in again to airbnb.com.");
     const out = [row({ site: "x", state: "signed_out", pattern: "*.x.com" })];
-    expect(authPunchline([reddit, airbnb, x], out)).toBe("1 of 3 logins in sync, 2 need a Re-sync: airbnb.com, @OpsDesk.");
+    expect(authPunchline([reddit, airbnb, x], out)).toBe("1 of 3 sign-ins good, the team signs in again to airbnb.com, @OpsDesk.");
   });
 
   it("puts the answer box right under the title, the prose after the rows, and shows the laptop and API states as grey text", async () => {
@@ -113,7 +116,7 @@ describe("the Browser auth page opens with its answer in two accents", () => {
       </MemoryRouter>,
     );
     const box = await screen.findByTestId("auth-punchline");
-    expect(box.textContent).toBe("1 of 2 logins in sync, 1 needs a Re-sync: airbnb.com.");
+    expect(box.textContent).toBe("1 of 2 sign-ins good, the team signs in again to airbnb.com.");
     const h1 = screen.getByRole("heading", { level: 1 });
     // nothing but the header's own row sits between the title and the answer: the prose comes after the rows
     expect(h1.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

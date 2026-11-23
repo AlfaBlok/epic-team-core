@@ -10,9 +10,14 @@ import { nextRunAfter } from "./nextRun.js";
 export const REPLACE_WINDOW_MS = 60 * 60_000;
 export const TIMED_REPLACES_PREFIX = "skipped: timed check at";
 
-/** The timed check that takes this cadence wake's place, or undefined when the cadence wake goes ahead. */
-export function timedCheckReplaces(retryAt: string | undefined, nextCadence: Date, now: Date): string | undefined {
-  if (!retryAt) return undefined;
+/**
+ * The timed check that takes this cadence wake's place, or undefined when the cadence wake goes ahead.
+ * A Publisher's cadence is its catch-up pace, so it never gives way (`keepsCadence`): when its run asks for a check an
+ * hour on, the half-hour cadence wake would give way and posts past their slot would wait an hour. Its no-model
+ * pre-check still skips a wake with no work.
+ */
+export function timedCheckReplaces(retryAt: string | undefined, nextCadence: Date, now: Date, keepsCadence = false): string | undefined {
+  if (!retryAt || keepsCadence) return undefined;
   const t = Date.parse(retryAt);
   if (Number.isNaN(t)) return undefined;
   return t <= Math.min(nextCadence.getTime(), now.getTime() + REPLACE_WINDOW_MS) ? retryAt : undefined;

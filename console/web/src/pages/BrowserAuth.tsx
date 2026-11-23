@@ -1,21 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Check, Copy, KeyRound, RefreshCw, Trash2 } from "lucide-react";
-import { api, type AuthSite, type AuthSync, type EgressStatus, type SignedInCheck } from "@/api";
-import { invalidate, useQuery } from "@/lib/data";
-import { BROWSERS, detectBrowser, expiryState, parsePatterns, syncState } from "@/lib/auth";
+import { useEffect, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { api, type AuthSite, type EgressStatus, type SignedInCheck } from "@/api";
+import { useQuery } from "@/lib/data";
+import { expiryState, syncState } from "@/lib/auth";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input, NativeSelect } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Empty, ErrorBox, Field, Loading, PageHeader, RelTime } from "@/components/common";
+import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { ConfirmDialog } from "@/components/dialogs";
 import { useSkin } from "@/lib/skin";
 import { mainHost } from "../lib/identity";
-
-const POLL_MS = 2000;
 
 function ExpiryBadge({ iso, prefix = "", title }: { iso?: string; prefix?: string; title?: string }) {
   const state = expiryState(iso);
@@ -54,260 +49,15 @@ function SiteExpiry({ site }: { site: AuthSite }) {
   );
 }
 
-/**
- * The owner's own one-line sync command (`curl -sSL …/auth-sync/<token>.sh | sh`), shown alone in a copy box for him to run
- * in the Terminal app on his Mac. The copy-paste rule's one named exception, on his own words: this box holds strictly the
- * command, never text for the Claude app. `data-owner-command` names the exception for the copy-paste checks; the command
- * was tested in zsh and bash.
- */
-export const SYNC_COMMAND_EXCEPTION = "sync-browser-auth";
-
-function CopyCommand({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked (plain http): the text is selectable */
-    }
-  };
-  return (
-    <div className="flex items-stretch gap-2">
-      <code
-        className="min-w-0 flex-1 select-all break-all rounded-md border bg-muted px-3 py-2 font-mono text-xs"
-        data-owner-command={SYNC_COMMAND_EXCEPTION}
-        data-runs-on="On your Mac, in the Terminal app"
-        data-tested-in="zsh and bash"
-      >
-        {command}
-      </code>
-      <Button type="button" variant="outline" size="sm" className="h-auto" onClick={copy} aria-label="Copy command">
-        {copied ? <Check /> : <Copy />}
-      </Button>
-    </div>
-  );
-}
-
-function SyncResult({ sync }: { sync: AuthSync }) {
-  const r = sync.result!;
-  return (
-    <div className="grid gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm">
-      <div className="font-medium">
-        Synced from {r.browser} / {r.profileName ?? r.profile}
-      </div>
-      {r.sites.map((s) => (
-        <div key={s.pattern}>
-          <span className="font-mono">{s.pattern}</span>:{" "}
-          {s.cookieCount > 0 ? `${s.cookieCount} cookies (${s.domains.join(", ")})` : "no cookies found, previous sync kept"}
-          {!!s.keptBeside?.length && (
-            <div className="text-xs text-muted-foreground">Other profiles kept as they were: {s.keptBeside.join(", ")}</div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** The browser profile a row's Re-sync is for. */
-export interface SyncTarget {
-  /** "Chrome/Profile 5": what the Team Browser keys the row by. */
-  key: string;
-  /** The profile's own name ("example.com (ops@)"). */
-  name: string;
-  accounts?: string[];
-}
-
 /** a row's profile name: the map's label, else the name Chrome gave it at sync time. */
 export const profileNameOf = (s: AuthSite) => s.profileLabel ?? s.sourceProfile;
-const targetOf = (s: AuthSite): SyncTarget | undefined =>
-  s.profileKey ? { key: s.profileKey, name: profileNameOf(s), accounts: s.accounts } : undefined;
 
 /**
- * Patterns → one-time command → wait for the Mac script → result. The token rides in ?sync= while open.
- * A row's Re-sync passes its `target` profile; the token carries it, so the command is the same one line and
- * the Mac script opens that profile on the site and syncs it, with no question.
+ * the team signs in itself (the Team Browser's own sign_in, with the logins in Bitwarden). The owner rejected
+ * the Mac 'Sync browser auth' path, so this page never offers its command, its Get command button or a Re-sync: it
+ * shows the sign-ins the team holds, and a row can still be cleared.
  */
-function SyncDialog({ token, initialPatterns, target, onClose, onToken }: {
-  token?: string;
-  initialPatterns: string;
-  target?: SyncTarget;
-  onClose: () => void;
-  onToken: (token: string) => void;
-}) {
-  const [patterns, setPatterns] = useState(initialPatterns);
-  const [browser, setBrowser] = useState(() =>
-    detectBrowser(navigator.userAgent, !!(navigator as Navigator & { brave?: unknown }).brave),
-  );
-  const [sync, setSync] = useState<AuthSync>();
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-
-  // Poll the token until it is synced or expired.
-  useEffect(() => {
-    if (!token) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      try {
-        const s = await api.getAuthSync(token);
-        if (!alive) return;
-        setSync(s);
-        setError(undefined);
-        if (s.status === "synced") return invalidate();
-        if (s.status === "expired") return;
-      } catch (e) {
-        if (!alive) return;
-        setError((e as Error).message);
-      }
-      timer = setTimeout(tick, POLL_MS);
-    };
-    tick();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [token]);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const list = parsePatterns(patterns);
-    if (list.length === 0) return setError("Enter at least one site pattern.");
-    setBusy(true);
-    setError(undefined);
-    try {
-      let s: AuthSync;
-      try {
-        s = await api.startAuthSync({ patterns: list, browser, ...(target ? { profile: target.key } : {}) });
-      } catch (err) {
-        // an older Team Browser refuses `profile`: a plain sync still works (the script asks which profile)
-        if (!target || !/profile|unrecognized/i.test((err as Error).message)) throw err;
-        s = await api.startAuthSync({ patterns: list, browser });
-      }
-      setSync(s);
-      onToken(s.token);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restart = () => {
-    setPatterns(sync?.patterns.join(", ") ?? patterns);
-    setSync(undefined);
-    onToken("");
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{target ? `Re-sync ${target.name}` : "Sync browser auth"}</DialogTitle>
-          <DialogDescription>
-            Copies your logged-in cookies for these sites from a browser profile on your Mac into the central store on{" "}
-            {mainHost()}. Every agent on {mainHost()} can then browse them as you.
-          </DialogDescription>
-        </DialogHeader>
-
-        {target && !token && (
-          <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="resync-target">
-            <div>
-              Chrome profile <span className="font-medium">{target.name}</span>
-            </div>
-            {!!target.accounts?.length && (
-              <div className="text-muted-foreground">Holds {target.accounts.map((a) => "@" + a).join(", ")}</div>
-            )}
-            <div className="text-muted-foreground">The command opens this profile on the site, then syncs it.</div>
-          </div>
-        )}
-        {!token && (
-          <form className="grid gap-4" onSubmit={submit}>
-            <Field label="Sites" hint={<>Comma separated. <code>*.reddit.com</code> = reddit.com and subdomains; <code>x.com</code> = that host only; <code>*.airbnb.*</code> = any airbnb TLD.</>}>
-              <Input autoFocus value={patterns} onChange={(e) => setPatterns(e.target.value)} placeholder="*.reddit.com, x.com" />
-            </Field>
-            {!target && (
-              <Field label="Browser" hint="Detected from this page. Open this page in the browser profile that is logged in.">
-                <NativeSelect value={browser} onChange={(e) => setBrowser(e.target.value)}>
-                  {BROWSERS.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-            )}
-            {error && <div className="text-sm text-destructive">{error}</div>}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={busy} pending={busy} pendingLabel="Getting command…">
-                <KeyRound /> Get command
-              </Button>
-            </DialogFooter>
-          </form>
-        )}
-
-        {token && (
-          <div className="grid gap-4">
-            {sync && sync.status !== "synced" && (
-              <>
-                <div className="grid gap-1.5 text-sm">
-                  {/* the copy-paste rule's named exception: the owner's own one-line command, strictly the command */}
-                  <span className="text-base font-semibold">On your Mac, in the Terminal app</span>
-                  <span className="font-medium">Paste this one command and press Return</span>
-                  <CopyCommand command={sync.command} />
-                  <span className="text-xs text-muted-foreground">
-                    One-time link for {sync.patterns.join(", ")}, valid <RelTime iso={sync.expiresAt} />. Needs{" "}
-                    <a className="underline" href="https://docs.astral.sh/uv/" target="_blank" rel="noreferrer">
-                      uv
-                    </a>
-                    . macOS asks once for the browser's Safe Storage key: choose Always Allow. Only counts and domains are
-                    printed.
-                    {sync.targetProfile && (
-                      <span className="mt-1 block" data-testid="resync-note">
-                        It opens the {target?.name ?? sync.targetProfile} profile on the site, waits 30 seconds, then syncs it.
-                      </span>
-                    )}
-                    {sync.targetProfile && (
-                      <span className="mt-1 block" data-testid="resync-mac-list">
-                        This row is on your Mac list now too: the next Run all there re-syncs it for you, so you can also just close this.
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {sync.status === "pending" && !sync.error && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <RefreshCw className="h-4 w-4 animate-spin" /> Waiting for the sync…
-                  </div>
-                )}
-                {sync.status === "error" && (
-                  <div className="text-sm text-destructive">The script reported: {sync.error}. Fix it and run the command again.</div>
-                )}
-                {sync.status === "expired" && <div className="text-sm text-destructive">This link expired. Start a new sync.</div>}
-              </>
-            )}
-            {sync?.status === "synced" && <SyncResult sync={sync} />}
-            {!sync && !error && <Loading />}
-            {error && <div className="text-sm text-destructive">{error}</div>}
-            <DialogFooter>
-              {(sync?.status === "expired" || error) && (
-                <Button type="button" variant="outline" onClick={restart}>
-                  New sync
-                </Button>
-              )}
-              <Button type="button" variant={sync?.status === "synced" ? "default" : "outline"} onClick={onClose}>
-                {sync?.status === "synced" ? "Done" : "Close"}
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
+export const TEAM_SIGNS_IN = "The team signs in itself with the Team Browser and the logins in Bitwarden. Nothing for you to do here.";
 
 const EGRESS_POLL_MS = 30_000;
 
@@ -433,7 +183,8 @@ export function SignedInChecks({ rows }: { rows?: SignedInCheck[] }) {
                   </span>
                 )}
               </span>
-              {needsStep && r.fix && r.fix !== "none" && <span className="col-span-2 text-muted-foreground sm:col-span-1 sm:col-start-2">{r.fix}</span>}
+              {/* never the Browser's old Mac step (r.fix): the team signs in again itself */}
+              {needsStep && <span className="col-span-2 text-muted-foreground sm:col-span-1 sm:col-start-2">The team signs in again itself.</span>}
             </li>
           );
         })}
@@ -492,28 +243,13 @@ function ProfileCell({ site, shared }: { site: AuthSite; shared: boolean }) {
       >
         {state.line}
       </div>
-      {/* the Mac list's Run all re-syncs this row by itself; the line clears when fresh cookies arrive */}
-      {site.resync && (
-        <div data-testid="mac-list" className="break-words text-xs text-muted-foreground">
-          On your Mac list: Run all re-syncs it for you, nothing to paste.
-          {site.resync.lastError && <span className="text-destructive"> Last try: {site.resync.lastError}</span>}
-        </div>
-      )}
     </div>
   );
 }
 
-function RowActions({ site, onResync, onClear }: { site: AuthSite; onResync: (patterns: string, target?: SyncTarget) => void; onClear: (s: AuthSite) => void }) {
+function RowActions({ site, onClear }: { site: AuthSite; onClear: (s: AuthSite) => void }) {
   return (
     <div className="flex shrink-0 justify-end gap-1">
-      <Button
-        size="sm"
-        variant="outline"
-        aria-label={`Re-sync ${site.pattern} from ${profileNameOf(site)}`}
-        onClick={() => onResync(site.pattern, targetOf(site))}
-      >
-        <RefreshCw /> Re-sync
-      </Button>
       <Button size="sm" variant="ghost" aria-label={`Clear ${site.pattern} from ${profileNameOf(site)}`} onClick={() => onClear(site)}>
         <Trash2 />
       </Button>
@@ -524,42 +260,25 @@ function RowActions({ site, onResync, onClear }: { site: AuthSite; onResync: (pa
 const plainSite = (pattern: string) => pattern.replace(/^\*\./, "");
 
 /**
- * the page's one-line answer (the card quality check, rule 1): how many synced logins are in sync and which
- * need a Re-sync. A login needs one when its row is out of sync (dead, expired or expiring soon) or the hourly check
+ * the page's one-line answer (the card quality check, rule 1): how many sign-ins the team holds are good and which
+ * the team must sign in again (the team does it itself, never the owner). A login needs one when its row is out of sync (dead, expired or expiring soon) or the hourly check
  * found its site signed out.
  */
 export function authPunchline(sites: AuthSite[], checks: SignedInCheck[] = [], now: Date = new Date()): string {
-  if (sites.length === 0) return "No logins synced yet. Press Sync browser auth to add one.";
+  if (sites.length === 0) return "No sign-ins yet. The team signs in itself.";
   const signedOut = new Set(checks.filter((c) => c.state === "signed_out" && c.pattern).map((c) => c.pattern!));
   const need = sites.filter((s) => syncState(s, now).stale || signedOut.has(s.pattern));
   const n = sites.length;
-  if (need.length === 0) return n === 1 ? "The 1 synced login is in sync." : `All ${n} synced logins are in sync.`;
+  if (need.length === 0) return n === 1 ? "The 1 sign-in is good." : `All ${n} sign-ins are good.`;
   const names = [...new Set(need.map((s) => (s.accounts?.length ? s.accounts.map((a) => "@" + a.replace(/^@/, "")).join(", ") : plainSite(s.pattern))))];
   const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
-  return `${n - need.length} of ${n} logins in sync, ${need.length} ${need.length === 1 ? "needs" : "need"} a Re-sync: ${shown}.`;
+  return `${n - need.length} of ${n} sign-ins good, the team signs in again to ${shown}.`;
 }
 
 export function BrowserAuthPage() {
   const { data: sites, error, loading } = useQuery(() => api.listAuthSites(), []);
-  const [params, setParams] = useSearchParams();
-  const token = params.get("sync") ?? undefined;
-  const [dialog, setDialog] = useState<{ patterns: string; target?: SyncTarget } | undefined>(token ? { patterns: "" } : undefined);
   const [toClear, setToClear] = useState<AuthSite>();
   const narrow = useNarrow();
-
-  // A reload or shared link with ?sync= reopens the dialog on that token.
-  useEffect(() => {
-    if (token && !dialog) setDialog({ patterns: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  const open = (patterns: string, target?: SyncTarget) => setDialog({ patterns, target });
-  const close = () => {
-    setDialog(undefined);
-    if (params.has("sync")) setParams({}, { replace: true });
-  };
-  // Push (not replace) so the URL with the token lands in the browser's history: the Mac script looks for it there.
-  const onToken = (t: string) => setParams(t ? { sync: t } : {});
 
   // on the social skin this is the tester's own world: their sign-ins stay in their team's own browser.
   const social = useSkin().id === "social";
@@ -571,11 +290,6 @@ export function BrowserAuthPage() {
     <>
       <PageHeader
         title={social ? "Browser sign-ins" : "Browser auth"}
-        actions={
-          <Button onClick={() => open(social ? "x.com, *.reddit.com" : "*.reddit.com")}>
-            <KeyRound /> Sync browser auth
-          </Button>
-        }
       />
       {/* the one-line answer first, in the console's punchline box (ink border, one green bar; app face, no paper) */}
       {sites && (
@@ -590,7 +304,7 @@ export function BrowserAuthPage() {
       {!social && <SignedInChecks rows={checks} />}
       {error && <ErrorBox error={error} />}
       {loading && <Loading />}
-      {sites?.length === 0 && <Empty>No synced sites yet. Click Sync browser auth.</Empty>}
+      {sites?.length === 0 && <Empty>Each sign-in the team makes shows here.</Empty>}
       {sites && sites.length > 0 && (
         <>
           {/* phones: one card per row */}
@@ -602,7 +316,7 @@ export function BrowserAuthPage() {
                     <div className="font-mono font-medium">{s.pattern}</div>
                     <div className="truncate text-xs text-muted-foreground">{s.cookieCount} cookies · {s.domains.join(", ")}</div>
                   </div>
-                  <RowActions site={s} onResync={open} onClear={setToClear} />
+                  <RowActions site={s} onClear={setToClear} />
                 </div>
                 <div className="mt-2">
                   <ProfileCell site={s} shared={sharedPattern(sites, s)} />
@@ -665,7 +379,7 @@ export function BrowserAuthPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <RowActions site={s} onResync={open} onClear={setToClear} />
+                      <RowActions site={s} onClear={setToClear} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -676,14 +390,13 @@ export function BrowserAuthPage() {
       )}
       {/* what the page is, after the answer and the rows (prose last) */}
       <p className="mt-4 text-xs text-muted-foreground" data-testid="auth-about">
-        {about}
+        {TEAM_SIGNS_IN} {about}
       </p>
-      {dialog && <SyncDialog token={token} initialPatterns={dialog.patterns} target={dialog.target} onClose={close} onToken={onToken} />}
       <ConfirmDialog
         open={!!toClear}
         onOpenChange={(o) => !o && setToClear(undefined)}
         title={`Clear ${toClear?.pattern ?? "site"}${toClear ? ` from ${profileNameOf(toClear)}` : ""}?`}
-        description="Deletes the stored cookies. Agents lose the logged-in session until you sync again."
+        description="Deletes the stored cookies. The team signs in again itself."
         confirmLabel="Clear"
         onConfirm={() => api.clearAuthSite(toClear!.id)}
       />

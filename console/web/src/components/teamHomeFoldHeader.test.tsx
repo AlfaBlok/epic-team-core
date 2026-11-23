@@ -86,7 +86,8 @@ function expectOneDesign(list: HTMLElement[]) {
     expect(s.className, titleOf(s)).toBe(first.className);
     expect(header(s).className, titleOf(s)).toBe(header(first).className);
     expect(toggle(s).className, titleOf(s)).toBe(toggle(first).className);
-    const chevron = (x: HTMLElement) => toggle(x).querySelector("svg")!.getAttribute("class")!.replace(/lucide-chevron-(down|right)/, "lucide-chevron");
+    // the one shared fold chevron (its open state aside)
+    const chevron = (x: HTMLElement) => toggle(x).querySelector(".fold-chevron")!.getAttribute("class");
     expect(chevron(s), titleOf(s)).toBe(chevron(first));
     expect(pill(s).className.startsWith(PILL_SHAPE), titleOf(s)).toBe(true);
     expect(header(s).textContent, titleOf(s)).not.toMatch(/\(\d+\)/);

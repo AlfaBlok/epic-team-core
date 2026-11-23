@@ -1,3 +1,4 @@
+import { repoRowIds } from "../status/rowIds.js";
 import { HIS_WORDS_MAX } from "../hisWords.js";
 import { execFile } from "node:child_process";
 import { secureDeep } from "../steps/secureLinks.js";
@@ -730,7 +731,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       true,
       (text, date) => {
         let t = text;
-        const f = writeFollowups(t, r.ref, picks, date, by);
+        const f = writeFollowups(t, r.ref, picks, date, by, repoRowIds(repoDir(r)));
         if ("skip" in f) return f;
         t = f.text;
         made = f.rows;
@@ -823,7 +824,7 @@ export function createReview(db: DB, o: ReviewOptions) {
         if ("skip" in e) return { ok: false, error: e.skip };
         t = e.text;
         if (picks.length) {
-          const f = writeFollowups(t, r.ref, picks, date, by);
+          const f = writeFollowups(t, r.ref, picks, date, by, repoRowIds(repoDir(r)));
           if ("skip" in f) return { ok: false, error: f.skip };
           t = f.text;
           made = f.rows;
@@ -856,7 +857,7 @@ export function createReview(db: DB, o: ReviewOptions) {
             } catch {
               return { ok: false, error: `${g.rel} is not in the checkout` };
             }
-            const a = addSwitchedOnRow(gt, g.code, { title: s.title, ...(s.why ? { why: s.why } : {}), ...(s.quote ? { quote: s.quote } : {}), from: { ref: r.ref, rel: r.path } }, date, by);
+            const a = addSwitchedOnRow(gt, g.code, { title: s.title, ...(s.why ? { why: s.why } : {}), ...(s.quote ? { quote: s.quote } : {}), from: { ref: r.ref, rel: r.path } }, date, by, repoRowIds(repoDir(r)));
             if ("skip" in a) return { ok: false, error: a.skip };
             files.set(g.rel, a.text);
             started.push({ ref: a.ref, goal: g.code, rel: g.rel, title: s.title });
@@ -1095,6 +1096,8 @@ export function createReview(db: DB, o: ReviewOptions) {
     // this thread each minute (~1 s on the main server, logged as a blocked event loop). The write itself re-reads the row's status.
     for (const r of (await payload()).rows) {
       if (r.verdict.kind !== "closes-itself") continue;
+      // a row he sent back is never closed here: only his press closes it (its verdict already sends it back to its worker)
+      if ((r.iteration ?? 1) > 1) continue;
       const k = `${r.repo}\0${r.path}\0${r.ref}`;
       if ((closeTried.get(k) ?? 0) > now().getTime()) continue;
       const why = selfCloseWhy(r.verdict.reason);

@@ -162,7 +162,10 @@ describe("T42-S12 the button in Chat and the note in the chat", () => {
     expect(screen.getByTestId("note-cost").textContent).toContain("max 30 min");
     const loads = load.mock.calls.length;
     await act(async () => void fireEvent.click(screen.getByTestId("note-button")));
-    await waitFor(() => expect(screen.getByTestId("note-sent").textContent).toMatch(/Voice note sent · 2:30 · \$0\.0075/));
+    // E948-S174 (vn_3b3cf02e): no Sent under the box; the posted note's ✓ Sent is its own message in the reloaded chat
+    await waitFor(() => expect(f.api.finish).toHaveBeenCalled());
+    await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(loads));
+    expect(screen.queryByTestId("note-sent")).toBeNull();
     expect(f.api.finish).toHaveBeenCalledWith("vn_1", 1, undefined);
     expect(load.mock.calls.length).toBeGreaterThan(loads);
   });

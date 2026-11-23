@@ -168,8 +168,8 @@ export function createNewAskWaker(d: NewAskWakeDeps) {
     try {
       const run = await d.wake(a.id, newAskNote(codes), NEW_ASK_NOTE_BY);
       // a wake that started meanwhile got the note queued (start guard), not a second wake
-      if (run.startGuard === "queued") {
-        markSeen(d.db, m.id, codes, "queued into a running wake", run.id);
+      if (run.startGuard === "queued" || run.startGuard === "held" || run.startGuard === "handled") {
+        markSeen(d.db, m.id, codes, run.startGuard === "queued" ? "queued into a running wake" : `${run.startGuard} for a wake`, run.id);
         return { milestoneId, woke: false, reason: `queued into running wake ${run.id}`, codes };
       }
       markSeen(d.db, m.id, codes, "woke the Unblocker", run.id);

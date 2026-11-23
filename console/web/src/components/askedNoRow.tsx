@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { LimitControl, ListPane, useListLimit } from "@/components/listPane";
 import { useProject } from "@/lib/project";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * "Asked, no row yet" on the Team home. Open Done-means lines in runnable epics that no ledger row
@@ -68,6 +69,7 @@ function AskedLine({ item: i }: { item: AskedNoRowItem }) {
       aria-expanded={full}
       onClick={() => setFull(!full)}
     >
+      <FoldChevron open={full} className="self-center" />
       <span className="shrink-0 font-medium">{i.id}</span>{" "}
       <span className={cn("min-w-0 flex-1", full ? "break-words" : "truncate")}>{i.text}</span>
     </button>

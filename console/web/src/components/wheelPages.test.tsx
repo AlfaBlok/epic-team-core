@@ -49,6 +49,15 @@ const PAGES: PagesBody = {
 describe("pages inside their wheel", () => {
   const ix = indexScorecards(SETS);
 
+  it("the registry's own objective wins over the row's spine ", () => {
+    // a check row lives in the social epic but its page was made for the testers objective: it shows there only.
+    const named = { total: 1, groups: [{ id: "app-EPIC-909", repo: "app", epic: "EPIC-909", epicTitle: "", pages: [{ ...page(9305, "E907-S5", "app", "EPIC-909", "Check"), objective: "testers" }] }] } as PagesBody;
+    expect(placePages(named, SETS, ix).map((p) => p.wheel?.id)).toEqual(["testers"]);
+    expect(pagesOfObjective(named, SETS, ix, "testers").map((p) => p.port)).toEqual([9305]);
+    expect(pagesOfObjective(named, SETS, ix, "social")).toEqual([]);
+    expect(pagesOfObjective(named, SETS, ix, "social~video")).toEqual([]);
+  });
+
   it("places a page by its row's spine, else by its epic, else not placed", () => {
     const placed = placePages(PAGES, SETS, ix);
     const where = Object.fromEntries(placed.map((p) => [p.row, p.wheel?.id ?? "not placed"]));
@@ -82,6 +91,33 @@ describe("pages inside their wheel", () => {
     expect(screen.getByTestId("wheel-pages-all").getAttribute("href")).toBe("/pages");
   });
 
+  // the owner: "Pages shows every file homed there": the answer and the counts hold the
+  // pages and notes kept in the repo too, so a tab never says fewer than it lists.
+  it("the tab's answer counts the served pages and the files kept in the repo", () => {
+    const entries = [
+      { id: "app:docs/status/e907-s1/index.html", repo: "app", path: "docs/status/e907-s1", open: "docs/status/e907-s1/index.html", title: "Kept page", kind: "page" as const, row: "E907-S1", files: 1 },
+      { id: "app:docs/status/e907-s2.md", repo: "app", path: "docs/status/e907-s2.md", open: "docs/status/e907-s2.md", title: "Kept note", kind: "note" as const, row: "E907-S2", files: 1 },
+    ];
+    render(
+      <MemoryRouter>
+        <WheelPagesTab pages={pagesOfMilestone(PAGES, "home_pick")} what="objective" files={{ entries }} />
+      </MemoryRouter>,
+    );
+    const answer = screen.getByTestId("wheel-pages-answer");
+    expect(answer.textContent).toContain("3 pages and notes were made for this objective: 1 served, 2 kept in the repo.");
+    expect(answer.dataset.total).toBe("3");
+    expect(screen.getAllByTestId("wheel-page-files-row")).toHaveLength(2);
+  });
+
+  it("each objective's count in the global list adds its kept files", () => {
+    const placed = placePages(PAGES, SETS, indexScorecards(SETS));
+    const files = new Map<string, unknown[]>([["testers", [1, 2, 3]], ["social", []]]);
+    expect(wheelCounts(placed, SETS.nodes, files).map((w) => [w.id, w.count])).toEqual([
+      ["testers", 4],
+      ["social", 2],
+    ]);
+  });
+
   it("the global list still shows every page, with each objective's count opening its Pages tab", async () => {
     vi.spyOn(api, "listPages").mockResolvedValue(PAGES);
     vi.spyOn(api, "listScorecards").mockResolvedValue(SETS);
@@ -109,8 +145,8 @@ describe("pages inside their wheel", () => {
         pages: [
           { ...page(9302, "E907-S4", "app", "EPIC-908", "Plans"), objective: "testers" },
           { ...page(9305, "E907-S8", "app", "EPIC-908", "Errand"), notPlaced: "a personal errand" },
-          // a page its row's tree places keeps that place, whatever it names.
-          { ...page(9303, "E907-S5", "app", "EPIC-909", "Week one"), objective: "testers" },
+          // a page that names no objective goes by its row's tree (one that names one goes there, test above).
+          { ...page(9303, "E907-S5", "app", "EPIC-909", "Week one") },
         ],
       },
       { id: "home_pick-EPIC", repo: "home_pick", epic: "EPIC", epicTitle: "", pages: [{ ...page(9204, "E907-S7", "home_pick", "EPIC", "Where to live"), objective: "home", objectiveName: "The home" }] },

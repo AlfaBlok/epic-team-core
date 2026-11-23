@@ -1,8 +1,9 @@
 import { copyPasteInText } from "../steps/copyPaste.js";
 import { untappableProblem } from "../inbox/untappable.js";
 import { stripInline } from "../adapters/markdown.js";
-import { ownerName } from "../identity.js";
+import { hostOf, ownerName, sites } from "../identity.js";
 import { hasPlaceLink } from "../inbox/askGate.js";
+import { aboutProblem } from "../inbox/about.js";
 
 /**
  * (the owner 2026-11-03, approved mockup docs/status/e48-s26/real-feed-mockup.html; spec docs/status/e48-s26-card-spec.md):
@@ -92,6 +93,13 @@ export interface CardFields {
   screenshot?: string;
   /** Short name of the task in the tree ("This task: <name>"). */
   name?: string;
+  /**
+   * E948-S180 (the owner 22 Nov: "I would rather you did like a URL where you show me. You lead my attention to
+   * what you want to show me"): `look:` one plain line under the evidence link saying what to look at there.
+   */
+  look?: string;
+  /** E948-S172 the card's topic in his words, 8 or fewer ("one kernel for every product"): its first line, `About: …`. */
+  about?: string;
   /** What the team does next once it is marked complete (sub-line of the button). */
   after?: string;
   next: NextStep[];
@@ -133,6 +141,8 @@ export interface CardFields {
    * as ready for him and the console tells him once by WhatsApp or mail (review/ready.ts).
    */
   ready?: { where: string; url?: string };
+  /** E948-S168: `label: urgent` (or `urgent: yes`): the card goes in his Urgent section, labelled Urgent. */
+  urgent?: true;
 }
 
 export interface CardDeadline {
@@ -163,6 +173,8 @@ const KEYS: [RegExp, keyof CardFields | "skip"][] = [
   [/^(evidence|the evidence|evidence url|evidence link|live|open live)$/, "evidence"],
   [/^(screenshot|shot|image|evidence screenshot|picture)$/, "screenshot"],
   [/^(name|tree name|short name|task name)$/, "name"],
+  [/^(about|topic|about line)$/, "about"],
+  [/^(look|look at|what to look at|see|what to see)$/, "look"],
   [/^(after|then|next for the team|what happens next|sub ?line)$/, "after"],
   [/^(next|next steps|suggested next steps|follow ?ups)$/, "next"],
   [/^(completes|complete)$/, "completes"],
@@ -175,6 +187,7 @@ const KEYS: [RegExp, keyof CardFields | "skip"][] = [
   [/^(objective|objectives|serves|serves objective)$/, "objective"],
   [/^(deadline|due|due by|reply by|answer by)$/, "deadline"],
   [/^(ready|ready at|where it is|find it at)$/, "ready"],
+  [/^(label|labels|urgent)$/, "urgent"],
 ];
 /** the `from` fields (the persona that sends the card). */
 const FROM_KEYS: [RegExp, keyof CardFrom][] = [
@@ -327,6 +340,10 @@ export function parseCard(text: string): CardFields | undefined {
       if (c) out.confirm = { yes: /^(yes|true)$/i.test(c[1]), ...(c[2].trim() ? { why: c[2].trim() } : {}) };
       continue;
     }
+    if (key === "urgent") {
+      if (/^(?:urgent|yes|true|top of inbox|pressing)\b/i.test(unquote(v))) out.urgent = true;
+      continue;
+    }
     if (key === "deadline") {
       const d = parseDeadline(v);
       if (d) out.deadline = d;
@@ -408,7 +425,7 @@ export function hasVerb(text: string): boolean {
  * the card's word limits, about half of what they were (title and goal 20, delivered 2 to 4 lines of 20, source 40,
  * decision 30). One place, so the rule text every brief carries (cardRule.ts) and the gate never disagree.
  */
-export const CARD_LIMITS = { title: 12, goal: 12, deliveredMin: 1, deliveredMax: 3, delivered: 12, source: 20, decision: 15, next: 12, after: 12, name: 8 } as const;
+export const CARD_LIMITS = { title: 12, goal: 12, deliveredMin: 1, deliveredMax: 3, delivered: 12, source: 20, decision: 15, next: 12, after: 12, name: 8, look: 14 } as const;
 
 /** What is not plain in one card text, or undefined (no `;`, `(`, `/`, `|` outside links; no row code, path or "approve"). */
 export function plainProblem(label: string, text: string, max: number): string | undefined {
@@ -467,6 +484,8 @@ export interface GateInput {
   goalSentence?: string;
   /** Whether the screenshot file exists in the repo. */
   screenshotFound?: boolean;
+  /** E948-S180 the hosts whose pages take a deep link (the page hub's, the console's): a bare link there is held. */
+  ownHosts?: string[];
 }
 
 /**
@@ -493,6 +512,10 @@ export function gateProblems(g: GateInput): string[] {
   add(need(g.goalSentence, "the goal sentence of the epic"));
   if (g.goalSentence) add(plainProblem("the goal sentence of the epic", g.goalSentence, 20));
   if (c.name) add(plainProblem("the task name", c.name, CARD_LIMITS.name));
+  // E948-S172 (his vn_106f5727: "somewhere there that says what's the topic"): the card opens with `About: <topic>`,
+  // its `about:` (else its task name, title or goal, derived). A new or changed card with neither `about:` nor `name:` is held by
+  // the quality check (scripts/card_qc.py, which judges only new words): a card already in his inbox is never pulled for it.
+  if (c.about) add(aboutProblem(c.about) && `the About line is not plain: ${aboutProblem(c.about)}`);
   if (c.after) add(plainProblem("the after line", c.after, CARD_LIMITS.after));
   c.next.forEach((n, i) => add(plainProblem(`next step ${i + 1}`, n.title, CARD_LIMITS.next)));
   // the label is the link's own words (it may name the page, memory.dev/connect)
@@ -523,6 +546,10 @@ export function gateProblems(g: GateInput): string[] {
   if (lines.length) out.push(`it gives ${ownerName()} a terminal line to copy (${lines[0].line}): make it a Mac-agent ticket or do it yourself`);
   // E948-S129: every address the card shows is one he can tap
   add(untappableProblem("the card", c.title, c.goal, ...c.delivered.map((d) => d.text), c.after, ...c.next.map((n) => n.title), c.source, c.decision, c.evidence, c.evidenceUrl, ...(c.options ?? [])));
+  // E948-S180: the link lands on the thing to look at, and one line says what it is
+  add(deepLinkProblem(c.evidenceUrl, g.ownHosts));
+  if (c.look) add(plainProblem("the look line", c.look, CARD_LIMITS.look));
+  else if (c.evidenceUrl && deepLinkPossible(c.evidenceUrl, g.ownHosts)) out.push("the look line is missing: add look: with one plain line saying what to look at behind the link");
   if (!c.screenshot) out.push("the screenshot is missing");
   else if (g.screenshotFound === false) out.push(`the screenshot ${c.screenshot} is not in the repo`);
   return out;
@@ -550,6 +577,50 @@ export function evidenceProblem(c: CardFields | undefined, rowText = ""): string
   const all = [c.title, c.goal, ...c.delivered.map((d) => d.text), rowText].join(" ");
   if (/\bdry[ -]?run\b/i.test(all)) return "the proof was a dry run, nothing real happened yet";
   return undefined;
+}
+
+/** The console's own hosts (its sites and customer sites): its pages take `?focus=` (web/src/lib/deepFocus.ts). The page hub's come from its page list. */
+export function consoleHosts(): string[] {
+  const s = sites();
+  const customer = s.customerHosts.split(/\s+/).map((p) => p.split("=")[0]?.trim().toLowerCase()).filter((h): h is string => !!h);
+  return [hostOf(s.teamUrl), hostOf(s.socialUrl), ...customer];
+}
+
+/** A file, never a page: an image, a clip, a document, a voice note. Nothing inside it to point at. */
+const FILE_URL = /\.(?:png|jpe?g|webp|gif|svg|mp4|mov|m4v|webm|mp3|m4a|wav|ogg|pdf|csv|json|txt|zip)$/i;
+
+/**
+ * E948-S180: a deep link is possible when the page is ours (the page hub's or the console's): every one of them scrolls
+ * to `#<id>` or `?focus=<id or words>` and highlights it (scripts/page_shell_kit/links.js, web/src/lib/deepFocus.ts).
+ * Someone else's page (a post on X, a video) and a file are taken as they are.
+ */
+export function deepLinkPossible(url: string, ownHosts: string[] = []): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(u.protocol) || FILE_URL.test(u.pathname) || u.pathname.startsWith("/api/")) return false;
+  const h = u.hostname.toLowerCase();
+  return [...consoleHosts(), ...ownHosts].some((x) => x.toLowerCase() === h);
+}
+
+/** True when the link already points inside its page: a `#<section>` (a text fragment counts) or `?focus=`. */
+export function isDeepLink(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hash.replace(/^#/, "").trim().length > 0 || !!u.searchParams.get("focus")?.trim();
+  } catch {
+    return false;
+  }
+}
+
+/** The hold for a bare page link where a deep link is possible (the owner 22 Nov: "You lead my attention"), else undefined. */
+export const BARE_LINK = "point the link at the thing";
+export function deepLinkProblem(url: string | undefined, ownHosts: string[] = []): string | undefined {
+  if (!url || !deepLinkPossible(url, ownHosts) || isDeepLink(url)) return undefined;
+  return `${BARE_LINK}: the evidence link opens the whole page, add #<section id> or ?focus=<id or words> so it lands on the one section, row or number to look at`;
 }
 
 /** A short label for the evidence link: the card's own, else the page's host and path, never the raw URL. */

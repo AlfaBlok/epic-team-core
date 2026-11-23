@@ -78,9 +78,9 @@ describe("the repo's own level is not a campaign", () => {
         <SidebarNav />
       </MemoryRouter>,
     );
-    // the console skin holds every goal no objective holds in its folded More objectives, PLAN-0 among them.
+    // the console skin holds every goal no objective holds in its folded Other goals, PLAN-0 among them.
     expect(total).toBeGreaterThan(0);
-    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
+    fireEvent.click(await screen.findByTestId("nav-other-goals-toggle"));
     expect(await screen.findByText("PLAN-0: Memo social presence")).toBeTruthy();
   });
 });

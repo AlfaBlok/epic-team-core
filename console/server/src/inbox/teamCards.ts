@@ -1,3 +1,4 @@
+import { repoRowIds } from "../status/rowIds.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -86,6 +87,10 @@ export interface TeamCard {
   goal?: { unset: string; options: { goal: string; number: string }[]; recommend?: number; links?: CardLink[] };
   advisor?: AdvisorSet;
   answer?: { at: string; text: string; pick?: number; via: "text" | "voice" | "button"; attachments?: string[] };
+  /** withdrawn by the team without his answer, because his newer word overtook it or its goal is
+   * already set (`why` says which, quoting him); a closed card leaves the inbox like an answered one. Written in the repo's
+   * cards file (the repo is the only source), or with closeCard. */
+  closed?: { at: string; by: string; why: string };
 }
 export interface TeamCardsDoc {
   version: 1;
@@ -208,7 +213,7 @@ export function overLimit(doc: TeamCardsDoc, card: Pick<TeamCard, "kind" | "scor
   // one cap across worlds: `others` are the other files' cards (the home world's and the card worlds')
   if (card.kind === "idea" && [...doc.cards, ...others].filter((c) => c.kind === "idea" && c.day === day).length >= LIMITS.ideasPerDay)
     return { code: "limit_ideas", message: `at most ${LIMITS.ideasPerDay} ideas a day: today's (${day}) are in` };
-  if (card.kind === "goal" && doc.cards.some((c) => c.kind === "goal" && c.scorecard === card.scorecard && !c.answer))
+  if (card.kind === "goal" && doc.cards.some((c) => c.kind === "goal" && c.scorecard === card.scorecard && isOpen(c)))
     return { code: "limit_goal", message: `one open goal conversation per scorecard: ${card.scorecard} has one waiting for his answer` };
   return null;
 }
@@ -243,8 +248,18 @@ export function answerCard(doc: TeamCardsDoc, id: string, answer: NonNullable<Te
 
 export const KIND_ORDER: Record<TeamCardKind, number> = { advisor: -1, digest: 0, idea: 1, goal: 2 };
 
-/** open: no answer yet; an advisor set while one suggestion still waits for his verdict. */
-export const isOpen = (c: TeamCard) => (c.kind === "advisor" ? advisorOpen(c.advisor) : !c.answer);
+/** open: no answer yet and not withdrawn; an advisor set while one suggestion still waits for his verdict. */
+export const isOpen = (c: TeamCard) => !c.closed && (c.kind === "advisor" ? advisorOpen(c.advisor) : !c.answer);
+
+/** the team withdraws a card he has not answered (overtaken by his newer word, or its goal already set). */
+export function closeCard(doc: TeamCardsDoc, id: string, closed: NonNullable<TeamCard["closed"]>): { doc: TeamCardsDoc; card: TeamCard } | { error: { code: string; message: string } } {
+  const card = doc.cards.find((c) => c.id === id);
+  if (!card) return { error: { code: "not_found", message: `no team card ${id}` } };
+  if (!isOpen(card)) return { error: { code: "not_open", message: `${id} is already answered or closed` } };
+  if (!closed.why.trim()) return { error: { code: "bad_why", message: "say why it is withdrawn: his newer word or where its goal is set" } };
+  const next: TeamCard = { ...card, closed };
+  return { doc: { ...doc, cards: doc.cards.map((c) => (c.id === id ? next : c)) }, card: next };
+}
 
 /**
  * What the inbox lists: open cards (digests: only each scorecard's newest, an older one is replaced by it), then
@@ -525,7 +540,7 @@ export function mountTeamCards(
           fetchFreshMs: 30_000,
           edit: (t, date) => {
             if (!t.trim()) return { skip: (skip = `${item.spine} is not in the repo`) };
-            const r = acceptOnSpine(t, item, card.advisor!, { date, who, source, ...(text ? { words: text } : {}) });
+            const r = acceptOnSpine(t, item, card.advisor!, { date, who, source, taken: repoRowIds(dir), ...(text ? { words: text } : {}) });
             if ("skip" in r) return { skip: (skip = r.skip) };
             made = r.ref;
             return { text: r.text, msg: `${made}: ${who} accepted the ${ADVISOR_BY}'s suggestion: ${item.title.slice(0, 80)}`, body: `${who} accepted it in his inbox (${card.id} ${item.id}, ${card.advisor!.week}); ${made} is ready for the Delivery manager.` };

@@ -9,8 +9,13 @@
  * - every `checkMs` the keeper rebuilds when `signature()` changed (an input file was written) and the last build is at
  *   least `minGapMs` old, or when the last build is `everyMs` old whatever changed (database parts: milestones, asks);
  * - `refresh()` rebuilds now (a write that changes the answer); a failed build keeps the last answer.
+ * - `file`: every build is also saved there, and a new process starts from the saved answer, so the first
+ *   request after a restart gets the last good bytes at once (a release restarts the console every ~10 min; the cold
+ *   build took 9.9 to 21 s on the main server while the sidebar waited), and the keeper rebuilds it in the background straight away.
  */
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { promisify } from "node:util";
 import { gzip as gzipCb } from "node:zlib";
 import type { Context } from "hono";
@@ -51,9 +56,31 @@ export function keptJson(o: {
   log?: (msg: string) => void;
   /** false: no timer (tests drive tick()). */
   timer?: boolean;
+  /** where the last good answer is saved, so a restart serves it at once; unset = memory only. */
+  file?: string;
 }): KeptJson {
   const now = o.now ?? Date.now;
   let kept: PreparedJson | undefined;
+  /** true while `kept` is the saved answer from before this start (rebuilt on the first get). */
+  let fromFile = false;
+  if (o.file)
+    try {
+      const saved = JSON.parse(fs.readFileSync(o.file, "utf8")) as { at: number; tookMs: number; etag: string; json: string; gz: string };
+      kept = { json: Buffer.from(saved.json, "base64"), gz: Buffer.from(saved.gz, "base64"), etag: saved.etag, at: saved.at, tookMs: saved.tookMs };
+      fromFile = true;
+    } catch {
+      /* nothing saved yet, or unreadable: the first get builds it */
+    }
+  const save = (p: PreparedJson) => {
+    if (!o.file) return;
+    const f = o.file;
+    const body = JSON.stringify({ at: p.at, tookMs: p.tookMs, etag: p.etag, json: p.json.toString("base64"), gz: p.gz.toString("base64") });
+    void fs.promises
+      .mkdir(path.dirname(f), { recursive: true })
+      .then(() => fs.promises.writeFile(`${f}.tmp`, body))
+      .then(() => fs.promises.rename(`${f}.tmp`, f))
+      .catch((e) => o.log?.(`kept answer: could not save ${f}: ${(e as Error)?.message ?? e}`));
+  };
   let building: Promise<PreparedJson | undefined> | undefined;
   let first: Promise<PreparedJson> | undefined;
   let sig: string | undefined;
@@ -79,6 +106,8 @@ export function keptJson(o: {
       try {
         const value = await o.build();
         kept = await prepareJson(value, now(), now() - started);
+        fromFile = false;
+        save(kept);
         // read after the build: the spines it read are known only then (a file written mid-build waits for everyMs).
         sig = sign();
         return kept;
@@ -106,6 +135,12 @@ export function keptJson(o: {
 
   return {
     get() {
+      if (kept && fromFile && !first) {
+        // the saved answer from before this start: send it now, build the fresh one behind it
+        start();
+        first = Promise.resolve(kept);
+        void refresh();
+      }
       if (kept) return Promise.resolve(kept);
       if (!first) {
         start();

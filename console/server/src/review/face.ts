@@ -6,6 +6,7 @@ import path from "node:path";
 import { inside } from "../adapters/doc.js";
 import { field, stripInline } from "../adapters/markdown.js";
 import { parseCard, plainProblem, type CardDeadline, type CardFields, type CardFrom, type DeliveredLine, type NextStep } from "./card.js";
+import { sourceRelOf } from "../adapters/spineArchive.js";
 
 /**
  * what the card face shows, read from the repo only (L-45): the card file's fields, the project name (root spine,
@@ -21,6 +22,8 @@ export interface TreeLine {
 }
 
 export interface CardFace {
+  /** E948-S172 the card's topic, its first line `About: …` (the card's `about:`, else its task name, title or goal). */
+  about?: string;
   project: { name: string; url?: string };
   /** The epic's goal sentence; `code` + the row's milestone make its Epic Book link (/book/<milestone>#<code>). */
   goal: { text: string; code: string };
@@ -29,7 +32,8 @@ export interface CardFace {
   title: string;
   taskGoal: string;
   delivered: DeliveredLine[];
-  evidence: { url: string; label: string };
+  /** E948-S180 `look`: one plain line under the link, what to look at there. */
+  evidence: { url: string; label: string; look?: string };
   /** Repo-relative path of the screenshot (served by GET /api/review-items/<id>/screenshot). */
   screenshot?: string;
   /** E948-S62 the quality check: his words beside the result point by point, the live screens at 390 and 1280 (GET …/screenshot?width=390). */
@@ -189,7 +193,8 @@ export function cardFor(repoDir: string, spineRel: string, ref: string, cells: s
       const f = abs && !rel.startsWith("..") ? readCardFile(abs) : undefined;
       if (f?.row === ref) return { rel, fields: f };
     }
-  const base = path.posix.basename(spineRel);
+  // a row read from its epic's archive keeps its card: the card names the epic's own spine
+  const base = path.posix.basename(sourceRelOf(spineRel));
   const named = cards.filter((c) => c.fields.row === ref);
   return named.find((c) => c.fields.spine && path.posix.basename(c.fields.spine) === base) ?? named.find((c) => !c.fields.spine);
 }

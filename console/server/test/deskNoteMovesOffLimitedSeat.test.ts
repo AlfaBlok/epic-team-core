@@ -161,3 +161,49 @@ describe("console lines wait while the desk is busy and go in together, never ah
     expect(t3.ops("sendToThread").map((c) => c.args)).toEqual([{ threadId: "desk1", message: "digest", clientRequestId: "d1" }]);
   });
 });
+
+describe("22 Nov: T3's queue stuck on an idle desk is sent again as one message", () => {
+  it("idle desk + queued messages for 2 ticks past QUEUE_STUCK_MS: cancelled from T3's queue and re-sent once", async () => {
+    let t = Date.parse("2026-11-22T05:00:00Z");
+    t3.readThreadStatus = async () => ({ status: "completed", raw: {} });
+    let q = [
+      { queuedRunId: "q1", text: "his words: why these failures all the time????", truncated: false },
+      { queuedRunId: "q2", text: "↔ Passed to the other desk…", truncated: true },
+    ];
+    const cancelled: string[] = [];
+    Object.assign(t3, {
+      queueItems: async () => q,
+      queueRead: async (_th: string, id: string) => `${id} whole text`,
+      queueCancel: async (_th: string, id: string) => {
+        cancelled.push(id);
+        q = q.filter((x) => x.queuedRunId !== id);
+      },
+      queuedCount: async () => q.length,
+    });
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher: dispatcher(["seat2"]), publicUrl: BASE, reposRoot: dir, sendWaitMs: 5, now: () => t });
+    await desk.view();
+    expect(await desk.unstickQueue()).toBe(0); // first sight: maybe T3 is just about to start it
+    t += 30_000;
+    expect(await desk.unstickQueue()).toBe(0);
+    t += 70_000;
+    expect(await desk.unstickQueue()).toBe(2);
+    expect(cancelled).toEqual(["q1", "q2"]);
+    const sent = t3.ops("sendToThread").map((c) => c.args.message);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("why these failures all the time????");
+    expect(sent[0]).toContain("q2 whole text");
+    expect(await desk.unstickQueue()).toBe(0);
+  });
+
+  it("a working desk never counts as stuck", async () => {
+    t3.readThreadStatus = async () => ({ status: "running", raw: {} });
+    Object.assign(t3, { queueItems: async () => [{ queuedRunId: "q1", text: "x", truncated: false }], queueCancel: async () => undefined });
+    let t = 0;
+    const desk = createDesk({ db, store: createStore(db), t3, dispatcher: dispatcher(["seat2"]), publicUrl: BASE, reposRoot: dir, sendWaitMs: 5, now: () => t });
+    await desk.view();
+    for (let i = 0; i < 5; i++) {
+      t += 60_000;
+      expect(await desk.unstickQueue()).toBe(0);
+    }
+  });
+});

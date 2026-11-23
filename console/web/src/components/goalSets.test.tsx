@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type DeskChat } from "@/api";
 import type { ScorecardsBody } from "@/api/pursuit-types";
-import { GoalSetPage, GoalSetsPage, SidebarGoalSets, filterChat, objectiveTab } from "@/components/goalSets";
+import { GoalSetPage, GoalSetsPage, SidebarGoalSets, filterChat, krNumber, objectiveTab, pinDeciding } from "@/components/goalSets";
 import { SCORECARD_PATH, SCORECARDS_PATH, SET_NAME, indexScorecards, homeOf, sortInbox, type InboxRow } from "@/lib/scorecards";
 
 /**
@@ -126,6 +126,10 @@ describe("goal sets: the pure parts", () => {
       ],
     } as DeskChat;
     expect(filterChat(chat, `${SET_NAME.one} · Launch`, ["EPIC-901", "E901-"]).messages.map((m) => m.id)).toEqual(["3", "4", "5"]);
+    // none of the desk's lines is about it: an empty view, not one stuck on loading
+    const none = filterChat({ ...chat, stale: true } as typeof chat, `${SET_NAME.one} · Other`, ["E999-"]);
+    expect(none.messages).toEqual([]);
+    expect(none.stale).toBe(false);
   });
 });
 
@@ -161,7 +165,7 @@ describe("goal sets: the screens", () => {
     expect(screen.queryByTestId("sidebar-inside-chat")).toBeNull();
   });
 
-  it("its Plan tab: the same eight sections as a campaign's, read for this objective", async () => {
+  it("its Plan tab is the wheel's plan: per key result how it gets to green (a drawn step line, the approach, the steps, green when, if it stalls), never a marketing plan or the key results' numbers", async () => {
     const plan = vi.spyOn(api, "getObjectivePlan");
     render(
       <MemoryRouter initialEntries={["/sets/launch?tab=plan"]}>
@@ -172,7 +176,22 @@ describe("goal sets: the screens", () => {
     );
     const tab = await screen.findByTestId("plan-tab");
     expect(plan).toHaveBeenCalledWith("launch");
-    expect(within(tab).getAllByRole("heading", { level: 3 })).toHaveLength(8);
+    expect(tab.dataset.plan).toBe("wheel");
+    expect(within(tab).getByTestId("plan-line").textContent).toMatch(/first key result green/);
+    const steps = within(tab).getAllByTestId("plan-step");
+    expect(steps).toHaveLength(2);
+    expect(within(steps[1]).getByTestId("plan-step-owner").textContent).toBe("Ticket worker");
+    expect(within(steps[1]).getByTestId("plan-step-by").textContent).toBe("26 Nov");
+    expect(tab.textContent).not.toMatch(/marketing|who we reach|the offer|budget/i);
+    const kr = within(tab).getAllByTestId("plan-kr")[0];
+    expect(within(kr).getByTestId("plan-line-diagram").querySelector("svg")).toBeTruthy();
+    expect(within(kr).getByTestId("plan-how").textContent).toMatch(/blocks it first/);
+    expect(within(kr).getAllByTestId("plan-step-changes")[0].textContent).toMatch(/what comes first/);
+    expect(within(kr).getByTestId("plan-green-when").textContent).toMatch(/no miss/);
+    expect(within(kr).getByTestId("plan-if-stuck").textContent).toMatch(/one decision/);
+    // the heading is the key result's name only: its value, target and ticket list stay on the Key results tab
+    expect(kr.querySelector("h3")!.textContent).not.toMatch(/→|\d+%/);
+    expect(kr.textContent).not.toMatch(/\b[A-Z]\d*-S\d+\b/); // no ticket codes: the Board tab holds the tickets
     expect(screen.getByTestId("set-tab-plan").getAttribute("aria-current")).toBe("page");
   });
 
@@ -189,41 +208,58 @@ describe("goal sets: the screens", () => {
     expect(screen.getByTestId("set-answer").textContent).toBe("1 of 3 key results are green, 2 red. 1 has nothing working on it.");
     expect(screen.getByTestId("kr-summary").textContent).toContain("1 of 3 green");
     const krs = screen.getAllByTestId("kr-item");
-    expect(krs.map((r) => r.dataset.state)).toEqual(["red", "green", "red"]);
-    expect(within(krs[0]).getByTestId("kr-things").textContent).toBe("2 things under it");
-    // each key result: its target and its status now, side by side (the owner 17:57Z: "what is the target? what is the status?")
-    expect(within(krs[0]).getByTestId("kr-target").textContent).toBe("5 by 17 Nov");
-    expect(within(krs[0]).getByTestId("kr-now").textContent).toBe("Behind: 0 of 5 · read 13 Novnothing measures this yet"); // the status in a word first (vn_15aa4467); no stamp in this fixture
-    expect(within(krs[0]).getByTestId("kr-target-status-phone").textContent).toBe("Target 5 by 17 NovNow Behind: 0 of 5 · read 13 Novnothing measures this yet");
+    // green first, then amber, then red (vn_68cda1fe); a colour keeps the file's order
+    expect(krs.map((r) => r.dataset.state)).toEqual(["green", "red", "red"]);
+    const [green, red, idleRed] = krs;
+    expect(within(red).getByTestId("kr-things").textContent).toBe("2 things under it");
+    // a table of three columns on every screen: key result, target, current (vn_68cda1fe: "Testers sign up, 5, 3")
+    expect(screen.getByTestId("kr-sheet-head").textContent).toBe("Key resultTargetCurrent");
+    expect(within(red).getByTestId("kr-target").textContent).toBe("5 by 17 Nov");
+    // the current cell: the value alone, coloured by its state, the status word for readers; no stamp in this fixture
+    expect(within(red).getByTestId("kr-now").textContent).toBe("0 of 5 (Behind)nothing measures this yet");
+    expect(within(red).getByTestId("kr-now").dataset.state).toBe("red");
     // no target in the file: "no target yet", in grey
-    expect(within(krs[1]).getByTestId("kr-target").textContent).toBe("no target yet");
-    expect(screen.getByTestId("kr-sheet-head").textContent).toBe("Key resultTargetStatus now");
+    expect(within(green).getByTestId("kr-target").textContent).toBe("no target yet");
     // the key results come before the spine line: the first thing he sees
     expect(screen.getByTestId("kr-sheet").compareDocumentPosition(screen.getByTestId("spine-line")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // green with no work: no mark in red; red with none: "nothing working on this"
-    expect(within(krs[2]).getByTestId("kr-no-work").textContent).toBe("nothing working on this");
-    expect(within(krs[0]).queryByTestId("kr-detail")).toBeNull();
-    // the owner: "please make rows reasonable height": in the row the status and target are cut to two lines, full on hover
-    const short = within(within(krs[0]).getByTestId("kr-now")).getByTestId("kr-now-short");
-    expect(short.className).toContain("line-clamp-2");
-    expect(short.getAttribute("title")).toBe("0 of 5 · read 13 Nov");
+    expect(within(idleRed).getByTestId("kr-no-work").textContent).toBe("nothing working on this");
+    expect(within(red).queryByTestId("kr-detail")).toBeNull();
+    // the owner: "please make rows reasonable height": the current value's words are cut to three lines, whole on hover;
+    // vn_1e5a86e8: the number itself is big and bold in its colour, its words small under it
+    const short = within(within(red).getByTestId("kr-now")).getByTestId("kr-now-short");
+    expect(within(short).getByTestId("kr-big").textContent).toBe("0");
+    expect(within(short).getByTestId("kr-big").className).toContain("font-bold");
+    expect(within(short).getByTestId("kr-unit").textContent).toBe("of 5");
+    expect(within(short).getByTestId("kr-unit").className).toContain("line-clamp-3");
+    expect(within(within(red).getByTestId("kr-target")).getByTestId("kr-big").textContent).toBe("5");
+    expect(within(red).getByTestId("kr-now").getAttribute("title")).toBe("Behind: 0 of 5 · read 13 Nov");
     // the target is never cut (vn_15aa4467: "the target ... I want to see it fully in this view")
-    expect(within(within(krs[0]).getByTestId("kr-target")).getByTestId("kr-target-text").className).not.toContain("line-clamp");
-    expect(within(krs[0]).getByTestId("kr-row").className).toContain("sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]");
-    fireEvent.click(within(krs[0]).getByTestId("kr-row"));
+    expect(within(within(red).getByTestId("kr-target")).getByTestId("kr-target-text").className).not.toContain("line-clamp");
+    // the same three columns on a phone and a laptop
+    // vn_b0c6e015: the key result takes most of a phone's width, no arrow column there (the arrow sits in the first cell)
+    expect(within(red).getByTestId("kr-row").className).toContain("grid-cols-[minmax(0,1fr)_minmax(0,4rem)_minmax(0,4.25rem)]");
+    expect(within(red).getByTestId("kr-row").className).toContain("sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_minmax(0,10rem)_1rem]");
+    expect(within(red).getByTestId("kr-open-phone").className).toContain("sm:hidden");
+    // ...and the whole row is tinted in its colour, not just the current cell
+    expect(red.getAttribute("style")).toMatch(/background: rgba\(220, 40, 40, 0.12\)/);
+    expect(green.getAttribute("style")).toMatch(/background: rgba\(\d+, \d+, \d+, 0.12\)/);
+    expect(within(red).getByTestId("kr-now").getAttribute("style")).toBeNull();
+    fireEvent.click(within(red).getByTestId("kr-row"));
     // ...and a tap opens the whole status and target, uncut, above its work
-    const whole = within(screen.getAllByTestId("kr-item")[0]).getByTestId("kr-detail-status");
+    const whole = within(screen.getAllByTestId("kr-item")[1]).getByTestId("kr-detail-status");
     expect(within(whole).getByTestId("kr-now-full").className).not.toContain("line-clamp");
     expect(whole.textContent).toBe("Status nowBehind: 0 of 5 · read 13 Novnothing measures this yetTarget 5 by 17 NovEvidence: no evidence yet. Nothing we can open shows why it is this colour.");
     // the owner: "I want to see a link to the evidence for the color"; none named reads plainly, in grey
     expect(within(whole).getByTestId("kr-evidence-none").className).toContain("text-muted-foreground");
     expect(within(whole).queryByTestId("kr-evidence-link")).toBeNull();
-    const items = within(screen.getAllByTestId("kr-item")[0]).getAllByTestId("kr-work-item");
+    // the work under it goes green first too
+    const items = within(screen.getAllByTestId("kr-item")[1]).getAllByTestId("kr-work-item");
     expect(items.map((x) => [x.textContent, x.dataset.state])).toEqual([
-      ["E901-S1Build the pageready", "amber"],
       ["E901-S9ticketdone", "green"],
+      ["E901-S1Build the pageready", "amber"],
     ]);
-    expect(items[0].getAttribute("href")).toBe("/deck/app/EPIC-901?pursuit=launch");
+    expect(items[1].getAttribute("href")).toBe("/deck/app/EPIC-901?pursuit=launch");
     expect(screen.getByTestId("kr-legend").textContent).toContain("red: behind or stuck");
     // every measured row stays one tap away, with its two inbox rows
     const rows = await screen.findAllByTestId("set-row");
@@ -250,18 +286,10 @@ describe("goal sets: the screens", () => {
     expect(await within(screen.getByTestId("kanban-review")).findByText("Testers call")).toBeTruthy();
   });
 
-  it("context and personas say where the rows come from and who works on it", async () => {
-    const { unmount } = render(
-      <MemoryRouter initialEntries={["/sets/launch?tab=context"]}>
-        <Routes>
-          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    expect((await screen.findByTestId("set-file")).textContent).toContain("docs/scorecards/launch.json");
-    expect(screen.getByTestId("objective-was").textContent).toBe("It replaces: A customer pays.");
-    unmount();
+  it("personas say who works on it", async () => {
     vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => ({ ...n, milestoneId: undefined })) });
+    // an objective first looks for personas that name it; none here, so its teams list shows
+    vi.spyOn(api, "listAssignments").mockResolvedValue([]);
     render(
       <MemoryRouter initialEntries={["/sets/launch?tab=personas"]}>
         <Routes>
@@ -270,7 +298,46 @@ describe("goal sets: the screens", () => {
       </MemoryRouter>,
     );
     // a node with a milestone shows its live persona controls; one with only a teams list shows that list.
-    expect((await screen.findByTestId("set-persona")).textContent).toContain("every 30 min");
+    expect((await screen.findByTestId("set-persona", undefined, { timeout: 8000 })).textContent).toContain("every 30 min");
+  });
+
+  // the kernel: the Context tab opens with the objective's one where-we-are, read first and rewritten last.
+  it("the Context tab opens with the objective's where-we-are: the answer, the open questions, what changed", async () => {
+    const where = vi.spyOn(api, "whereWeAre").mockResolvedValue({
+      path: "docs/scorecards/launch.md", present: true, at: "2026-11-22T22:30Z", by: "run_x", row: "E901-S1",
+      answer: "One customer paid; the page is live.", open: ["Who is the second customer?"], changed: ["2026-11-22 E901-S1: the page went live"],
+    });
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=context"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId("where-we-are");
+    await within(box).findByText("One customer paid; the page is live.");
+    expect(where).toHaveBeenCalledWith("launch");
+    expect(within(box).getByTestId("where-open").textContent).toContain("Who is the second customer?");
+    expect(within(box).getByTestId("where-changed").textContent).toContain("22 Nov · E901-S1 the page went live");
+    expect(within(box).getByTestId("where-stamp").textContent).toContain("Rewritten 22 Nov 22:30Z for E901-S1");
+    // it is the whole tab: nothing else in the objective's Context
+    const ctx = screen.getByTestId("set-context");
+    expect(ctx.contains(box)).toBe(true);
+    expect(ctx.children).toHaveLength(1);
+  });
+
+  it("an objective with no where-we-are yet says where the first one will live", async () => {
+    vi.spyOn(api, "whereWeAre").mockResolvedValue({ path: "docs/scorecards/launch.md", present: false, open: [], changed: [] });
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=context"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId("where-we-are");
+    await waitFor(() => expect(box.getAttribute("data-present")).toBe("false"));
+    expect(box.textContent).toContain("docs/scorecards/launch.md");
   });
 
   // one objective, one screen (the owner, vn_748ec5a1: "two dashboards for one objective"): the switch is on the objective's own tab.
@@ -303,6 +370,29 @@ describe("goal sets: the screens", () => {
     expect(screen.getByTestId("objective-pause")).toBeTruthy();
   });
 
+  it("an objective names its product with a link to the product and its social kit; an old ?tab=kit link opens the product's kit", async () => {
+    vi.spyOn(api, "listPursuits").mockResolvedValue({ staleDays: 3, pursuits: [{ id: "launch", name: "Launch", product: { id: "notes", name: "Notes" }, totems: [] }] } as never);
+    render(
+      <MemoryRouter initialEntries={["/sets/launch"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect((await screen.findByTestId("set-product-link")).getAttribute("href")).toBe("/products/notes");
+    expect(screen.getByTestId("set-product-kit").getAttribute("href")).toBe("/products/notes?tab=kit");
+    cleanup();
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?tab=kit"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+          <Route path="/products/:id" element={<div data-testid="product-landed">{"kit"}</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("product-landed")).toBeTruthy();
+  });
+
   it("an old milestone tab opens the objective tab that does its job now", async () => {
     render(
       <MemoryRouter initialEntries={["/sets/launch?tab=approvals"]}>
@@ -317,6 +407,18 @@ describe("goal sets: the screens", () => {
     expect(objectiveTab("activity")).toBe("personas");
     expect(objectiveTab("settings")).toBe("personas");
     expect(objectiveTab("nonsense")).toBe("table");
+  });
+
+  it("the objectives screen says in one plain line what his order does", async () => {
+    render(
+      <MemoryRouter initialEntries={["/sets"]}>
+        <Routes>
+          <Route path={SCORECARDS_PATH} element={<GoalSetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const line = await screen.findByTestId("objective-order-rule");
+    expect(line.textContent).toBe("Your order decides what goes first: a higher objective's cards come first in your inbox, and its ready work gets workers first.");
   });
 
   it("All goal sets: one line per set, and the combined inbox sorts across them", async () => {
@@ -368,6 +470,29 @@ describe("goal sets: the screens", () => {
     expect(tabs.className).not.toContain("grid-cols");
     expect(screen.getByTestId("set-tab-inbox").className).toContain("min-h-11");
     expect(screen.getByTestId("spine-line-work").textContent).toContain("2 things");
+    // the spine box opens the spine its file names
+    expect(within(screen.getByTestId("spine-line-spine")).getByTestId("spine-line-open").getAttribute("href")).toBe("/spines/app/view?path=docs%2Fe1.md");
+  });
+
+  it("a plan in a top-level EPIC.md with no EPIC number is the objective's spine, and its box opens it", async () => {
+    const body = structuredClone(BODY);
+    const n = body.nodes[0];
+    delete n.spineRef;
+    n.children = [{ id: "launch~plans:EPIC.md", kind: "epic", name: "EPIC: Home Plan", repo: "plans", path: "EPIC.md", greens: 0, total: 3, spines: ["plans:EPIC.md"], rows: [], children: [] }];
+    vi.spyOn(api, "listScorecards").mockResolvedValue(body);
+    render(
+      <MemoryRouter initialEntries={["/sets/launch"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId("spine-line-spine");
+    expect(box.textContent).not.toContain("no spine");
+    const a = within(box).getByTestId("spine-line-open");
+    expect(a.textContent).toBe("Home Plan");
+    expect(a.getAttribute("href")).toBe("/spines/plans/view?path=EPIC.md");
+    expect(box.textContent).toContain("plans spine");
   });
 
   it("an opened key result links to the evidence behind its colour, with when it was read", async () => {
@@ -389,6 +514,43 @@ describe("goal sets: the screens", () => {
     expect(ev.textContent).toBe("Evidence: the site itself ↗ · read 3 h ago");
   });
 
+  it("each key result says where it came from: his words in the row, the linked note when opened", async () => {
+    const body = structuredClone(BODY);
+    body.nodes[0].keyResults![1].from = { said: "100% of the my logins are on the multi-tenant", when: "22 Nov 09:28Z", url: "https://notes.example/log#^e-1" };
+    vi.spyOn(api, "listScorecards").mockResolvedValue(body);
+    render(
+      <MemoryRouter initialEntries={["/sets/launch?kr=Site%20answers"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const row = await screen.findByTestId("kr-from");
+    expect(row.textContent).toBe("From your note, 22 Nov 09:28Z: 100% of the my logins are on the multi-tenant");
+    expect(row.tagName).toBe("SPAN");
+    const full = screen.getByTestId("kr-from-full");
+    expect(full.getAttribute("href")).toBe("https://notes.example/log#^e-1");
+    expect(screen.getAllByTestId("kr-from")).toHaveLength(1);
+  });
+
+  it("the key result that decides the objective stays first in its table whatever its colour", async () => {
+    const body = structuredClone(BODY);
+    body.nodes[0].keyResults![0].decides = true; // red, would sort after the green one
+    vi.spyOn(api, "listScorecards").mockResolvedValue(body);
+    render(
+      <MemoryRouter initialEntries={["/sets/launch"]}>
+        <Routes>
+          <Route path={SCORECARD_PATH} element={<GoalSetPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId("kr-sheet");
+    const names = screen.getAllByTestId("kr-name").map((n) => n.textContent ?? "");
+    expect(names[0]).toContain("Testers apply");
+    expect(names[1]).toContain("Site answers");
+    expect(pinDeciding([{ decides: false, n: 1 }, { decides: true, n: 2 }, { n: 3 }]).map((r) => r.n)).toEqual([2, 1, 3]);
+  });
+
   it("a link to one key result opens it", async () => {
     render(
       <MemoryRouter initialEntries={["/sets/launch?kr=Testers%20apply"]}>
@@ -401,7 +563,7 @@ describe("goal sets: the screens", () => {
     expect(screen.getByTestId("set-all-rows").hasAttribute("open")).toBe(false);
   });
 
-  it("a set with a social kit gets a Social kit tab showing the kit inside the set, and its kit row links there", async () => {
+  it("a set with a social kit shows no kit tab and no kit in its Plan: the kit stays on its campaign", async () => {
     vi.spyOn(api, "listScorecards").mockResolvedValue({
       ...BODY,
       nodes: [{ ...BODY.nodes[0], rows: [...BODY.nodes[0].rows, { label: "The social kit is complete", state: "green", value: "7 of 7 parts", kind: "check", note: "all parts there" }] }, ...BODY.nodes.slice(1)],
@@ -422,12 +584,14 @@ describe("goal sets: the screens", () => {
         </Routes>
       </MemoryRouter>,
     );
-    const tab = await screen.findByTestId("set-tab-kit");
-    expect(tab.getAttribute("href")).toBe("/sets/launch?tab=kit");
-    expect(screen.getByTestId("set-row-kit").getAttribute("href")).toBe("/sets/launch?tab=kit");
-    fireEvent.click(tab);
-    expect(await screen.findByTestId("social-kit")).toBeTruthy();
-    expect(kit).toHaveBeenCalledWith("brand");
+    await screen.findByTestId("set-tab-plan");
+    // root L-100: the same nine tabs on every objective; the kit is content inside the Plan.
+    expect(screen.queryByTestId("set-tab-kit")).toBeNull();
+    expect(screen.queryByTestId("set-row-kit")).toBeNull();
+    fireEvent.click(screen.getByTestId("set-tab-plan"));
+    expect(await screen.findByTestId("plan-tab")).toBeTruthy();
+    expect(screen.queryByTestId("social-kit")).toBeNull();
+    expect(kit).not.toHaveBeenCalled();
     cleanup();
     render(
       <MemoryRouter initialEntries={["/sets/vault"]}>
@@ -533,8 +697,8 @@ describe("the key-result table of every wheel", () => {
     fireEvent.click(within(rows[0]).getByTestId("wheel-toggle"));
     const sheet = within(rows[0]).getByTestId("kr-sheet");
     expect(within(sheet).getAllByTestId("kr-item").length).toBe(3);
-    expect(within(sheet).getAllByTestId("kr-light")[0].dataset.state).toBe("red");
-    expect(within(sheet).getAllByTestId("kr-target")[0].textContent).toBe("5 by 17 Nov");
+    expect(within(sheet).getAllByTestId("kr-now").map((x) => x.dataset.state)).toEqual(["green", "red", "red"]);
+    expect(within(sheet).getAllByTestId("kr-target")[1].textContent).toBe("5 by 17 Nov");
     fireEvent.click(within(rows[0]).getByTestId("wheel-toggle"));
     expect(within(rows[0]).queryByTestId("kr-sheet")).toBeNull();
   });
@@ -594,5 +758,19 @@ describe("the owner's notes on the objective screen (vn_15aa4467)", () => {
   it("says a key result's status in a word", async () => {
     const { STATUS_SAYS } = await import("@/components/goalSets");
     expect(STATUS_SAYS).toEqual({ green: "At target", amber: "On its way", red: "Behind", unknown: "Not measured" });
+  });
+});
+
+describe("krNumber (vn_1e5a86e8: the number big, its words small)", () => {
+  it("splits a number from its words and leaves dates and words alone", () => {
+    expect(krNumber("1.19 GB")).toEqual({ lead: "", num: "1.19", rest: "GB" });
+    expect(krNumber("0 of 5")).toEqual({ lead: "", num: "0", rest: "of 5" });
+    expect(krNumber("100%")).toEqual({ lead: "", num: "100%", rest: "" });
+    expect(krNumber("under 2 GB")).toEqual({ lead: "under", num: "2", rest: "GB" });
+    expect(krNumber("median 5")).toEqual({ lead: "median", num: "5", rest: "" });
+    expect(krNumber("5 by 17 Nov")).toEqual({ lead: "", num: "5", rest: "by 17 Nov" });
+    expect(krNumber("done by 24 Nov")).toBeNull();
+    expect(krNumber("live")).toBeNull();
+    expect(krNumber("not yet")).toBeNull();
   });
 });

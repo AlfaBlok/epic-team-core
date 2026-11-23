@@ -1,5 +1,5 @@
 import type { Milestone, Store } from "../store.js";
-import { FIRST_TIER, tierOf, type JordiPriority, type Locatable, type PriorityLookup } from "./jordiPriority.js";
+import { FIRST_TIER, tierOf, type JordiPriority, type Locatable, type ObjectiveMark, type PriorityLookup } from "./jordiPriority.js";
 
 /**
  * the owner's lists ("Blocked, waiting on you", "Done, waiting for your review") follow milestone priority:
@@ -24,23 +24,25 @@ export function rankOf(i: Ranked, ranks: Map<string, number>): number {
  * Stable sort by milestone rank: items of one milestone (and unranked ones) keep their order. Each item carries
  * `priority` (1 = top milestone; absent when its milestone is unknown) so a screen merging two lists keeps the order.
  *
- * with `owner` (the Prioritizer's levels from the repo, jordiPriority.ts) the owner's level comes first: high, then
- * normal and unranked, then low; the milestone order and the old order only break ties inside one level. Each item then
- * carries `owner` (its level and the why quoting him) and always a `priority`, `tier * TIER_SPAN + rank`, so a screen
- * merging two lists (waiting.tsx mergeByPriority) keeps the same order.
- * several red lines: inside tier 0 the first line's items lead, then the next line's (`line * LINE_SPAN + rank`).
- * his objectives: items on his first objective lead (their own tier); inside every tier his objectives' order comes
- * before the line and the milestone (`objective * OBJECTIVE_SPAN`), so no rule is set by hand.
+ * with `owner` (the Prioritizer's levels from the repo, jordiPriority.ts) his objectives lead (the owner asked:
+ * "is the order of my objectives used at all?"): an item he asked by name to be first (or labelled urgent)
+ * leads; then every item of his first objective, then his second, and so on in his order (docs/pursuits.json), items on
+ * none last. Inside one objective the old order holds: pressing, the red line, then high, normal and low, each line in
+ * milestone order. Each item then carries `owner` (its level and the why quoting him) and always a `priority`, so a
+ * screen merging two lists (waiting.tsx mergeByPriority) keeps the same order:
+ * `tier * TIER_SPAN + line * LINE_SPAN + rank - (OBJECTIVE_NONE - objective) * OBJECTIVE_SPAN - head * HEAD_SPAN`, so an
+ * item on none keeps the number it had before.
  */
+/** one tier's span inside an objective (tiers FIRST_TIER -3 to low 3 fit inside one objective's span). */
 export const TIER_SPAN = 1_000_000;
-/** one red line's span inside tier 0 (lines in order; milestone ranks stay far below it). */
+/** one red line's span inside a tier (lines in order; milestone ranks stay far below it). */
 export const LINE_SPAN = 10_000;
-/**
- * one objective's span inside a tier (his order, docs/pursuits.json): up to 9 objectives, below the tier's old numbers,
- * so an item on none keeps the number it had (`tier * TIER_SPAN + line * LINE_SPAN + rank`).
- */
-export const OBJECTIVE_SPAN = 100_000;
-const OBJECTIVE_NONE = TIER_SPAN / OBJECTIVE_SPAN - 1;
+/** one objective's span (his order, docs/pursuits.json): room for every tier inside it. */
+export const OBJECTIVE_SPAN = 10_000_000;
+/** objectives counted apart: up to 98 of his, the 99th place is "on none". */
+export const OBJECTIVE_NONE = 99;
+/** the head: an item he asked by name to be first (or urgent) before every objective. */
+export const HEAD_SPAN = OBJECTIVE_SPAN * (OBJECTIVE_NONE + 1);
 export function byMilestonePriority<T extends Ranked & Locatable>(
   items: T[],
   ranks: Map<string, number>,
@@ -49,19 +51,33 @@ export function byMilestonePriority<T extends Ranked & Locatable>(
   return items
     .map((it, i) => {
       const p = lookup?.(it);
-      // his objectives' order (n 0 is his first; none after every objective) breaks ties inside a tier, before the line and file order
+      // his objectives' order first (n 0 is his first; none after every objective)
       const o = Math.min(p?.objective?.n ?? OBJECTIVE_NONE, OBJECTIVE_NONE);
       // E948-S155: an urgent ask (`label: urgent`) is in the same first tier as an item he asked by name to be first.
-      const t = (it as { urgent?: boolean }).urgent ? FIRST_TIER : lookup ? tierOf(p) : 0;
-      return { it, i, r: rankOf(it, ranks), p, t, o, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
+      const first = !!(it as { urgent?: boolean }).urgent || p?.pressing?.kind === "first";
+      // inside one objective: pressing, the red line, then his levels (the objective itself no longer makes a tier)
+      const t = first ? FIRST_TIER : lookup ? tierOf(p && { ...p, objective: undefined }) : 0;
+      return { it, i, r: rankOf(it, ranks), p, h: first ? 0 : 1, t, o, l: p?.pressing ? (p.pressing.order ?? 0) : (p?.redLine?.line ?? 0) };
     })
-    .sort((a, b) => a.t - b.t || a.o - b.o || a.l - b.l || a.r - b.r || a.i - b.i)
-    .map(({ it, r, p, t, o, l }) => {
+    .sort((a, b) => a.h - b.h || a.o - b.o || a.t - b.t || a.l - b.l || a.r - b.r || a.i - b.i)
+    .map(({ it, r, p, h, t, o, l }) => {
       if (!lookup) return r === Number.MAX_SAFE_INTEGER ? it : { ...it, priority: r + 1 };
-      // inside a tier his first objective leads, then the next; inside one objective the first line, each in milestone order.
       const rank = Math.min(r + 1, LINE_SPAN - 1);
-      return { ...it, priority: t * TIER_SPAN - (OBJECTIVE_NONE - o) * OBJECTIVE_SPAN + Math.min(l, OBJECTIVE_SPAN / LINE_SPAN - 1) * LINE_SPAN + rank, ...(p ? { ownerPriority: p } : {}) };
+      const line = Math.min(l, TIER_SPAN / LINE_SPAN - 1);
+      // an item on none of his objectives keeps the number it always had; each objective above it, and the head, lie below
+      return { ...it, priority: t * TIER_SPAN + line * LINE_SPAN + rank - (OBJECTIVE_NONE - o) * OBJECTIVE_SPAN - (1 - h) * HEAD_SPAN, ...(p ? { ownerPriority: p } : {}) };
     });
+}
+
+/**
+ * ready rows in his objectives' order, for a wake's dispatch: the rows of his first objective first, then his
+ * second, rows on none last; ties keep the ledger's order. Each row carries the objective it moves.
+ */
+export function byObjective<T extends Locatable>(rows: T[], objectiveOf: (row: T) => ObjectiveMark | undefined): (T & { objective?: ObjectiveMark })[] {
+  return rows
+    .map((row, i) => ({ row, i, o: objectiveOf(row) }))
+    .sort((a, b) => (a.o?.n ?? Number.MAX_SAFE_INTEGER) - (b.o?.n ?? Number.MAX_SAFE_INTEGER) || a.i - b.i)
+    .map(({ row, o }) => (o ? { ...row, objective: o } : row));
 }
 
 /** The store's milestones (this world's, settled included) as ranks. */

@@ -115,7 +115,7 @@ describe("E908-S36 (b) the alert's ask carries its card and its inbox id", () =>
     const trees: Record<string, Tree> = { zs: tree("zs"), e46: tree("e46", { "docs/spines/epic-946.md": [askLine] }) };
     const lookup = askLookupIn({ listMilestones: () => ms, worldOfMilestone: (id) => (id === "zs" ? "social" : "home") }, async (m) => trees[m.id], () => "https://team.example.com", () => "home_repo");
     const got = (await lookup(ms[0], [{ repo: "home_repo", code: "E946-A4" }])).get("home_repo/E946-A4")!;
-    expect(got.id).toBe(askItemId("home_repo", "docs/spines/epic-946.md", "E946-S7", "Mexico proxy?"));
+    expect(got.id).toBe(askItemId("home_repo", "docs/spines/epic-946.md", "E946-S7", "Mexico proxy?", "E946-A4"));
     expect(got.world).toBe("home");
     expect(got.card).toEqual({ ask: "approve", question: "Mexico proxy?", path: "docs/spines/epic-946.md", line: 12, row: "E946-S7", options: ["yes", "no"], recommendation: "yes", risk: "$11/month", since: "2026-11-01" });
   });

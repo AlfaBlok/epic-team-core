@@ -6,6 +6,7 @@ import { useRoutes, type ScreenId } from "@/lib/skin";
 import { worldId } from "@/lib/useSocial";
 import { cn } from "@/lib/utils";
 import { socialProduct } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * the onboarding scorecard on the social product home, the social product side of's wizard
@@ -119,6 +120,7 @@ export function ScorecardView({ s, chat, has = () => true, list }: { s: Onboardi
           {s.ticks.map((t) => (
             <li key={t.id} data-testid={`onboarding-${t.id}`} data-state={t.state}>
               <button type="button" className="flex w-full items-baseline gap-3 px-4 py-3 text-left" aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
+                <FoldChevron open={open === t.id} className="self-center" />
                 <span className="min-w-0 flex-1 text-sm text-foreground">
                   {t.title}
                   <span className="text-xs text-muted-foreground"> · {t.line}</span>
@@ -157,8 +159,9 @@ export function ScorecardView({ s, chat, has = () => true, list }: { s: Onboardi
                   {t.line}
                 </span>
               </span>
-              <span className="whitespace-nowrap text-xs font-medium" style={{ color: t.state === "done" ? C.accent : RED }}>
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium" style={{ color: t.state === "done" ? C.accent : RED }}>
                 {LABEL[t.state]}
+                <FoldChevron open={open === t.id} />
               </span>
             </button>
             {open === t.id && <StepDetail s={s} t={t} chat={chat} has={has} className="mb-3 ml-[2.4rem]" />}

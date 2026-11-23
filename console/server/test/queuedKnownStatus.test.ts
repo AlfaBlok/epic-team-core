@@ -75,3 +75,11 @@ describe("T35-S2 queued is a known status", () => {
     expect(sub.flagged).toBe(0);
   });
 });
+
+describe("a row carries its Last Verified date", () => {
+  it("the tree node has `since` from the Last Verified cell (the Hosts waiting queue's since when)", () => {
+    const t = house();
+    expect(issue(t.root, 20).since).toBe("2026-10-15");
+    expect(issue(t.root, 20).nextAction).toBe("Dispatch when #17-#19 are integrated");
+  });
+});

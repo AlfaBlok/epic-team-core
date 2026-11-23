@@ -119,6 +119,17 @@ describe("pursuits: the scorecard and the motion", () => {
     expect(body.boardAt).toBe("2026-11-12T04:30:00Z");
   });
 
+  it("a deciding key result that is green turns the whole objective green", async () => {
+    const doc = parsePursuits(JSON.stringify({ staleDays: 3, pursuits: [{ id: "house", name: "Acme: Buy a place", greenWhen: "Bought.", watch: [], lines: [
+      { label: "A place was bought", from: "check", check: "bought", decides: true },
+      { label: "Satisfaction", from: "check", check: "sat" },
+    ] }], checks: { bought: { state: "red", value: "not yet", at: "2026-11-12T04:00Z" }, sat: { state: "red", value: "negative", at: "2026-11-12T04:00Z" } } }));
+    const o = { board: null, spineText: () => undefined, repoDir: () => undefined, git: fakeGit(""), now: NOW };
+    expect((await buildPursuits(doc, o)).pursuits[0].state).toBe("red");
+    doc.checks.bought.state = "green";
+    expect((await buildPursuits(doc, o)).pursuits[0].state).toBe("green");
+  });
+
   it("a check older than the stale window is not trusted", async () => {
     const body = await read("");
     const secrets = body.pursuits[1];
@@ -142,6 +153,19 @@ describe("pursuits: the scorecard and the motion", () => {
     expect(body.pursuits[0].motion).toBe("stalled");
     const none = await read("");
     expect(none.pursuits[0].motion).toBe("unknown");
+  });
+
+  it("in a repo two objectives watch, a commit moves only the objective whose epic it names", async () => {
+    const doc = parsePursuits(JSON.stringify({ staleDays: 3, pursuits: [
+      { id: "a", name: "A: one", greenWhen: "x", watch: [{ repo: "team", paths: ["docs"] }], epics: [{ repo: "team", spine: "docs/a.md" }], lines: [] },
+      { id: "b", name: "B: two", greenWhen: "y", watch: [{ repo: "team", paths: ["docs"] }], epics: [{ repo: "team", spine: "docs/b.md" }], lines: [] },
+    ] }));
+    const recent = Math.floor((NOW - 3600_000) / 1000);
+    const older = Math.floor((NOW - 7200_000) / 1000);
+    const spineText = (_r: string, f: string) => (f === "docs/a.md" ? "# EPIC-907: A\n" : f === "docs/b.md" ? "# EPIC-908: B\n" : undefined);
+    const body = await buildPursuits(doc, { board: null, spineText, repoDir: () => "/repo", git: fakeGit(`${recent}\tE908-S4: B work\n${older}\tE907-S2: A work`), now: NOW });
+    expect(body.pursuits[0].lastMove?.subject).toBe("E907-S2: A work");
+    expect(body.pursuits[1].lastMove?.subject).toBe("E908-S4: B work");
   });
 
   it("without a launch board the light lines say so instead of guessing", async () => {

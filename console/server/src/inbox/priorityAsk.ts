@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { stripInline } from "../adapters/markdown.js";
 import { PURSUITS_FILE } from "../pursuits.js";
+import { workspaceDataDir } from "../workspaceData.js";
 import type { SpineWriter } from "./spineWrite.js";
 
 /**
@@ -56,8 +57,9 @@ export function moveFirstText(text: string, id: string): string | null | "same" 
  * else the home world's objectives checkout. Never a second list.
  */
 export function pursuitsDirFor(askRepoDir: string | undefined, homeDir: string | undefined): string | undefined {
-  if (askRepoDir && fs.existsSync(path.join(askRepoDir, PURSUITS_FILE))) return askRepoDir;
-  return homeDir && fs.existsSync(path.join(homeDir, PURSUITS_FILE)) ? homeDir : undefined;
+  // a checkout whose workspace data moved writes in its data checkout
+  if (askRepoDir && fs.existsSync(path.join(askRepoDir, PURSUITS_FILE))) return workspaceDataDir(askRepoDir);
+  return homeDir && fs.existsSync(path.join(homeDir, PURSUITS_FILE)) ? workspaceDataDir(homeDir) : undefined;
 }
 
 export type PriorityMove = { ok: true; note: string } | { ok: false; retry: boolean; error: string };

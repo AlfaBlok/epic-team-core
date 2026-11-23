@@ -28,8 +28,18 @@ export const WORLD_WAKE_HOLD_CODE = "world_needs_box";
  * Hosted: cycle/jobRoute.ts (a world on CONSOLE_JOB_SERVER_WORLDS whose jobs are on: a Stripe payment or a coupon).
  */
 export interface JobRoute {
-  /** This world's wakes run on its own job servers now (listed, jobs on). */
-  handles(world: string | undefined): boolean;
+  /**
+   * This world's wakes run on its own route now (listed, jobs on). With `personaId`, that persona's wakes (a world can
+   * move into its sandbox one persona at a time); without it, true only when the whole world has moved.
+   */
+  handles(world: string | undefined, personaId?: string): boolean;
+  /** where the route runs this world's (persona's) jobs, in words, and the run's `route` value; default a job server. */
+  where?(world: string, personaId?: string): { words: string; route: string };
+  /**
+   * the workspace whose job servers run this milestone's wakes, when the milestone (of another world, the owner's
+   * home world) is routed there one milestone at a time; undefined = the milestone follows its own world.
+   */
+  boxFor?(milestoneId: string, world: string): string | undefined;
   /** The console as the job's agent reaches it: the agent gateway through the job's ssh tunnel. */
   base: string;
   /** Hand one wake to a job server of the world; resolves when the job ended (never throws). */
@@ -55,6 +65,10 @@ export interface JobStart {
   model: string;
   /** The wake stub the job's agent runs (its curls read the per-job token from the job's memory). */
   stub: string;
+  /** the milestone's repo (owner/name): a sandboxed job works in its own clone of it. */
+  repo?: string;
+  /** the workspace whose job server runs it (boxFor), when not `world` itself; the job then clones `repo`. */
+  box?: string;
 }
 export interface JobEnd {
   ok: boolean;
@@ -72,7 +86,7 @@ export interface HostedHooks {
   /** The wake / chat seed text of a world's persona: its curls carry the world token (hosted: tenancy/agentAuth.ts withWorldAuth). */
   worldPrompt(text: string, w: { tenant: string; personaId: string; consoleUrl?: string; /** a wake on its world's own job servers */ job?: boolean }): string;
   /** Every curl in the text carries the world token (hosted: tenancy/agentAuth.ts curlsWithWorldAuth). */
-  worldCurls(text: string, w: { tenant: string; personaId: string }): string;
+  worldCurls(text: string, w: { tenant: string; personaId: string; /** a job on a job server */ job?: boolean }): string;
   /** The wake gate for worlds on shared hosts (hosted: cycle/worldGate.ts worldWakeGate). */
   worldWakeGate(env?: NodeJS.ProcessEnv): WorldWakeHold;
   /** Its state for /api/health (hosted: cycle/worldGate.ts worldWakeGateState). */

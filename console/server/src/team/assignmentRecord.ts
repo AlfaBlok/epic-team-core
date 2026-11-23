@@ -14,7 +14,9 @@ import { ownerName } from "../identity.js";
  * live in the world's team repo, not in console.db:
  *
  *   state/assignments.json   one entry per assignment: id, milestoneId, personaId, cadence, enabled (the owner's switch),
- *                            writeEnabled, writeScope, createdAt.
+ *                            writeEnabled, writeScope, createdAt, and `objective` (the docs/pursuits.json id it works:
+ *                            several objectives share one milestone, so each objective's Personas tab lists only its
+ *                            own).
  *   state/access.json        `mcp`: [{serviceId, personaId, allowed}] (a service switch per persona; an absent pair is
  *                            the service's default), `mailCaps`: [{personaId, dailyCap}].
  *
@@ -37,6 +39,8 @@ export interface AssignmentEntry {
   enabled: boolean;
   writeEnabled: boolean;
   writeScope: string;
+  /** the objective it works (docs/pursuits.json id); absent = the milestone's, shown on its objectives when only one has it. */
+  objective?: string;
   createdAt: string;
 }
 export interface AccessFile {
@@ -53,6 +57,7 @@ export const assignmentEntryOf = (a: Assignment): AssignmentEntry => ({
   enabled: a.enabled || !!a.parkedAt,
   writeEnabled: a.writeEnabled,
   writeScope: a.writeScope,
+  ...(a.objective ? { objective: a.objective } : {}),
   createdAt: a.createdAt,
 });
 
@@ -86,6 +91,7 @@ export function parseAssignments(text: string): { entries: AssignmentEntry[] } |
         enabled: x.enabled === true,
         writeEnabled: x.writeEnabled === true,
         writeScope: typeof x.writeScope === "string" ? x.writeScope : "",
+        ...(typeof x.objective === "string" && x.objective.trim() ? { objective: x.objective.trim() } : {}),
         createdAt: typeof x.createdAt === "string" ? x.createdAt : "",
       });
     }
@@ -182,7 +188,7 @@ export function createAssignmentRecord(d: AssignmentRecordDeps) {
             if (!cur) {
               if (d.db.prepare("SELECT 1 FROM assignments WHERE id = ?").get(e.id)) continue;
               if (!s.getMilestone(e.milestoneId) || !s.getPersona(e.personaId)) continue; // waits for its milestone / persona
-              s.createAssignment({ id: e.id, milestoneId: e.milestoneId, personaId: e.personaId, cadence: e.cadence, enabled: e.enabled, writeEnabled: e.writeEnabled, writeScope: e.writeScope, createdAt: e.createdAt || now().toISOString() });
+              s.createAssignment({ id: e.id, milestoneId: e.milestoneId, personaId: e.personaId, cadence: e.cadence, enabled: e.enabled, writeEnabled: e.writeEnabled, writeScope: e.writeScope, objective: e.objective, createdAt: e.createdAt || now().toISOString() });
               out.push(`${world}: assignment ${e.id} added`);
               continue;
             }
@@ -190,6 +196,7 @@ export function createAssignmentRecord(d: AssignmentRecordDeps) {
             if (JSON.stringify(cur.cadence) !== JSON.stringify(e.cadence)) patch.cadence = e.cadence;
             if (cur.writeEnabled !== e.writeEnabled) patch.writeEnabled = e.writeEnabled;
             if (cur.writeScope !== e.writeScope) patch.writeScope = e.writeScope;
+            if ((cur.objective ?? "") !== (e.objective ?? "")) patch.objective = e.objective ?? null;
             // the owner's switch: off is off; on wakes only an assignment the scheduler has not parked
             if (!e.enabled && (cur.enabled || cur.parkedAt)) Object.assign(patch, { enabled: false, parkedAt: null, parkedReason: null });
             if (e.enabled && !cur.enabled && !cur.parkedAt) patch.enabled = true;
@@ -282,7 +289,7 @@ export function createAssignmentRecord(d: AssignmentRecordDeps) {
         const createdAt = now().toISOString();
         const writeEnabled = input.writeEnabled ?? !!s.getPersona(input.personaId)?.mayWrite;
         const writeScope = input.writeScope ?? (writeEnabled ? DEFAULT_WRITE_SCOPE : "");
-        const e: AssignmentEntry = { id, milestoneId: input.milestoneId, personaId: input.personaId, cadence: input.cadence, enabled: input.enabled, writeEnabled, writeScope, createdAt };
+        const e: AssignmentEntry = { id, milestoneId: input.milestoneId, personaId: input.personaId, cadence: input.cadence, enabled: input.enabled, writeEnabled, writeScope, ...(input.objective ? { objective: input.objective } : {}), createdAt };
         // refs that the store would refuse (missing, another world's) are not recorded: the store's error answers
         if (s.getMilestone(input.milestoneId) && s.getPersona(input.personaId) && (s.worldOfMilestone?.(input.milestoneId) ?? DEFAULT_TENANT) === worldOf(input))
           await changeAssignments(worldOf(input), `attach ${s.getPersona(input.personaId)!.name} to ${s.getMilestone(input.milestoneId)!.title}`, (list) => [...list.filter((x) => x.id !== id), e]);
@@ -302,8 +309,12 @@ export function createAssignmentRecord(d: AssignmentRecordDeps) {
           ...(p.milestoneId ? { milestoneId: p.milestoneId } : {}),
           ...(p.personaId ? { personaId: p.personaId } : {}),
         };
+        if (p.objective !== undefined) {
+          if (p.objective) next.objective = p.objective;
+          else delete next.objective;
+        }
         if (JSON.stringify(next) !== JSON.stringify(was)) {
-          const what = [p.enabled !== undefined && p.enabled !== was.enabled ? (p.enabled ? "switched on" : "switched off") : "", p.cadence ? "cadence" : "", p.writeEnabled !== undefined || p.writeScope !== undefined ? "write grant" : ""].filter(Boolean).join(", ") || "changed";
+          const what = [p.enabled !== undefined && p.enabled !== was.enabled ? (p.enabled ? "switched on" : "switched off") : "", p.cadence ? "cadence" : "", p.writeEnabled !== undefined || p.writeScope !== undefined ? "write grant" : "", p.objective !== undefined && p.objective !== was.objective ? `objective ${p.objective || "none"}` : ""].filter(Boolean).join(", ") || "changed";
           await changeAssignments(worldOf(next), `${s.getPersona(next.personaId)?.name ?? next.personaId} on ${s.getMilestone(next.milestoneId)?.title ?? next.milestoneId}: ${what}`, (list) => [...list.filter((x) => x.id !== id), next]);
         }
         return s.updateAssignment(id, p);

@@ -60,6 +60,8 @@ export const DB_REGISTRY: Record<string, TableEntry> = {
   cycle_bootstrap: { class: "ops", reason: "log of a bootstrap request (the run writes the spine)", columns: "milestone_id run_id kind goal created_at" },
   cycle_handover: { class: "ops", reason: "idempotency of a handover thread", columns: "client_request_id host thread_id project_id title repo epic created_at" },
   cycle_run_steer: { class: "ops", reason: "send log of steers into a running thread", columns: "run_id at mode message" },
+  cycle_held_note: { class: "ops", reason: "a note a running wake could not take, held for the next wake", columns: "id assignment_id by note held_at for_run_id reason tried_at delivered_run_id delivered_at" },
+  cycle_note_seen: { class: "ops", reason: "handled mark: which wake took each note, so a note is never sent twice", columns: "assignment_id note_key run_id at how" },
   cycle_priority_session: { class: "ops", reason: "priority mode switch: which rows hold the machine and since when (run control, like Stop)", columns: "id rows by reason started_at assignments ended_at ended_by end_why" },
   cycle_priority_park: { class: "ops", reason: "the sessions priority mode parked and how each was resumed (run log)", columns: "session_id run_id kind ticket assignment_id parent_run_id thread_id rank state parked_at resume_run_id resumed_at note" },
   cycle_priority_log: { class: "ops", reason: "every park and resume line (run log)", columns: "id session_id at event run_id ticket detail" },
@@ -153,6 +155,7 @@ export const DB_REGISTRY: Record<string, TableEntry> = {
   world_secret_readers: { class: "ops", reason: "encrypted secret vault, readers, audit log", columns: "tenant_id app name path switched_at" },
   world_secrets: { class: "ops", reason: "encrypted secret vault, readers, audit log", columns: "tenant_id app name iv tag ct fp key_id prev_iv prev_tag prev_ct prev_fp cls provider source set_at set_by" },
   // tables added since the registry was last complete, declared here
+  world_key_fills: { class: "ops", reason: "last fill of a workspace's keys from its linked data repo's list (counts only, never a value)", columns: "world repo at filled missing kept" },
   email_tokens: { class: "ops", reason: "one-time email sign-up confirm and password reset links (hash, kind, expiry, used)", columns: "hash kind email host name pw_hash next visit_source created_at expires_at used_at" },
   access_mail_log: { class: "ops", reason: "send log of sign-in mails (confirm, reset): kind, host, address, outcome", columns: "at kind host to_addr outcome message_id detail" },
   oauth_connects: { class: "ops", reason: "last result of each one-button connect (auth/connects.ts)", columns: "id detail at" },

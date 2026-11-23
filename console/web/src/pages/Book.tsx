@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { MadeList } from "@/components/bookMade";
 import { ownerName } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * the Epic Book, one URL that answers "where are we" (L-33). Every repo's spines, per epic:
@@ -51,6 +52,7 @@ function Epic({ e, repo, folded = [] }: { e: BookEpic; repo: BookRepo; folded?: 
   return (
     <details id={e.code} className="group rounded-md border bg-card" style={{ marginLeft: `${Math.min(e.depth, 4) * 0.75}rem` }} data-testid="book-epic">
       <summary className="flex cursor-pointer list-none items-start gap-2 p-3 max-sm:min-h-11">
+        <FoldChevron className="mt-[5px]" />
         <span className="mt-1.5">
           <StateDot state={e.state} />
         </span>

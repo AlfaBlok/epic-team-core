@@ -27,6 +27,19 @@ export interface CardReady {
 /** his words asking for something to be made and handed to him. */
 export const ASKED_FOR = /\b(get|send|email|e-mail|mail|give|bring|hand)\s+(it\s+|that\s+|this\s+|them\s+)?(back\s+)?(to\s+)?me\b/i;
 export const URGENT = /\burgent(ly)?\b|\bas a matter of urgency\b/i;
+/**
+ * E948-S168 (the owner, 22 Nov 05:09Z, on the Adeje card titled "Urgent."): "If something is being marked urgent, why is it
+ * not actually labeled urgent properly?". A title that opens with the word Urgent (`Urgent.`, `URGENT:`, `**Urgent** -`)
+ * is the team's label for his urgent note, never the card's title: the card goes in Urgent and the word is cut off.
+ */
+export const URGENT_LEAD = /^\s*(?:\*\*|__)?\s*urgent\s*(?:\*\*|__)?\s*(?:[.:!]+|\s[—–-])\s*(?:\*\*|__)?\s*/i;
+/** the title without its leading Urgent label, and whether it had one ("Urgent." alone keeps nothing, so the rest stays). */
+export function cutUrgentLead(title: string): { title: string; urgent: boolean } {
+  const m = URGENT_LEAD.exec(title ?? "");
+  if (!m) return { title: title ?? "", urgent: false };
+  const rest = title.slice(m[0].length).trim();
+  return { title: rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : title, urgent: true };
+}
 
 const WHY_TEXT: Record<ReadyWhy, string> = {
   ready: "You were waiting on this",
@@ -40,12 +53,15 @@ export function readyOf(o: {
   deadline?: { at: string };
   /** the row's title cell and the card's source: his words among them. */
   words: string[];
-  /** the card's `source:` alone (urgent counts only there). */
+  /** the card's `source:` alone (his words: urgent counts there). */
   source?: string;
+  /** E948-S168: the card or its row is labelled urgent (an `Urgent.` title, the card's `label: urgent`). */
+  labelled?: boolean;
   evidence: { url: string; label?: string };
 }): CardReady | undefined {
   const text = o.words.filter(Boolean).join(" \n ");
-  const why: ReadyWhy | undefined = o.deadline ? "deadline" : URGENT.test(o.source ?? "") ? "urgent" : ASKED_FOR.test(text) ? "asked" : o.ready ? "ready" : undefined;
+  // E948-S168: urgent wins over a deadline (the Adeje card had both and sat under Done as "It has a deadline").
+  const why: ReadyWhy | undefined = o.labelled || URGENT.test(o.source ?? "") ? "urgent" : o.deadline ? "deadline" : ASKED_FOR.test(text) ? "asked" : o.ready ? "ready" : undefined;
   if (!why) return undefined;
   const url = o.ready?.url ?? o.evidence.url ?? "";
   const where = o.ready?.where || o.evidence.label || url;

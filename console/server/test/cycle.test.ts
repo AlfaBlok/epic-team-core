@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import { modelId, type CycleOptions } from "../src/cycle/service.js";
@@ -364,7 +364,7 @@ describe("run now + wake", () => {
     expect(listed.steers).toHaveLength(2);
   });
 
-  it("M2-37 steer: falls back to auto when T3 will not steer; 400 on empty; 409 when idle", async () => {
+  it("M2-37 steer: held for the next wake when T3 will not steer, never T3's queue; 400 on empty; 409 when idle", async () => {
     const t = setup();
     const { a } = await t.seed();
     expect((await t.call("POST", `/api/assignments/${a.id}/steer`, { message: "hi" })).json.error.code).toBe("not_running");
@@ -375,12 +375,12 @@ describe("run now + wake", () => {
     t.t3.failSteer = true;
     const s = await t.call("POST", `/api/assignments/${a.id}/steer`, { message: "x".repeat(100) });
     expect(s.status).toBe(200);
-    expect(s.json.mode).toBe("auto");
-    const modes = t.t3.ops("sendToThread").slice(-2).map((c) => c.args.mode);
-    expect(modes).toEqual(["steer", "auto"]);
-    expect((await t.call("GET", `/api/runs/${r.json.id}`)).json.steers).toEqual([expect.objectContaining({ mode: "auto", message: "x".repeat(100) })]);
+    expect(s.json.mode).toBe("held");
+    expect(t.t3.ops("sendToThread").map((c) => c.args.mode)).not.toContain("auto");
+    t.t3.failSteer = false;
     await t.call("PATCH", `/api/runs/${r.json.id}`, { outcome: "idle", summary: "ok", endedAt: new Date().toISOString() });
-    expect((await t.call("POST", `/api/assignments/${a.id}/steer`, { message: "late" })).status).toBe(409);
+    // the wake ended: the held message starts the next wake, in its instructions
+    await vi.waitFor(() => expect(createStore(t.db).listRuns({ assignmentId: a.id }).filter((x) => x.id !== r.json.id && x.instructions?.includes("x".repeat(100)))).toHaveLength(1));
   });
 
   it("T8-S18: with a home thread, Run now posts the stub there (never a T3 scheduled task)", async () => {

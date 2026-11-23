@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { ObjectiveName, productText, splitObjectiveName } from "@/components/objectiveName";
 import { byRingColour } from "@/lib/ringOrder";
-import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ArrowRight, ChevronRight } from "lucide-react";
+import { Link, NavLink, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, type ChatRead, type DeskChat, type PendingItem, type ReviewItem } from "@/api";
 import type { PersonaGapsBody, ScorecardNode, ScorecardRow, ScorecardRowState, ScorecardsBody, ScorecardWork } from "@/api/pursuit-types";
 import { CountPill, PILL_SHAPE, PILL_TITLES, SortControl, useSectionSort, type SectionSort } from "@/components/homeSection";
@@ -10,20 +10,21 @@ import { InboxSearchBox } from "@/components/inboxSearch";
 import { TeamCardsSections } from "@/components/teamCards";
 import { epicDeckHref } from "@/components/pursuitsMap";
 import { usePursuits } from "@/components/pursuits";
-import { InactiveObjectives, ObjectiveOffButton } from "@/components/objectiveSwitch";
-import { SET_KIT_TAB, SocialKitView, kitPursuitOf, setKitHref } from "@/components/socialKit";
+import { DailyBriefingSwitch, InactiveObjectives, ObjectiveOffButton } from "@/components/objectiveSwitch";
+import { kitPursuitOf } from "@/components/socialKit";
 import { useQuery, useSharedQuery } from "@/lib/data";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import {
   SCORECARDS_PATH,
   PRODUCTS_PATH,
-  productHref,
   SET_NAME,
   homeOf,
   inScorecard,
   indexScorecards,
-  queueOf,
+  boardOf,
+  namesLaunchBoard,
+  productHref,
   scorecardHref,
   sortInbox,
   type InboxRow,
@@ -34,12 +35,16 @@ import {
 import { cn } from "@/lib/utils";
 import { CardAge, cardAgeWords } from "@/components/common";
 import { lazyPage } from "@/lib/lazyPage";
-import { useFold } from "@/lib/storedFlag";
-import { useWheelPages, WheelPagesTab } from "@/components/wheelPages";
-import { ObjectivePlanTab } from "@/pages/social/PlanTab";
-import { TotemTab, productOfObjective, totemTabs, useTotemMaps } from "@/components/totemTabs";
+import { spineViewHref } from "@/lib/nodes";
+import { useHomeTab, useWheelPages, WheelPagesTab } from "@/components/wheelPages";
+import { WheelPlanTab } from "@/components/wheelPlan";
+import { TotemTab, productOfObjective, useTotemMaps } from "@/components/totemTabs";
+import { wheelTabsOf } from "@/lib/wheelTabs";
+import type { Totem } from "@/api/totem-types";
 import { TrackersTab } from "@/components/trackersTab";
-import { pagesOfObjective } from "@/lib/wheelPages";
+import { homeFilesOf, pagesOfObjective } from "@/lib/wheelPages";
+import { FoldChevron } from "@/components/foldChevron";
+import { WhereWeAreBox } from "@/components/whereWeAre";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
 const ChatView = lazyPage(() => import("@/pages/Chat"), "ChatView");
@@ -106,22 +111,44 @@ const STATE_WORD: Record<ScorecardRowState, string> = { green: "green", amber: "
 export const STATUS_SAYS: Record<ScorecardRowState, string> = { green: "At target", amber: "On its way", red: "Behind", unknown: "Not measured" };
 const STATUS_INK: Record<ScorecardRowState, string> = { green: "hsl(142 72% 26%)", amber: "hsl(30 90% 35%)", red: "hsl(0 72% 42%)", unknown: "hsl(var(--muted-foreground))" };
 
-/** the set as a wheel: one segment per row, in its colour, reds then ambers then greens (a wheel is a circle); greens of rows inside. */
-export function SetWheel({ rows: given, size = 40, testId = "set-wheel" }: { rows: Pick<ScorecardRow, "state">[]; size?: number; testId?: string }) {
-  const rows = byRingColour(given); // each colour one continuous arc
+/** the order of the ring's arcs: green, then yellow (amber), then red, then grey for not measured (vn_68cda1fe, his 22 Nov ask). */
+export const RING_ARC_ORDER: ScorecardRowState[] = ["green", "amber", "red", "unknown"];
+
+/** the ring's arcs: one per colour present, its length the share of rows in that colour, laid end to end from the top
+ * with no gap, so the whole is one continuous circle ("one continuous circle ... no gaps"). Pure, for the tests. */
+export function ringArcs(rows: Pick<ScorecardRow, "state">[], circumference: number): { state: ScorecardRowState; share: number; length: number; offset: number }[] {
+  const n = rows.length;
+  if (!n) return [];
+  let at = 0;
+  return RING_ARC_ORDER.flatMap((state) => {
+    const k = rows.filter((x) => (RING_ARC_ORDER.includes(x.state) ? x.state : "unknown") === state).length;
+    if (!k) return [];
+    const share = k / n;
+    const arc = { state, share, length: share * circumference, offset: at };
+    at += arc.length;
+    return [arc];
+  });
+}
+
+/** the set as a ring: one continuous circle whose arcs show the share of green, then yellow, then red rows (grey: not
+ * measured, last), no gaps (the owner 22 Nov, after vn_68cda1fe); greens of rows inside on the larger sizes. */
+export function SetWheel({ rows, size = 40, testId = "set-wheel" }: { rows: Pick<ScorecardRow, "state">[]; size?: number; testId?: string }) {
   const r = (size - 6) / 2;
   const c = 2 * Math.PI * r;
   const n = rows.length;
-  const gap = n > 1 ? Math.min(2, c / n / 4) : 0;
-  const seg = n ? c / n : 0;
+  const arcs = ringArcs(rows, c);
   const greens = rows.filter((x) => x.state === "green").length;
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }} data-testid={testId} role="img" aria-label={`${greens} of ${n} rows green`}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
-        {n === 0 && <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--border))" strokeWidth="4" />}
-        {rows.map((x, i) => (
-          <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={STATE_FILL[x.state]} strokeWidth="4" strokeDasharray={`${Math.max(0.5, seg - gap)} ${c}`} strokeDashoffset={-i * seg} />
-        ))}
+        {arcs.length === 0 && <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--border))" strokeWidth="4" />}
+        {arcs.map((a) =>
+          a.share >= 1 ? (
+            <circle key={a.state} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={STATE_FILL[a.state]} strokeWidth="4" data-arc={a.state} data-share={a.share.toFixed(4)} />
+          ) : (
+            <circle key={a.state} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={STATE_FILL[a.state]} strokeWidth="4" strokeDasharray={`${a.length} ${c}`} strokeDashoffset={-a.offset} data-arc={a.state} data-share={a.share.toFixed(4)} />
+          ),
+        )}
       </svg>
       {size >= 36 && (
         <span className="absolute text-[11px] font-medium tabular-nums text-foreground">
@@ -179,6 +206,9 @@ function WorkSummary({ r }: { r: ScorecardRow }) {
   );
 }
 
+/** the id of a ticket's line on an objective's page (a search hit scrolls to it). */
+export const workAnchor = (code: string) => `work-${encodeURIComponent(code)}`;
+
 /** a key result opened: the list of things under it (epics, tickets, Done-means items), each in its colour. */
 function WorkDetail({ r, setId }: { r: ScorecardRow; setId: string }) {
   const all = r.work ?? [];
@@ -213,6 +243,52 @@ function WorkDetail({ r, setId }: { r: ScorecardRow; setId: string }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * every ticket hangs under a key result: the objective's open tickets no key result
+ * lists, under the key results table, so a ticket floating under no goal shows where he looks. None: one calm line.
+ */
+export function UnplacedTickets({ node, setId, marked }: { node: Pick<ScorecardNode, "unplaced" | "keyResults">; setId: string; marked?: string | null }) {
+  if (!node.keyResults?.length) return null;
+  const all = node.unplaced ?? [];
+  if (!all.length)
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="unplaced-none">
+        Every open ticket hangs under a key result.
+      </p>
+    );
+  return (
+    <section className="grid gap-1.5 rounded-xl border bg-card p-3" data-testid="unplaced">
+      <p className="text-sm text-foreground">
+        <span className="font-semibold">{all.length}</span> open {all.length === 1 ? "ticket hangs" : "tickets hang"} under no key result
+      </p>
+      <p className="text-xs text-muted-foreground">The Delivery Manager puts each under the key result it moves on its next wake, or closes it.</p>
+      <ul className="grid gap-1">
+        {all.map((w) => {
+          const href = w.epicCode ? epicDeckHref(w.repo, w.epicCode, setId) : undefined;
+          const inner = (
+            <span className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto] sm:items-baseline sm:gap-x-3">
+              <code className="text-xs text-muted-foreground">{w.code}</code>
+              <span className="text-sm text-foreground [overflow-wrap:anywhere]">{w.title ?? "in review"}</span>
+              <span className="col-start-2 text-xs text-muted-foreground sm:col-start-auto sm:text-right">{w.status ?? ""}</span>
+            </span>
+          );
+          return (
+            <li key={`${w.repo}:${w.code}`} data-testid="unplaced-item" {...(marked === w.code ? { id: workAnchor(w.code), "data-marked": "1", className: "rounded-md ring-1 ring-foreground" } : {})}>
+              {href ? (
+                <Link to={href} className="block rounded-md px-1.5 py-1.5 hover:bg-accent/40">
+                  {inner}
+                </Link>
+              ) : (
+                <div className="px-1.5 py-1.5">{inner}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -263,7 +339,7 @@ export function RowsTable({ rows, setId = "", open, onOpen, kitHref }: { rows: S
                   <Dot state={r.state} />
                   <span className="min-w-0" role="cell">
                     <span className="flex items-start gap-1 text-sm text-foreground [overflow-wrap:anywhere]">
-                      {TAKES_WORK.has(r.kind) && (open === r.label ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />)}
+                      {TAKES_WORK.has(r.kind) && <FoldChevron open={open === r.label} className="mt-[3px] text-muted-foreground" />}
                       <span className="min-w-0">{r.label}</span>
                     </span>
                     {(r.source || r.note) && <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">{r.note ?? r.source}</span>}
@@ -397,9 +473,30 @@ export function AnswerBox({ light, title, answer, testId }: { light: Light; titl
 export function krAnswer(krs: ScorecardRow[]): string {
   const by = { green: 0, amber: 0, red: 0, unknown: 0 };
   krs.forEach((r) => by[r.state]++);
-  const rest = [by.red && `${by.red} red`, by.amber && `${by.amber} amber`, by.unknown && `${by.unknown} with no data yet`].filter(Boolean).join(", ");
+  const rest = [by.amber && `${by.amber} amber`, by.red && `${by.red} red`, by.unknown && `${by.unknown} with no data yet`].filter(Boolean).join(", ");
   const none = idle(krs);
   return `${by.green} of ${krs.length} key results are green${rest ? `, ${rest}` : ""}.${none ? ` ${none} ${none === 1 ? "has" : "have"} nothing working on ${none === 1 ? "it" : "them"}.` : ""}`;
+}
+
+/**
+ * The spine an objective lives in, for its spine box: the one its file names ("repo EPIC-n"), else its first epic,
+ * also a plan kept in a top-level EPIC.md with no EPIC number, then named by its title. `path` opens it.
+ */
+export function objectiveSpine(node: ScorecardNode): { repo: string; label: string; path?: string } | undefined {
+  const plain = (name: string) => name.replace(/^EPIC(-[\w.]+)?\s*:\s*/i, "").trim() || name;
+  const pathOf = (repo: string, code: string): string | undefined => {
+    const todo = [...node.children];
+    while (todo.length) {
+      const n = todo.shift()!;
+      if (n.repo === repo && n.code === code && n.path) return n.path;
+      todo.push(...n.children);
+    }
+    return undefined;
+  };
+  if (node.spineRef) return { repo: node.spineRef.repo, label: node.spineRef.code, path: pathOf(node.spineRef.repo, node.spineRef.code) };
+  const first = node.children[0];
+  if (!first?.repo || !(first.code || first.path)) return undefined;
+  return { repo: first.repo, label: first.code ?? plain(first.name), ...(first.path ? { path: first.path } : {}) };
 }
 
 /**
@@ -409,9 +506,9 @@ export function krAnswer(krs: ScorecardRow[]): string {
  */
 export function SpineLine({ node, krs }: { node: ScorecardNode; krs: ScorecardRow[] }) {
   const work = new Set(krs.flatMap((r) => (r.work ?? []).map((w) => `${w.repo}:${w.code}`))).size;
-  const ref = node.spineRef ?? (node.children[0]?.code && node.children[0]?.repo ? { repo: node.children[0].repo, code: node.children[0].code } : undefined);
-  const steps: { k: string; top: ReactNode; sub: string; subShort?: string }[] = [
-    { k: "spine", top: ref ? ref.code : "no spine", sub: ref ? `${ref.repo} spine` : "spine", subShort: "its spine" },
+  const ref = objectiveSpine(node);
+  const steps: { k: string; top: ReactNode; sub: string; subShort?: string; href?: string }[] = [
+    { k: "spine", top: ref ? ref.label : "no spine", sub: ref ? `${ref.repo} spine` : "spine", subShort: "its spine", ...(ref?.path ? { href: spineViewHref({ repo: ref.repo, path: ref.path }) } : {}) },
     { k: "objective", top: SET_NAME.one, sub: "its Goal sentence" },
     { k: "krs", top: <>{krs.length} key results<KrStrip rows={krs} className="mt-1 gap-[2px] [&>i]:w-2.5" /></>, sub: "its Done means" },
     { k: "work", top: `${work} ${work === 1 ? "thing" : "things"}`, sub: "its rows, the work" },
@@ -420,8 +517,15 @@ export function SpineLine({ node, krs }: { node: ScorecardNode; krs: ScorecardRo
     <ol className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-x-0.5 sm:gap-x-1.5" aria-label="How this lives in its spine: spine, objective, key results, work" data-testid="spine-line">
       {steps.map((s, i) => (
         <Fragment key={s.k}>
-          <li className="grid min-w-0 content-start rounded-lg border bg-card px-1.5 py-1.5 sm:px-3" data-testid={`spine-line-${s.k}`}>
-            <span className="text-xs font-medium leading-tight text-foreground [overflow-wrap:anywhere] sm:text-sm">{s.top}</span>
+          <li className="relative grid min-w-0 content-start rounded-lg border bg-card px-1.5 py-1.5 sm:px-3" data-testid={`spine-line-${s.k}`}>
+            {s.href ? (
+              // the spine box opens the objective's plan (its spine), the whole box is the link.
+              <Link to={s.href} className="text-xs font-medium leading-tight text-foreground underline-offset-2 [overflow-wrap:anywhere] after:absolute after:inset-0 hover:underline sm:text-sm" data-testid="spine-line-open">
+                {s.top}
+              </Link>
+            ) : (
+              <span className="text-xs font-medium leading-tight text-foreground [overflow-wrap:anywhere] sm:text-sm">{s.top}</span>
+            )}
             {s.subShort ? (
               <span className="text-xs leading-tight text-muted-foreground">
                 <span className="sm:hidden">{s.subShort}</span>
@@ -443,7 +547,8 @@ export function SpineLine({ node, krs }: { node: ScorecardNode; krs: ScorecardRo
 }
 
 export type Light = "green" | "amber" | "red" | "unknown";
-const LAMPS = ["red", "amber", "green"] as const;
+// green first, then amber, then red, left to right (the owner 22 Nov, vn_68cda1fe).
+const LAMPS = ["green", "amber", "red"] as const;
 /** a pursuit's light: red when any key result is red, green when all are, amber otherwise, unlit with none. */
 export function lightOf(krs: Pick<ScorecardRow, "state">[]): Light {
   if (!krs.length) return "unknown";
@@ -452,7 +557,7 @@ export function lightOf(krs: Pick<ScorecardRow, "state">[]): Light {
   if (krs.every((r) => r.state === "unknown")) return "unknown";
   return "amber";
 }
-/** a small traffic light: red, amber, green lamps, the one that applies lit, none lit when there is no data yet. */
+/** a small traffic light: green, amber, red lamps, the one that applies lit, none lit when there is no data yet. */
 export function TrafficLight({ light, size = "md", testId = "traffic-light" }: { light: Light; size?: "sm" | "md"; testId?: string }) {
   const d = size === "sm" ? "h-2 w-2" : "h-2.5 w-2.5";
   return (
@@ -465,7 +570,40 @@ export function TrafficLight({ light, size = "md", testId = "traffic-light" }: {
 }
 
 /** a key result's target in plain words, or "no target yet" in grey (the owner, 17:57Z: "what is the target?"). */
-function KrTarget({ r, label }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
+/**
+ * a target or current value split into its number and its words (the owner 22 Nov, vn_1e5a86e8: "can the number be big?
+ * ... the font can be smaller. But the number I wanted to jump to my face, the target and the current"): "1.19 GB" is
+ * 1.19 and GB, "0 of 5" is 0 and "of 5", "under 2 GB" is 2 with its whole phrase under it. A date ("done by 24 Nov"), a
+ * long lead-in or no number at all stays words.
+ */
+export function krNumber(text: string | null | undefined): { lead: string; num: string; rest: string } | null {
+  const t = (text ?? "").replace(/\u00a0/g, " ").trim();
+  const m = /^(.*?)(-?\d[\d,]*(?:\.\d+)?%?)(.*)$/.exec(t);
+  if (!m) return null;
+  const [, lead, num, rest] = m;
+  if (lead.length > 12 || /[\d:/]/.test(lead)) return null;
+  if (/^\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(rest) || /^[:/]/.test(rest)) return null;
+  return { lead: lead.trim(), num, rest: rest.trim() };
+}
+
+/** a value in the table: its number large and bold (in `ink` when given), its words small and muted under it. */
+function KrFigure({ text, ink, testId }: { text: string; ink?: string; testId: string }) {
+  const n = krNumber(text);
+  if (!n) return <span className="line-clamp-3 text-sm font-semibold [overflow-wrap:anywhere]" style={ink ? { color: ink } : undefined} data-testid={testId}>{text}</span>;
+  const words = n.lead ? text.replace(/\u00a0/g, " ").trim() : n.rest;
+  return (
+    <span className="grid min-w-0 justify-items-end" data-testid={testId}>
+      <span className="whitespace-nowrap text-xl font-bold leading-none tracking-tight tabular-nums sm:text-3xl" style={ink ? { color: ink } : { color: "hsl(var(--foreground))" }} data-testid="kr-big">
+        {n.num}
+      </span>
+      {words && <span className="sr-only"> </span>}
+      {words && <span className="mt-1 line-clamp-3 text-xs leading-tight text-muted-foreground [overflow-wrap:anywhere]" data-testid="kr-unit">{words}</span>}
+    </span>
+  );
+}
+
+function KrTarget({ r, label, full }: { r: ScorecardRow; label?: boolean; full?: boolean }) {
+  if (r.target && !label && !full) return <span className="grid min-w-0 justify-items-end" data-testid="kr-target-text"><KrFigure text={r.target} testId="kr-target-figure" /></span>;
   return r.target ? (
     // the whole target, never cut (vn_15aa4467: "the target ... I want to see it fully in this view ... if not, we make it wider, taller").
     <span className="text-foreground [overflow-wrap:anywhere]" data-testid="kr-target-text">
@@ -482,8 +620,10 @@ function KrTarget({ r, label }: { r: ScorecardRow; label?: boolean; full?: boole
 /** a key result older than this reads stale (the owner: "are all the other ones also not up to date?"). */
 export const KR_STALE_MS = 24 * 3600 * 1000;
 /** when a key result was measured, in words: "measured 3 h ago", stale past a day, "nothing measures this" when never. */
-export function krMeasured(r: Pick<ScorecardRow, "measuredAt">, now = Date.now()): { words: string; stale: boolean; never: boolean } {
+export function krMeasured(r: Pick<ScorecardRow, "measuredAt"> & Partial<Pick<ScorecardRow, "source">>, now = Date.now()): { words: string; stale: boolean; never: boolean } {
   const t = r.measuredAt ? Date.parse(r.measuredAt) : NaN;
+  // a row its check reads (a `source`) is measured, only its time is not stamped.
+  if (!Number.isFinite(t) && r.source) return { words: `read by ${r.source}, time not stamped`, stale: false, never: false };
   if (!Number.isFinite(t)) return { words: "nothing measures this yet", stale: true, never: true };
   const ago = Math.max(0, now - t);
   const h = Math.floor(ago / 3600000);
@@ -566,14 +706,83 @@ export function KrEvidence({ r }: { r: ScorecardRow }) {
 }
 
 /**
- * the key results as the mock-up drew them: a colour bar, the name, how much work is under it, the value; one opens its work.
- * `plain` (a new workspace's Get set up): each key result's name, target and light stacked in one column, nothing to
- * open and no work count (the workspace's chat works them).
+ * where a key result came from (the owner, vn_243861c3 22 Nov: "another key result that I don't know where it's
+ * coming from"): his words that asked for it, when. In the row one line of text (the row is a button); opened, the
+ * whole quote, linked to the note.
  */
-export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { krs: ScorecardRow[]; setId: string; open?: string | null; onOpen?: (label: string | null) => void; plain?: boolean }) {
+export function KrFromLine({ r, full }: { r: ScorecardRow; full?: boolean }) {
+  const f = r.from;
+  if (!f) return null;
+  const words = (
+    <>
+      From your note{f.when ? `, ${f.when}` : ""}: <q className="italic">{f.said}</q>
+    </>
+  );
+  const cls = cn("block text-xs text-muted-foreground [overflow-wrap:anywhere]", !full && "line-clamp-1");
+  return full && f.url ? (
+    <a href={f.url} target="_blank" rel="noreferrer" className={cn(cls, "underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground")} data-testid={full ? "kr-from-full" : "kr-from"}>
+      {words} ↗
+    </a>
+  ) : (
+    <span className={cls} data-testid={full ? "kr-from-full" : "kr-from"}>
+      {words}
+    </span>
+  );
+}
+
+/** a state's colour as a soft tint, for the current cell's ground (the colour carries the status; the ink stays readable). */
+const STATE_TINT: Record<ScorecardRowState, string> = {
+  green: "hsl(142 72% 29% / 0.12)",
+  amber: "hsl(38 92% 50% / 0.16)",
+  red: "hsl(0 72% 51% / 0.12)",
+  unknown: "hsl(var(--muted) / 0.6)",
+};
+/**
+ * the table's columns: the key result takes most of the width, target and current stay narrow and right-aligned; the
+ * arrow that opens a row has its own column only on a laptop, on a phone it sits in the first cell (the owner 22 Nov,
+ * vn_b0c6e015: "very little space horizontally on the mobile ... make the first column not so narrow").
+ */
+export const KR_COLS = "grid-cols-[minmax(0,1fr)_minmax(0,4rem)_minmax(0,4.25rem)] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_minmax(0,10rem)_1rem]";
+const KR_COLS_PLAIN = "grid-cols-[minmax(0,1fr)_minmax(0,4rem)_minmax(0,4.25rem)] sm:grid-cols-[minmax(0,1fr)_minmax(0,9rem)_minmax(0,10rem)]";
+
+/** the current cell: the value alone, in its colour, right-aligned; the whole row carries the tint (vn_b0c6e015). */
+function KrCurrent({ r }: { r: ScorecardRow }) {
+  const says = r.kind === "key-result" ? STATUS_SAYS[r.state] : STATE_WORD[r.state];
+  const value = r.kind === "key-result" && r.state === "unknown" ? "no data yet" : r.value;
+  return (
+    <span className="grid min-w-0 content-start justify-items-end gap-0.5 py-3 text-right" title={`${says}: ${[r.value, r.note].filter(Boolean).join(" · ")}`} data-testid="kr-now" data-state={r.state}>
+      <span className="grid min-w-0 justify-items-end" data-testid="kr-now-short">
+        <KrFigure text={value} ink={STATUS_INK[r.state]} testId="kr-now-figure" />
+        <span className="sr-only"> ({says})</span>
+      </span>
+      {r.kind === "key-result" && (
+        <span className="hidden sm:block">
+          <KrWhen r={r} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** the key result that decides the objective stays first, whatever its colour; the rest keep the colour order
+ * (the owner, vn_617e3481: "one key result is missing, which is the first, the key result is a house was bought"). */
+export function pinDeciding<T extends { decides?: boolean }>(rows: T[]): T[] {
+  return [...rows.filter((r) => r.decides), ...rows.filter((r) => !r.decides)];
+}
+
+/**
+ * an objective's key results as one table of three columns, key result, target and current, on a phone and a laptop
+ * alike (the owner 22 Nov, vn_68cda1fe: "a table with three columns ... Testers sign up, 5, 3"); the current cell is
+ * coloured, and the rows go green first, then amber, then red, then no data (the one order, lib/ringOrder.ts).
+ * A row opens its whole status, its evidence and the work under it. `plain` (a new workspace's Get set up): the same
+ * table, nothing to open and no work count (the workspace's chat works them).
+ */
+export function KeyResultSheet({ krs: given, setId, open, onOpen, plain = false, marked }: { krs: ScorecardRow[]; setId: string; open?: string | null; onOpen?: (label: string | null) => void; plain?: boolean; marked?: string | null }) {
+  const krs = pinDeciding(byRingColour(given));
   const by = { green: 0, amber: 0, red: 0, unknown: 0 };
   krs.forEach((r) => by[r.state]++);
   const stale = krs.filter((r) => krMeasured(r).stale).length;
+  const cols = plain ? KR_COLS_PLAIN : KR_COLS;
   return (
     <div className="grid gap-2" data-testid="kr-sheet-wrap">
       <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm text-muted-foreground" data-testid="kr-summary">
@@ -587,56 +796,54 @@ export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { kr
         {!plain && <span>tap a key result for the work under it</span>}
       </p>
       <ul className="overflow-hidden rounded-xl border bg-card" data-testid="kr-sheet">
-        <li aria-hidden="true" className={plain ? "hidden" : "hidden grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto] gap-x-3 border-b bg-muted/30 pr-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid"} data-testid="kr-sheet-head">
-          <i />
+        <li aria-hidden="true" className={cn("grid gap-x-2 border-b bg-muted/30 pl-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:gap-x-3", cols, !plain && "pr-2 sm:pr-3")} data-testid="kr-sheet-head">
           <span className="py-2">Key result</span>
-          <span className="py-2">Target</span>
-          <span className="py-2">Status now</span>
-          <span className="w-4" />
+          <span className="py-2 text-right">Target</span>
+          <span className="py-2 text-right">Current</span>
+          {!plain && <span className="hidden sm:block" />}
         </li>
         {krs.map((r) => {
           const isOpen = !plain && open === r.label;
           const all = r.work ?? [];
           const toggle = () => onOpen?.(isOpen ? null : r.label);
           return (
-            <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className={cn("border-b last:border-b-0", krMeasured(r).stale && "opacity-55 grayscale")} data-testid="kr-item" data-state={r.state} data-stale={krMeasured(r).stale ? "1" : "0"}>
-              <button type="button" onClick={plain ? undefined : toggle} aria-expanded={plain ? undefined : isOpen} className={cn("grid w-full items-center gap-x-3 pr-3 text-left", plain ? "cursor-default grid-cols-[6px_minmax(0,1fr)]" : "grid-cols-[6px_minmax(0,1fr)_auto] hover:bg-accent/30 sm:grid-cols-[6px_minmax(0,1fr)_minmax(0,11rem)_minmax(0,1fr)_auto]", isOpen && "bg-accent/40")} data-testid="kr-row">
-                <i className="block self-stretch" style={{ background: STATE_FILL[r.state] }} aria-hidden="true" />
+            <li key={r.label} id={`kr-${encodeURIComponent(r.label)}`} className={cn("border-b last:border-b-0", krMeasured(r).stale && "opacity-55 grayscale")} style={{ background: STATE_TINT[r.state] }} data-testid="kr-item" data-state={r.state} data-stale={krMeasured(r).stale ? "1" : "0"}>
+              <button type="button" onClick={plain ? undefined : toggle} aria-expanded={plain ? undefined : isOpen} className={cn("grid w-full items-start gap-x-2 pl-3 text-left sm:gap-x-3", cols, plain ? "cursor-default" : "pr-2 hover:bg-accent/30 sm:pr-3", isOpen && "bg-accent/40")} data-testid="kr-row">
                 <span className="grid min-w-0 gap-0.5 py-3">
                   <span className="text-[15px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="kr-name">
                     {r.label}
                     <span className="sr-only"> ({STATE_WORD[r.state]})</span>
                   </span>
-                  {/* on a phone the target and the status sit under the name, one line each. */}
-                  <span className={cn("grid gap-0.5 text-xs", !plain && "sm:hidden")} data-testid="kr-target-status-phone">
-                    <KrTarget r={r} label />
-                    <KrNow r={r} label />
-                  </span>
-                  {plain ? null : all.length ? (
-                    <span className="text-xs text-muted-foreground" data-testid="kr-things">
-                      {all.length} {all.length === 1 ? "thing" : "things"} under it
-                    </span>
-                  ) : (
-                    <span className={cn("text-xs", r.state === "green" ? "text-muted-foreground" : "text-[hsl(0_72%_45%)]")} data-testid="kr-no-work">
-                      nothing working on this
+                  <KrFromLine r={r} />
+                  {plain ? null : (
+                    <span className="flex items-center gap-1">
+                      {all.length ? (
+                        <span className="text-xs text-muted-foreground" data-testid="kr-things">
+                          {all.length} {all.length === 1 ? "thing" : "things"} under it
+                        </span>
+                      ) : (
+                        <span className={cn("text-xs", r.state === "green" ? "text-muted-foreground" : "text-[hsl(0_72%_45%)]")} data-testid="kr-no-work">
+                          nothing working on this
+                        </span>
+                      )}
+                      {/* on a phone the arrow sits here, no column of its own; the whole row opens it */}
+                      <span className="text-muted-foreground sm:hidden" aria-hidden="true" data-testid="kr-open-phone">
+                        <FoldChevron open={isOpen} />
+                      </span>
                     </span>
                   )}
                 </span>
+                <span className="grid min-w-0 justify-items-end py-3 text-right text-sm" data-testid="kr-target">
+                  <KrTarget r={r} />
+                </span>
+                <KrCurrent r={r} />
                 {!plain && (
-                  <>
-                    <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-target">
-                      <KrTarget r={r} />
-                    </span>
-                    <span className="hidden min-w-0 py-3 text-sm sm:grid" data-testid="kr-now">
-                      <KrNow r={r} />
-                    </span>
-                    <span className="text-muted-foreground" aria-hidden="true">
-                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </span>
-                  </>
+                  <span className="hidden py-3.5 text-muted-foreground sm:block" aria-hidden="true">
+                    <FoldChevron open={isOpen} />
+                  </span>
                 )}
               </button>
-              {isOpen && (
+      {isOpen && (
                 <div className="grid gap-1.5 border-t bg-muted/20 px-3 py-3 sm:px-5" data-testid="kr-detail">
                   {/* the whole status and target, cut to two lines in the row above: the full text on tap. */}
                   <div className="grid gap-1 rounded-md border bg-card px-2.5 py-2 text-sm" data-testid="kr-detail-status">
@@ -648,11 +855,11 @@ export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { kr
                       </span>
                     )}
                     <KrEvidence r={r} />
+                    <KrFromLine r={r} full />
                   </div>
                   <p className="text-sm text-foreground">Work under this key result</p>
                   {!all.length && <p className="text-xs text-muted-foreground">Nothing is working on this yet. The Delivery Manager opens a row for it on the next wake.</p>}
-                  {all.map((w) => {
-                    const st = stateOfWork(w);
+                  {byRingColour(all.map((w) => ({ w, state: stateOfWork(w) }))).map(({ w, state: st }) => {
                     const href = w.epicCode ? epicDeckHref(w.repo, w.epicCode, setId) : undefined;
                     const inner = (
                       <>
@@ -664,13 +871,15 @@ export function KeyResultSheet({ krs, setId, open, onOpen, plain = false }: { kr
                         </span>
                       </>
                     );
-                    const cls = "grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 rounded-md border bg-card px-2.5 py-2";
+                    const hit = marked === w.code;
+                    const cls = cn("grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 rounded-md border bg-card px-2.5 py-2", hit && "border-foreground ring-1 ring-foreground");
+                    const mark = hit ? { id: workAnchor(w.code), "data-marked": "1" } : {};
                     return href ? (
-                      <Link key={`${w.repo}:${w.code}`} to={href} className={cn(cls, "hover:bg-accent/40")} data-testid="kr-work-item" data-state={st}>
+                      <Link key={`${w.repo}:${w.code}`} to={href} className={cn(cls, "hover:bg-accent/40")} data-testid="kr-work-item" data-state={st} {...mark}>
                         {inner}
                       </Link>
                     ) : (
-                      <div key={`${w.repo}:${w.code}`} className={cls} data-testid="kr-work-item" data-state={st}>
+                      <div key={`${w.repo}:${w.code}`} className={cls} data-testid="kr-work-item" data-state={st} {...mark}>
                         {inner}
                       </div>
                     );
@@ -878,30 +1087,21 @@ export function SidebarGoalSets({ onNavigate }: { onNavigate?: () => void }) {
   return <SidebarGoalSetsOf data={data} onNavigate={onNavigate} />;
 }
 
-/** the More objectives fold, open or closed in this browser (default closed). */
-const MORE_OBJECTIVES_STORE = "sidebar.moreObjectives.open";
-export const MORE_OBJECTIVES = "More objectives";
-/** the pinned ones: his objectives in his order, less those he unpinned (`"pinned": false` in docs/pursuits.json). */
-export const pinnedObjectives = (nodes: ScorecardNode[] | undefined) => topObjectives(nodes).filter((n) => !n.unpinned);
-
 /**
- * the same, on objectives the caller already read (the sidebar reads them once for this list and its other goals).
- * the owner's yes to the sidebar mock-up ("Everything is an objective with key results ... maybe
- * we can have like pinned and non-pinned"): the Objectives heading (it opens every objective), his pinned objectives in
- * his order, then one folded More objectives holding the ones he unpinned and every goal no objective holds (`more`:
- * the house, travel, hair), then `footer` (Add objective).
+ * the same, on objectives the caller already read: the Objectives heading (it opens every objective), then every
+ * objective in his order, one list, never a second tier (the owner: "I don't like this kind of
+ * distinction between objectives and more objectives ... These are all objectives, you know, and they're sorted"), then
+ * `footer` (Add objective). The goals no objective holds are not objectives:
+ * the caller draws them apart (Layout's Other goals fold, beside Tools).
  */
 export function SidebarGoalSetsOf({
   data,
   onNavigate,
-  more,
   footer,
   products = true,
 }: {
   data: ScorecardsBody | undefined;
   onNavigate?: () => void;
-  /** the goals no objective holds, drawn by the caller, with their inbox counts for the folded pills. */
-  more?: { links: ReactNode[]; count: number; ask: number; review: number; loading?: boolean; active?: boolean };
   footer?: ReactNode;
   /** the Products link (the social skin keeps it; the console's sidebar dropped it). */
   products?: boolean;
@@ -910,17 +1110,10 @@ export function SidebarGoalSetsOf({
   const { pathname } = useLocation();
   const activeId = pathname.startsWith(`/${SCORECARDS_PATH}/`) ? decodeURIComponent(pathname.slice(SCORECARDS_PATH.length + 2).split("/")[0]) : undefined;
   const top = topObjectives(data?.nodes);
-  // the fold opens by itself while one of its objectives is the page shown; a press always opens or folds it.
-  const [shown, toggleMore] = useFold(MORE_OBJECTIVES_STORE, !!more?.active || top.some((n) => n.unpinned && n.id === activeId));
   if (!top.length) return null;
-  const pinned = top.filter((n) => !n.unpinned);
-  const unpinned = top.filter((n) => n.unpinned);
   const asks = rows.filter((r) => r.kind === "ask").length;
   const reviews = rows.length - asks;
   const krs = top.flatMap(keyResultsOf);
-  const moreCount = unpinned.length + (more?.count ?? 0);
-  const foldAsk = unpinned.reduce((t, n) => t + countFor(n.id).ask, more?.ask ?? 0);
-  const foldReview = unpinned.reduce((t, n) => t + countFor(n.id).review, more?.review ?? 0);
   return (
     <div className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-goal-sets">
       <NavLink
@@ -937,36 +1130,12 @@ export function SidebarGoalSetsOf({
           {krs.filter((r) => r.state === "green").length} green · {krs.filter((r) => r.state === "red").length} red
         </span>
       </NavLink>
-      <ul className="grid min-w-0 gap-1" data-testid="sidebar-pinned-objectives">
+      <ul className="grid min-w-0 gap-1" data-testid="sidebar-objectives">
         {/* his order, unnumbered (the owner picked A, "lose the one, two, three") */}
-        {pinned.map((n) => (
+        {top.map((n) => (
           <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
         ))}
       </ul>
-      {moreCount > 0 && (
-        <button
-          type="button"
-          className="mt-1 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          aria-expanded={shown}
-          data-testid="more-objectives-toggle"
-          onClick={toggleMore}
-        >
-          {shown ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          {MORE_OBJECTIVES}
-          <span className="tabular-nums" data-testid="more-objectives-count">{moreCount}</span>
-          {!shown && <GoalPills c={{ ask: more?.loading ? 0 : foldAsk, review: foldReview }} ids={{ ask: "more-objectives-needs-you", review: "more-objectives-review" }} />}
-        </button>
-      )}
-      {shown && moreCount > 0 && (
-        <div className="grid min-w-0 gap-1 pl-3" data-testid="sidebar-more-objectives">
-          <ul className="grid min-w-0 gap-1">
-            {unpinned.map((n) => (
-              <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
-            ))}
-          </ul>
-          {more?.links}
-        </div>
-      )}
       {footer}
       {/* each product defined once; its objectives and its social kit read it there. */}
       {products && (
@@ -1030,41 +1199,42 @@ export function SlimInbox({ rows, showSet = true, loading, sortKey }: { rows: In
 
 // ---------- tabs ----------
 
-/** the Product tab's id: the product deck totem's own tab id, so its old links still open it. */
-export const PRODUCT_TAB = "product";
-/** totems shown inside the Product tab rather than as tabs of their own ("pricing is inside the product"). */
-export const IN_PRODUCT_TOTEMS = ["product", "pricing"];
-// the order the owner gave (vn_15aa4467, 2026-11-16 06:26Z): "key results, and then we should have like product, then
-// plan, inbox, chat, personas, social kit. For me, pricing is inside the product"; the rest after them.
-const TABS = [
-  { id: "table", label: "Key results" },
-  // the objective's product: its page, its pricing and its product deck in one tab (it left the header, vn_15aa4467).
-  { id: PRODUCT_TAB, label: "Product" },
-  // its plan (the owner: "where we have a wheel, we should have a plan like this attached to it"): the campaign's eight sections.
-  { id: "plan", label: "Plan" },
-  { id: "inbox", label: "Inbox" },
-  { id: "chat", label: "Chat" },
-  { id: "personas", label: "Personas" },
-  // the set's social kit (only on a set that has one): the owner reaches "these totems" from the set.
-  { id: SET_KIT_TAB, label: "Social kit" },
-  { id: "kanban", label: "Board" },
-  { id: "context", label: "Context" },
-  // the pages made for it (vn_dad96778): pages live inside the wheel they belong to; the Pages list still shows all.
-  { id: "pages", label: "Pages" },
-  // its tracker tables (the owner: "these tables I want them to be accessible at the wheel level"): every wheel has them.
-  { id: "trackers", label: "Trackers" },
-] as const;
-type Tab = (typeof TABS)[number]["id"];
+/**
+ * Every objective page is the same class of thing with the same tabs (the owner, vn_e6655c98, root L-100: "each objective
+ * is the same class of thing and it should have the same class of tabs ... these fixed points of knowledge corresponds
+ * to tabs in this key results page"). The tabs come from the product's data graph (the owner: "these tabs depend on the
+ * data graph of the product"), one tab per kind of node its personas need, read from the hosted layer (lib/wheelTabs.ts):
+ * nine in his order (Key results, Plan, Inbox, Chat, Personas, Board, Context, Pages, Trackers), never a list written here.
+ * What one product has and another has not (a launch board, a feature list, a product deck, a social kit) is content
+ * inside one of these tabs (TOTEM_HOME), never a tab of its own; an empty tab says what goes there.
+ */
+export const OBJECTIVE_TABS = wheelTabsOf("objective");
+type Tab = string;
+/** the tab each product totem and extra lives inside: the launch board on the Board, the social kit in the Plan, the
+ * product deck, pricing, feature list and lean core (and any totem not named here) in the Context. */
+export const TOTEM_HOME: Record<string, Tab> = {
+  launch: "kanban",
+  kit: "plan",
+  product: "context",
+  pricing: "context",
+  features: "context",
+  core: "context",
+};
+/** a totem's home tab: its own when it is one of the nine (Plan, Key results, Inbox, Pages, Trackers), else TOTEM_HOME. */
+export const homeOfTotem = (tab: string): Tab => (OBJECTIVE_TABS.find((t) => t.id === tab)?.id ?? TOTEM_HOME[tab] ?? "context") as Tab;
 /**
  * the old milestone page's tabs, folded into the objective's own (vn_748ec5a1): Summary is Key results, Waiting on you is
  * Inbox, Tree and Backlog are the Board, Chat is the Chat desk, Definition, Deck and Approvals are Context, Activity
- * and Settings (pause) are Personas. A link carrying an old tab opens the tab that does its job now.
+ * and Settings (pause) are Personas. The old extra tabs (Product, Pricing, Launch board, Feature list, Social kit) open
+ * the tab that holds them now. A link carrying an old tab opens the tab that does its job now.
  */
 export const OLD_TAB_TO_OBJECTIVE: Record<string, Tab> = {
-  pricing: PRODUCT_TAB,
+  ...TOTEM_HOME,
   summary: "table",
   waiting: "inbox",
   tree: "kanban",
+  // the Board by its own name: ?tab=board opens it (it fell back to Key results).
+  board: "kanban",
   backlog: "kanban",
   chat: "chat",
   definitions: "context",
@@ -1076,7 +1246,7 @@ export const OLD_TAB_TO_OBJECTIVE: Record<string, Tab> = {
   personas: "personas",
 };
 export function objectiveTab(asked: string | null): Tab {
-  return (TABS.find((t) => t.id === asked)?.id ?? (asked ? OLD_TAB_TO_OBJECTIVE[asked] : undefined) ?? "table") as Tab;
+  return (OBJECTIVE_TABS.find((t) => t.id === asked)?.id ?? (asked ? OLD_TAB_TO_OBJECTIVE[asked] : undefined) ?? "table") as Tab;
 }
 const ALL_TABS = [
   { id: "table", label: "Key results" },
@@ -1187,13 +1357,20 @@ function Crumbs({ ix, node }: { ix: ScorecardIndex; node: ScorecardNode }) {
 
 /** Kanban: Ready, Running, Waiting from the spines' ledgers, Review from the inbox's cards. */
 function Kanban({ body, node, reviews }: { body: ScorecardsBody; node: ScorecardNode; reviews: InboxRow[] }) {
-  const q = queueOf(body, node);
+  const q = boardOf(body, node);
   const cols: { id: string; title: string; items: { key: string; code?: string; title: string; sub?: string; href?: string; since?: string }[] }[] = [
     { id: "ready", title: "Ready", items: q.filter((r) => r.state === "ready").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.epicCode ?? r.epic })) },
     { id: "running", title: "Running", items: q.filter((r) => r.state === "running").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.status })) },
     { id: "waiting", title: "Waiting", items: q.filter((r) => r.state === "waiting").map((r) => ({ key: `${r.repo}:${r.code}`, code: r.code, title: r.title, sub: r.status })) },
     { id: "review", title: "Your review", items: reviews.map((r) => ({ key: r.id, code: r.code, title: r.title, href: scorecardHref(node.id, "inbox"), since: r.since })) },
   ];
+  // an empty Board says what goes there in one plain line (root L-100: every tab is a fixed point of knowledge).
+  if (cols.every((c) => !c.items.length))
+    return (
+      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="set-kanban" data-empty="yes">
+        Nothing is being built for this {SET_NAME.one.toLowerCase()} yet. Its ready, running and waiting rows and your reviews show here.
+      </p>
+    );
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="set-kanban">
       {cols.map((c) => (
@@ -1253,6 +1430,8 @@ export function filterChat(chat: DeskChat, tag: string, marks: string[]): DeskCh
     if (m.role === "user") keep = (m.page ?? "").includes(tag) || marks.some((k) => m.text.includes(k));
     if (keep) out.push(m);
   }
+  // the desk answered and none of its lines is about this objective: that is an empty view, never "Loading the chat…".
+  if (!out.length && chat.messages.length) return { ...chat, messages: out, stale: false, unreachable: undefined, t3: undefined };
   return { ...chat, messages: out };
 }
 
@@ -1369,7 +1548,13 @@ function Context({ node, pursuit }: { node: ScorecardNode; pursuit: ScorecardNod
 
 function Personas({ node }: { node: ScorecardNode }) {
   // one objective, one screen (vn_748ec5a1): its personas switch on or off right here, never on a second page.
+  // only this objective's personas, its Delivery Manager first (several objectives share one milestone)
+  if (node.kind === "pursuit") return <ObjectivePersonas milestoneId={node.milestoneId} objective={{ id: node.id, shared: node.milestoneShared }} fallback={<TeamsList node={node} />} />;
   if (node.milestoneId) return <ObjectivePersonas milestoneId={node.milestoneId} />;
+  return <TeamsList node={node} />;
+}
+
+function TeamsList({ node }: { node: ScorecardNode }) {
   const teams = node.teams ?? [];
   return (
     <div className="grid gap-2" data-testid="set-personas">
@@ -1410,8 +1595,12 @@ export function GoalSetPage() {
   const node = inbox.ix.byId.get(id);
   // a link to one key result (an inbox card's) opens it and brings it into view.
   useEffect(() => {
-    if (kr && node) document.getElementById(`kr-${encodeURIComponent(kr)}`)?.scrollIntoView?.({ block: "center" });
-  }, [kr, node]);
+    if (!node) return;
+    // a ticket from Search (?row=) first, else its key result.
+    const row = params.get("row");
+    const el = (row ? document.getElementById(workAnchor(row)) : null) ?? (kr ? document.getElementById(`kr-${encodeURIComponent(kr)}`) : null);
+    el?.scrollIntoView?.({ block: "center" });
+  }, [kr, node, params]);
   const pursuit = node ? inbox.ix.pursuitOf.get(node.id)! : undefined;
   const mine = node ? inbox.rows.filter((r) => inScorecard(inbox.ix, node.id, r.item)) : [];
   // the sidebar's own count (useSetInbox countFor), so its pills and this Inbox tab's never differ.
@@ -1421,20 +1610,26 @@ export function GoalSetPage() {
   const only = useCallback((i: Placeable) => !!node && inScorecard(inbox.ix, node.id, i), [node, inbox.ix]);
   const kitId = pursuit ? kitPursuitOf(pursuitsBody?.pursuits, pursuit.id) : undefined;
   const pursuitP = pursuit ? pursuitsBody?.pursuits.find((x) => x.id === pursuit.id) : undefined;
-  // root L-77: the objective's product map gives each hardwired totem a tab (Pricing, Launch board, ...); empty ones show empty.
+  // root L-77: the objective's product map names its hardwired totems; each one is content inside the tab that is its
+  // home (TOTEM_HOME), never a tab of its own: every objective shows the same nine tabs (root L-100, vn_e6655c98).
   const productMap = productOfObjective(totemMaps.data, pursuit?.id, pursuitP?.product?.id);
-  // pricing and the product deck sit inside the Product tab ("for me, pricing is inside the product", vn_15aa4467).
-  const extraTabs = totemTabs(productMap, [...TABS.map((t) => t.id), ...IN_PRODUCT_TOTEMS]);
-  const inProduct = productMap?.totems.filter((t) => IN_PRODUCT_TOTEMS.includes(t.tab)) ?? [];
-  const hasProduct = !!pursuitP?.product || inProduct.length > 0;
-  const tabs = [...TABS.filter((t) => (t.id !== SET_KIT_TAB || kitId) && (t.id !== PRODUCT_TAB || hasProduct)), ...extraTabs.map(({ id, label }) => ({ id, label }))];
+  // the social kit totem is drawn by the kit view itself when the objective has a kit, never twice.
+  const homed = (home: Tab) => productMap?.totems.filter((t) => !OBJECTIVE_TABS.some((x) => x.id === t.tab) && !(t.tab === "kit" && kitId) && homeOfTotem(t.tab) === home) ?? [];
   // his order, numbered (vn_15aa4467: "I could say priority 5, priority 10"): the same number as the sidebar's.
   const priority = node && node.kind === "pursuit" ? topObjectives(data?.nodes).findIndex((n) => n.id === node.id) + 1 : 0;
   const dates = keyDatesOf(krs);
-  const totemOn = extraTabs.find((t) => t.id === params.get("tab"));
-  const tab: string = totemOn ? totemOn.id : baseTab;
+  const tab: Tab = baseTab;
+  // an old link to an extra's own tab (?tab=launch) opens its home tab and brings that part into view.
+  const askedTab = params.get("tab");
+  useEffect(() => {
+    if (askedTab && TOTEM_HOME[askedTab] && productMap) document.getElementById(`totem-${askedTab}`)?.scrollIntoView?.({ block: "start" });
+  }, [askedTab, productMap]);
   const pagesList = useWheelPages();
   const myPages = useMemo(() => (node ? pagesOfObjective(pagesList.data, data, inbox.ix, node.id) : []), [pagesList.data, data, inbox.ix, node]);
+  // the pages and notes kept in the repo for this objective (every file the Pages tab homes), read on that tab.
+  // read on every tab: the Pages pill counts them too, so it never shows fewer than the tab holds.
+  const homeFiles = useHomeTab("all", "pages");
+  const myFiles = useMemo(() => (node ? homeFilesOf(homeFiles.data?.entries, inbox.ix, node.id) : []), [homeFiles.data, inbox.ix, node]);
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-3" data-testid="goal-set-page" data-set={id}>
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the {SET_NAME.many.toLowerCase()}…</div>}
@@ -1450,6 +1645,8 @@ export function GoalSetPage() {
           {/* each objective is a wheel (the owner: "These are the wheels"): its key results round a circle, then the answer. */}
           {/* the first screen opens on one boxed answer at every width (the card check, 390 px: "a heading and a
               paragraph, not a punchline answer box"): the objective, then its answer, in one box edged by its light. */}
+          {/* an old link to the objective's Social kit (?tab=kit) opens the kit where it lives now: on its product. */}
+          {askedTab === "kit" && pursuitP?.product && <Navigate replace to={productHref(pursuitP.product.id, "kit")} />}
           <GoalHeader
             rows={krs}
             title={
@@ -1477,28 +1674,64 @@ export function GoalSetPage() {
                 )}
               </p>
             )}
-            <ObjectiveOffButton id={node.id} />
+            {/* the product this objective promotes, written once, and its social kit: one tap from the objective in both
+                skins (the owner: no page without a way to it). */}
+            {pursuitP?.product && (
+              <p className="text-xs text-muted-foreground" data-testid="set-product">
+                Product{" "}
+                <Link to={productHref(pursuitP.product.id)} className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground" data-testid="set-product-link">
+                  {pursuitP.product.name}
+                </Link>
+                {" · "}
+                <Link to={productHref(pursuitP.product.id, "kit")} className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground" data-testid="set-product-kit">
+                  Social kit
+                </Link>
+              </p>
+            )}
+            {/* an objective held inside another says so and links its holder: its own page keeps only its own work. */}
+            {node.foldedInto && inbox.ix.byId.get(node.foldedInto) && (
+              <p className="text-xs text-muted-foreground" data-testid="set-held-in">
+                Held inside{" "}
+                <Link to={`/sets/${encodeURIComponent(node.foldedInto)}`} className="font-medium text-foreground underline underline-offset-4">
+                  {titleOf(inbox.ix.byId.get(node.foldedInto)!)}
+                </Link>
+                : the two share one wheel, each with its own key results.
+              </p>
+            )}
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <DailyBriefingSwitch id={node.id} />
+              <ObjectiveOffButton id={node.id} openBoxes={node.children.reduce((n, c) => n + Math.max(0, c.total - c.greens), 0)} />
+            </span>
           </GoalHeader>
-          <TabStrip tabs={tabs} tab={tab} pills={{ inbox: counts }} counts={{ kanban: queueOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length } : {}) }} />
+          <TabStrip tabs={OBJECTIVE_TABS} tab={tab} pills={{ inbox: counts }} counts={{ kanban: boardOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length + myFiles.length } : {}) }} />
           {tab === "table" && (
             <div className="grid gap-4">
-              <KeyResultSheet krs={krs} setId={pursuit.id} open={kr} onOpen={openKr} />
+              {/* a ticket found by Search opens here with ?row=<code>: its line is marked and brought into view. */}
+              <KeyResultSheet krs={krs} setId={pursuit.id} open={kr} onOpen={openKr} marked={params.get("row")} />
+              <UnplacedTickets node={node} setId={pursuit.id} marked={params.get("row")} />
               <ProgressLine today={data?.progress?.sets[pursuit.id]?.today} week={data?.progress?.sets[pursuit.id]?.week} since={data?.progress?.since} />
               {/* how it lives in its spine, after the sheet: the key results are the first thing he sees (17:57Z). */}
               <SpineLine node={node} krs={krs} />
               {/* every row measured for it (12 to 26, vn_fd4f7a7a) stays one tap away, under the key results. */}
               <details className="group rounded-xl border bg-card/50" data-testid="set-all-rows" open={!!kr && !krs.some((k) => k.label === kr)}>
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm text-muted-foreground hover:text-foreground">
-                  <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+                  <FoldChevron />
                   All {rows.length} measured rows
                 </summary>
                 <div className="p-2 pt-0">
-                  <RowsTable rows={rows} setId={pursuit.id} open={kr} onOpen={openKr} kitHref={kitId ? setKitHref(node.id) : undefined} />
+                  <RowsTable rows={rows} setId={pursuit.id} open={kr} onOpen={openKr} />
                 </div>
               </details>
             </div>
           )}
-          {tab === "kanban" && <Kanban body={data!} node={node} reviews={mine.filter((r) => r.kind === "review")} />}
+          {tab === "kanban" && (
+            <div className="grid gap-6">
+              {/* the launch board: what must be true before the product launches, inside the Board (root L-100). */}
+              {/* only on the objective that names its launch board itself, never every objective of the product. */}
+              {productMap && namesLaunchBoard(pursuitP?.totems) && homed("kanban").map((t) => <HomedTotem key={t.id} product={productMap.product} totem={t} />)}
+              <Kanban body={data!} node={node} reviews={mine.filter((r) => r.kind === "review")} />
+            </div>
+          )}
           {tab === "inbox" && (
             <InboxSearchProvider>
               <InboxSearchBox />
@@ -1511,25 +1744,32 @@ export function GoalSetPage() {
             </InboxSearchProvider>
           )}
           {tab === "chat" && <SetChat node={node} />}
-          {tab === "context" && <Context node={node} pursuit={pursuit} />}
+          {tab === "context" &&
+            (node.kind === "pursuit" ? (
+              // an objective's Context is its one where-we-are and nothing else: no product page, pricing or feature list,
+              // which belong to a campaign (the owner: "What the fuck is this doing here?").
+              <div className="grid gap-6" data-testid="set-context">
+                <WhereWeAreBox id={node.id} />
+              </div>
+            ) : (
+              <Context node={node} pursuit={pursuit} />
+            ))}
           {tab === "personas" && <Personas node={node} />}
-          {tab === "plan" && <ObjectivePlanTab id={pursuit.id} />}
-          {totemOn && productMap && <TotemTab product={productMap.product} totem={totemOn.totem} />}
-          {tab === PRODUCT_TAB && !totemOn && (
-            <div className="grid gap-6" data-testid="set-product-tab">
-              {pursuitP?.product && (
-                <Link to={productHref(pursuitP.product.id)} className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-foreground underline decoration-foreground/40 underline-offset-4 hover:decoration-foreground" data-testid="set-product">
-                  Open the {pursuitP.product.name} product page <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
-              )}
-              {productMap && [...inProduct].sort((a, b) => IN_PRODUCT_TOTEMS.indexOf(b.tab) - IN_PRODUCT_TOTEMS.indexOf(a.tab)).map((t) => <TotemTab key={t.id} product={productMap.product} totem={t} />)}
-            </div>
-          )}
+          {/* the wheel's plan and nothing else: a social kit or marketing material stays on its campaign. */}
+          {tab === "plan" && <WheelPlanTab id={pursuit.id} keyResults={keyResultsOf(node)} />}
           {tab === "trackers" && <TrackersTab wheel={pursuit.id} />}
-          {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} />}
-          {tab === SET_KIT_TAB && (kitId ? <SocialKitView id={kitId} /> : <div className="text-sm text-muted-foreground" data-testid="set-no-kit">This {SET_NAME.one.toLowerCase()} has no social kit here yet.</div>)}
+          {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} files={{ entries: myFiles, loading: homeFiles.loading }} />}
         </>
       )}
+    </div>
+  );
+}
+
+/** a product totem shown inside its home tab, with an anchor so an old ?tab=<its id> link scrolls to it. */
+function HomedTotem({ product, totem }: { product: string; totem: Totem }) {
+  return (
+    <div id={`totem-${totem.tab}`} className="scroll-mt-4" data-testid="homed-totem" data-tab={totem.tab}>
+      <TotemTab product={product} totem={totem} />
     </div>
   );
 }
@@ -1593,7 +1833,7 @@ export function WheelsTable({
                 const inner = (
                   <>
                     <span className="flex min-h-6 items-center text-muted-foreground" aria-hidden={lead ? undefined : true}>
-                      {lead ? lead(n) : isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      {lead ? lead(n) : <FoldChevron open={isOpen} />}
                     </span>
                     <span className="flex h-6 items-center">
                       <TrafficLight light={light} testId="wheel-light" />
@@ -1657,6 +1897,9 @@ export function WheelsTable({
   );
 }
 
+/** what his order does, said once on the objectives screen. */
+export const ORDER_RULE = "Your order decides what goes first: a higher objective's cards come first in your inbox, and its ready work gets workers first.";
+
 export function GoalSetsPage() {
   const [params] = useSearchParams();
   const tab = ALL_TABS.find((t) => t.id === params.get("tab"))?.id ?? "table";
@@ -1675,6 +1918,12 @@ export function GoalSetsPage() {
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the {SET_NAME.many.toLowerCase()}…</div>}
       {error && <div className="text-sm text-destructive">Could not read the {SET_NAME.many.toLowerCase()}: {error.message}</div>}
       <TabStrip tabs={ALL_TABS} tab={tab} counts={{ inbox: inbox.rows.length }} />
+      {/* the owner asked: "is the order of my objectives used at all?": the rule, in one line. */}
+      {tab === "table" && (
+        <p className="text-sm text-muted-foreground" data-testid="objective-order-rule">
+          {ORDER_RULE}
+        </p>
+      )}
       {tab === "table" && data && <BriefingSlot nodes={sets.map((x) => x.n)} kind="objective" />}
       {tab === "table" && <LastBriefings />}
       {tab === "table" && <PersonaGapsLine />}

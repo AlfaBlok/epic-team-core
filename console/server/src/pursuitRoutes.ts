@@ -5,7 +5,8 @@ import { credentialWorld } from "./auth/identity.js";
 import { DEFAULT_TENANT } from "./db.js";
 import type { Cadence } from "./schemas.js";
 import type { Milestone, Store } from "./store.js";
-import { PURSUITS_FILE, activeText, doneText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
+import { workspaceDataDir } from "./workspaceData.js";
+import { PURSUITS_FILE, activeText, briefingText, doneText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
 
 /**
  * The navigable scorecard's links and the owner's two switches:
@@ -15,6 +16,8 @@ import { PURSUITS_FILE, activeText, doneText, parkText, reorderText, scaleCadenc
  *   docs/pursuits.json of the code repo, the record (root L-45). The scheduler and the stall watch read the file.
  * - POST /api/pursuits/:id/active {active}: his On/Off switch; off keeps the objective in the file with
  *   `"active": false` and the day, out of Goals to set, the counts, the inbox and the wake prompts, greyed on the screen.
+ * - POST /api/pursuits/:id/briefing {on}: his Daily briefing switch; on writes `"briefing": true`, and the
+ *   06:00 and 18:00 briefings (scripts/objective_briefing.py) carry that objective's key results and tester table.
  * - POST /api/pursuits/:id/done {done}: Mark done (true) or undo (false); done keeps it in the file with `"active": false`
  *   and `"doneOn"`, out of every list like an inactive one, shown under Done.
  */
@@ -97,7 +100,8 @@ export function withMilestones(
 
 export function mountPursuitWrites(api: Hono, o: { writer?: SpineWriter; repo: () => string | undefined; who: () => string; wrote?: (dir: string) => void }): void {
   const write = async (label: string, edit: (text: string) => string | null, msg: string, why: string) => {
-    const dir = o.repo();
+    // the objectives file lives in the workspace's data repo when the home checkout points there
+    const dir = workspaceDataDir(o.repo());
     if (!dir || !o.writer) return { status: 503, body: { error: { code: "no_spine_writer", message: "the console cannot write the repo here; nothing saved" } } };
     let bad = false;
     const by = o.who();
@@ -149,6 +153,16 @@ export function mountPursuitWrites(api: Hono, o: { writer?: SpineWriter; repo: (
     const active = body.active;
     const day = new Date().toISOString().slice(0, 10);
     const r = await write(`objective ${id}`, (t) => activeText(t, id, active, day), `${active ? "switch on" : "switch off"} objective ${id}`, active ? `switched the objective ${id} back on` : `switched the objective ${id} off (inactive since ${day})`);
+    return c.json(r.body, r.status as 200);
+  });
+
+  api.post("/pursuits/:id/briefing", async (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found", message: "no pursuits here" } }, 404);
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { on?: unknown };
+    if (!/^[\w-]{1,80}$/.test(id) || typeof body.on !== "boolean") return c.json({ error: { code: "bad_briefing", message: "on is true or false" } }, 400);
+    const on = body.on;
+    const r = await write(`objective ${id}`, (t) => briefingText(t, id, on), `daily briefing ${on ? "on" : "off"} for objective ${id}`, on ? `switched the Daily briefing on for the objective ${id} (its key results and tester table go into the 06:00 and 18:00 briefings)` : `switched the Daily briefing off for the objective ${id}`);
     return c.json(r.body, r.status as 200);
   });
 

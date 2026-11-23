@@ -23,6 +23,8 @@ export interface Identity {
   socialProduct: string;
   /** the app platform keys are also set in (an app's env) */
   deployer: string;
+  /** the password manager a pasted key goes into first (unset: the console's own secret store) */
+  vault?: string;
 }
 
 export const NEUTRAL_IDENTITY: Identity = { owner: "the owner", homeWorld: "home", homeRepo: "team", mainHost: "main", workerHost: "worker", memory: "Memory", socialWorld: "social", opsRepo: "ops", org: "Acme", socialProduct: "SocialApp", deployer: "Deployer" };
@@ -104,8 +106,12 @@ export function identity(): Identity {
     org: str(w?.org) ?? NEUTRAL_IDENTITY.org,
     socialProduct: str(w?.socialProduct) ?? NEUTRAL_IDENTITY.socialProduct,
     deployer: str(w?.deployer) ?? NEUTRAL_IDENTITY.deployer,
+    ...(str(w?.vault) ? { vault: str(w?.vault) } : {}),
   };
 }
+
+/** where a pasted key goes, as people read it: the password manager when one is set, else the secret store. */
+export const keyVaultName = (): string | undefined => identity().vault;
 
 export const ownerName = (): string => identity().owner;
 export const homeWorld = (): string => identity().homeWorld;

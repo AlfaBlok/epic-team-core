@@ -74,3 +74,26 @@ export function sshMeminfo(t: SshTarget, o: { exec?: Exec; timeoutMs?: number } 
   const exec = o.exec ?? sshExec;
   return () => exec(sshArgv(t, "cat", ["/proc/meminfo"]), o.timeoutMs ?? 20_000);
 }
+
+/**
+ * the worker server's CPU count, load and memory in one ssh call (`nproc`, /proc/loadavg, /proc/meminfo), for the
+ * Hosts page's caps: the load cap is 2 per CPU and the memory floor is read against MemAvailable. Read-only; an off box fails.
+ */
+export function sshHostLoad(t: SshTarget, o: { exec?: Exec; timeoutMs?: number; client?: string } = {}): () => Promise<string> {
+  const exec = o.exec ?? sshExec;
+  return () => exec([...sshArgv(t, "nproc; cat", ["/proc/loadavg", "/proc/meminfo"]).slice(0, -1), hostLoadCommand(o.client)], o.timeoutMs ?? 15_000);
+}
+
+/**
+ * the probe also prints pick's own memory numbers (`PICK {"floor":…,"per":…,"recent":…}`), read by loading the
+ * worker server's dispatcher client itself (its MEM_FLOOR_MB or DISPATCH_MEM_FLOOR_MB, MEM_PER_LAUNCH_MB and its
+ * recent-launch file), so Hosts shows exactly what pick would answer now and the two can never read memory apart.
+ * An older client or a failed load prints nothing extra (Hosts then says the share is unknown, never a guess).
+ */
+export function hostLoadCommand(client = VPS3_CLIENT().replace(/^python3\s+/, "")): string {
+  const py =
+    "import importlib.util as u,json,os;" +
+    `s=u.spec_from_file_location("d","${client}");d=u.module_from_spec(s);s.loader.exec_module(d);` +
+    'print("PICK "+json.dumps({"floor":int(os.environ.get("DISPATCH_MEM_FLOOR_MB") or d.MEM_FLOOR_MB),"per":d.MEM_PER_LAUNCH_MB,"recent":len(d.recent_launches(os.environ)),"window":d.LAUNCH_WINDOW}))';
+  return `nproc; cat /proc/loadavg /proc/meminfo; python3 -c '${py}' 2>/dev/null || true`;
+}

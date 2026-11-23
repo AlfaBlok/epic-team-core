@@ -11,7 +11,7 @@ import { busy, useCallTab } from "./CallProvider";
 import type { CallFocus, CallHands } from "./engine";
 
 /**
- * A phone button next to each inbox section ("Goals to set (14 cards)") starts the same Team desk call (one voice, one
+ * A phone button inside each open inbox section ("Goals to set (14 cards)", never on its heading) starts the same Team desk call (one voice, one
  * call code), already holding
  * that section's cards and a briefing for them. It goes one by one to clear the board, answers fast, and hands other work
  * to the desk. On his spoken yes (read back once) the call presses his own button on a card through the same calls the
@@ -256,9 +256,10 @@ export function SectionCallButton({ section, cards, testId, onOpen }: { section:
       title={live ? "A call is on" : `Call about ${section}: the voice goes through these cards with you`}
       aria-label={`Call about ${section}`}
       data-testid={`${testId}-call`}
-      className={cn("inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40")}
+      className={cn("inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40")}
     >
       <Phone className="size-4" aria-hidden />
+      <span>Call</span>
     </button>
   );
 }

@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { LimitControl, ListPane, useListLimit } from "@/components/listPane";
 import { useProject } from "@/lib/project";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * commits on a tracked repo's main that name no ticket (row code or spine path).
@@ -58,6 +59,7 @@ function OrphanLine({ item: i }: { item: OrphanCommitItem }) {
         aria-expanded={full}
         onClick={() => setFull(!full)}
       >
+        <FoldChevron open={full} className="self-center" />
         <span className="shrink-0 font-mono text-xs">{i.short}</span>
         <span className={cn("min-w-0 flex-1", full ? "break-words" : "truncate")}>{i.subject}</span>
       </button>

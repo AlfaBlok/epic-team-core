@@ -23,6 +23,8 @@ export interface Placeable {
   code?: string;
   ref?: string;
   spine?: { path: string };
+  /** an ask: the ledger row it blocks; the ask sits where that row lives, not where its line is written. */
+  row?: string;
 }
 
 export interface ScorecardIndex {
@@ -67,6 +69,12 @@ export function indexScorecards(body: ScorecardsBody | undefined): ScorecardInde
 
 /** the spine an item lives in ("repo:path"), or undefined when the scorecards do not know it. */
 export function spineOfItem(ix: ScorecardIndex, i: Placeable): string | undefined {
+  // an ask follows its row: a row moved to another epic takes its ask's card with it (the ask keeps its own key).
+  const row = i.row ? /\b[A-Z][A-Z0-9]*-S\d+\b/.exec(i.row)?.[0] : undefined;
+  if (row && i.repo) {
+    const k = ix.codes.get(`${repoKey(i.repo)}:${row}`);
+    if (k) return k;
+  }
   const path = i.spine?.path ?? i.path;
   if (path && path.endsWith(".md")) {
     const k = keyOf(i.repo, path);
@@ -152,6 +160,45 @@ export function queueOf(body: ScorecardsBody | undefined, node: ScorecardNode | 
   }
   return out;
 }
+
+/** a row's status word as the Board's column: the server's own rule (queueStateOf), null = not on the Board (done, review). */
+export function boardStateOf(status: string | undefined): ScorecardQueueRow["state"] | null {
+  const w = (status ?? "").trim().toLowerCase().replace(/^[*_`]+/, "");
+  if (/^(ready|queued)\b/.test(w)) return "ready";
+  if (/^(active|dispatched|claimed|running|in progress|in-progress|doing|monitoring)\b/.test(w)) return "running";
+  if (/^(blocked|waiting|pending|needs|on hold)\b/.test(w)) return "waiting";
+  return null;
+}
+
+/**
+ * An objective's Board (the owner: "the Board fix for every goal"): only its own work, the
+ * rows of its own epics (queueOf) and the tickets placed under its key results from other epics, never a product's
+ * board or another objective's rows as a fallback. Each once, ready, running or waiting.
+ */
+export function boardOf(body: ScorecardsBody | undefined, node: ScorecardNode | undefined): ReturnType<typeof queueOf> {
+  if (!body || !node) return [];
+  const out = queueOf(body, node);
+  const seen = new Set(out.map((r) => `${repoKey(r.repo)}:${r.code}`));
+  for (const kr of node.keyResults ?? []) {
+    for (const w of kr.work ?? []) {
+      if (w.kind !== "ticket") continue;
+      const state = boardStateOf(w.status);
+      const id = `${repoKey(w.repo)}:${w.code}`;
+      if (!state || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ code: w.code, title: w.title ?? w.code, state, status: w.status ?? state, epic: w.epicCode, epicCode: w.epicCode, repo: w.repo, path: w.path ?? "" });
+    }
+  }
+  return out;
+}
+
+/**
+ * whether an objective's Board shows a product's launch board: only when the objective names that board itself among
+ * its own totems (a "Launch board" link, or /launch), never because it shares the product (a product's sign-in lights
+ * showed on every objective of the product and on objectives of no product).
+ */
+export const namesLaunchBoard = (totems: readonly { label: string; url?: string }[] | undefined): boolean =>
+  (totems ?? []).some((t) => /^launch board$/i.test(t.label.trim()) || /^\/launch\/?(?:[?#].*)?$/.test(t.url ?? ""));
 
 /** how long ago, in plain words ("3 h", "2 d"); empty when unknown. */
 export function waitedFor(since: string | undefined, now = Date.now()): string {

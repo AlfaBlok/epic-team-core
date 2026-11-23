@@ -77,6 +77,7 @@ describe("T48-S19 sidebar pills", () => {
       milestones: { [a.id]: { needsYou: 2, review: 1, chat: 4 }, [b.id]: { review: 2 }, [c.id]: { needsYou: 1 } },
     }));
     getCounts.mockClear();
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never); // no objectives yet, so the goals are listed
     render(
       <MemoryRouter>
         <SidebarNav />
@@ -92,8 +93,8 @@ describe("T48-S19 sidebar pills", () => {
     expect(within(chat).getByTestId("chat-unread").title).toBe("3 unread messages");
 
     const line = (id: string) => document.querySelector(`[data-testid="sidebar-milestones"] a[href="/milestones/${id}"]`)!;
-    // the goals sit in the folded More objectives
-    const open = screen.queryByTestId("more-objectives-toggle") ?? screen.queryByTestId("other-milestones-toggle");
+    // no Other goals fold; with no objectives yet the goals are listed straight
+    const open = screen.queryByTestId("other-milestones-toggle");
     if (open?.getAttribute("aria-expanded") === "false") act(() => open.click());
     await waitFor(() => expect(pills(line(a.id))).toEqual(["needs-you:2", "review:1"]));
     expect(pills(line(b.id))).toEqual(["review:2"]);

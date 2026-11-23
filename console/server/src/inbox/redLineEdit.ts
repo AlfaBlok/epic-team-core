@@ -8,6 +8,7 @@ import { DEFAULT_TENANT } from "../db.js";
 import { OBJECTIVES_FILE, redLinesFile } from "./jordiPriority.js";
 import type { EditInput, FileEdit, SpineWrite, SpineWriter } from "./spineWrite.js";
 import { homeRepo } from "../identity.js";
+import { workspaceDataDir } from "../workspaceData.js";
 
 /**
  * (the owner 2026-11-10 20:45Z, vn_ffa4783d, Log/2026-11-10.md#^e-4807be: "the two red lines take up a lot of space
@@ -246,10 +247,13 @@ export function mountRedLineEdit(api: Hono, d: RedLineEditDeps): void {
     const verb = c.how === "edit" ? "changed" : c.how === "delete" ? "deleted" : "brought back";
     const msg = `${c.by} ${verb} the red line “${c.name}” (Team home)`;
     const body = `${c.by} ${verb} the red line “${c.name}” from its row on top of Team home. ${OBJECTIVES_FILE} holds the line (or removedRedLines, with who and when), the root spine's Red line lines follow it and the red lines' epic's Decisions row quotes him. The Prioritizer reads the file on its next run.`;
+    // the objectives file (when it holds the lines) lives in the workspace's data checkout: its own commit there
+    const linesFile = redLinesFile(repo.path);
+    const linesDir = linesFile === OBJECTIVES_FILE ? workspaceDataDir(repo.path) : repo.path;
     const edits: EditInput[] = [
       {
-        repoDir: repo.path,
-        path: redLinesFile(repo.path),
+        repoDir: linesDir,
+        path: linesFile,
         label,
         edit: (text): FileEdit => {
           got = applyChange(text, c);
@@ -278,7 +282,10 @@ export function mountRedLineEdit(api: Hono, d: RedLineEditDeps): void {
       },
     ];
     let ws: SpineWrite[];
-    if (d.writer.edits) ws = await d.writer.edits(edits);
+    if (linesDir !== repo.path) {
+      ws = [await d.writer.edit(edits[0])];
+      for (const e of edits.slice(1)) ws.push(await d.writer.edit(e));
+    } else if (d.writer.edits) ws = await d.writer.edits(edits);
     else {
       ws = [];
       for (const e of edits) ws.push(await d.writer.edit(e));

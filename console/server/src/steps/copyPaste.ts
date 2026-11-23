@@ -11,15 +11,28 @@ import { ownerName } from "../identity.js";
  * Named exceptions: a command the owner himself chose to run as one copied line, by name only. A block marked
  * `data-owner-command="<name>"` (HTML) or a text with `owner-command: <name>` passes when the name is in OWNER_COMMANDS;
  * an unknown name is reported, so the marker never loosens the rule for anything else.
+ *
+ * the Mac 'Sync browser auth' command, its 'Get command' button and any step sending him to run it are refused
+ * outright, whatever the markers: he rejected the Mac sync, the team signs in itself (22 Nov "stop showing him that command
+ * anywhere"). The same patterns as MAC_AUTH_SYNC in scripts/copy_paste_check.py.
  */
 
 /** The owner's own one-line commands that stay a copy box. Add one only on his recorded words (the repo's rule records them). */
 export const OWNER_COMMANDS: Record<string, string> = {
-  // the owner asked for strictly the command here, not text for an agent
-  "sync-browser-auth": "the Sync browser auth command (curl -sSL …/auth-sync/<token>.sh | sh) on the console's Browser auth page",
   // the owner asked for one command that runs every open agent ticket on his own computer
   "run-mac-list": "the ticket runner (curl -fsSL …/mac/go.sh | sh) on the list of tickets for his computer",
 };
+
+/** the rejected Mac auth-sync path (its command, its button, a step sending him to run it). */
+export const MAC_AUTH_SYNC =
+  /\/auth-sync\/|\bsync browser auth\b|\bauth[- ]sync command\b|\bre-?sync\b[^\n]{0,160}\b(?:run (?:the|that|this) (?:one )?command|on your mac|mac list)\b/i;
+const GET_COMMAND = /\bGet command\b/;
+
+/** the Mac auth-sync he rejected, anywhere in the text; no marker lets it through. */
+export function macAuthSync(text: string): CopyPasteBlock[] {
+  const m = MAC_AUTH_SYNC.exec(text) ?? GET_COMMAND.exec(text);
+  return m ? [{ kind: "mac-auth-sync", line: `offers the Mac auth-sync he rejected ("${m[0].slice(0, 80)}"): the team signs in itself, never show it` }] : [];
+}
 
 /** Command words that start a terminal line (after an optional prompt `$ ` / `% ` and `sudo`). */
 const SHELL = new Set(
@@ -84,8 +97,8 @@ function allowed(openTag: string): boolean {
 
 /** Copy-paste terminal blocks for the owner in a steps page's HTML. */
 export function copyPasteInHtml(html: string): CopyPasteBlock[] {
-  const out: CopyPasteBlock[] = [];
   let rest = html.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  const out: CopyPasteBlock[] = macAuthSync(rest);
   // an agent's part (a <details> or any element marked data-for="agent") is not for the owner
   rest = rest.replace(/<(details|div|section|pre|code)\b[^>]*\sdata-for\s*=\s*["']agent["'][^>]*>[\s\S]*?<\/\1>/gi, "");
   const scan = (re: RegExp, kind: string, inline = false) => {
@@ -109,6 +122,8 @@ export function copyPasteInHtml(html: string): CopyPasteBlock[] {
 
 /** Copy-paste terminal steps for the owner in an ask's or a card's text (markdown: fences and inline code). */
 export function copyPasteInText(text: string): CopyPasteBlock[] {
+  const rejected = macAuthSync(text); // no marker lets this one through
+  if (rejected.length) return rejected;
   const out: CopyPasteBlock[] = [];
   // an ask that says where its one command runs and that it was tested in both shells keeps it (L-54's last resort)
   if (/\bruns on\s*:/i.test(text) && /\bzsh\b/i.test(text) && /\bbash\b/i.test(text)) return out;

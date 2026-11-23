@@ -125,7 +125,10 @@ export function credNames(provider: ProviderId, product: Product): { id: string[
 }
 
 
-/** Env, else the console's store; cached 5 minutes (1 minute while missing), values never logged. */
+/**
+ * Env, else the console's store; cached 5 minutes, values never logged. A missing name is cached 30 minutes: sign-in
+ * pages ask for names no store has on every load, and a store read can be slow; a new key shows within that, a restart at once.
+ */
 export function storeCreds(o: { env?: NodeJS.ProcessEnv; read?: (file: string) => Promise<string | undefined>; now?: () => number } = {}): CredsOf {
   const env = o.env ?? process.env;
   const read = o.read ?? sudoRead;
@@ -134,7 +137,7 @@ export function storeCreds(o: { env?: NodeJS.ProcessEnv; read?: (file: string) =
   const value = async (name: string) => {
     if (env[name]?.trim()) return env[name]!.trim();
     const c = cache.get(name);
-    if (c && now() - c.at < (c.v ? 5 : 1) * 60_000) return c.v;
+    if (c && now() - c.at < (c.v ? 5 : 30) * 60_000) return c.v;
     const v = (await read(keyFile(name)).catch(() => undefined))?.trim() || undefined;
     cache.set(name, { v, at: now() });
     return v;

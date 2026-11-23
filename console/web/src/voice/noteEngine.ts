@@ -28,6 +28,12 @@ export interface NoteStartInfo {
   monthUsd: number;
   monthCapUsd: number;
 }
+/**
+ * E948-S174 (the owner 22 Nov 19:2xZ: a 0-second note to a card sat "Waiting to send" on his phone, retried for days): a
+ * recording with no audio (0 s, or no bytes) is dropped at once with this line, never queued or retried.
+ */
+export const EMPTY_RECORDING_TEXT = "Empty recording, not sent";
+
 export interface SentNote {
   id: string;
   state: string;
@@ -860,9 +866,19 @@ export class NoteEngine {
     this.releaseMic();
     clearTimeout(this.recoverTimer);
     this.set({ phase: "sending", level: 0, elapsedS: Math.floor(this.closedS), error: undefined, ...(this.out ? { info: KEPT_TEXT } : {}) });
-    void this.outNote({ send: true });
+    const keptHere = this.outNote({ send: true });
     await Promise.all(this.pendingStops);
     await this.queue;
+    // E948-S174: nothing recorded went up and nothing waits to (0 s, or no audio bytes): dropped now, never kept
+    if (!this.done.size && !this.failed.size) {
+      const id = this.info?.note.id;
+      if (id) void this.api.discard(id).catch(() => undefined);
+      await Promise.resolve(keptHere).catch(() => undefined); // its outbox write lands first, then it leaves (no "Waiting to send")
+      this.store.clear();
+      this.retries = 0;
+      this.outDone(false);
+      return this.set({ phase: "sent", note: { id: id ?? "", state: "empty", seconds: 0, costUsd: 0, segments: 0 }, costUsd: 0, info: EMPTY_RECORDING_TEXT });
+    }
     // the note never opened on the console while recording (no answer): open it now, the parts kept here go up.
     if (!this.info) {
       try {

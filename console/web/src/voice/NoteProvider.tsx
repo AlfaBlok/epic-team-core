@@ -7,7 +7,9 @@ import { cn } from "@/lib/utils";
 import { outbox, outboxState, startOutbox, subscribeOutbox } from "./outbox";
 import { ON_DEVICE_PATH } from "@/lib/routePaths";
 import { deskFallback } from "./deskFallback";
-import { browserNoteMedia, fetchNotesApi, KEPT_FAILED_TEXT, WAITING_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
+import { hookLinks } from "./linkGuard";
+import { markSent, sentOf } from "@/lib/sentRows";
+import { browserNoteMedia, EMPTY_RECORDING_TEXT, fetchNotesApi, KEPT_FAILED_TEXT, WAITING_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
 
 /**
  * Like a call (
@@ -52,6 +54,10 @@ export interface HeldNote {
    * went to the Team desk whole), or failed (Send again; his words are already in his memory, so never "Not sent").
    */
   out?: { state: "sending" | "done" | "empty" | "desk" | "failed"; error?: string; note?: SentNote };
+  /** E948-S174: the card the note was started or sent on (its `data-inbox-card` slot), found from the pressed button. */
+  slot?: string;
+  /** E948-S174: the card collapsed to this row on Send; the row spins until the card's press has the note. */
+  row?: string;
 }
 
 /** a refused card note goes here whole (the world's Team desk); `id` keys it so a retry never posts twice. */
@@ -102,7 +108,10 @@ export class NoteTab {
       this.win.addEventListener("pagehide", hide);
       this.win.addEventListener("online", online);
       doc.addEventListener("visibilitychange", seen);
+      // a link out of the app opens a new window, and no link reloads the page under a note that is on
+      const offLinks = hookLinks(this.win, { busy: () => this.busy() });
       this.unhook = () => {
+        offLinks();
         this.win?.removeEventListener("pagehide", hide);
         this.win?.removeEventListener("online", online);
         doc.removeEventListener("visibilitychange", seen);
@@ -160,11 +169,62 @@ export class NoteTab {
     if (v.phase === "sent" && v.note && h.deliver && !h.out) {
       const n = v.note;
       h.engine.dismiss();
-      if (n.state === "empty" || !n.transcript?.trim()) h.out = { state: "empty" };
-      else void this.send(h, n);
+      if (n.state === "empty" || !n.transcript?.trim()) {
+        h.out = { state: "empty", ...(v.info === EMPTY_RECORDING_TEXT ? { error: EMPTY_RECORDING_TEXT } : {}) };
+        this.rowEmpty(h, v.info === EMPTY_RECORDING_TEXT ? EMPTY_RECORDING_TEXT : "Nothing was heard, so nothing was sent");
+      } else void this.send(h, n);
       this.later(h);
     }
+    // E948-S174: written out failed on a collapsed card: the row says why with Send again (a note kept on the phone
+    // sends by itself, so its row keeps spinning)
+    if (was !== v.phase && v.phase === "failed" && h.row && v.info !== KEPT_FAILED_TEXT) this.rowFailed(h, v.error ?? "it could not be written out");
     if (was !== v.phase) this.changed();
+  }
+
+  /**
+   * E948-S174 (the owner 22 Nov 18:56Z, vn_3b3cf02e: "the moment I press Send, it compacts into this row. It's just that
+   * instead of saying Sent, it stays spinning until it fully has been sent"):
+   *
+   *   [ the card, Voice recording ]  ──Send──▶  [ ◌ Sending · Voice note · its title ]  ──card has it──▶  [ ✓ Sent · … ]
+   *                                                    └── failed ──▶  [ Not sent · why · Send again ]
+   *
+   * Send on a card's note collapses the card to its one row at once (no button spinner on a big card, no floating pill);
+   * the row spins while the note is written out and handed to the card's press, then turns green Sent.
+   */
+  finish(h: HeldNote) {
+    if (h.deliver && h.slot) this.collapse(h, h.slot);
+    void h.engine.finish();
+  }
+  /** Send again from the row: the row spins again, the note goes the way it failed (its card's press, or written out again). */
+  retry(key: string) {
+    const h = this.held.get(key);
+    if (!h) return;
+    if (h.out?.state === "failed" && h.out.note) {
+      if (h.row) this.collapse(h, h.row);
+      void this.send(h, h.out.note);
+    } else {
+      if (h.row) h.slot = h.row;
+      this.finish(h);
+    }
+  }
+  private collapse(h: HeldNote, slot: string) {
+    h.row = slot;
+    markSent(slot, { said: "Voice note", title: h.to, voice: h.key });
+    this.changed();
+  }
+  /** ours = the row still shows this note on its way (the card's own press did not mark it with its own words yet) */
+  private ours(h: HeldNote) {
+    return !!h.row && sentOf(h.row)?.voice === h.key;
+  }
+  private rowDone(h: HeldNote, said: string) {
+    if (this.ours(h)) markSent(h.row!, { said, title: h.to });
+  }
+  private rowFailed(h: HeldNote, why: string) {
+    if (h.row) markSent(h.row, { said: "Voice note", title: h.to, voice: h.key, failed: why });
+  }
+  /** nothing to send (an empty recording, nothing heard): the row says so plainly, Bring it back shows the card again */
+  private rowEmpty(h: HeldNote, said: string) {
+    if (this.ours(h)) markSent(h.row!, { said, title: h.to, dropped: true, back: async () => ({ back: true, line: "" }) });
   }
 
   /** Hand a written-out note to its card's press; a failure stays on the control with Send again. */
@@ -174,6 +234,7 @@ export class NoteTab {
     try {
       await h.deliver!(n);
       h.out = { state: "done", note: n };
+      this.rowDone(h, "Voice note sent");
       this.later(h);
     } catch (e) {
       const why = (e as Error).message || "the card did not answer";
@@ -184,6 +245,7 @@ export class NoteTab {
         try {
           await this.toDesk(`Feedback on ${h.page ?? h.to} (the card did not take it: ${why}): ${h.words(n)}`, h.page, `card-note:${n.id}`);
           h.out = { state: "desk", error: why, note: n };
+          this.rowDone(h, "Your words went to the Team desk");
           this.later(h);
           this.changed();
           return;
@@ -192,6 +254,7 @@ export class NoteTab {
         }
       }
       h.out = { state: "failed", error: why, note: n };
+      this.rowFailed(h, why);
     }
     this.changed();
   }
@@ -227,6 +290,7 @@ export class NoteTab {
   started(h: HeldNote, route: string | undefined) {
     h.route = route;
     h.out = undefined;
+    h.row = undefined;
     if (route && !h.given && !h.deliver)
       try {
         localStorage.setItem(ROUTE_KEY(h.key), route);
@@ -238,7 +302,8 @@ export class NoteTab {
 
   /** Notes on that no page shows: the floating pill's. */
   floating(): HeldNote[] {
-    return [...this.held.values()].filter((h) => h.docks === 0 && (!!h.out || SHOWN.includes(h.engine.view().phase)));
+    // E948-S174: a note whose card collapsed to its row shows there, never a second time floating
+    return [...this.held.values()].filter((h) => h.docks === 0 && !(h.row && sentOf(h.row)) && (!!h.out || SHOWN.includes(h.engine.view().phase)));
   }
 
   /** a note is recording, paused, sending or failed (its words not yet landed) somewhere in the tab: a new build waits. */
@@ -406,7 +471,9 @@ export const outText = (out: NonNullable<HeldNote["out"]>, to: string) =>
     : out.state === "done"
       ? `Sent to ${to}${/[.?!…]$/.test(to) ? "" : "."}`
       : out.state === "empty"
-        ? "Nothing was heard, so nothing was sent."
+        ? out.error === EMPTY_RECORDING_TEXT
+          ? `${EMPTY_RECORDING_TEXT}.`
+          : "Nothing was heard, so nothing was sent."
         : out.state === "desk"
           ? OUT_DESK_TEXT
           : outFailedText(out.error);
@@ -502,7 +569,7 @@ function Floating({ h, tab }: { h: HeldNote; tab: NoteTab }) {
             disabled={v.phase === "starting"}
             pending={v.phase === "sending" || out?.state === "sending"}
             pendingLabel="Sending…"
-            onClick={() => (out?.state === "failed" && out.note ? void tab.send(h, out.note) : void h.engine.finish())}
+            onClick={() => (out?.state === "failed" && out.note ? void tab.send(h, out.note) : tab.finish(h))}
           >
             <SendHorizontal /> {kept ? "Send now" : failed ? "Send again" : "Send"}
           </Button>

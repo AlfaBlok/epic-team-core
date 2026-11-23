@@ -34,8 +34,13 @@ describe("T46-S4 r2 NewApplications", () => {
     vi.spyOn(api, "listTesters").mockResolvedValue({ page: "", newCount: 2, signups: [row("a", "tester-10", null), row("b", "tester-10", null), row("c", "tester-10", "x"), row("w", "waitlist-alpha", "x")] });
     render(<NewApplications />, { wrapper: MemoryRouter });
     expect((await screen.findByTestId("new-applications-count")).textContent).toBe("2 new applications");
-    expect(screen.getByText(/3 tester applications in all/)).toBeTruthy();
+    expect(screen.getByText(/3 applications in all, the team's own tests left out/)).toBeTruthy();
     expect(screen.getByTestId("new-applications").querySelector("a")?.getAttribute("href")).toBe("/testers");
+  });
+  it("counts as the Applications tracker does when the server says so", async () => {
+    vi.spyOn(api, "listTesters").mockResolvedValue({ page: "", newCount: 0, counted: 1, signups: [row("a", "tester-10", "x"), row("t", "tester-10", "x")] });
+    render(<NewApplications />, { wrapper: MemoryRouter });
+    expect(await screen.findByText(/1 application in all/)).toBeTruthy();
   });
   it("with none new it still names the list", async () => {
     vi.spyOn(api, "listTesters").mockResolvedValue({ page: "", newCount: 0, signups: [row("c", "tester-10", "x")] });

@@ -227,12 +227,16 @@ export interface Assignment {
   nextWakeAt?: string;
   /** never been switched on (attached off; Run now alone does not count). */
   neverOn?: boolean;
+  /** the objective (pursuit id) it works: an objective's Personas tab lists only its own. */
+  objective?: string;
 }
 
 export type AssignmentInput = Pick<Assignment, "milestoneId" | "personaId" | "cadence"> & {
   enabled?: boolean;
   writeEnabled?: boolean;
   writeScope?: string;
+  /** "" clears it on a patch. */
+  objective?: string;
 };
 
 /** POST /api/milestones/bootstrap: an agent in the repo creates the spine/ticket and sets the path. */
@@ -548,6 +552,9 @@ export interface BoardSeat {
   state: "working" | "free" | "limited" | "signed_out" | "unknown";
   usage5h?: number;
   usageWeekly?: number;
+  /** Fable credit left this week, percent; 0 when its plan has none or Fable was refused on it. */
+  fableLeft?: number;
+  fableNote?: string;
   limitedUntil?: string;
   running: number;
   now: BoardPersona[];
@@ -563,6 +570,8 @@ export interface SeatBoard {
   workingNow: number;
   personas: number;
   runs24h: number;
+  /** seats with Fable credit left now. */
+  fableSeats?: number;
   readAt?: string;
 }
 
@@ -819,12 +828,21 @@ export interface HostWake {
   /** The exact failure reason when state is failed. */
   error?: string;
 }
+/** one live run on a host (the Hosts page unfolds "N agents running" into these). */
+export interface RunningAgent {
+  runId: string;
+  persona: string;
+  kind: "wake" | "worker";
+  goal?: string;
+  summary?: string;
+  startedAt: string;
+}
 export interface HostView {
   id: HostId;
   state: HostState;
   t3: { state: T3Reach; detail?: string };
   /** Runs open in the console whose T3 thread was last read as live (wakes + child workers); `unconfirmed` = state unknown. */
-  agents: { live: number; wakes: number; workers: number; unconfirmed: number };
+  agents: { live: number; wakes: number; workers: number; unconfirmed: number; running?: RunningAgent[] };
   seats?: { name: string; capacity: number; available: number; inUse: number };
   /** the worker server: what `coding status` said (raw text kept) or why it could not be read. */
   coding?: {
@@ -849,6 +867,41 @@ export interface HostsView {
   stale: boolean;
   checking: boolean;
   hosts: HostView[];
+  /** every cap on how many agents run, its value and today's reading; `limitNow` names the one that holds now. */
+  caps?: HostCap[];
+  limitNow?: string;
+  /** each ticket or wake waiting for a slot, oldest first. */
+  waiting?: SlotWait[];
+}
+
+export interface HostCap {
+  id: string;
+  name: string;
+  limit: string;
+  now?: string;
+  state: "room" | "tight" | "full" | "unknown";
+  why: string;
+}
+
+export interface SlotWait {
+  kind: "wake" | "ticket";
+  id: string;
+  title: string;
+  why: string;
+  since?: string;
+  nextTry?: string;
+  repo?: string;
+  /** in the console's work queue: it starts by itself when its limit clears. */
+  queued?: boolean;
+  /** waited over a day: named on top. */
+  overDay?: boolean;
+  days?: number;
+  /** a card he sent back: its answer is his, the queue takes it first. */
+  sentBack?: boolean;
+  /** its place in the one queue order (1 = the next free slot is its), queued tickets only. */
+  place?: number;
+  /** why it sits there: urgent or his feedback, waited over a day, or his objective order. */
+  tier?: "first" | "overDay" | "objective";
 }
 
 /** a standing approval of a milestone (spines.py `grants`), with the Decisions rows citing it. */
@@ -1198,6 +1251,10 @@ export interface DeskMessage {
   truncated?: boolean;
   /** the item's position in the T3 thread (`before` of the next older page); negative = an earlier session's. */
   position?: number;
+  /** his message's request id (every request lands on exactly one ticket row). */
+  request?: string;
+  /** the ticket rows that hold that request id now: [] = on none yet; unset = not read yet. */
+  rows?: { code: string; repo: string; path: string; status?: string; title?: string }[];
 }
 /** what a chat read asks for: the newest `limit` messages, or (with `before`) the page older than that position. */
 export interface ChatRead {
@@ -2191,6 +2248,8 @@ export interface TestersView {
   page: string;
   /** signups the owner has not seen on /testers yet (Team home shows "N new applications"). */
   newCount?: number;
+  /** the sign-ups the Applications tracker counts (the team's own tests and the owner's own left out). */
+  counted?: number;
 }
 export interface TeamServicesView {
   services: TeamService[];
@@ -2911,6 +2970,9 @@ export interface CampaignTotems {
   work: { rows: TotemTask[]; asks: { code: string; text: string }[] };
   observations: TotemObservation[];
   history: { weeks: TotemHistoryWeek[] };
+  /** the Benefits tab: what the product does for the people who use it (the brief's Benefits table, else the product
+   * deck's What it does for you); older servers send none. */
+  benefits?: { source: string | null; lines: TotemBenefit[]; asked: { id: string; text: string }[] };
   remote: string | null;
   team: { root: TotemEpicRef; slides: TotemSlide[]; rebuilds: TotemRebuild[]; observations: TotemObservation[] } | null;
 }

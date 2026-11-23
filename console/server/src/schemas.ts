@@ -90,6 +90,8 @@ export const assignmentCreate = z
     // omitted = the persona's may_write decides the default for this new assignment.
     writeEnabled: z.boolean().optional(),
     writeScope: z.string().max(2000).optional(),
+    // the objective (docs/pursuits.json id) it works; "" on a patch clears it.
+    objective: z.string().trim().max(80).regex(/^[a-z0-9-]*$/, "an objective id: lowercase words joined by -").optional(),
   })
   .strict();
 export const assignmentPatch = assignmentCreate.partial().strict();
@@ -176,6 +178,8 @@ export const needsJordiCreate = z
     row: z.string().trim().regex(/^[\w.-]+$/, "row must be a ledger row id like E962-S4").optional(),
     /** the ask's kind when the caller knows it (a `do` ask is a step only the owner can do); default from the text. */
     kind: z.enum(["do", "decide", "approve", "provide"]).optional(),
+    /** E948-S172: the card's topic in plain words, 8 or fewer (its first line, `About: …`); derived from the question when left out. */
+    about: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
 /** an ask the console wrote taken out again by its raiser once it is moot (the Team Browser's site reads signed in again). */

@@ -15,6 +15,7 @@ import type { Attachments } from "../desk/attachments.js";
 import type { DB } from "../db.js";
 import { whoPressed } from "../press/mount.js";
 import { ownerName } from "../identity.js";
+import { readArchiveOf } from "../adapters/spineArchive.js";
 
 /**
  * after a card closes he often wants to add something, or take the
@@ -41,7 +42,10 @@ const cardIn = z.object({
   title: z.string().max(400).optional(),
   milestoneId: z.string().max(80).optional(),
 });
-const commentIn = cardIn.extend({ text: z.string().max(COMMENT_MAX), attachments: z.array(z.string()).max(10).optional(), via: z.enum(["text", "voice"]).optional() });
+const commentIn = cardIn.extend({ text: z.string().max(COMMENT_MAX), attachments: z.array(z.string()).max(10).optional(), via: z.enum(["text", "voice"]).optional(),
+  /** `in_work` = a note on a card he sent back, while its next round is being built (never "after he closed it"). */
+  stage: z.enum(["closed", "in_work"]).optional(),
+});
 const reopenIn = cardIn.extend({ kind: z.literal("review").default("review"), /** the card's id (orders it after the close it undoes) */ id: z.string().max(80).optional() });
 
 export interface AfterCloseOptions {
@@ -88,7 +92,9 @@ export function createAfterClose(o: AfterCloseOptions) {
       return { error: 404, code: "not_found", message: `${c.path} is not in ${c.repo}` };
     }
     const bare = c.ref.replace(/^.*\//, "");
-    if (!new RegExp(`(^|[^\\w-])${bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w-])`).test(text)) return { error: 404, code: "not_found", message: `${bare} is not in ${c.path} any more` };
+    const holds = (t: string | undefined) => !!t && new RegExp(`(^|[^\\w-])${bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w-])`).test(t);
+    // a finished row moved to the epic's archive is still his card: his comment goes to the epic's Decisions
+    if (!holds(text) && !holds(readArchiveOf(abs))) return { error: 404, code: "not_found", message: `${bare} is not in ${c.path} any more` };
     return { dir, abs, text };
   }
 
@@ -137,6 +143,9 @@ export function createAfterClose(o: AfterCloseOptions) {
     const by = who();
     const ref = c.ref.replace(/^.*\//, "");
     const what = c.kind === "ask" ? `ask ${ref}` : `row ${ref}`;
+    // a card he sent back stays on his inbox while it is reworked, and his notes on it reach the round in work
+    const inWork = c.stage === "in_work";
+    const when = inWork ? "while its next round is in work" : "after he closed it";
     const w = await o.writer.edit({
       repoDir: at.dir,
       path: c.path,
@@ -147,14 +156,16 @@ export function createAfterClose(o: AfterCloseOptions) {
         const t = addDecisionRow(text, {
           date,
           outcome: "comment",
-          decision: `${by}'s comment on ${what} after he closed it${c.via === "voice" ? " (voice)" : ""}: "${cell(words).slice(0, 1500)}"`,
-          summary: "it may change his decision: the owner reads it and acts on it (a new round, a follow-up row, or a reply); the answered line stays as he left it",
-          evidence: "console Add comment",
+          decision: `${by}'s ${inWork ? "note" : "comment"} on ${what} ${when}${c.via === "voice" ? " (voice)" : ""}: "${cell(words).slice(0, 1500)}"`,
+          summary: inWork
+            ? "more input for the round in work: the worker on the row gets his words now and the round answers them; the card comes back to his review with it"
+            : "it may change his decision: the owner reads it and acts on it (a new round, a follow-up row, or a reply); the answered line stays as he left it",
+          evidence: inWork ? "console note on a sent-back card" : "console Add comment",
           revisit: "when the owner has acted on it",
         });
         return t === undefined
           ? { skip: `${c.path} has no Decisions table to hold the comment; nothing written` }
-          : { text: t, msg: `${ref}: ${by}'s comment after closing it (via console)`, body: `${by} added a comment on ${what} ("${cell(c.title ?? "")}") from the console after closing it:\n\n${words}` };
+          : { text: t, msg: `${ref}: ${by}'s ${inWork ? "note while it is in work" : "comment after closing it"} (via console)`, body: `${by} added a ${inWork ? "note" : "comment"} on ${what} ("${cell(c.title ?? "")}") from the console ${when}:\n\n${words}` };
       },
     });
     if (w.status !== "written") return { error: w.status === "skipped" ? 409 : 502, code: w.status === "skipped" ? "spine_write_skipped" : "spine_write_failed", message: `${w.status === "skipped" ? "not written" : "spine write failed"}: ${w.reason ?? "unknown"}; nothing changed` };
@@ -162,9 +173,12 @@ export function createAfterClose(o: AfterCloseOptions) {
     const woke = await wake(
       c,
       [
-        `${by} added a comment on ${what}${c.title ? ` ("${cell(c.title)}")` : ""} in ${c.repo} ${c.path} after he closed it (written as a Decisions row${w.sha ? ` in commit ${w.sha}` : ""}).`,
+        `${by} added a ${inWork ? "note" : "comment"} on ${what}${c.title ? ` ("${cell(c.title)}")` : ""} in ${c.repo} ${c.path} ${when} (written as a Decisions row${w.sha ? ` in commit ${w.sha}` : ""}).`,
         `His words: ${words}`,
-        `It may change his decision. Read it as a new round of feedback on that ${c.kind === "ask" ? "ask" : "row"}: if he changes his mind, reopen it the EpicSpine way (a new round, a new row, or a corrected answer with a Decisions row); if it adds a follow-up, file it; hand it to the owner persona when it is not you. Never rewrite his answered line silently. Record what you did in the spine.`,
+        ...(inWork
+          ? [`He sent this card back and it is still on his inbox, marked in progress: this is more input for the round being built. Hand his words to the worker on ${ref} now (a running worker: send them to its thread; none running: start the round with them), never open a second row for them, and bring the card back to his review answering every point.`]
+          : []),
+        ...(inWork ? [] : [`It may change his decision. Read it as a new round of feedback on that ${c.kind === "ask" ? "ask" : "row"}: if he changes his mind, reopen it the EpicSpine way (a new round, a new row, or a corrected answer with a Decisions row); if it adds a follow-up, file it; hand it to the owner persona when it is not you. Never rewrite his answered line silently. Record what you did in the spine.`]),
       ].join("\n\n"),
       `comment:${c.repo}:${ref}:${w.sha ?? Date.now()}`,
     );
@@ -215,10 +229,10 @@ export function createAfterClose(o: AfterCloseOptions) {
   }
   function readRecent(db: DB, o2: { days?: number; limit?: number; world?: string; test?: boolean }): ClosedCard[] {
     const since = new Date(Date.now() - Math.min(Math.max(o2.days ?? 30, 1), 90) * 86_400_000).toISOString();
-    type P = { id: string; at: string; action: string; target: string; who: string; via: string | null; ref: string | null; response: string | null; tenant_id: string | null; landed_at: string | null };
+    type P = { id: string; at: string; action: string; target: string; who: string; via: string | null; ref: string | null; response: string | null; request: string | null; tenant_id: string | null; landed_at: string | null };
     const rows = db
       .prepare(
-        "SELECT id, at, action, target, who, via, ref, response, tenant_id, landed_at FROM presses WHERE state = 'landed' AND at >= ? AND (action IN ('review approve', 'review complete', 'review deny', 'review feedback') OR action LIKE 'ask %' OR action LIKE '% comment') ORDER BY at DESC LIMIT 3000",
+        "SELECT id, at, action, target, who, via, ref, response, request, tenant_id, landed_at FROM presses WHERE state = 'landed' AND at >= ? AND (action IN ('review approve', 'review complete', 'review deny', 'review feedback') OR action LIKE 'ask %' OR action LIKE '% comment') ORDER BY at DESC LIMIT 3000",
       )
       .all(since) as P[];
     const mine = rows.filter((r) => (!o2.world || !r.tenant_id || r.tenant_id === o2.world) && r.via !== "press-test" && !/press test/i.test(r.who));
@@ -244,7 +258,7 @@ export function createAfterClose(o: AfterCloseOptions) {
         if (!repo || !p || !ref) continue;
         const face = it?.face as { title?: string } | undefined;
         const what = r.action.slice(7);
-        card = { key: `review:${repo}:${p}#${ref}`, kind: "review", repo, path: p, ref, title: str(face?.title) ?? str(it?.title) ?? ref, outcome: what === "deny" ? "declined" : what === "feedback" ? "changes" : "approved", at: r.landed_at ?? r.at, ...(str(it?.milestoneId) ? { milestoneId: str(it?.milestoneId) } : {}), comments: comments.get(`${repo}:${ref}`) ?? 0 };
+        card = { key: `review:${repo}:${p}#${ref}`, kind: "review", repo, path: p, ref, title: str(face?.title) ?? str(it?.title) ?? ref, outcome: what === "deny" ? "declined" : what === "feedback" ? "changes" : "approved", at: r.landed_at ?? r.at, ...(str(it?.milestoneId) ? { milestoneId: str(it?.milestoneId) } : {}), ...(what === "feedback" && pressWords(r.request) ? { words: pressWords(r.request) } : {}), comments: comments.get(`${repo}:${ref}`) ?? 0 };
       } else if (r.ref) {
         const a = answer.get(r.ref) as { kind: string; text: string; item: string } | undefined;
         const it = json(a?.item ?? null);
@@ -277,6 +291,18 @@ export function createAfterClose(o: AfterCloseOptions) {
 }
 
 /** one closed card on Team home's Recently closed list (Add comment files to its row or ask). */
+/** his words in a press's stored request (`{ body: { feedback } }`, the body as an object or as JSON text). */
+export function pressWords(request: string | null | undefined): string | undefined {
+  try {
+    const q = request ? (JSON.parse(request) as { body?: unknown }) : undefined;
+    const b = typeof q?.body === "string" ? (JSON.parse(q.body) as unknown) : q?.body;
+    const f = b && typeof b === "object" ? (b as { feedback?: unknown }).feedback : undefined;
+    return typeof f === "string" && f.trim() ? f.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ClosedCard {
   key: string;
   kind: "review" | "ask";
@@ -289,6 +315,8 @@ export interface ClosedCard {
   at: string;
   milestoneId?: string;
   responseId?: string;
+  /** his own words on a Change it press, whole (the press's request body): what a reopened or picked-up round is briefed with. */
+  words?: string;
   /** Comments he added since (Add comment presses that landed). */
   comments: number;
 }

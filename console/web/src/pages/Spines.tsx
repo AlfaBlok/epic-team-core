@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import { api, type Repo, type SpineListing } from "@/api";
 import { useQuery } from "@/lib/data";
 import { useSocial } from "@/lib/useSocial";
@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { Empty, ErrorBox, Loading, PageHeader, RelTime } from "@/components/common";
 import { TreeDot, TreeLegend } from "@/components/tree";
 import { cn } from "@/lib/utils";
+import { FoldChevron } from "@/components/foldChevron";
 
 // Spines page: every repo's spine tree (spines.py), cached per repo here and on the server.
 const STORE_KEY = "console.spines.";
@@ -123,7 +124,7 @@ function RepoSpines({ repo, social }: { repo: Repo; social?: boolean }) {
     <Card id={repo.name} data-testid="repo-spines">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
         <button type="button" className="flex items-center gap-1.5 font-medium" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <FoldChevron open={open} />
           {repo.name}
         </button>
         {repo.remote && <span className="font-mono text-xs text-muted-foreground">{repo.remote}</span>}

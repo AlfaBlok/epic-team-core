@@ -35,6 +35,9 @@ import { buildTree, subtree, treeTodoSection, type Tree } from "./adapters/tree.
 import { DEFAULT_OWNER, ownerOf } from "./tenancy/owner.js";
 import { activeGrantsFor } from "./cycle/grants.js";
 import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js";
+import { contextMissing, readTicketContext } from "./cycle/ticketContext.js";
+import { readWhereWeAre, whereWeAreSection } from "./whereWeAre.js";
+import { keyResultPlanText, planSection, readWheelPlan } from "./wheelPlan.js";
 import { runStateFor } from "./cycle/runState.js";
 import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
 import { FAILED_WAKES_IN_A_ROW, failedWakesAction, failedWakesQuestion, openFailedWakesAsk, wakeStreak } from "./cycle/failedWakes.js";
@@ -65,26 +68,33 @@ import { createMilestoneChats, spinesBindRunner } from "./desk/milestoneChat.js"
 import { sinceBlock } from "./desk/since.js";
 import { mountChatScope } from "./desk/scope.js";
 import { claimsFor, claimsSection, mountChatDispatch, rowClaimRefusal, rowOf } from "./desk/dispatch.js";
-import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, hasStandingDuty, noteAck } from "./wakePrompt.js";
+import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, dispatchOrderSection, hasStandingDuty, noteAck } from "./wakePrompt.js";
+import { roomyMaxFromEnv } from "./cycle/workerRoom.js";
+import { getWorkerLaunch } from "./cycle/workerLaunch.js";
+import { readyRows } from "./adapters/nightQueue.js";
 import { mountInbox } from "./inbox/routes.js";
 import { mountBriefing } from "./briefing.js";
 import { anthropicReworder, mountRedLineEdit, openAiReworder, type Reworder } from "./inbox/redLineEdit.js";
-import { withCounts, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
+import { withCounts, objectiveOf, worldObjectiveDefs, worldObjectives, worldPriorities, worldRedLines } from "./inbox/jordiPriority.js";
 import { readBuilding } from "./building.js";
 import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, objectiveIds, priorityLines } from "./pursuits.js";
 import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
+import { createHomeTabs, readHomeFile, readHomeWheels } from "./homeFiles.js";
+import { createPlacer } from "./homePlace.js";
 import { wheelTrackers } from "./trackers.js";
 import { storePersonas, wheelReader } from "./wheel.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
+import { workspaceDataDir } from "./workspaceData.js";
 import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, isTestWorld, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
 import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as parseTeamCards, TEAM_CARDS_FILE } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
-import { readHisWords } from "./desk/hisObjectives.js";
-import { objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
+import { chatSection, inForceWords, readHisWords } from "./desk/hisObjectives.js";
+import { keyResultLines, objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
+import { inboxWarmHealth } from "./warmInbox.js";
 import { keptJson, sendPrepared } from "./keptJson.js";
 import { SCORECARD_DIR, type ScorecardsBody, applyLiveKeyResults, buildScorecards, createGreenHistory, createSpineFileReader, createWorkFinder } from "./scorecards.js";
 import { createOneOffs } from "./oneOffs.js";
@@ -106,7 +116,7 @@ import type { PostReview } from "./review/postCards.js";
 import { createWebPush, mountWebPush, vapidFromEnv, type PushTransport, type Vapid } from "./notify/webpush.js";
 import { asksFrom, isTestItem, reviewNotices, teamLink, type Sender } from "./notify/notice.js";
 import { addDecisionRow } from "./review/followups.js";
-import { cachedSudoRead as sudoRead } from "./secretCache.js";
+import { cachedSudoRead as sudoRead, secretSourceHealth } from "./secretCache.js";
 import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteList } from "./plug/memory.js";
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
@@ -123,6 +133,7 @@ import { hooks, openForJobs, registeredPlugs } from "./plug/hooks.js";
 import type { SecretPut } from "./plug/keys.js";
 import { askLine, raiseAsk, retireAsk, type RaiseDeps } from "./inbox/raise.js";
 import { askGateProblem, heldAsksSection, staleAsksSection } from "./inbox/askGate.js";
+import { heldToRoute, routedHeldSection, type HeldOfGoal } from "./inbox/heldRoute.js";
 import { decideButtonsProblem } from "./inbox/decideChoices.js";
 import { datedReport, heldWhat, monitorValue, monitorWhat, writeMonitoring } from "./repoState/monitoringLine.js";
 import { carryNeedsJordi } from "./inbox/carry.js";
@@ -131,8 +142,11 @@ import { createSpineWriter, type SpineWrite, type SpineWriter } from "./inbox/sp
 import { groupEdits } from "./inbox/groupWrite.js";
 import { createCloneWriter } from "./inbox/writeClone.js";
 import { createPresses } from "./press/presses.js";
-import { mountPresses, type PressWorker } from "./press/mount.js";
+import { mountPresses, whoPressed, type PressWorker } from "./press/mount.js";
 import { createAfterClose, mountAfterClose } from "./review/afterClose.js";
+import { createSentBack, mountSentBack } from "./review/sentBack.js";
+import { createPickup, PICKUP_TICK_MS, type Pickup } from "./review/pickup.js";
+import type { WorkerLaunchInput } from "./cycle/workerLaunch.js";
 import { computeReviewRows, rowClaimIn, TEST_REPO, TEST_ROW } from "./review/rows.js";
 import { createPressTest, PRESS_TEST_RUN, pressTestHome, type PressTest, type ListLeak } from "./press/dailyTest.js";
 import { mountApprovals, wakeDeliveryManager } from "./approvals.js";
@@ -160,7 +174,7 @@ import { worldCallContext } from "./voice/worldContext.js";
 import { createInboxSearch, SEARCH_MAX_CHARS } from "./inbox/search.js";
 import { mountAlertActions } from "./status/alertActions.js";
 import { mountMorningRead } from "./desk/morning.js";
-import { asksForSettle, deskOnly, mountMark, SETTLE_OK, SETTLE_REFUSED } from "./status/mark.js";
+import { asksForSettle, deskOnly, mountMark, notJordi, SETTLE_OK, SETTLE_REFUSED } from "./status/mark.js";
 import { mountStamp } from "./status/stamp.js";
 import { mountTreeAdd } from "./status/add.js";
 import { createTicketSessions, migrateTicketSessions, mountTicketSessions } from "./tickets/sessions.js";
@@ -197,16 +211,17 @@ import { socialHead, TEAM_HEAD } from "./brand.js";
 import { requestScopedStore } from "./auth/scopedStore.js";
 import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
-import { byMilestonePriority, milestoneRanks, storeRanks } from "./inbox/priority.js";
+import { byMilestonePriority, byObjective, milestoneRanks, storeRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
 import { anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchJudge, type NoteTouch, type TouchCard, type TouchJudge } from "./voice/touch.js";
 import { addMarks } from "./review/noteMarks.js";
-import { createVoiceNotes, DELIVER_WINDOW_MS, mountVoiceNotesRec, openAiTranscriber, voiceSendHealth, type Transcriber, type VoiceNote, type VoiceNotes } from "./voice/notes.js";
+import { createVoiceNotes, DELIVER_WINDOW_MS, geminiTranscriber, mountVoiceNotesRec, voiceSendHealth, type Transcriber, type VoiceNote, type VoiceNotes } from "./voice/notes.js";
 import { writeUndeliveredNote } from "./voice/undeliveredNote.js";
 import { campaignQuickStatus, milestoneInstructions, milestoneTools } from "./voice/milestoneCall.js";
 import { createChatUnread } from "./desk/unread.js";
@@ -227,9 +242,10 @@ import { driftLine, type DriftResult } from "./readModel/drift.js";
 import type { AnswerJobs } from "./inbox/answerJobs.js";
 import { viewWaiting, computeWaiting, computeStatus, type WaitingPayload } from "./readModel/views.js";
 import { sameRepo } from "./adapters/repoNames.js";
-import { homeRepo, homeWorld, type HostId, keyFile, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, workerHost } from "./identity.js";
+import { homeRepo, homeWorld, type HostId, keyFile, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, socialWorld, workerHost } from "./identity.js";
 import { identityIndex, originFile } from "./identityPage.js";
-import { saidInAny, saidWords } from "./desk/said.js";
+import { chatCopyMessages, createRequestRows, hisMessages, requestsIn } from "./desk/requests.js";
+import { saidInAny, saidRequest, saidWords } from "./desk/said.js";
 
 /** an API request slower than this is logged (the bar Blocked on you is held to). */
 export const SLOW_REQUEST_MS = 1_000;
@@ -384,6 +400,8 @@ export function createApp(
     checkoutSync?: { everyMs?: number; afterMs?: number; /** self-healing pull of a checkout left behind (default on) */ heal?: false };
     /** the worker server's home volume free space (`df` over the worker server ssh); no probe = off. */
     hostDisk?: { everyMs?: number; probe?: () => Promise<string>; minFreePct?: number };
+    /** the worker server's CPU, load and memory for the Hosts page's caps (sshHostLoad). */
+    hostLoad?: { probe?: () => Promise<string> };
     /** job servers' records from box/provision.py (status lines, alerts, spend) in `dir`; no dir = off. */
     jobServers?: { everyMs?: number; dir?: string };
     /**
@@ -497,7 +515,9 @@ export function createApp(
     /** Epic Book: rebuild age (ms), git runner (tests fake it), and a background build at start (index.ts). */
     book?: { ttlMs?: number; git?: (dir: string, args: string[]) => Promise<string>; prewarmAfterMs?: number; tickMs?: number };
     /** warm the milestone trees this long after the start (index.ts sets it; absent = no warm-up); onDone for tests and the log. */
-    warmTrees?: { afterMs?: number; onDone?: (r: { milestones: number; ms: number }) => void };
+    /** `after`: start only once it settles (index.ts passes the inbox warm-up, so the owner's first reads come first). */
+    /** `gapMs`: a pause between two milestones, so requests waiting meanwhile are answered first. */
+    warmTrees?: { afterMs?: number; gapMs?: number; after?: Promise<unknown>; onDone?: (r: { milestones: number; ms: number }) => void };
     /** how old a GET /moving-now answer may be (ms, default 10 s; 0 = built per request). */
     movingMemoMs?: number;
     /** the books' daily refresh: tick period (0/absent = no timer; index.ts sets it), probe and pull (tests fake them). */
@@ -506,6 +526,8 @@ export function createApp(
     deckNotify?: { tickMs?: number; now?: () => number };
     /** check the books' deliverable links every tickMs (0/absent = never, as in tests); fetch is injectable. */
     linkCheck?: { tickMs?: number; fetch?: Fetcher };
+    /** the fallback that picks up an answer of his nobody worked looks every this many ms (0 = off; default 5 min in production). */
+    pickupMs?: number;
     /** review list: the live check (tests fake fetch/revision; default loopback for the console's own names + app/REVISION). */
     review?: { live?: LiveCheckDeps };
     /** how old the unread snapshot may get before a /counts read starts a new pass (default 20 s; tests 0). */
@@ -753,12 +775,14 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null, scans: beat.scans ?? null, saved: beat.saved ?? null };
-    return c.json({ ok: true, worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
   // set once the cycle exists (below); every pull that moved a checkout tells it, so a new ask wakes the Unblocker.
   let newAsks: NewAskWaker | undefined;
+  // set once the objectives caches exist (below): a pull of the workspace data repo drops them.
+  let objectivesPulled: ((dir: string) => boolean) | undefined;
   // registered first so its pull-on-open middleware runs before the milestone routes below.
   mountFreshness(api, {
     ...opts.freshness,
@@ -771,6 +795,8 @@ export function createApp(
     reposRoot: read.reposRoot,
     treeFor: (m) => treeFor(m),
     invalidate: (dir) => {
+      // the workspace data checkout holds no spines: only the objectives caches built from it are dropped
+      if (objectivesPulled?.(dir)) return;
       pulledSpines(dir);
       newAsks?.repoMoved(dir);
     },
@@ -840,6 +866,29 @@ export function createApp(
     return lists.flat();
   };
   const orphanMilestones = (world: string) => store.listMilestones().filter((m) => (store.worldOfMilestone?.(m.id) ?? DEFAULT_TENANT) === world && !m.paused);
+  /**
+   * the world's home goal, whose Delivery Manager takes the held asks other goals left (the overall check):
+   * the console's own repo on its root spine first, then any root spine, then the oldest goal.
+   */
+  const heldHomeOf = (world: string): string | undefined => {
+    const ms = orphanMilestones(world).filter((x) => !x.settledAt && x.repo);
+    const root = (x: Milestone) => /(^|\/)root\.md$/i.test(x.path ?? "");
+    const own = (x: Milestone) => resolveRepo(read.reposRoot, x.repo)?.name === homeRepo();
+    return (ms.find((x) => own(x) && root(x)) ?? ms.find(root) ?? ms[0])?.id;
+  };
+  /** every goal's held asks in the world, with whether its own Delivery Manager is on, routed per heldToRoute. */
+  const routedHeldOf = async (world: string) => {
+    const home = heldHomeOf(world);
+    if (!home) return [];
+    const goals: HeldOfGoal[] = [];
+    for (const g of orphanMilestones(world).filter((x) => !x.settledAt)) {
+      const held = (await waitingAndHeld(inboxDeps, g).catch(() => ({ held: [] }))).held;
+      if (!held.length) continue;
+      const managerOn = store.listAssignments({ milestoneId: g.id }).some((a) => a.enabled && !a.parkedAt && isDeliveryManager(store.getPersona(a.personaId)?.name));
+      goals.push({ milestoneId: g.id, title: g.title, managerOn, held });
+    }
+    return heldToRoute(goals, home);
+  };
   /** the Delivery Manager's section on its repo's orphan commits (only the repo's home milestone gets it). */
   // the social skin is a hosted plug (hosted/social.ts): the pack export, the launch board, the Publisher's
   // pre-check and wake sections, the social routes, site numbers, campaigns; the one-team core has none of them.
@@ -988,7 +1037,16 @@ export function createApp(
   const browserArea = hostedPlugs.find((p) => p.browser)?.browser?.({ api, db, options: opts.browser, instances: opts.browserInstances });
   // Team services: the memory service, Gmail and the team mailbox, WhatsApp, the services hub. The services plug's
   // (hosted/services.ts); the one-team core has no memory service, sends no WhatsApp and reads no mailbox.
-  const services = hostedPlugs.find((p) => p.services)?.services?.({ api, db, options: opts.mcp, reposRoot: read.reposRoot });
+  // the owner's Approve on a vault read wakes the asking run's owner at once (the cycle is made below; called later).
+  const wakeRun = cycleOpts.enabled
+    ? (runId: string, note: string) =>
+        outsideRequest(async () => {
+          const r = store.getRun(runId);
+          const m = r?.milestoneId ? store.getMilestone(r.milestoneId) : undefined;
+          return m ? wakeDeliveryManager({ store, cycle, homeThread: (a) => cycle.getLink(a)?.threadId }, m, note) : undefined;
+        })
+    : undefined;
+  const services = hostedPlugs.find((p) => p.services)?.services?.({ api, db, options: opts.mcp, reposRoot: read.reposRoot, ...(wakeRun ? { wakeRun } : {}) });
   const memory: MemoryLookup = opts.mcp?.memoryLookup ?? services?.memory ?? (async () => ({ error: NO_MEMORY, unreachable: false }));
   // the persona's team skills at wake (use_when lines; with wakeCheck on, a missing one fails the wake).
   const skillsRepo = opts.teamSkills?.repoDir ?? libraryRepo(read.reposRoot);
@@ -1019,9 +1077,39 @@ export function createApp(
   const totemMaps = () => readMaps(totemHome());
   /** the objective whose epics list this milestone's spine (docs/pursuits.json), for picking its product. */
   const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => wheelReader(totemHome()).ofSpine(m.repo, m.path);
-  const totemMapFor = (m: { repo?: string; path: string }): string => {
+  const liveObjective = (id: string) => !!pursuits.doc()?.pursuits.some((p) => p.id === id && (p as { active?: boolean }).active !== false && !(p as { done?: boolean }).done);
+  /** the milestone's objective; one under none (a campaign) takes its product's first live objective. */
+  const objectiveFor = (m: { repo?: string; path: string }) => {
     const maps = totemMaps();
-    return mapSection(maps, productFor(maps, { objective: objectiveOfMilestone(m), repo: m.repo }));
+    const own = objectiveOfMilestone(m);
+    const product = productFor(maps, { objective: own, repo: m.repo });
+    return { maps, own, product, objective: own ?? product?.objectives.find(liveObjective) };
+  };
+  /** the wake message's own lines: where the objective stands (its answer now) and the owner's newest word on it. */
+  const wakeFirst = (m: { repo?: string; path: string }): string => {
+    const { objective } = objectiveFor(m);
+    if (!objective) return "";
+    const name = pursuits.doc()?.pursuits.find((p) => p.id === objective)?.name ?? objective;
+    const answer = readWhereWeAre(pursuits.homeDir(), objective)?.answer?.replace(/\s+/g, " ").slice(0, 300);
+    const w = inForceWords(readHisWords(read.reposRoot, homeRepo())?.objectives?.find((e) => e.id === objective));
+    const out = [`Read first (${name}):`];
+    if (answer) out.push(`- Where we are now: ${answer}`);
+    if (w?.words) out.push(`- ${ownerName()}'s newest word on it${w.said ? ` (${w.said.slice(0, 10)})` : ""}: "${w.words.replace(/\s+/g, " ").slice(0, 240)}"`);
+    return out.length > 1 ? out.join("\n") : "";
+  };
+  const totemMapFor = (m: { repo?: string; path: string }): string => {
+    const { maps, own, product, objective } = objectiveFor(m);
+    const live = liveObjective;
+    // a wake whose spine sits under no objective (a campaign) reads its product's first live objective's where-we-are,
+    // and the owner's newest words on its objectives (the Chat tab).
+    // the objective's one where-we-are rides beside the map: read first, rewritten last.
+    const name = objective ? pursuits.doc()?.pursuits.find((p) => p.id === objective)?.name : undefined;
+    const where = whereWeAreSection(pursuits.homeDir(), objective, name, homeRepo());
+    // and its plan, per key result: how each gets to green (vn_9c02d869: "when an agent reads this, he gets the plan").
+    const plan = planSection(pursuits.homeDir(), objective, name);
+    const named = (product?.objectives ?? []).filter(live).map((id) => pursuits.doc()?.pursuits.find((p) => p.id === id)?.name ?? "");
+    const words = own || !named.length ? "" : chatSection(readHisWords(read.reposRoot, homeRepo()), named.join("\n"), homeRepo());
+    return mapSection(maps, product) + (where ? "\n\n" + where : "") + (plan ? "\n\n" + plan : "") + (words ? "\n\n" + words : "");
   };
   // the owner's pursuits (docs/pursuits.json of the code repo): scorecard, totems, moving or stalled, and the effort
   // each rank buys (pursuits.ts); only the home world's milestones follow it.
@@ -1066,9 +1154,18 @@ export function createApp(
     rankMemo = { at: Date.now(), ranks };
     return ranks;
   };
+  /** the fallback (made further down, once review and the spine writer exist); Hosts reads what it holds. */
+  const pickupRef: { current?: Pickup } = {};
   const cycle = createCycle(db, store, {
     effortFor: pursuitEffort,
     priorityFor: (m) => [priority?.promptLines() ?? "", pursuitPriority(m)].filter(Boolean).join("\n"),
+    // ready rows in his objectives' order (each row's own key result first, then its epic, its repo, its words)
+    dispatchOrder: (m, rows) => {
+      if (worldOf(m.id) !== DEFAULT_TENANT) return "";
+      const defs = worldObjectiveDefs(store, read.reposRoot);
+      const repo = resolveRepo(read.reposRoot, m.repo)?.name ?? m.repo;
+      return defs.length ? dispatchOrderSection(byObjective(rows.map((r) => ({ ...r, repo, ref: r.id })), (r) => objectiveOf(defs, r))) : "";
+    },
     wakeHold: (id) => priority?.holdsWake(id),
     seatsFile: read.seatsFile,
     teamSkills: opts.teamSkills?.wakeCheck
@@ -1106,7 +1203,22 @@ export function createApp(
     // asks the gate kept from the owner, and asks open more than 3 days, to close, withdraw or ask again
     heldAsks: async (m) => {
       const { items, held } = await waitingAndHeld(inboxDeps, m);
-      return [heldAsksSection(held), staleAsksSection(items)].filter(Boolean).join("\n\n") || undefined;
+      // the world's home goal also takes the held asks other goals' managers left (off, or 2 h untouched).
+      const routed = heldHomeOf(worldOf(m.id)) === m.id ? routedHeldSection(await routedHeldOf(worldOf(m.id)), resolveRepo(read.reposRoot, m.repo)?.name ?? m.repo ?? "") : undefined;
+      return [heldAsksSection(held), routed, staleAsksSection(items)].filter(Boolean).join("\n\n") || undefined;
+    },
+    heldRoutedDue: async () => {
+      const worlds = new Set(store.listMilestones().map((x) => worldOf(x.id)));
+      const out: Array<{ milestoneId: string; key: string; at: string }> = [];
+      for (const w of worlds) {
+        const home = heldHomeOf(w);
+        if (!home) continue;
+        for (const h of await routedHeldOf(w)) {
+          const at = h.why === "manager off" || !h.since ? new Date(Date.now() - 60_000).toISOString() : new Date(Date.parse(h.since) + 2 * 3_600_000).toISOString();
+          out.push({ milestoneId: home, key: `${h.repo}/${h.code ?? h.path}`, at });
+        }
+      }
+      return out;
     },
     orphanCommits: orphanSectionOf, // commits on main that name no ticket
     orphansDue: async () => {
@@ -1131,8 +1243,14 @@ export function createApp(
     },
     launchDrafts: launchDraftsOf, // launch board reds with no owner row
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
-    totemMap: async (m) => totemMapFor(m), // the product's map: read its totems first, write back last (root L-77)
+    totemMap: async (m) => totemMapFor(m),
+    wakeFirst: (m) => wakeFirst(m), // the product's map: read its totems first, write back last (root L-77)
     ownerObjectives: async (m) => (ownerObjectivesNow && worldOf(m.id) === DEFAULT_TENANT ? ownerObjectivesNow() : undefined), // his objectives open every wake and brief
+    // a persona that names an objective works its epics only
+    objectiveOf: async (id) => {
+      const p = (await pursuits.get()).pursuits.find((x) => x.id === id);
+      return p ? { name: p.name, epics: p.epics.map((e) => `${e.repo}: ${e.path}`) } : undefined;
+    },
     deskInbox: deskInboxOf, // notes other worlds dropped in this repo's desk/inbox/
     // the home Delivery Manager's open faults (open desk notes, its red server-wheel key results) are a part of its wake fingerprint
     wakeNews: async (m) => {
@@ -1271,7 +1389,10 @@ export function createApp(
   // Team desk: one long-lived T3 thread, shown by the Chat page (no console chat store).
   migrateDesk(db);
   // every desk chat (Team, repo, world) runs on its persona's host, like a wake (cycle clientFor: the worker server over the tunnel).
+  // one request, one row: which ticket rows hold each of his requests (one request, one row), read from the epic files under the repos root.
+  const requestRows = createRequestRows({ reposRoot: () => read.reposRoot, wanted: () => [...hisMessages(db, Date.now() - 14 * 86_400_000).map((m) => ({ id: m.request, words: m.text })), ...chatCopyMessages(read.reposRoot)] });
   const deskHosts = {
+    requestRows,
     clientFor: (h: HostId) => {
       if (!cycleOpts.enabled) return undefined;
       if (h === mainHost()) return cycleOpts.t3;
@@ -1541,6 +1662,28 @@ export function createApp(
     },
     runT3State: cycle.runT3State,
     staleRunMs: cycleOpts.staleRunMs,
+    // every cap on how many agents run, and the waiting queue
+    ...(opts.hostLoad?.probe ? { hostLoad: opts.hostLoad.probe } : {}),
+    maxWorkers: (() => {
+      const base = cycleOpts.maxWorkersPerMilestone ?? DEFAULT_MAX_WORKERS;
+      return { base, roomy: cycleOpts.workerRoom ? roomyMaxFromEnv(undefined, base) : base };
+    })(),
+    workerLaunch: (runId: string) => getWorkerLaunch(db, runId),
+    sentBack: () => pickupRef.current?.waiting() ?? [],
+    readyRows: async () => {
+      const ms = store.listMilestones().filter((m) => !m.paused && m.repo);
+      const trees = await Promise.all(ms.map((m) => treeFor(m, 1_500).then((t) => ({ m, t })).catch(() => undefined)));
+      const out: { id: string; title: string; repo?: string; nextAction?: string; since?: string }[] = [];
+      for (const x of trees) {
+        if (!x) continue;
+        const repo = resolveRepo(read.reposRoot, x.m.repo)?.name ?? x.m.repo;
+        for (const n of readyRows(x.t)) {
+          if (n.kind !== "ticket") continue;
+          out.push({ id: n.id, title: n.title, repo, ...(n.nextAction ? { nextAction: n.nextAction } : {}), ...(n.since ? { since: n.since } : {}) });
+        }
+      }
+      return out;
+    },
   });
   // waiting-on-the owner inbox + messages (inbox/routes.ts).
   // One spine writer (one git lock per checkout) for inbox answers and the Secrets ledger.
@@ -1715,10 +1858,31 @@ export function createApp(
   mountQcJudge(api, opts.qcJudge ?? anthropicQcJudge(anthropicKey));
   cardOfPress = (id) => review.card(id);
   // after a card closes: Add comment (a last thought, any time later) and Bring it back once the press landed.
-  mountAfterClose(
-    api,
-    createAfterClose({ db, showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1", store, reposRoot: read.reposRoot, writer: spine, cycle: cycle.enabled ? cycle : undefined, wrote: dropSpines, ...(attachments ? { attachments } : {}), who: () => (currentAuth()?.identity?.kind === "legacy" && (currentAuth()?.identity as { peer?: string }).peer === PRESS_TEST_RUN ? "the daily press test" : ownerName()) }),
-  );
+  const afterClose = createAfterClose({ db, showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1", store, reposRoot: read.reposRoot, writer: spine, cycle: cycle.enabled ? cycle : undefined, wrote: dropSpines, ...(attachments ? { attachments } : {}), who: () => (currentAuth()?.identity?.kind === "legacy" && (currentAuth()?.identity as { peer?: string }).peer === PRESS_TEST_RUN ? "the daily press test" : ownerName()) });
+  mountAfterClose(api, afterClose);
+  // every card he sent back stays on his inbox, marked in progress with its worker, until it returns to review
+  const sentBackDeps = { store, reposRoot: read.reposRoot, goals: () => review.goals(), rows: () => review.rows(), recent: (o: { days: number; limit: number; world?: string }) => afterClose.recent(o), world: () => whoPressed().tenant };
+  mountSentBack(api, sentBackDeps);
+  // (the owner 23 Nov 00:29Z): a card he sent back that the team closed is reopened, and any answer of his with
+  // no worker and no new round after 15 minutes gets its worker from the console itself, through the one work queue.
+  const pickup = createPickup({
+    store,
+    reposRoot: read.reposRoot,
+    list: () => createSentBack(sentBackDeps).list(),
+    recent: (o) => afterClose.recent(o),
+    writer: spine,
+    wrote: dropSpines,
+    cancel: (runId: string, why: string) => void store.updateRun(runId, { outcome: "idle", endedAt: new Date().toISOString(), summary: why }),
+    ...(cycle.enabled ? { launch: (aid: string, i: WorkerLaunchInput) => cycle.launchPickup(aid, i), wake: (aid: string, o: { instructions: string; instructionsBy: string }, key: string) => cycle.runNowRequest(aid, o, key) } : {}),
+  });
+  pickupRef.current = pickup;
+  api.get("/pickup", (c) => c.json({ afterMin: pickup.afterMin, everyMs: PICKUP_TICK_MS, last: pickup.last() ?? null, waiting: pickup.waiting() }));
+  const pickupMs = opts.pickupMs ?? (opts.passive || process.env.VITEST || process.env.CONSOLE_STAGING === "1" || process.env.CONSOLE_PICKUP === "0" ? 0 : PICKUP_TICK_MS);
+  if (pickupMs > 0 && cycle.enabled) {
+    const run = () => void outsideRequest(() => pickup.tick().catch((e) => console.error("pickup:", e instanceof Error ? e.message : e)));
+    setTimeout(run, 90_000).unref();
+    setInterval(run, pickupMs).unref();
+  }
   // the owner's red line (docs/pursuits.json `redLines` when it holds them, else the Prioritizer's docs/priorities.json), the band on top of the Team home.
   // several named lines (`redLines`, the first leads); `redLine` stays the first one for older screens.
   // a line's live counts (the memory service's public counts) are read here, at most once an hour.
@@ -1757,6 +1921,13 @@ export function createApp(
   // one-offs: rows titled `One-off:` in the home repo's spines and every row of docs/spines/one-offs.md, by stage.
   const oneOffs = createOneOffs({ reposRoot: read.reposRoot });
   api.get("/one-offs", (c) => c.json(oneOffs.get()));
+  // one request, one row: his requests in every chat (the Team desk, each objective's chat, each workspace desk) with the ticket rows
+  // holding each one now, from the chats' last views; the hosted request check adds them.
+  api.get("/requests", async (c) => {
+    const hours = Math.min(168, Math.max(1, Number(c.req.query("hours")) || 24));
+    await requestRows.ready();
+    return c.json(requestsIn(db, requestRows, Date.now() - hours * 3_600_000));
+  });
   // the outcome log: one line per real outcome in docs/outcomes/<day>.jsonl of the run's repo (root L-45),
   // written by the run PATCH's `outcomes` or POST /api/outcomes, read back filterable by persona, product, row, kind, day.
   // what counts as an outcome, per persona: the home repo's docs/outcomes/what-counts.json.
@@ -1893,6 +2064,8 @@ export function createApp(
     checkMs: 15_000,
     minGapMs: 60_000,
     everyMs: 3 * 60_000,
+    // a restart serves the last good scorecards at once and rebuilds behind them (beside console.db)
+    ...(opts.readModel?.dbPath && process.env.CONSOLE_KEPT_FILES !== "off" ? { file: path.join(path.dirname(opts.readModel.dbPath), "kept", "scorecards.json") } : {}),
     signature: () => {
       const home = pursuits.homeDir();
       const inHome = (rel: string) => {
@@ -1916,6 +2089,19 @@ export function createApp(
     const w = connectedWorld();
     if (w) return c.json(await worldScorecards(w));
     return sendPrepared(c, await keptScorecards.get());
+  });
+  // an objective's one where-we-are: docs/scorecards/<id>.md beside its key results, the top of its Context tab.
+  api.get("/scorecards/:id/where-we-are", (c) => {
+    const w = connectedWorld();
+    const v = readWhereWeAre(w ? worldRepoDir(read.reposRoot, db, w)(w) : pursuits.homeDir(), c.req.param("id"));
+    return v ? c.json(v) : c.json({ error: { code: "not_found" } }, 404);
+  });
+  // an objective's Plan tab: its wheel's plan, how each key result gets to green (steps, owners, dates), from the
+  // `plan` block of docs/scorecards/<id>.json.
+  api.get("/pursuits/:id/plan", (c) => {
+    const w = connectedWorld();
+    const v = readWheelPlan(w ? worldRepoDir(read.reposRoot, db, w)(w) : pursuits.homeDir(), c.req.param("id"));
+    return v ? c.json(v) : c.json({ error: { code: "not_found", message: `no objective ${c.req.param("id")}` } }, 404);
   });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.
@@ -1975,6 +2161,17 @@ export function createApp(
       })),
     );
   // his order and his park switch, one commit each in the code repo (the file is the record, root L-45).
+  // his objectives and scorecards live in the workspace data repo: when a pull moves it, the next read shows the change.
+  objectivesPulled = (dir) => {
+    const home = pursuits.homeDir();
+    const data = home ? path.resolve(workspaceDataDir(home)) : undefined;
+    if (!data || data === path.resolve(home!) || data !== path.resolve(dir)) return false;
+    pursuits.clear();
+    scorecardsBuilt.clear();
+    objectivesMemo = undefined;
+    void keptScorecards.refresh();
+    return true;
+  };
   mountPursuitWrites(api, { writer: spine, repo: () => pursuits.homeDir(), who: () => ownerName(), wrote: (dir) => (pursuits.clear(), dropSpines(dir), scorecardsBuilt.clear(), void keptScorecards.refresh()) });
   // the team's own inbox cards (a digest per scorecard a day, strategic ideas, goal conversations), docs/inbox/cards.json.
   // a card world's (the social world's) idea cards live in one of its own repos; the world is already a card world's
@@ -2029,6 +2226,33 @@ export function createApp(
     const v = totemView({ maps: totemMaps(), product: c.req.param("product"), totem: c.req.param("totem"), repoDir: (r) => resolveRepo(read.reposRoot, r)?.path, board: () => launchBoard?.board() ?? null });
     return v ? c.json(v) : c.json({ error: "not_found" }, 404);
   });
+  // every file homed in a tab, listed for that tab (docs/totems/<product>.json wheel tabs' `homes`), newest
+  // first, each opening read-only below /api/homes/file/<repo>/<path>. The owner's two worlds only: the home world
+  // (an objective's Pages) and the social world (a campaign's History); any other world gets none.
+  const homeTabs = createHomeTabs({ wheels: () => readHomeWheels(totemHome()), repoDir: (r) => resolveRepo(read.reposRoot, r)?.path });
+  const placeHomes = createPlacer(totemHome);
+  const homesHome = () => { const w = credentialWorld(); return !w || w === DEFAULT_TENANT || w === socialWorld(); };
+  api.get("/homes/file/:repo/*", (c) => {
+    if (!homesHome()) return c.json({ error: { code: "not_found" } }, 404);
+    const repo = c.req.param("repo");
+    const prefix = `/api/homes/file/${repo}/`;
+    const at = c.req.path.indexOf(prefix);
+    const rel = at < 0 ? "" : decodeURIComponent(c.req.path.slice(at + prefix.length));
+    const a = readHomeFile({ wheels: readHomeWheels(totemHome()), repo, rel, repoDir: resolveRepo(read.reposRoot, repo)?.path });
+    if (a.status !== 200) return c.json({ error: a.error }, a.status);
+    const headers: Record<string, string> = { "content-type": a.type, "cache-control": "private, max-age=60", "x-content-type-options": "nosniff" };
+    // a team page runs in its own origin, never with the console's sign-in (scripts and links still work).
+    if (a.sandbox) headers["content-security-policy"] = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms";
+    return c.body(typeof a.body === "string" ? a.body : new Uint8Array(a.body), 200, headers);
+  });
+  api.get("/homes/:product/:tab", async (c) => {
+    if (!homesHome()) return c.json({ error: { code: "not_found" } }, 404);
+    const product = c.req.param("product"), tab = c.req.param("tab");
+    // `all`: that tab of every product that has one (an objective of any product shows the pages made for it).
+    const b = product === "all" ? await homeTabs.all(tab) : await homeTabs.get(product, tab);
+    // each file with the objective it was made for when its row's spine sits in no objective's tree (homePlace.ts).
+    return b ? c.json({ ...b, entries: placeHomes(b.entries) }) : c.json({ error: { code: "not_found" } }, 404);
+  });
   // a wheel's tracker tables (shortlists: entries, status, columns), the frame's, its product's and its own.
   // the wheel as one record: objective, key results, map, trackers, plan and personas joined in one place
   // (wheel.ts); scripts/wheel.py reads these. Home world only, as the objectives file is.
@@ -2054,6 +2278,19 @@ export function createApp(
       } catch { views = []; }
     }
     return c.text(workerBriefRules(line || undefined, views).map((r) => `"${r}"`).join("\n") + "\n");
+  });
+  // the row's "Context to read first" (docs/context/<row>.md in its repo), the section every worker brief opens with.
+  // It ends with the key result the row hangs under (or that it hangs under none and how to place it).
+  api.get("/ticket-context", async (c) => {
+    const row = c.req.query("row") ?? "", repo = c.req.query("repo") || homeRepo();
+    const text = readTicketContext(resolveRepo(read.reposRoot, repo)?.path, row);
+    let kr = "";
+    try {
+      kr = ownerObjectivesInput ? keyResultLines(await ownerObjectivesInput(), row, repo, (id, n) => keyResultPlanText(readWheelPlan(pursuits.homeDir(), id)?.keyResults.find((k) => k.kr === n))) + "\n" : "";
+    } catch {
+      kr = "";
+    }
+    return c.text((text ?? contextMissing(row, repo)) + kr, text ? 200 : 404);
   });
   // a pursuit's social kit, shown inside the console on the pursuit's own page (its kit.json, previews and fonts).
   api.get("/pursuits/:id/kit", (c) => {
@@ -2114,7 +2351,7 @@ export function createApp(
   const textProvider = textModelProvider();
   const openAiKey = async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile()));
   const textJudge: Judge = textProvider === "anthropic" ? anthropicJudge(anthropicKey) : openAiJudge(openAiKey);
-  // E948-S127: his words on a card answer its asks (read only; the card presses each answer through its own route).
+  // his words on a card answer its asks (read only; the card presses each answer through its own route).
   mountSpokenAnswers(api, { ...(textProvider === "anthropic" && !process.env.VITEST ? { judge: anthropicSpokenJudge(anthropicKey) } : {}) });
   const textStructurer: Structurer = opts.voice?.structure ?? (textProvider === "anthropic" ? anthropicStructurer(anthropicKey) : openAiStructurer(openAiKey));
   // the owner edits a red line (typed or a voice note, reworded by the same text model) or deletes it, from its slim
@@ -2385,7 +2622,9 @@ export function createApp(
       .listMilestones()
       .filter((m) => !!m.path && !m.settledAt)
       .sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity));
-    for (const m of ms) {
+    const gapMs = opts.warmTrees?.gapMs ?? 0;
+    for (const [i, m] of ms.entries()) {
+      if (i && gapMs > 0) await new Promise((r) => setTimeout(r, gapMs));
       try {
         await spinesFor(m, SPINES_TIMEOUT_MS); // the real spines.py output, so the stored tree is not the bare doc parse
         await status.paintedTree(m, await treeFor(m));
@@ -2397,7 +2636,10 @@ export function createApp(
   };
   if (opts.warmTrees?.afterMs !== undefined) {
     const onDone = opts.warmTrees.onDone ?? ((r) => console.log(`trees warm: ${r.milestones} milestones in ${(r.ms / 1000).toFixed(1)} s`));
-    setTimeout(() => void warmTrees().then(onDone, (e) => console.warn(`trees warm failed: ${e instanceof Error ? e.message : e}`)), opts.warmTrees.afterMs).unref();
+    const afterMs = opts.warmTrees.afterMs;
+    void (opts.warmTrees.after ?? Promise.resolve()).catch(() => undefined).then(() =>
+      setTimeout(() => void warmTrees().then(onDone, (e) => console.warn(`trees warm failed: ${e instanceof Error ? e.message : e}`)), afterMs).unref(),
+    );
   }
   // what waits on the owner (the badge's open items) and E48's review list also reach him on WhatsApp.
   const homeStore = createStore(db, { tenant: DEFAULT_TENANT }); // the owner's world's review rows
@@ -2830,6 +3072,9 @@ export function createApp(
   };
   setTimeout(() => void readObjectiveCards(), 6_000).unref?.();
   setTimeout(() => void readObjectives(), 5_000).unref?.();
+  // voice calls are off unless the `calls`
+  // setting (PUT /api/voice/settings {calls}) or CONSOLE_VOICE_CALLS=on turns them on; tests keep the old default.
+  const callsDefault: "on" | "off" = process.env.CONSOLE_VOICE_CALLS === "on" || (process.env.VITEST && process.env.CONSOLE_VOICE_CALLS !== "off") ? "on" : "off";
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
   const voice = createVoice({
     db,
@@ -2838,6 +3083,7 @@ export function createApp(
     onEnded: (id) => void memoryForward?.enqueueCall(id),
     envOff: process.env.CONSOLE_VOICE === "off",
     envModel: process.env.CONSOLE_VOICE_MODEL || undefined,
+    callsDefault,
     ...(opts.voice?.now ? { now: opts.voice.now } : {}),
     brief: deskBrief,
     inbox: voiceInbox,
@@ -2875,6 +3121,7 @@ export function createApp(
     onEnded: (id: string) => void memoryForward?.enqueueCall(id),
     envOff: process.env.CONSOLE_VOICE === "off",
     envModel: process.env.CONSOLE_VOICE_MODEL || undefined,
+    callsDefault,
     ...(opts.voice?.now ? { now: opts.voice.now } : {}),
   };
   const noStatus = async () => ({ text: "", waiting: 0, stuck: 0, working: 0 });
@@ -3013,6 +3260,8 @@ export function createApp(
   api.use("/tenants/:id/desk/voice/*", async (c, next) => (c.req.method !== "GET" && ownVoice(c.req.param("id")) ? c.json(OWN_VOICE, 409) : next()));
   api.use("/milestones/:id/voice/*", async (c, next) => (c.req.method !== "GET" && ownVoice(milestoneWorld(db, c.req.param("id") ?? "")) ? c.json(OWN_VOICE, 409) : next()));
   mountVoice(api, voice, { world: () => store.tenant, worldVoice });
+  // Settings > Transcription (his model pick, the paid backup switch, the model in use, the last 30 days' cost).
+  mountTranscription(api, { db, callsOn: () => voice.callsOn(), world: () => store.tenant, home: DEFAULT_TENANT, refuse: (c) => notJordi((n) => c.req.header(n)), ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
   mountCampaignVoice(api, campaignVoice);
   // Play on a desk reply speaks it in the team's local voice on the worker server (free); down = the browser's best voice.
   mountReplyVoice(api, opts.voice?.speak);
@@ -3039,7 +3288,21 @@ export function createApp(
   // rework (the owner's review): voice notes in every chat (the Team desk, a milestone's or campaign's chat): recorded in
   // segments by the page, transcribed once each (gpt-4o-mini-transcribe), posted as his message; the cost is in the voice budget.
   const notesDir = opts.voice?.notesDir ?? process.env.CONSOLE_VOICE_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "voice-notes");
-  const transcribe = opts.voice?.transcribe ?? openAiTranscriber(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
+  // our own Whisper on the worker server first (free, Settings > Transcription picks its model); the team's shared Gemini
+  // key only when ours fails and his paid backup is on, each such part an alarm. OpenAI is no longer asked.
+  const transcribeUrl = process.env.CONSOLE_TRANSCRIBE_URL ?? siteConfig().transcribeUrl;
+  const transcribe =
+    opts.voice?.transcribe ??
+    pickedTranscriber({
+      db,
+      ours: (m) => localTranscriber(transcribeUrl, () => m),
+      paid: geminiTranscriber(async () => process.env.GEMINI_API_KEY || (await sudoRead(keyFile("GEMINI_API_KEY")))),
+      onBackup: (why, file) => {
+        const text = `Our own transcription failed on ${file}, so the paid backup (Gemini) wrote it out. Why: ${why.slice(0, 200)}`;
+        console.warn(`[voice] ${text}`);
+        if (opts.readModel?.drift?.alert) void whatsapp.alert("transcribe-backup", `${text}\nSettings: ${teamLink()}/settings#transcription`);
+      },
+    });
   const notesOf = new WeakMap<Voice, VoiceNotes>();
   // a posted Chat note also goes to the world's the memory service (made below, with the memory service connections); never awaited.
   let memoryForward: MemoryArea["forward"];
@@ -3090,11 +3353,23 @@ export function createApp(
   };
   /** `chat`: where a posted (not card) note lands is the world's Team desk itself, which reads all of it: no spill. */
   // a posted Chat note is checked in its chat's thread (its head line names the note id) before it counts as delivered.
-  const inChat = (read: () => Promise<{ messages: { role: string; text: string }[]; stale?: boolean }>) => async (id: string) => {
-    const v = await read();
-    if (v.messages.some((m) => m.role === "user" && m.text.includes(id))) return true;
-    return v.stale ? undefined : false;
-  };
+  // "queued": the note waits to go in, held by the console while T3 is down or in T3's own queue while the desk is busy; a
+  // re-send then would only add a copy (22 Nov: 13 copies of one note, a fresh request id per re-send while T3 was down).
+  const inChat =
+    (read: () => Promise<{ messages: { role: string; text: string }[]; queued?: { text: string }[]; stale?: boolean }>, t3Queued?: () => Promise<string[]>) =>
+    async (id: string): Promise<boolean | "queued" | undefined> => {
+      const v = await read();
+      if (v.messages.some((m) => m.role === "user" && m.text.includes(id))) return true;
+      if (v.queued?.some((q) => q.text.includes(id))) return "queued";
+      // "absent" (false) only from a live read with T3's queue listed; T3 down, unreachable, stale or a queue
+      // that could not be listed is "cannot tell", so the note keeps its one request id (22 Nov: 23 copies of vn_59852983)
+      if ((v as { t3?: unknown }).t3 || (v as { unreachable?: unknown }).unreachable || v.stale) return undefined;
+      if (!t3Queued) return undefined;
+      const inQueue = await t3Queued().catch(() => undefined);
+      if (!inQueue) return undefined;
+      if (inQueue.some((t) => t.includes(id))) return "queued";
+      return false;
+    };
   // the note's world's Delivery Manager gets one desk-inbox line (its home checkout), and production one WhatsApp alert.
   const undeliveredLine = (u: { id: string; world: string; tries: number; ms: number; gaveUp: boolean; postedAt: string; words: string }) => {
     const text = u.gaveUp ? `Voice note ${u.id} is still not in the chat after ${u.tries} re-sends; the console keeps re-sending it.` : `Voice note ${u.id} showed Sent but is not in the chat ${Math.round(u.ms / 60_000)} min later; the console is re-sending it.`;
@@ -3106,7 +3381,7 @@ export function createApp(
       .then((r) => console.log(`[voice] ${u.id} not delivered: desk note ${r}`))
       .catch((e) => console.error(`[voice] ${u.id} desk note failed:`, e instanceof Error ? e.message : e));
   };
-  const notesFor = (v: Voice, desk: Pick<DeskPort, "send">, chat: "team-desk" | "milestone", seen?: (id: string) => Promise<boolean | undefined>) => {
+  const notesFor = (v: Voice, desk: Pick<DeskPort, "send">, chat: "team-desk" | "milestone", seen?: (id: string) => Promise<boolean | "queued" | undefined>) => {
     let n = notesOf.get(v);
     if (!n)
       notesOf.set(
@@ -3120,6 +3395,13 @@ export function createApp(
           onPosted: (id) => void memoryForward?.enqueue(id),
           ...(seen ? { seen } : {}),
           onUndelivered: undeliveredLine,
+          // a note (or part) neither OpenAI nor Gemini turned into words: one WhatsApp to the owner with its audio
+          // (kind voice-note-unheard, outside the alert caps, once a note); the desk already got the line with the link.
+          onUnheard: (u) => {
+            const text = `Your voice note ${u.id} could not be transcribed${u.parts.length < u.of ? ` (${u.parts.length} of ${u.of} parts)` : ""}: our Whisper and the paid backup both failed. Audio: ${u.audio}${u.error ? `\nWhy: ${u.error.slice(0, 200)}` : ""}`;
+            console.warn(`[voice] ${text}`);
+            if (opts.readModel?.drift?.alert) void whatsapp.alert("voice-note-unheard", text);
+          },
           // tap stop to Sent over 3 s, or an accepted note still not posted: a log line, /api/health `voiceSend`
           // and, in production, one WhatsApp per episode (the notifier's per-kind gap).
           onSlow: (x) => {
@@ -3150,7 +3432,7 @@ export function createApp(
     return n;
   };
   const teamDeskNotes = () =>
-    notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk", inChat(() => desk.view()));
+    notesFor(voice, { send: (t, page, crid) => desk.send(t, page, crid).then((r) => (deskSaid(DEFAULT_TENANT, t, crid, r.pending), r)) }, "team-desk", inChat(() => desk.view(), desk.t3QueuedTexts));
   const worldDeskNotes = (w: string) =>
     notesFor(worldVoice(w), { send: (t, page, crid) => worldDesks.send(w, t, page, crid).then((r) => (deskSaid(w, t, crid, r.pending), r)) }, "team-desk", inChat(() => worldDesks.view(w)));
   teamUndelivered = () => ((store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT ? teamDeskNotes().undelivered() : []);
@@ -3275,7 +3557,7 @@ export function createApp(
     chatSaid: async (header, chat) => {
       const callerId = chatScope.caller(header);
       if (!callerId || saidWords(chat).length < 8) return false;
-      return saidInAny(await milestoneChats.chatFor(callerId).jordiMessages(), chat);
+      return saidRequest(await milestoneChats.chatFor(callerId).jordiMessages(), chat);
     },
     wake: (m, instructions) => wakeDeliveryManager({ store, cycle, homeThread: (id) => cycle.getLink(id)?.threadId }, m, instructions),
     // An Add the desk makes is its placement (the delivered note follows it); the owner's own Add on the page is not.
@@ -3990,6 +4272,23 @@ export function createApp(
       const newer = store
         .listRuns({ assignmentId: run.assignmentId, limit: 50 })
         .find((r) => r.id !== run.id && r.kind === "wake" && !r.parentRunId && r.outcome === "running" && r.startedAt > run.startedAt);
+      // a note this wake took (queued into it, or given as its instructions) may finish after it ended: its report is
+      // kept on the wake the note names, appended, never refused (every such report was once refused as superseded_wake, so the
+      // same note came back up to 3 times). The wake's own outcome and end time stay as they were.
+      const tookNote = (r: Run) => (r.startGuards ?? []).some((g) => g.action === "queued") || (cycle?.steersOf(r.id)?.length ?? 0) > 0;
+      if (newer && !asking(run) && tookNote(run) && run.endedAt) {
+        const late = (reported.summary ?? `outcome: ${reported.outcome}`).trim();
+        const updated = found(
+          store.updateRun(id, { summary: `${run.summary.trim()}\nlate note report (after this wake ended; wake ${newer.id} runs now): ${late}`.slice(0, 8_000) }),
+          "run",
+          id,
+        );
+        if (reportedOutcomes?.length) {
+          const logged = await outcomes.record(updated, reportedOutcomes).then((r) => (outcomes.clear(), r)).catch((e) => ({ error: (e as Error).message }));
+          return c.json({ ...updated, lateNoteReport: true, outcomesLogged: logged });
+        }
+        return c.json({ ...updated, lateNoteReport: true });
+      }
       if (newer && !asking(run))
         throw new ApiError(409, "superseded_wake", `run ${id} ended (${run.outcome}); wake ${newer.id} of this assignment is running now: PATCH that run with this report, not ${id}`, {
           runId: newer.id,
@@ -4216,7 +4515,7 @@ export function createApp(
     const r = await raiseAsk(
       raiseDeps(),
       m,
-      { question: p.question, proposedAction: p.proposedAction, askedBy: persona ?? (run ? `run ${run.id}` : "an API caller"), ...(run ? { runId: run.id } : {}), ...(p.row ? { row: p.row } : {}), ...(p.kind ? { kind: p.kind } : {}) },
+      { question: p.question, proposedAction: p.proposedAction, askedBy: persona ?? (run ? `run ${run.id}` : "an API caller"), ...(run ? { runId: run.id } : {}), ...(p.row ? { row: p.row } : {}), ...(p.kind ? { kind: p.kind } : {}), ...(p.about ? { about: p.about } : {}) },
       p.path,
     );
     if (r.status !== "written")

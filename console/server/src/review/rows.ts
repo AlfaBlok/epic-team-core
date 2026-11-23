@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
+import { withArchive } from "../adapters/spineArchive.js";
 import { field, firstH1, linkTarget, proseLines, stripInline } from "../adapters/markdown.js";
 import { resolveRepo } from "../adapters/repos.js";
 import { parseAsks, SNOOZE_ON_LINE, SNOOZE_UNTIL } from "../inbox/asks.js";
@@ -15,7 +16,8 @@ import { activeMark, noteMarksOf, type NoteMark } from "./noteMarks.js";
 import { pageNotesFor, pageNotesOf, type PageNote } from "./pageNotes.js";
 import { cardFor, goalSentenceOf, plainName, plainNamesOf, projectOf, repoCards, screenshotPath, targetGoals, treeOf, type CardFace, type TargetGoal, type Sibling } from "./face.js";
 import { ownerName } from "../identity.js";
-import { readyOf } from "./ready.js";
+import { cutUrgentLead, readyOf } from "./ready.js";
+import { aboutOf } from "../inbox/about.js";
 
 /**
  * "Done, waiting for your review" is a view of the spines. A review card is a spine ledger
@@ -284,6 +286,7 @@ export function editRowStatus(text: string, ref: string, next: (status: string) 
   const rows = ledgerLines(text).filter((r) => r.id === ref && r.col.status >= 0);
   if (!rows.length) return { skip: `row ${ref} is not in this spine's ledger any more` };
   const pick = rows.find((r) => awaitsReview(stripInline(r.cells[r.col.status] ?? ""))) ?? rows[0];
+  if (pick.cells.length !== pick.headers.length) return outOfColumns(ref, pick);
   const status = pick.cells[pick.col.status] ?? "";
   const n = next(status);
   if (typeof n !== "string") return n;
@@ -296,6 +299,14 @@ export function editRowStatus(text: string, ref: string, next: (status: string) 
   raw[pick.line] = line;
   return { text: raw.join("\n"), before: old.replace(/\r$/, ""), after: line.replace(/\r$/, ""), status };
 }
+
+/**
+ * A claim can never break a ticket's row: a row whose cells no longer line up with its header is never
+ * written by column (the value would land in the wrong cell); scripts/ledger_rows.py repair rebuilds it on its timer.
+ */
+export const outOfColumns = (ref: string, r: Pick<LedgerLine, "cells" | "headers">) => ({
+  skip: `row ${ref} has ${r.cells.length} cells but its header has ${r.headers.length}; nothing written until it is repaired (scripts/ledger_rows.py repair)`,
+});
 
 const notInReview = (ref: string, status: string) => ({ skip: `row ${ref} is not in review any more (it reads “${stripInline(status).slice(0, 120)}”); nothing written` });
 
@@ -472,7 +483,16 @@ function readFile(abs: string): FileRead | undefined {
 }
 
 /** Card id: stable while the row keeps its code and file. */
-export const reviewId = (repo: string, rel: string, ref: string) => `rv_${createHash("sha1").update(`${repo}\0${rel}\0${ref}`).digest("hex").slice(0, 20)}`;
+/** the card id before E948-S182 (repo, spine path, row): a row moved to another epic got a new card. */
+export const reviewLegacyId = (repo: string, rel: string, ref: string) => `rv_${createHash("sha1").update(`${repo}\0${rel}\0${ref}`).digest("hex").slice(0, 20)}`;
+/** a row code that names its epic (`E948-S182`, `TAX-S3`): unique in its repo, so it alone keys the card. */
+const CODED_ROW = /^[A-Za-z][A-Za-z0-9]*-[A-Za-z]*\d+$/;
+/**
+ * E948-S182 (E906-S228 moved rows from EPIC-906 to EPIC-9105 and their cards got new ids): a review card is keyed by repo and
+ * row code, wherever the row sits; a bare row code (`T6`, `S1`, shared by many epics) keeps the path id.
+ */
+export const reviewId = (repo: string, rel: string, ref: string) =>
+  CODED_ROW.test(ref) ? `rv_${createHash("sha1").update(`${repo}\0row\0${ref.toUpperCase()}`).digest("hex").slice(0, 20)}` : reviewLegacyId(repo, rel, ref);
 
 /** Spine files read per repo at most (a guard against a link web, not a real limit: the code repo has about 80). */
 const MAX_SPINES = 2000;
@@ -523,6 +543,17 @@ const mdIn = (dir: string): string[] => {
  */
 /** the home repo's page list per repos root (docs/pages/registry.json), read again when it changes. */
 const pageLists = new Map<string, ReturnType<typeof createPagesReader>>();
+/** E948-S180 the hosts whose pages take a deep link: the page hub's (its page list) and the console's own address. */
+function ownHosts(reg: { hosts: string[] } | undefined): string[] {
+  const pub = (() => {
+    try {
+      return process.env.CONSOLE_PUBLIC_URL ? [new URL(process.env.CONSOLE_PUBLIC_URL).hostname] : [];
+    } catch {
+      return [];
+    }
+  })();
+  return [...(reg?.hosts ?? []), ...pub];
+}
 
 export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoot: string, only: { repoDir?: string } = {}): ReviewPayload {
   if (!pageLists.has(reposRoot)) pageLists.set(reposRoot, createPagesReader({ reposRoot }));
@@ -678,13 +709,19 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
           });
           const face: CardFace | undefined = card
             ? {
+                // E948-S172: the topic first, in his words
+                ...(() => {
+                  const t = aboutOf({ about: card.about, name: plainName(card.name) ?? plainName(doc.plainNames.get(r.id)), title: card.title, goal: doc.goalSentence });
+                  return t ? { about: t.about } : {};
+                })(),
                 project: project ?? { name: g.name },
                 goal: { text: (doc.goalSentence ?? stripInline(doc.title ?? epic)).replace(/\.$/, ""), code: epic },
                 tasks: tree.tasks,
-                title: card.title ?? "",
+                // E948-S168: a leading "Urgent." is the label, never the title (the Adeje card showed "Urgent." alone)
+                title: cutUrgentLead(card.title ?? "").title,
                 taskGoal: card.goal ?? "",
                 delivered: card.delivered,
-                evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card) },
+                evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card), ...(card.look ? { look: card.look } : {}) },
                 // his card always shows the thing itself: the check's live screen once it passed, else the worker's picture
                 ...((qcPicture(qcSeen) ?? shot) ? { screenshot: qcPicture(qcSeen) ?? shot } : {}),
                 ...(qcSeen ? { qc: qcSeen } : {}),
@@ -705,7 +742,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
                 ...(card.deadline ? { deadline: card.deadline } : {}),
                 // something he waits on (a deadline, urgent, his "send me…", or the card's `ready:`) leads his inbox
                 ...(() => {
-                  const ready = readyOf({ ready: card.ready, deadline: card.deadline, words: [titleCell, card.source ?? ""], source: card.source ?? "", evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card) } });
+                  const ready = readyOf({ ready: card.ready, deadline: card.deadline, words: [titleCell, card.source ?? ""], source: card.source ?? "", labelled: !!card.urgent || cutUrgentLead(card.title ?? "").urgent || cutUrgentLead(titleCell).urgent, evidence: { url: card.evidenceUrl ?? "", label: evidenceLabelOf(card) } });
                   return ready ? { ready } : {};
                 })(),
                 openInGoal: siblings
@@ -717,15 +754,26 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
           const why = (card?.confirm?.yes === yes ? card?.confirm?.why : undefined) ?? (fu.confirm?.yes === yes ? fu.confirm?.why : undefined);
           const confirm = yes === undefined ? undefined : { yes, ...(why ? { why } : {}) };
           const startedOwn = fu.started.filter((c) => c.ref !== r.id).map((c) => stepState(byCode.get(c.ref)?.status ?? ""));
+          // (the owner 23 Nov 00:29Z: "Closed by the team, it should not be possible ... I never ask for this"): a row he sent
+          // back (it is in a later iteration) never closes itself. What would have closed it goes back to its worker
+          // instead, so the round returns to him as a card and only his press closes it.
+          const selfClose = (reason: string): ReviewVerdict =>
+            iteration > 1
+              ? { kind: "needs-rewriting", reason: "card needs rewriting", problems: [`${ownerName()} sent this card back, so only his press closes it (it would have closed itself: ${reason}). Write its card with \`confirm: yes\` so this round returns to him`] }
+              : { kind: "closes-itself", reason };
           const verdict: ReviewVerdict = (() => {
-            if (!confirm?.yes) return { kind: "closes-itself", reason: confirm?.why ?? `nothing for ${ownerName()} to open and judge: the row has no \`confirm: yes\`` };
-            if (card?.fed && doc.askOpen.get(card.fed) === false) return { kind: "closes-itself", reason: `the ask it fed, ${card.fed}, is answered` };
-            if (card?.exampleOf) return { kind: "closes-itself", reason: `an example made for ${card.exampleOf}: that feature's card is the one card` };
-            if (startedOwn.length && startedOwn.every((x) => x === "running" || x === "live") && !next.length) return { kind: "closes-itself", reason: "its next steps already run" };
+            // the console never closes a ticket by default: a row in review that says neither `confirm: yes` nor
+            // `confirm: no` goes back to its worker to say which. (A ticket the owner asked for at 10:06Z on 22 Nov was
+            // closed this way 4 minutes after it reached review, and again at 00:03Z after he asked for it back.)
+            if (!confirm) return { kind: "needs-rewriting", reason: "card needs rewriting", problems: [`the row says neither \`confirm: yes\` nor \`confirm: no\`: write its card with \`confirm: yes\` so it reaches ${ownerName()}, or \`confirm: no — <why he has nothing to judge>\`; the console no longer closes a ticket by default`] };
+            if (!confirm.yes) return selfClose(confirm.why ?? `nothing for ${ownerName()} to open and judge`);
+            if (card?.fed && doc.askOpen.get(card.fed) === false) return selfClose(`the ask it fed, ${card.fed}, is answered`);
+            if (card?.exampleOf) return selfClose(`an example made for ${card.exampleOf}: that feature's card is the one card`);
+            if (startedOwn.length && startedOwn.every((x) => x === "running" || x === "live") && !next.length) return selfClose("its next steps already run");
             // a one-off page with no parent (no entry in the page list) is an island: never his card.
             const ev = card ? (evidenceProblem(card, stripInline(status)) ?? pageParentProblem(card.evidenceUrl, pageList)) : undefined;
             if (ev) return { kind: "needs-evidence", reason: ev };
-            const problems = gateProblems({ ...(card ? { card } : {}), ...(project ? { project: project.name } : {}), ...(doc.goalSentence ? { goalSentence: doc.goalSentence } : {}), screenshotFound: !!shot });
+            const problems = gateProblems({ ...(card ? { card } : {}), ...(project ? { project: project.name } : {}), ...(doc.goalSentence ? { goalSentence: doc.goalSentence } : {}), screenshotFound: !!shot, ownHosts: ownHosts(pageList) });
             // E948-S53: a card that says it completes the goal while other parts are still worked on
             // never reaches him; it would offer a close and then warn him against it.
             if (completes === "goal" && working.length)
@@ -744,7 +792,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
           rows.push({
             id: reviewId(g.name, rel, r.id),
             ref: r.id,
-            title: (titleCell || r.id).slice(0, 300),
+            title: (cutUrgentLead(titleCell).title || r.id).slice(0, 300),
             ...(summary && summary !== "none" ? { summary: summary.slice(0, 2000) } : {}),
             repo: g.name,
             path: rel,
@@ -796,6 +844,10 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
       }
     }
   }
+  // E948-S182: one row code in two spines of a repo (a real duplicate) keeps both cards apart by their path ids
+  const ids = new Map<string, number>();
+  for (const r of rows) ids.set(r.id, (ids.get(r.id) ?? 0) + 1);
+  for (const r of rows) if ((ids.get(r.id) ?? 0) > 1) r.id = reviewLegacyId(r.repo, r.path, r.ref);
   onePageOneCard(rows, branchOf);
   return { rows, goals, closedGoals };
 }
@@ -856,6 +908,8 @@ const mentions = (cell: string | undefined, ref: string) => !!cell && new RegExp
 
 const RUNNING = /^(active|ready|running|dispatched|in[ -]progress|blocked|monitoring|testing|queued)\b/i;
 const PARKED = /^(draft|parked|deferred)\b/i;
+/** a row he sent back (its status keeps `relaunched by` or its `iteration <n>`) that is still being worked on. */
+export const SENT_BACK = /^(active|ready|running|dispatched|in[ -]progress|blocked|monitoring|testing|queued|waiting)\b.*\b(relaunched by|iteration \d+)/i;
 
 /** The iteration a row is in: the highest `iteration <n>` in its cells (1 when none). */
 export function iterationOf(cells: string[]): number {
@@ -878,7 +932,9 @@ function goalOf(doc: FileRead, base: Pick<ReviewGoal, "key" | "code" | "repo" | 
     once.add(r.id);
     const st = r.col.status >= 0 ? stripInline(r.cells[r.col.status] ?? "") : "";
     const t = (r.col.title >= 0 ? stripInline(r.cells[r.col.title] ?? "") : "").slice(0, 160);
-    if (/^active\b.*\b(relaunched by|iteration \d+)/i.test(st)) {
+    // any status still being worked on (ready, queued, blocked, monitoring), not only `active`: a row he sent
+    // back that waits for a worker is still his sent-back card
+    if (SENT_BACK.test(st)) {
       const words = /relaunched by \w+ (\d{4}-\d{2}-\d{2}):\s*(.*?)\)?$/i.exec(st);
       inWork.push({ ref: r.id, title: t, iteration: Math.max(2, iterationOf(r.cells)), ...(words?.[2] ? { words: words[2].slice(0, 200) } : {}), ...(words?.[1] ? { since: words[1] } : {}) });
     } else if (RUNNING.test(st)) {
@@ -989,6 +1045,20 @@ export function rowClaimIn(dir: string, ref: string): (ClaimedRow & { dir: strin
   return undefined;
 }
 
+/** row `ref` of spine `rel` in the checkout `dir` as it reads now (status, owner cell, title, iteration). */
+export function rowIn(dir: string, rel: string, ref: string): { status: string; owner: string; title: string; iteration: number } | undefined {
+  // the ledger first, then the epic's archive: a finished row moved there reads the same
+  let r: LedgerLine | undefined;
+  for (const f of withArchive(dir, rel)) {
+    const abs = inside(dir, f);
+    r = abs ? readFile(abs)?.rows.find((x) => x.id === ref) : undefined;
+    if (r) break;
+  }
+  if (!r) return undefined;
+  const cellOf = (i: number) => (i >= 0 ? stripInline(r.cells[i] ?? "") : "");
+  return { status: cellOf(r.col.status), owner: cellOf(r.col.owner), title: cellOf(r.col.title).slice(0, 160), iteration: iterationOf(r.cells) };
+}
+
 /**
  * the Status cell row `ref` had in a spine's text before it was claimed: the cell that `spines.py --claim`
  * overwrote with `active`. Undefined when the row is missing, has no status, or was already being worked on (active,
@@ -1011,6 +1081,7 @@ export function expireLeaseText(text: string, ref: string, by: string, until: st
   const raw = text.split("\n");
   const r = ledgerLines(text).find((x) => x.id === ref && x.col.owner >= 0);
   if (!r) return { skip: `row ${ref} is not in this spine any more` };
+  if (r.cells.length !== r.headers.length) return outOfColumns(ref, r);
   const c = claimOf(r.cells[r.col.owner] ?? "");
   if (!c || c.by !== by || c.until !== until) return { skip: `row ${ref}'s claim changed (renewed, released or taken); nothing written` };
   // re-checked on the text under the writer's lock: a row that is no longer worked on keeps its claim.

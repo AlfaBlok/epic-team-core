@@ -38,7 +38,7 @@ describe("T8-S36 (b) a counted alert carries the ask's own card and buttons", ()
     const spy = vi.spyOn(api, "respondToWaiting").mockReturnValue(new Promise((r) => (resolve = r)));
     wrap(<MonitorAlertCard item={alert()} />);
     const card = within(screen.getByTestId("monitor-alert-ask-card"));
-    expect(card.getByText("Approve about $11/month for a Mexico proxy?")).toBeTruthy();
+    expect(card.getByTestId("ask-lead").textContent).toContain("Approve about $11/month for a Mexico proxy?");
     expect(card.getByRole("button", { name: /^No: drop it$/ })).toBeTruthy();
     expect(card.getByRole("button", { name: /Snooze/ })).toBeTruthy();
     const approve = card.getByRole("button", { name: /^Yes: go ahead$/ }) as HTMLButtonElement;

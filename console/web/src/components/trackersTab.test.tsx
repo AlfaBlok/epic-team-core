@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addLine, EMPTY, filterColumns, filterRows, filtersFromSearch, pillTone, sizeOf, sortRows } from "./trackersTab";
+import { addLine, EMPTY, filterColumns, filterRows, filtersFromSearch, isStep, pillTone, shownCols, sizeOf, sortRows, unfoldFromSearch } from "./trackersTab";
 
 // The owner (vn_1df1364f): the Trackers tab holds only tables; who goes first is a Wave column he filters by.
 const tb = { columns: ["Name", "Wave", "Audience", "Status"], statuses: ["candidate", "contacted", "agreed"], rows: [
@@ -53,5 +53,20 @@ describe("addLine", () => {
   it("says how a wheel gets a table, with or without tables", () => {
     expect(addLine(0)).toMatch(/^This wheel has no tables yet\. A table is asked for by the team .* your yes\.$/);
     expect(addLine(2)).toMatch(/^Another table for this wheel is asked for/);
+  });
+});
+
+// The owner 2026-11-22 (vn_d99286a7): "the trackers should be expandable": tables open folded, entries unfold.
+describe("folding", () => {
+  it("shows a table's chosen columns on the folded line, else every column", () => {
+    expect(shownCols({ columns: ["Name", "Status", "GitHub", "Where"], shown: ["Name", "GitHub", "Nope"] })).toEqual([0, 2]);
+    expect(shownCols({ columns: ["Name", "Status"] })).toEqual([0, 1]);
+  });
+  it("opens the tables a link names", () => {
+    expect(unfoldFromSearch("?tracker=testers&filter=Status:using")).toEqual(["testers"]);
+    expect(unfoldFromSearch("")).toEqual([]);
+  });
+  it("draws yes, no and not read yet as a step disc", () => {
+    expect([isStep("yes"), isStep("no"), isStep("not read yet"), isStep("yes to post")]).toEqual([true, true, true, false]);
   });
 });

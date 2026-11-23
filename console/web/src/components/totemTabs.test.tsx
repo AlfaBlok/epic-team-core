@@ -8,7 +8,7 @@ const maps: TotemMaps = {
   every: { totems: [], grows: [] },
   products: [
     { product: "notes", name: "Notes", repos: [], objectives: ["notes-live"], grows: [], totems: [
-      { id: "marketing-plan", name: "Marketing plan", shape: "page", tab: "plan", lives: {} },
+      { id: "plan", name: "Plan", shape: "page", tab: "plan", lives: {} },
       { id: "pricing", name: "Pricing", shape: "page", tab: "pricing", lives: {} },
       { id: "launch-board", name: "Launch board", shape: "table", tab: "launch", lives: {} },
     ] },
@@ -16,7 +16,7 @@ const maps: TotemMaps = {
 };
 
 describe("totem tabs", () => {
-  it("The notes objective gets Pricing and Launch board tabs; the marketing plan is the Plan tab it already has", () => {
+  it("The notes objective gets Pricing and Launch board tabs; its plan is the Plan tab it already has", () => {
     const p = productOfObjective(maps, "notes-live");
     expect(p?.product).toBe("notes");
     expect(totemTabs(p, ["table", "plan", "kit"]).map((t) => t.label)).toEqual(["Pricing", "Launch board"]);

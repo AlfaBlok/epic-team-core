@@ -26,7 +26,9 @@ import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
 import { FIVE_LABELS, FIVE_TABS, fiveTabFromParams, type FiveTab } from "@/lib/totems";
-import { ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
+import { BenefitsTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
+import { CampaignTrackersTab } from "@/components/trackersTab";
+import { worldId } from "@/lib/useSocial";
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
 import { CampaignGoalBlock } from "@/components/CampaignGoal";
@@ -58,6 +60,7 @@ import { useSnoozes } from "@/lib/snooze";
 import { GOAL_INBOX_TAB, GoalHeader, TabStrip, objectiveTab } from "@/components/goalSets";
 import { WaitingForReview } from "@/components/review";
 import { ObjectiveApprovals, ObjectivePersonas } from "@/components/objectivePersonas";
+import { personasOfObjective } from "@/lib/objectivePersonas";
 import { milestoneAnswer, milestoneWheelRows } from "@/lib/bigRoots";
 import { sameRepo } from "../lib/repoNames";
 import { homeWorld } from "@/lib/identity";
@@ -458,11 +461,10 @@ function MilestoneScreen() {
       {five && scope ? (
         <>
           <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "plan" ? {} : { tab: t }, { replace: true })} />
-          {/* under the plan: where the campaign runs now, its channels, then its quiet lines. */}
+          {/* under the plan: where the campaign runs now, then its quiet lines (its channels are the Social kit tab's). */}
           {ftab === "plan" && (
             <section className="mt-8 grid gap-4 border-t pt-6" data-testid="campaign-under-plan">
               <MilestoneStrip status={status} waitingHref="?tab=waiting" />
-              {card?.channels?.length ? <CampaignChannels card={card} /> : null}
               {meta}
             </section>
           )}
@@ -586,12 +588,14 @@ function MilestoneScreen() {
 }
 
 /**
- * a campaign's fixed tabs in the social skin. Summary is gone (its lines are slide 1
- * of the Deck); Tree is the goal path at the top of Tasks; Activity is History (its Runs view, the old History its Posts
- * and replies view); Personas and Settings sit behind the header's Settings and personas button. Deck (was Brief), the
- * campaign's Product deck, Waiting on me and Pipeline are tabs of their own.
+ * a campaign's fixed tabs in the social skin: one per kind of node of the product's data graph, listed once in its
+ * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. Tree is the
+ * goal path at the top of Tasks; Activity is History (its Runs view, the old History its Posts and replies view);
+ * Personas and Settings sit behind the header's Settings and personas button.
  */
 function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone; tab: FiveTab; scope: Parameters<typeof CampaignProvider>[0]["scope"]; waitingCount: number; onTab: (t: FiveTab) => void }) {
+  // the campaign's Trackers tab reads the tables of the wheel it serves.
+  const loadTrackers = useCallback(async () => api.getCampaignTrackers(await worldId(), m.id), [m.id]);
   const oldHistory = (
     <CampaignProvider scope={scope}>
       <HistoryPage />
@@ -619,6 +623,16 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
       </TabsList>
       <div className="mt-4 min-w-0">
         {tab === "plan" && <PlanTab m={m} />}
+        {/* the social kit node of the product's graph: each channel, its account and sign-in, how often it posts. */}
+        {tab === "kit" && scope && (
+          <div className="grid gap-3" data-testid="campaign-kit">
+            {scope.card.channels?.length ? (
+              <CampaignChannels card={scope.card} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No channel set up yet. The social kit holds each channel this campaign posts on, its account and how often it posts.</p>
+            )}
+          </div>
+        )}
         {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
         {tab === "pipeline" && (
@@ -627,6 +641,8 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
           </CampaignProvider>
         )}
         {tab === "work" && <WorkTab m={m} />}
+        {tab === "benefits" && <BenefitsTab m={m} />}
+        {tab === "trackers" && <CampaignTrackersTab load={loadTrackers} />}
         {tab === "observations" && <ObservationsTab m={m} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}
         {tab === "chat" && (
@@ -1503,7 +1519,7 @@ export function NextWake({ a, paused }: { a: Assignment; paused: boolean }) {
   );
 }
 
-export function PersonasTab({ m }: { m: Milestone }) {
+export function PersonasTab({ m, objective }: { m: Milestone; /** shown on an objective's page: only that objective's personas, its Delivery Manager first. */ objective?: { id: string; shared?: boolean } }) {
   const w = useWords();
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
@@ -1517,12 +1533,15 @@ export function PersonasTab({ m }: { m: Milestone }) {
   const [runNowFor, setRunNowFor] = useState<Assignment>();
   const [steering, setSteering] = useState<Assignment>();
   const [stopping, setStopping] = useState<Run>();
-  const mine = assignments.filter((a) => a.milestoneId === m.id);
+  const isDm = (a: Assignment) => /delivery manager/i.test(personas.find((x) => x.id === a.personaId)?.name ?? "");
+  const mine = objective
+    ? personasOfObjective(assignments, { id: objective.id, milestoneId: m.id, shared: objective.shared }).sort((a, b) => Number(isDm(b)) - Number(isDm(a)))
+    : assignments.filter((a) => a.milestoneId === m.id);
 
   return (
     <div className="grid grid-cols-1 gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="min-w-0 text-sm text-muted-foreground">Personas wake on their cadence to push this {w.milestone} forward.</p>
+        <p className="min-w-0 text-sm text-muted-foreground">{objective ? "Who works this objective, its objective manager first: it wakes to turn the key results green." : `Personas wake on their cadence to push this ${w.milestone} forward.`}</p>
         <Button size="sm" onClick={() => setAttachOpen(true)}>
           <Plus /> Attach persona
         </Button>
@@ -1538,7 +1557,7 @@ export function PersonasTab({ m }: { m: Milestone }) {
             <CardContent className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{p?.name ?? a.personaId}</span>
+                  <span className="font-medium">{objective && isDm(a) ? "Objective manager" : (p?.name ?? a.personaId)}</span>
                   {p && <Badge variant="outline">{p.model}</Badge>}
                   {p && !a.writeEnabled && <Badge variant="gray">diagnose only</Badge>}
                   <ParkedBadge a={a} />
@@ -1596,7 +1615,7 @@ export function PersonasTab({ m }: { m: Milestone }) {
           </Card>
         );
       })}
-      <AssignmentDialog open={attachOpen} onOpenChange={setAttachOpen} milestoneId={m.id} />
+      <AssignmentDialog open={attachOpen} onOpenChange={setAttachOpen} milestoneId={m.id} objective={objective?.id} />
       <AssignmentDialog open={!!editing} onOpenChange={(o) => !o && setEditing(undefined)} milestoneId={m.id} assignment={editing} />
       <RunNowDialog
         open={!!runNowFor}
@@ -1707,7 +1726,7 @@ function PersonaFilter({ persona, id, onClear }: { persona?: Persona; id: string
   );
 }
 
-export function ActivityTab({ m }: { m: Milestone }) {
+export function ActivityTab({ m, only }: { m: Milestone; /** an objective's page: only these assignments' runs. */ only?: string[] }) {
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
   const { data: runs, loading } = useQuery(() => api.listRuns({ milestoneId: m.id }), [m.id]);
@@ -1717,7 +1736,7 @@ export function ActivityTab({ m }: { m: Milestone }) {
   const personaId = params.get("persona");
   const kind = params.get("kind") ?? "";
   if (loading) return <Loading />;
-  const all = runsForMilestone(m.id, assignments, runs ?? []).filter((r) => !kind || kind === "running" || (kind === "answer_run") === isAnswerRun(r));
+  const all = runsForMilestone(m.id, assignments, runs ?? []).filter((r) => !only || only.includes(r.assignmentId)).filter((r) => !kind || kind === "running" || (kind === "answer_run") === isAnswerRun(r));
   const grouped = timelineGroups(personaId ? filterRunsByPersona(all, assignments, personaId) : all, assignments);
   // Running = wakes with a live run or a live child (T3 state from the server's reconciler).
   const groups = kind === "running" ? runningOnly(grouped) : grouped;

@@ -5,6 +5,7 @@ import type { DB } from "../db.js";
 import { sectionRange } from "../approvals.js";
 import { proseLines, stripInline } from "../adapters/markdown.js";
 import { currentStatus } from "../status/stamp.js";
+import { readArchiveOf } from "../adapters/spineArchive.js";
 
 /**
  * what the Team desk placed in the tree, and the one "[delivered]" note per item once it closes. A placement is a row
@@ -77,26 +78,41 @@ const verdictOf = (raw: string | undefined, review: boolean): "delivered" | "dro
   return DROPPED.test(w) ? "dropped" : undefined;
 };
 
-/** The ledger row `id`: its title and Status cell (by header), or undefined when the row is gone. */
-export function ledgerRow(text: string, id: string): { title: string; status?: string } | undefined {
+type LedgerCell = { title: string; status?: string };
+/** Every ledger row of a spine by id (the first row of an id wins), parsed in one pass. */
+export function ledgerRows(text: string): Map<string, LedgerCell> {
+  const out = new Map<string, LedgerCell>();
   const r = sectionRange(text, /^(issue ledger|ledger)\b/i);
-  if (!r) return undefined;
+  if (!r) return out;
   const lines = proseLines(text);
   let heads: string[] | undefined;
+  let status = -1;
+  let title = -1;
   for (let k = r.head + 1; k < r.end; k++) {
     if (!/^\s*\|/.test(lines[k]) || /^\s*\|[\s:|-]+\|?\s*$/.test(lines[k])) continue;
     const cells = splitCells(lines[k]);
     if (!heads) {
       heads = cells.map((h) => stripInline(h).toLowerCase());
+      status = heads.findIndex((h) => /^status/.test(h));
+      title = heads.findIndex((h) => /title/.test(h));
       continue;
     }
-    if (stripInline(cells[0] ?? "") !== id) continue;
-    const at = (re: RegExp) => heads!.findIndex((h) => re.test(h));
-    const status = at(/^status/);
-    const title = at(/title/);
-    return { title: stripInline(cells[title >= 0 ? title : 1] ?? ""), ...(status >= 0 ? { status: cells[status] } : {}) };
+    const id = stripInline(cells[0] ?? "");
+    if (out.has(id)) continue;
+    out.set(id, { title: stripInline(cells[title >= 0 ? title : 1] ?? ""), ...(status >= 0 ? { status: cells[status] } : {}) });
   }
-  return undefined;
+  return out;
+}
+
+/** a spine's ledger rows plus its archive's: a finished row moved to the archive still reads delivered. */
+export function withArchiveRows(rows: Map<string, LedgerCell>, archive: string | undefined): Map<string, LedgerCell> {
+  if (archive) for (const [id, c] of ledgerRows(archive)) if (!rows.has(id)) rows.set(id, c);
+  return rows;
+}
+
+/** The ledger row `id`: its title and Status cell (by header), or undefined when the row is gone. */
+export function ledgerRow(text: string, id: string): LedgerCell | undefined {
+  return ledgerRows(text).get(id);
 }
 
 /** The `## Done means` line `id`: its text and whether it is ticked. */
@@ -113,10 +129,14 @@ export function doneMeansLine(text: string, id: string): { text: string; done: b
 const h1 = (text: string) => /^#\s+(.+?)\s*$/m.exec(text)?.[1];
 
 /** What the spine says now about a placement: its title (when readable) and whether it closed. */
-export function readPlacement(text: string, p: Pick<Placement, "kind" | "itemId">): { title?: string; closed?: "delivered" | "dropped"; missing?: boolean } {
+export function readPlacement(
+  text: string,
+  p: Pick<Placement, "kind" | "itemId">,
+  rows?: () => Map<string, LedgerCell>,
+): { title?: string; closed?: "delivered" | "dropped"; missing?: boolean } {
   if (p.kind === "epic") return { title: h1(text), closed: verdictOf(currentStatus(text), true) };
   if (p.kind === "row") {
-    const row = ledgerRow(text, p.itemId);
+    const row = rows ? rows().get(p.itemId) : ledgerRow(text, p.itemId);
     return row ? { title: row.title, closed: verdictOf(row.status, false) } : { missing: true };
   }
   const dm = doneMeansLine(text, p.itemId);
@@ -169,6 +189,7 @@ export function createPlacements(d: PlacementDeps) {
   // 22 Nov: the desk tick read and parsed every placement's spine each minute (545 of them, 1.4 s of blocked event loop
   // a minute); a state is kept until its file's mtime or size changes
   const states = new Map<string, { sig: string; state: Placement["state"] }>();
+  const docs = new Map<string, { sig: string; text: string; rows?: Map<string, LedgerCell> }>();
   const stateOf = (r: any): Placement["state"] => {
     const f = fileOf(r.repo, r.path);
     let sig: string;
@@ -182,9 +203,17 @@ export function createPlacements(d: PlacementDeps) {
     const k = `${f}\n${r.kind}\n${r.item_id}`;
     const hit = states.get(k);
     if (hit && hit.sig === sig) return hit.state;
-    const text = read(r.repo, r.path);
-    if (text === undefined) return "placed";
-    const now = readPlacement(text, { kind: r.kind, itemId: r.item_id });
+    // many placements share one spine (one epic can hold hundreds of rows); after it changes, read and parse it once
+    // for all of them, not once each (1.4 s of one blocked event loop on 22 Nov)
+    let doc = docs.get(f);
+    if (!doc || doc.sig !== sig) {
+      const text = read(r.repo, r.path);
+      if (text === undefined) return "placed";
+      doc = { sig, text };
+      docs.set(f, doc);
+    }
+    const d0 = doc;
+    const now = readPlacement(d0.text, { kind: r.kind, itemId: r.item_id }, () => (d0.rows ??= withArchiveRows(ledgerRows(d0.text), readArchiveOf(f))));
     const state = now.closed ?? (now.missing ? "dropped" : "placed");
     states.set(k, { sig, state });
     return state;
@@ -209,7 +238,8 @@ export function createPlacements(d: PlacementDeps) {
       const rel = i.path.trim().replace(/^\.\//, "");
       const text = read(repo, rel);
       if (text === undefined) throw new PlacementError(404, "not_found", `${repo}/${rel} is not a file in the console's checkout (commit and push it first, then register it)`);
-      const now = readPlacement(text, { kind: i.kind, itemId });
+      const file = fileOf(repo, rel);
+      const now = readPlacement(text, { kind: i.kind, itemId }, () => withArchiveRows(ledgerRows(text), file ? readArchiveOf(file) : undefined));
       if (now.missing) throw new PlacementError(404, "not_found", `${itemId} is not in ${rel}`);
       const have = d.db.prepare("SELECT * FROM desk_placement WHERE repo = ? AND path = ? AND kind = ? AND item_id = ?").get(repo, rel, i.kind, itemId);
       if (have) return row(have);

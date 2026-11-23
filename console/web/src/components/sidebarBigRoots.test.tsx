@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Milestone, type StatusBatch } from "@/api";
 import { SidebarNav } from "@/components/Layout";
@@ -49,22 +49,18 @@ function fakeStatus() {
 }
 
 describe("T40-S3 sidebar: big roots", () => {
-  it("lists the big roots first in Sam's order inside More objectives, their waiting count on the fold", async () => {
+  it("lists the big roots first in Sam's order while the workspace has no objectives", async () => {
     await seed();
     const spy = fakeStatus();
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never); // no objectives yet, so the goals are listed
     try {
       render(
         <MemoryRouter>
           <SidebarNav />
         </MemoryRouter>,
       );
-      // they sit in the folded More objectives, its count and waiting pills on the fold.
-      const toggle = await screen.findByTestId("more-objectives-toggle");
-      await waitFor(() => expect(within(toggle).getByTestId("more-objectives-count").textContent).toBe("7")); // 4 focus + the infra repo + the mock seed's two
-      await waitFor(() => expect(within(toggle).getByTestId("more-objectives-needs-you")).toBeTruthy());
-      expect(screen.queryAllByTestId("big-root")).toHaveLength(0);
-      fireEvent.click(toggle);
-      expect(localStorage.getItem("sidebar.moreObjectives.open")).toBe("1");
+      // no Other goals fold; with no objectives yet the goals are listed straight.
+      expect(screen.queryByTestId("nav-other-goals-toggle")).toBeNull();
       await waitFor(() => expect(screen.getAllByTestId("big-root")).toHaveLength(7));
       const roots = screen.getAllByTestId("big-root").slice(0, 4);
       // the state word now shares the line under the bar with the percent, so read the name's own line

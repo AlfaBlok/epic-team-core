@@ -19,6 +19,8 @@ export interface VoiceState {
   lastCall?: { costUsd: number; seconds: number; usdPerMin: number | null; endReason?: string; startedAt?: string };
   /** The world's call still on (any of its desks), from this tab or another. */
   activeCall?: { id: string; startedAt: string };
+  /** voice calls are off (voice notes still work): no Call button. */
+  callsOff?: boolean;
 }
 
 export const money = (v: number | undefined) => (v === undefined ? "–" : `$${v < 1 ? v.toFixed(3) : v.toFixed(2)}`);
@@ -31,6 +33,7 @@ const END_WORDS: Record<string, string> = {
   call_limit: "Hung up at the 20-minute limit. You can call again.",
   month_cap: "Voice paused until the 1st: the month's cap is reached. Chat still works.",
   voice_off: "Voice was switched off in the console.",
+  calls_off: "Calls are off. Send a voice note instead.",
   line_dropped: "The line dropped. Press Call to reconnect.",
   tab_closed: "Call ended.",
   ended_elsewhere: "Hung up from another page.",
@@ -145,6 +148,8 @@ export function useCallDock(
   };
   // Not the owner's world, or no voice at all: no bar (a switched-off or capped voice says why).
   if (!st || (!st.available && !st.enabled && !st.reason)) return { liveKey, onCall };
+  // calls off, no Call button and no bar.
+  if (st.callsOff && !onCall) return { liveKey, onCall };
 
   const cap = st.limits?.monthCapUsd;
   const month = v.monthUsd ?? st.monthUsd;

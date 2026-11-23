@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
@@ -35,17 +35,14 @@ describe("T40-S5 pageMilestones", () => {
 
 describe("T40-S5 sidebar: about 20, then Load more", () => {
   it("shows 20 in priority order and loads the rest on Load more", async () => {
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never); // no objectives yet, so the goals are listed
     render(
       <MemoryRouter>
         <SidebarNav />
       </MemoryRouter>,
     );
-    // every goal no objective holds sits in the folded More objectives, its count on the fold.
-    const toggle = await screen.findByTestId("more-objectives-toggle");
-    await waitFor(() => expect(within(toggle).getByTestId("more-objectives-count").textContent).toBe(String(total)));
-    expect(screen.queryAllByTestId("big-root")).toHaveLength(0);
-    expect(screen.queryByTestId("sidebar-load-more")).toBeNull();
-    fireEvent.click(toggle);
+    // a workspace with no objectives yet lists its goals straight (with objectives the sidebar lists none).
+    await waitFor(() => expect(screen.getAllByTestId("big-root").length).toBeGreaterThan(2));
     // focus first, in priority order, then the others: about 20 in all
     expect(screen.getAllByTestId("big-root").slice(0, 3).map((r) => r.querySelector(".line-clamp-2")?.textContent?.trim())).toEqual(["Focus one", "Focus two", "Focus three"]);
     const box = screen.getByTestId("sidebar-milestones");

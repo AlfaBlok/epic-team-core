@@ -100,7 +100,8 @@ export function createFreshness(o: FreshnessOptions = {}) {
   const state = new Map<string, RepoState>();
   const st = (dir: string) => state.get(dir) ?? (state.set(dir, {}), state.get(dir)!);
   const inFlight = new Map<string, Promise<boolean>>();
-  let timer: ReturnType<typeof setInterval> | undefined;
+  // one timer per start() call: the milestone repos' poll and the workspace data repo's faster one
+  const timers: ReturnType<typeof setInterval>[] = [];
 
   // HEAD from the files when the checkout is a plain one (no git child), else git as before. Only for the real git:
   // a test's fake git answers from its own script.
@@ -218,10 +219,22 @@ export function createFreshness(o: FreshnessOptions = {}) {
    * One poll: `git ls-remote origin main` per repo; a remote sha HEAD does not already contain → pull.
    * a repo pulled here within `pollSkipMs` (an open, a run end, Refresh) is not asked again.
    */
-  const poll = async (dirs: string[]): Promise<void> => {
+  /** the HEAD each watched repo had at its last poll (start(..., { watchHead: true })). */
+  const seenHead = new Map<string, string>();
+  /**
+   * watchHead: a checkout another process moved (the background sync, a worker's hand pull) is pulled by nobody
+   * here, so nothing dropped the caches built from it: the poll drops them when HEAD differs from its last poll.
+   */
+  const poll = async (dirs: string[], skipMs = pollSkipMs, watchHead = false): Promise<void> => {
     for (const dir of [...new Set(dirs)]) {
+      if (watchHead) {
+        const h = await head(dir);
+        const before = seenHead.get(dir);
+        if (h) seenHead.set(dir, h);
+        if (h && before && before !== h) o.invalidate?.(dir);
+      }
       const pulledAt = puller.lastPullAt(dir);
-      if (pulledAt !== undefined && now() - pulledAt < pollSkipMs) continue;
+      if (pulledAt !== undefined && now() - pulledAt < skipMs) continue;
       const failed = pollFailed.get(dir);
       if (failed && now() < failed.until) continue;
       try {
@@ -231,7 +244,10 @@ export function createFreshness(o: FreshnessOptions = {}) {
         if (!remote || !local || remote === local) continue;
         // Local is ahead (a console spine write not pushed yet): nothing to pull.
         const contained = await git(dir, ["merge-base", "--is-ancestor", remote, "HEAD"]).then(() => true, () => false);
-        if (!contained) await pullAndDrop(dir);
+        if (!contained && (await pullAndDrop(dir)) && watchHead) {
+          const h = await head(dir);
+          if (h) seenHead.set(dir, h); // dropped already by the pull
+        }
       } catch (e) {
         // a checkout whose origin is gone (removed test worlds: thousands of failed git calls a day at 5 min) waits 10 min,
         // then twice as long each time, up to 6 h; one answer from it clears the wait.
@@ -243,23 +259,24 @@ export function createFreshness(o: FreshnessOptions = {}) {
     }
   };
 
-  const start = (everyMs: number, dirs: () => string[]) => {
-    if (timer || everyMs <= 0) return;
+  /** Poll dirs() every everyMs; skipMs (default pollSkipMs) skips a repo pulled that recently; watchHead: see poll. */
+  const start = (everyMs: number, dirs: () => string[], skipMs = pollSkipMs, watchHead = false) => {
+    if (everyMs <= 0) return;
     let busy = false;
-    timer = setInterval(() => {
+    const timer = setInterval(() => {
       if (busy) return;
       busy = true;
       // A throw from dirs (its db closed, a bad row) is logged, never an uncaught exception in the timer.
       void Promise.resolve()
-        .then(() => poll(dirs()))
+        .then(() => poll(dirs(), skipMs, watchHead))
         .catch((e) => log(`freshness poll: ${(e as Error).message}`))
         .finally(() => (busy = false));
     }, everyMs);
     timer.unref?.();
+    timers.push(timer);
   };
   const stop = () => {
-    if (timer) clearInterval(timer);
-    timer = undefined;
+    for (const t of timers.splice(0)) clearInterval(t);
   };
 
   return { onOpen, status, refresh, poll, start, stop, pullAndDrop };

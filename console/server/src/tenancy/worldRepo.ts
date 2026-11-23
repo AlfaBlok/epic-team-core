@@ -159,6 +159,17 @@ export function spineTitle(text: string): string | undefined {
  */
 export type ConnectProof = string | { github: true; gitEnv: Record<string, string> };
 
+/**
+ * What runs once a workspace has linked a repo (the hosted layer fills the repo's listed keys from the owner's
+ * key vault). A listener never holds the answer back and its failure is its own.
+ */
+type RepoLinked = (world: string, repo: WorldRepo) => void | Promise<void>;
+const repoLinked = new Set<RepoLinked>();
+export function onRepoLinked(fn: RepoLinked): () => void {
+  repoLinked.add(fn);
+  return () => repoLinked.delete(fn);
+}
+
 export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: string, proof: ConnectProof): Promise<WorldRepo & { project: { id: string; title: string; state: "done" | "exists" }; starterMovedTo?: string }> {
   const { db, reposRoot } = d;
   const git = d.git ?? defaultGit;
@@ -221,7 +232,9 @@ export async function connectWorldRepo(d: ConnectDeps, world: string, repoIn: st
     if (codeIn !== undefined) db.prepare("UPDATE repo_connect_codes SET used_world = ?, used_at = ? WHERE code_hash = ?").run(world, at, sha(codeIn.toUpperCase()));
   })();
   resetRepoScans();
-  return { world, repo: slug, dir, connectedAt: at, project: ensureProject(db, world, dir), ...(starterMovedTo ? { starterMovedTo } : {}) };
+  const linked: WorldRepo = { world, repo: slug, dir, connectedAt: at };
+  for (const fn of repoLinked) void Promise.resolve().then(() => fn(world, linked)).catch(() => undefined);
+  return { ...linked, project: ensureProject(db, world, dir), ...(starterMovedTo ? { starterMovedTo } : {}) };
 }
 
 /** the workspace's first project is the repo's root spine, under its own title (a starter "Get set up" project takes it). */

@@ -126,3 +126,34 @@ describe("keptJson", () => {
     expect(s.builds()).toBe(1);
   });
 });
+
+describe("a restart serves the last good answer at once", () => {
+  it("a new keeper starts from the saved file, answers without building, then rebuilds behind it", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kept-e48s171-"));
+    const file = path.join(dir, "kept", "scorecards.json");
+    try {
+      let n = 0;
+      let open!: () => void;
+      let gate: Promise<void> | undefined;
+      const mk = () => keptJson({ build: async () => (gate && (await gate), { n: ++n }), checkMs: 15_000, minGapMs: 60_000, everyMs: 180_000, timer: false, file });
+      const a = mk();
+      expect(body(await a.get())).toEqual({ n: 1 });
+      for (let i = 0; i < 50 && !fs.existsSync(file); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(fs.existsSync(file)).toBe(true);
+      // the next process: its build is slow (held), the first get answers the saved bytes anyway
+      gate = new Promise((r) => (open = r));
+      const b = mk();
+      const first = await b.get();
+      expect(body(first)).toEqual({ n: 1 });
+      expect(gunzipSync(first.gz).toString()).toBe(first.json.toString());
+      open();
+      await b.refresh();
+      expect(body(await b.get()).n).toBeGreaterThan(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

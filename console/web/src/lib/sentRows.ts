@@ -37,6 +37,17 @@ export interface SentEntry {
   gone?: boolean;
   /** E948-S141 iteration 2: answered on another device (the server's press log), never pressed in this browser */
   server?: boolean;
+  /**
+   * E948-S174 (the owner 22 Nov 18:56Z, vn_3b3cf02e: "the moment I press Send, it compacts into this row. It's just that
+   * instead of saying Sent, it stays spinning until it fully has been sent"): a voice note on its way from this card, by
+   * its note's key. The row spins until the card's press has it, then a plain Sent entry replaces this one. Never kept
+   * across a reload (the note itself is safe on the phone and sends by itself).
+   */
+  voice?: string;
+  /** E948-S174: the voice note did not reach the card: why, said on the row with Send again. */
+  failed?: string;
+  /** E948-S174: an empty recording (0 s, no audio): nothing was sent, the row says so in `said`; Bring it back shows the card */
+  dropped?: boolean;
 }
 
 /**
@@ -86,7 +97,7 @@ function loadSent(): Map<string, SentEntry> {
 function saveSent(m: Map<string, SentEntry>) {
   try {
     const now = Date.now();
-    storage()?.setItem(STORE, JSON.stringify([...m].filter(([, e]) => now - e.at < SENT_KEEP_MS).map(([k, { back: _b, ...e }]) => [k, e])));
+    storage()?.setItem(STORE, JSON.stringify([...m].filter(([, e]) => now - e.at < SENT_KEEP_MS && !e.voice && !e.dropped).map(([k, { back: _b, ...e }]) => [k, e])));
   } catch {
     /* a full or private store: the rows still show until the page closes */
   }

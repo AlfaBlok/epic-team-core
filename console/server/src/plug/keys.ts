@@ -15,6 +15,8 @@ export interface SecretPutInput {
   deployed?: boolean;
   /** a whole key file (several lines, e.g. a JSON service-account key): `--multiline`, never with `--the app platform`. */
   multiline?: boolean;
+  /** the vault save already ran and was read back (`saveFirst`): the store writes only its working copy. */
+  vaultSaved?: string;
 }
 
 /** ok = stored (and set in the app platform); err = the tool's stderr tail (it never carries values; scrubbed anyway). */
@@ -22,13 +24,24 @@ export type SecretPutResult = { ok: true } | { ok: false; err: string };
 export type SecretPut = (o: SecretPutInput) => Promise<SecretPutResult>;
 
 /** `the app platform` = where the key went: false when the store-only fallback ran (or the app platform was not asked for). */
-export type SecretStoreResult = { ok: true; deployed: boolean } | { ok: false; err: string };
+export type SecretStoreResult = { ok: true; deployed: boolean; vault?: string; mirrorErr?: string } | { ok: false; err: string };
+/**
+ * `vault`: the password manager the key went into first (identity `vault`); the secret store then holds only a working
+ * copy. `mirrorErr`: that working copy could not be written (the key is saved in the vault all the same).
+ */
 
 export interface WorldKeys {
   backend(world: string): string;
   refuse(world: string, app: string): string | undefined;
   /** Store a pasted key in the world's backend; default world = today's `putWithFallback(secret put)` unchanged. */
   store(world: string, i: SecretPutInput): Promise<SecretStoreResult & { world?: boolean }>;
+  /**
+   * the owner's words: "it was supposed to make it into the vault, it didn't. But the card closed": save
+   * the key in the owner's vault and read it back by name BEFORE the card is answered, so a card never closes on a key
+   * that is not there. undefined: this world has no vault (the store is the only save); ok false: nothing saved, the
+   * card stays open with why.
+   */
+  saveFirst?(world: string, i: { app: string; name: string; value: string; source: string }): Promise<{ ok: true; vault: string; where?: string } | { ok: false; err: string } | undefined>;
 }
 
 /** Remove the value (and any line that still holds it) from tool output before it is shown or stored. */

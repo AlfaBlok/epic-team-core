@@ -283,6 +283,8 @@ export interface VoiceState {
   enabled: boolean;
   /** the platform's switch is on but this world's own is not (another world than the home world has voice only when the owner switched it on). */
   worldOff?: true;
+  /** voice calls are off (voice notes still work): the Call button is gone. */
+  callsOff?: true;
   reason?: string;
   model: string;
   monthUsd: number;
@@ -341,6 +343,11 @@ export interface VoiceDeps {
   envOff?: boolean;
   /** Model name override (CONSOLE_VOICE_MODEL); the setting wins when set. */
   envModel?: string;
+  /**
+   * whether
+   * voice calls are on when the `calls` setting is unset. The console sets it off; voice notes stay on either way.
+   */
+  callsDefault?: "on" | "off";
   now?: () => number;
   /** a call has ended (its transcript stored and posted when there is one): it goes to the owner's the memory service. */
   onEnded?: (id: string) => void;
@@ -566,6 +573,9 @@ export function createVoice(d: VoiceDeps) {
   const worldKey = world === DEFAULT_TENANT ? undefined : `enabled:${world}`;
   const worldOn = () => !worldKey || setting(worldKey) === "on";
   const enabled = () => platformOn() && worldOn();
+  /** calls are the platform's own switch (every world), off unless set on; notes never read it. */
+  const callsOn = () => (setting("calls") ?? d.callsDefault ?? "on") === "on";
+  const CALLS_OFF = "Calls are off. Send a voice note instead: it is written out free on our own server.";
   const offWhy = () => (platformOn() ? "Voice is not switched on for this workspace." : "Voice is switched off in the console.");
   const historyTokens = () => {
     const v = setting("history_tokens");
@@ -651,6 +661,7 @@ export function createVoice(d: VoiceDeps) {
   /** Why no call may start now, or undefined. */
   function refusal(): { code: string; message: string } | undefined {
     if (!enabled()) return { code: "voice_off", message: offWhy() };
+    if (!callsOn()) return { code: "calls_off", message: CALLS_OFF };
     const m = month();
     const cap = limits().monthCapUsd;
     if (m.usd >= cap - MIN_LEFT_USD) return { code: "month_cap", message: `Voice paused until the 1st: this month's calls reached the ${usd(cap)} cap. Chat still works.` };
@@ -662,11 +673,12 @@ export function createVoice(d: VoiceDeps) {
     const m = month();
     const act = active();
     const last = db.prepare(`SELECT * FROM voice_calls WHERE ended_at IS NOT NULL AND ${inScope} ORDER BY started_at DESC LIMIT 1`).get(sc);
-    const why = enabled() ? (m.usd >= limits().monthCapUsd - MIN_LEFT_USD ? refusal()?.message : undefined) : offWhy();
+    const why = enabled() ? (!callsOn() ? CALLS_OFF : m.usd >= limits().monthCapUsd - MIN_LEFT_USD ? refusal()?.message : undefined) : offWhy();
     const mdl = model();
     return {
       available: enabled() && !why,
       enabled: enabled(),
+      ...(callsOn() ? {} : { callsOff: true as const }),
       ...(platformOn() && !worldOn() ? { worldOff: true as const } : {}),
       ...(why ? { reason: why } : {}),
       model: mdl,
@@ -785,6 +797,7 @@ export function createVoice(d: VoiceDeps) {
   /** Why the page must hang up now, or undefined (per-call limit, month cap, switch off). */
   function stopWhy(c: VoiceCall): string | undefined {
     if (!enabled()) return "voice_off";
+    if (!callsOn()) return "calls_off";
     if (c.seconds >= CALL_MAX_MIN * 60) return "call_limit";
     if (month().usd >= limits().monthCapUsd) return "month_cap";
     return undefined;
@@ -1063,6 +1076,9 @@ export function createVoice(d: VoiceDeps) {
     get,
     model,
     enabled,
+    callsOn,
+    /** calls on or off for every world (the owner's to turn on; anyone may turn them off). */
+    setCalls: (on: boolean) => put("calls", on ? "on" : "off"),
     /** The platform's switch on the home world's Voice; on another world's Voice, that world's own switch. */
     setEnabled: (on: boolean) => put(worldKey ?? "enabled", on ? "on" : "off"),
     setModel: (m: string) => put("model", m),

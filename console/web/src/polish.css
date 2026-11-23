@@ -137,12 +137,22 @@ main textarea { resize: vertical; line-height: 1.55 !important; padding: 10px 12
 [data-testid="review-evidence"]::after { content: ""; position: absolute; inset: auto 0 0 0; height: 64px; background: linear-gradient(to bottom, hsl(var(--card) / 0), hsl(var(--card))); pointer-events: none; }
 [data-testid="review-evidence"] > span { z-index: 1; background: hsl(var(--background)) !important; color: hsl(var(--foreground)) !important; border: 1px solid hsl(var(--border)); box-shadow: 0 2px 8px rgb(0 0 0 / 0.08); font-weight: 500; }
 
-/* R2-7. Connections: the "where the items went" note is a quiet disclosure with a chevron, not a coloured bar. */
+/* R2-7. Connections: the "where the items went" note is a quiet disclosure (its chevron is the shared one). */
 [data-testid="where-items-went"] { border: 1px solid hsl(var(--border)) !important; background: transparent !important; border-radius: 12px !important; padding: 14px 16px !important; font-size: 13px !important; }
-[data-testid="where-items-went"] > summary { list-style: none; display: flex; align-items: center; gap: 8px; font-weight: 500 !important; font-size: 14px; cursor: pointer; }
-[data-testid="where-items-went"] > summary::-webkit-details-marker { display: none; }
-[data-testid="where-items-went"] > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: currentColor; opacity: 0.6; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; }
-[data-testid="where-items-went"][open] > summary::before { transform: rotate(90deg); }
+[data-testid="where-items-went"] > summary { display: flex; align-items: center; gap: 8px; font-weight: 500 !important; font-size: 14px; }
+
+/* R2-7b. The one fold chevron: every foldable heading shows it, right when closed, down when open, a short rotate.
+   A button that folds renders <FoldChevron open> (components/foldChevron.tsx); every <summary> gets it here by itself. */
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+.fold-chevron, summary:not(:has(.fold-chevron))::before {
+  content: ""; display: inline-block; flex: none; width: 14px; height: 14px; vertical-align: -2px; background: currentColor; opacity: 0.55;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 150ms ease;
+}
+summary:not(:has(.fold-chevron))::before { margin-right: 6px; }
+.fold-chevron[data-open="true"], details[open] > summary .fold-chevron:not([data-open]), details[open] > summary:not(:has(.fold-chevron))::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .fold-chevron, summary::before { transition: none; } }
 
 /* R2-12. Count pills: one size and weight everywhere. */
 [data-count-pill] { min-width: 20px; height: 20px; font-size: 12px !important; font-weight: 600 !important; }

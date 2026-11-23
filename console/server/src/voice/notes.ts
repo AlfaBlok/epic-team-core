@@ -7,7 +7,8 @@ import type { DB } from "../db.js";
 import { VOICE_NOTE_HEAD, pointsBackLine } from "../desk/voiceNotes.js";
 import { notJordi } from "../status/mark.js";
 import { VoiceError, type DeskPort, type Voice } from "./voice.js";
-import { ownerName } from "../identity.js";
+import { ownerName, sites } from "../identity.js";
+import { partModel } from "./transcription.js";
 
 /**
  * rework (the owner's review, 2026-11-02): voice notes in Chat. One button: tap to start, tap to finish. The page records
@@ -43,13 +44,22 @@ export const NOTE_SOURCE = "Chat";
  * (60 two-minute parts, the rest room for locks).
  */
 export const NOTE_MAX_PARTS = 300;
+/** the desk's line for a note no transcriber could turn into words (its audio link follows). */
+export const UNHEARD_LINE = "His voice note could not be transcribed (our Whisper and the paid backup both failed)";
 /** Context for the next segment: the last words of the previous one (OpenAI's `prompt`). */
 const PROMPT_TAIL = 300;
 
 export interface Transcript {
   text: string;
   usage?: unknown;
+  /** who turned it into words (`openai`, `gemini`) and with which model; kept on the part. */
+  provider?: string;
+  model?: string;
 }
+/** the fallback transcriber (the team's shared Gemini key) when OpenAI fails (429 no credits, 5xx, timeout). */
+export const GEMINI_NOTE_MODEL = "gemini-flash-latest";
+/** US$ per million tokens (gemini-2.5-flash list prices, checked 2026-11-22): audio in, text in, out (thinking counts as out). */
+export const GEMINI_PRICES = { audioIn: 1, textIn: 0.3, out: 2.5 };
 /** Transcribe one audio file (tests fake it). */
 export type Transcriber = (audio: Uint8Array, o: { mime: string; filename: string; prompt?: string }) => Promise<Transcript>;
 
@@ -85,6 +95,9 @@ export function ensureVoiceNoteRecTables(db: DB): void {
       PRIMARY KEY (note_id, n)
     );
   `);
+  // who transcribed the part (`openai`, `gemini`), so the head names it and its cost is read right.
+  const segCols = new Set((db.prepare("PRAGMA table_info(voice_note_segments)").all() as { name: string }[]).map((c) => c.name));
+  if (!segCols.has("provider")) db.exec("ALTER TABLE voice_note_segments ADD COLUMN provider TEXT");
   // how long the browser took from the press to the note open, the microphone open and recording (JSON, ms), sent
   // with the first part, so a slow start shows which stage held it.
   const cols = new Set((db.prepare("PRAGMA table_info(voice_notes)").all() as { name: string }[]).map((c) => c.name));
@@ -108,6 +121,12 @@ export function ensureVoiceNoteRecTables(db: DB): void {
   if (!cols.has("post_json")) db.exec("ALTER TABLE voice_notes ADD COLUMN post_json TEXT");
   if (!cols.has("deliver_tries")) db.exec("ALTER TABLE voice_notes ADD COLUMN deliver_tries INTEGER NOT NULL DEFAULT 0");
   if (!cols.has("deliver_error")) db.exec("ALTER TABLE voice_notes ADD COLUMN deliver_error TEXT");
+  // the request id a note goes out under, kept for its whole life (`voice-note-chat-<id>`, or `-g<n>` after a
+  // checked re-id); and the tries made under it. 22 Nov vn_59852983: a fresh id each minute past 10 tries put 23 copies in.
+  if (!cols.has("deliver_gen")) db.exec("ALTER TABLE voice_notes ADD COLUMN deliver_gen INTEGER NOT NULL DEFAULT 0");
+  if (!cols.has("gen_tries")) db.exec("ALTER TABLE voice_notes ADD COLUMN gen_tries INTEGER NOT NULL DEFAULT 0");
+  // when the owner was told a note (or a part) could not be turned into words by either transcriber (once a note).
+  if (!cols.has("unheard_at")) db.exec("ALTER TABLE voice_notes ADD COLUMN unheard_at TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS voice_notes_client ON voice_notes (tenant_id, client_id) WHERE client_id IS NOT NULL");
 }
 
@@ -132,7 +151,12 @@ export function noteCost(usage: unknown, seconds: number): number {
   const u = (usage ?? {}) as Record<string, any>;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
   let usd: number;
-  if (u.type === "tokens" && (num(u.input_tokens) || num(u.output_tokens))) {
+  // our own Whisper on the worker server costs no money (its server time is shown in Settings, Transcription).
+  if (u.provider === "local") return 0;
+  if (u.provider === "gemini") {
+    usd = (num(u.audio_tokens) * GEMINI_PRICES.audioIn + num(u.text_tokens) * GEMINI_PRICES.textIn + num(u.output_tokens) * GEMINI_PRICES.out) / 1_000_000;
+    if (!usd) usd = (Math.max(0, seconds) * 32 * GEMINI_PRICES.audioIn) / 1_000_000; // 32 audio tokens a second
+  } else if (u.type === "tokens" && (num(u.input_tokens) || num(u.output_tokens))) {
     const d = u.input_token_details ?? {};
     const audio = num(d.audio_tokens) || (d.text_tokens === undefined ? num(u.input_tokens) : 0);
     const text = num(d.text_tokens);
@@ -161,7 +185,58 @@ export function openAiTranscriber(key: () => Promise<string | undefined>, f: typ
     const r = await f("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { authorization: `Bearer ${k}` }, body: form, signal: AbortSignal.timeout(120_000) });
     const j = (await r.json().catch(() => ({}))) as any;
     if (!r.ok || typeof j.text !== "string") throw new VoiceError(502, "openai_refused", `OpenAI did not transcribe the note (${r.status}): ${String(j?.error?.message ?? "no message").slice(0, 200)}`);
-    return { text: j.text, ...(j.usage ? { usage: j.usage } : {}) };
+    return { text: j.text, provider: "openai", model: NOTE_MODEL, ...(j.usage ? { usage: j.usage } : {}) };
+  };
+}
+
+/**
+ * Gemini as a transcriber (generateContent with the audio inline), the team's shared GEMINI_API_KEY read
+ * from the console's key store. Its usage comes back as `{provider: "gemini", audio_tokens, text_tokens, output_tokens}`.
+ */
+export function geminiTranscriber(key: () => Promise<string | undefined>, model = GEMINI_NOTE_MODEL, f: typeof fetch = fetch): Transcriber {
+  return async (audio, o) => {
+    const k = await key();
+    if (!k) throw new VoiceError(503, "no_key", "the console has no GEMINI_API_KEY (secret store agent-team-console/GEMINI_API_KEY)");
+    const ask = [
+      "Transcribe this voice note word for word, in the language spoken. Output only the transcript: no title, no notes, no timestamps, no speaker labels.",
+      "If nothing is said, output nothing.",
+      ...(o.prompt ? [`The words just before this part were: "${o.prompt}"`] : []),
+    ].join(" ");
+    const body = { contents: [{ parts: [{ text: ask }, { inline_data: { mime_type: o.mime, data: Buffer.from(audio).toString("base64") } }] }], generationConfig: { temperature: 0 } };
+    const r = await f(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": k },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const j = (await r.json().catch(() => ({}))) as any;
+    const parts = j?.candidates?.[0]?.content?.parts;
+    const text = Array.isArray(parts) ? parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("").trim() : undefined;
+    if (!r.ok || text === undefined) throw new VoiceError(502, "gemini_refused", `Gemini did not transcribe the note (${r.status}): ${String(j?.error?.message ?? j?.candidates?.[0]?.finishReason ?? "no message").slice(0, 200)}`);
+    const m = j.usageMetadata ?? {};
+    const det = (Array.isArray(m.promptTokensDetails) ? m.promptTokensDetails : []) as { modality?: string; tokenCount?: number }[];
+    const of = (mod: string) => det.filter((x) => x.modality === mod).reduce((a, x) => a + (x.tokenCount ?? 0), 0);
+    const usage = { provider: "gemini", model, audio_tokens: of("AUDIO"), text_tokens: of("TEXT"), output_tokens: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0) };
+    return { text, provider: "gemini", model, usage };
+  };
+}
+
+/**
+ * OpenAI first; when it fails (429 no credits, a 5xx, a timeout, no key) the same part goes to the backup.
+ * Both failing is one error naming both, so the part is named unheard and the owner is told.
+ */
+export function fallbackTranscriber(primary: Transcriber, backup: Transcriber, log: (m: string) => void = (m) => console.warn(m)): Transcriber {
+  return async (audio, o) => {
+    try {
+      return await primary(audio, o);
+    } catch (e1) {
+      log(`[voice] ${o.filename}: ${(e1 as Error).message.slice(0, 200)}; trying the backup transcriber`);
+      try {
+        return await backup(audio, o);
+      } catch (e2) {
+        throw new VoiceError(502, "transcribe_failed", `${(e1 as Error).message.slice(0, 150)} | ${(e2 as Error).message.slice(0, 150)}`);
+      }
+    }
   };
 }
 
@@ -202,7 +277,18 @@ export const DELIVER_CHECK_MS = 2 * 60_000;
 export const DELIVER_TRIES = 10;
 /** notes older than this are not checked again (a note that old in the chat's tail cannot be told from one missing). */
 export const DELIVER_WINDOW_MS = 6 * 3600_000;
+/** a note or message he sent that the desk's chat still lacks this long after: /api/health `voiceSend` alerts. */
+export const UNDELIVERED_ALERT_MS = 10 * 60_000;
 export const NOT_DELIVERED_RETRYING = "not delivered yet, retrying";
+/**
+ * Exactly once: a note's request id never changes while it may still be in flight. T3 and the console's held
+ * sends both drop a repeat of an id they hold, so a re-send under the same id adds no copy, however long T3 is down or
+ * slow. Only a note proved absent (`seen` = false: a fresh read of the thread, T3's queue listed, nothing held) after
+ * REID_AFTER sends under one id gets a new id (one generation more), and is checked again just before that send.
+ */
+export const REID_AFTER = 30;
+/** the one request id of a note at generation `gen`. */
+export const noteRequestId = (id: string, gen = 0) => (gen > 0 ? `voice-note-chat-${id}-g${gen}` : `voice-note-chat-${id}`);
 
 export interface NoteStart {
   note: VoiceNote;
@@ -240,8 +326,14 @@ export interface NotesDeps {
    * is the note in its chat's thread now (its head line carries the note id)? undefined = cannot tell. A
    * posted note it does not find DELIVER_CHECK_MS after the post is re-sent.
    */
-  seen?: (id: string) => Promise<boolean | undefined>;
+  /**
+   * true: in the chat; "queued": waiting to go in (never re-sent then); false: proved absent (a fresh thread read, T3's
+   * queue listed, nothing held), the only answer that may give a note a new request id; undefined: cannot tell now.
+   */
+  seen?: (id: string) => Promise<boolean | "queued" | undefined>;
   /** a posted note was not in the chat at its check (first miss), or its tries ran out (`gaveUp`); never awaited. */
+  /** parts of a note neither transcriber turned into words (once a note): the owner's WhatsApp alert. */
+  onUnheard?: (u: { id: string; world: string; milestoneId?: string; parts: number[]; of: number; audio: string; page?: string; error?: string }) => void;
   onUndelivered?: (u: { id: string; world: string; milestoneId?: string; tries: number; ms: number; gaveUp: boolean; postedAt: string; words: string }) => void;
 }
 
@@ -417,7 +509,7 @@ export function createVoiceNotes(d: NotesDeps) {
     try {
       const t = await d.transcribe(audio, { mime: mime.split(";")[0], filename: `${id}-${n}.${audioExt(mime) ?? "webm"}`, ...(prev ? { prompt: prev.slice(-PROMPT_TAIL) } : {}) });
       const cost = noteCost(t.usage, sec);
-      db.prepare("UPDATE voice_note_segments SET text = ?, usage = ?, cost_usd = ?, error = NULL WHERE note_id = ? AND n = ?").run(t.text.trim(), t.usage ? JSON.stringify(t.usage).slice(0, 2000) : null, cost, id, n);
+      db.prepare("UPDATE voice_note_segments SET text = ?, usage = ?, cost_usd = ?, provider = ?, error = NULL WHERE note_id = ? AND n = ?").run(t.text.trim(), t.usage ? JSON.stringify(t.usage).slice(0, 2000) : null, cost, t.provider ?? "openai", id, n);
       retotal(id);
       return t.text.trim();
     } catch (e) {
@@ -427,12 +519,43 @@ export function createVoiceNotes(d: NotesDeps) {
     }
   }
 
+  /**
+   * The note's words, part by part. A part neither transcriber could turn into words is one line with its audio link
+   * (never an empty arrival); every part unheard is one line for the whole note.
+   */
+  function wordsOf(rows: { n: number; text: string | null; seconds: number }[], segments: number, unheard: Set<number>, audioUrl: string): string {
+    const parts = rows.filter((r) => r.n < segments);
+    if (parts.length && parts.every((r) => unheard.has(r.n))) return `${UNHEARD_LINE}; audio: ${audioUrl}${parts.length > 1 ? ` (${parts.length} parts: ${parts.map((r) => `${audioUrl}?part=${r.n}`).join(" , ")})` : ""}`;
+    let at = 0;
+    const said: string[] = [];
+    for (const r of parts) {
+      if (unheard.has(r.n)) said.push(`[Part ${r.n + 1}, from ${clock(at)}, could not be turned into words. Its audio is kept: ${audioUrl}?part=${r.n}]`);
+      else if (r.text?.trim()) said.push(r.text.trim());
+      at += r.seconds;
+    }
+    return said.join("\n\n");
+  }
+
+  /** the owner hears once per note that some of it could not be turned into words (one WhatsApp, outside the alert caps). */
+  function tellUnheard(id: string, parts: number[], of: number, audioUrl: string, page?: string) {
+    const r = db.prepare("UPDATE voice_notes SET unheard_at = ? WHERE id = ? AND unheard_at IS NULL").run(iso(), id);
+    if (!r.changes) return;
+    const errs = (db.prepare("SELECT error FROM voice_note_segments WHERE note_id = ? AND text IS NULL AND error IS NOT NULL ORDER BY n").all(id) as { error: string }[]).map((x) => x.error);
+    try {
+      d.onUnheard?.({ id, world, ...(ms ? { milestoneId: ms } : {}), parts, of, audio: audioUrl, ...(page ? { page } : {}), ...(errs[0] ? { error: errs[0] } : {}) });
+    } catch (e) {
+      console.error("voice note onUnheard:", e);
+    }
+  }
+
   /** The chat message: the head (source, time, length, cost, id), the audio link, then his words. */
   function message(n: VoiceNote, words: string, audioUrl: string, parts: number): string {
     const when = `${n.startedAt.slice(0, 10)} ${n.startedAt.slice(11, 16)}Z`;
     const back = pointsBackLine(words);
+    // who turned it into words: the model of each part (OpenAI's, or Gemini's when OpenAI failed)
+    const used = [...new Set((db.prepare("SELECT provider, usage FROM voice_note_segments WHERE note_id = ? AND text IS NOT NULL ORDER BY n").all(n.id) as { provider: string | null; usage: string | null }[]).map((r) => partModel(r.provider, r.usage)))];
     return [
-      `${VOICE_NOTE_HEAD} (${NOTE_SOURCE}), ${when} · ${clock(n.seconds)} · ${usd(n.costUsd)} (${NOTE_MODEL}) · ${n.id}`,
+      `${VOICE_NOTE_HEAD} (${NOTE_SOURCE}), ${when} · ${clock(n.seconds)} · ${usd(n.costUsd)} (${used.length ? used.join(" + ") : NOTE_MODEL}) · ${n.id}`,
       ...(back ? [back] : []),
       `Audio: ${audioUrl}${parts > 1 ? ` (${parts} parts)` : ""}`,
       "",
@@ -477,16 +600,9 @@ export function createVoiceNotes(d: NotesDeps) {
     const skip = new Set(o.skip ?? []);
     for (let i = 0; i < o.segments; i++) if (!skip.has(i) && !unheard.has(i) && rows.find((r) => r.n === i)?.text == null) missing.push(i);
     if (missing.length) throw new VoiceError(409, "segments_missing", `segments not in yet: ${missing.join(", ")}`);
-    let at = 0;
-    const said: string[] = [];
-    for (const r of rows) {
-      if (r.n >= o.segments) continue;
-      if (unheard.has(r.n)) said.push(`[Part ${r.n + 1}, from ${clock(at)}, could not be turned into words. Its audio is kept: ${audioUrl}?part=${r.n}]`);
-      else if (r.text?.trim()) said.push(r.text.trim());
-      at += r.seconds;
-    }
-    const words = said.join("\n\n");
+    const words = wordsOf(rows, o.segments, unheard, audioUrl);
     const page = o.page?.trim() || (db.prepare("SELECT page FROM voice_notes WHERE id = ?").get(id) as { page: string | null } | undefined)?.page || undefined;
+    if (unheard.size) tellUnheard(id, [...unheard], rows.filter((r) => r.n < o.segments && !skip.has(r.n)).length, audioUrl, page);
     if (!words) {
       db.prepare("UPDATE voice_notes SET state = 'empty', finished_at = ? WHERE id = ?").run(iso(), id);
       return { note: must(id) };
@@ -509,7 +625,7 @@ export function createVoiceNotes(d: NotesDeps) {
     if (!d.desk) throw new VoiceError(503, "desk_unavailable", "this chat has no desk to post the note to");
     try {
       db.prepare("UPDATE voice_notes SET post_json = ? WHERE id = ?").run(JSON.stringify({ audioUrl, segments: o.segments, ...(page ? { page } : {}) }), id);
-      const r = await d.desk.send(message(n, words, audioUrl, o.segments), page, `voice-note-chat-${id}`);
+      const r = await d.desk.send(message(n, words, audioUrl, o.segments), page, noteRequestId(id));
       // only a send T3 took is delivered; a pending or queued one is checked in the chat after DELIVER_CHECK_MS.
       const at = iso();
       db.prepare("UPDATE voice_notes SET state = 'posted', posted_at = ?, post_error = NULL, delivered_at = ? WHERE id = ?").run(at, r && r.pending === false ? at : null, id);
@@ -520,6 +636,59 @@ export function createVoiceNotes(d: NotesDeps) {
     forward(id);
     filed(false);
     return { note: must(id) };
+  }
+
+  /**
+   * a note that went out (or was filed on a card) with parts no transcriber heard is heard again: its kept
+   * audio goes to the transcriber once more (OpenAI, then the backup), and when every part now has words the note is
+   * posted to its chat as his message once more, under its next request id (the first copy, with no words, already
+   * holds the first one, so T3 would drop a same-id copy). `force`: re-post even when no part was unheard.
+   */
+  async function redo(id: string, o: { audioBase: string; force?: boolean }): Promise<{ note: VoiceNote; heard: number[]; still: number[]; reposted: boolean }> {
+    const n0 = must(id);
+    if (n0.state === "recording" || n0.state === "discarded") throw new VoiceError(409, "note_open", `voice note ${id} is ${n0.state}; it finishes by itself`);
+    const row = db.prepare("SELECT * FROM voice_notes WHERE id = ?").get(id) as any;
+    const prev = row.post_json ? (JSON.parse(row.post_json) as { audioUrl: string; segments: number; page?: string }) : undefined;
+    const acc = row.accept_json ? (JSON.parse(row.accept_json) as { segments: number; skip?: number[]; audioBase?: string }) : undefined;
+    // the link the note went out with (his public one), never the address this redo was called on
+    const audioUrl = prev?.audioUrl ?? `${acc?.audioBase ?? o.audioBase}/${id}/audio`;
+    const rows = db.prepare("SELECT n, text, error, file, mime, seconds FROM voice_note_segments WHERE note_id = ? ORDER BY n").all(id) as { n: number; text: string | null; error: string | null; file: string; mime: string; seconds: number }[];
+    const segments = prev?.segments ?? acc?.segments ?? (rows.length ? Math.max(...rows.map((r) => r.n)) + 1 : 0);
+    const heard: number[] = [];
+    const still = new Set<number>();
+    for (const r of rows) {
+      if (r.n >= segments || r.text != null) continue;
+      if (!fs.existsSync(r.file)) {
+        still.add(r.n);
+        continue;
+      }
+      const t = await transcribePart(id, r.n, new Uint8Array(fs.readFileSync(r.file)), r.mime, r.seconds).catch(() => undefined);
+      if (t != null) {
+        r.text = t;
+        heard.push(r.n);
+      } else still.add(r.n);
+    }
+    if (!heard.length && !o.force) return { note: must(id), heard, still: [...still], reposted: false };
+    if (still.size && !o.force) return { note: must(id), heard, still: [...still], reposted: false };
+    const words = wordsOf(rows, segments, still, audioUrl);
+    if (!words) return { note: must(id), heard, still: [...still], reposted: false };
+    if (!d.desk) throw new VoiceError(503, "desk_unavailable", "this chat has no desk to post the note to");
+    const page = prev?.page ?? (row.page as string | null) ?? undefined;
+    const gen = (row.deliver_gen as number) + 1;
+    db.prepare("UPDATE voice_notes SET transcript = ?, finished_at = COALESCE(finished_at, ?), post_json = ?, deliver_gen = ?, gen_tries = 0, deliver_tries = 0, deliver_error = NULL WHERE id = ?").run(
+      words.slice(0, 200_000),
+      iso(),
+      JSON.stringify({ audioUrl, segments, ...(page ? { page } : {}) }),
+      gen,
+      id,
+    );
+    const n = must(id);
+    const s = await d.desk.send(message(n, words, audioUrl, segments), page, noteRequestId(id, gen));
+    const at = iso();
+    db.prepare("UPDATE voice_notes SET state = 'posted', posted_at = ?, post_error = NULL, delivered_at = ? WHERE id = ?").run(at, s && s.pending === false ? at : null, id);
+    forward(id);
+    console.log(`[voice] ${id}: heard again (parts ${heard.map((x) => x + 1).join(", ") || "none"}), re-posted under ${noteRequestId(id, gen)}`);
+    return { note: must(id), heard, still: [...still], reposted: true };
   }
 
   /**
@@ -563,21 +732,25 @@ export function createVoiceNotes(d: NotesDeps) {
   const delivering = new Set<string>();
   /**
    * every posted note not delivered yet, DELIVER_CHECK_MS after its post: in the chat (`seen`) = delivered;
-   * else re-sent with its own request id (T3 drops a copy it already took) and named: the chat shows
+   * else re-sent under its one request id (T3 and the held sends drop a copy they already hold) and named: the chat shows
    * NOT_DELIVERED_RETRYING on it, the first miss and the last try go to `onUndelivered` (the Delivery Manager's line).
    */
-  async function deliverCheck(): Promise<{ checked: number; delivered: number; resent: number; failed: number }> {
+  async function deliverCheck(only?: string): Promise<{ checked: number; delivered: number; resent: number; failed: number }> {
     const out = { checked: 0, delivered: 0, resent: 0, failed: 0 };
     const t = now();
+    // `only`: his Send again on one note in the chat, at once (no 2-minute wait), within the same window.
     const rows = db
-      .prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at <= @cut AND posted_at >= @since ORDER BY posted_at")
-      .all({ ...sc, cut: iso(t - DELIVER_CHECK_MS), since: iso(t - DELIVER_WINDOW_MS) }) as any[];
+      .prepare(
+        `SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m AND state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at >= @since ${only ? "AND id = @only" : "AND posted_at <= @cut"} ORDER BY posted_at`,
+      )
+      .all({ ...sc, since: iso(t - DELIVER_WINDOW_MS), ...(only ? { only } : { cut: iso(t - DELIVER_CHECK_MS) }) }) as any[];
     for (const r of rows) {
       if (delivering.has(r.id)) continue;
       delivering.add(r.id);
       out.checked++;
       try {
         const there = d.seen ? await d.seen(r.id).catch(() => undefined) : undefined;
+        if (there === "queued") continue; // it waits to go in: a re-send would only add a copy
         if (there) {
           db.prepare("UPDATE voice_notes SET delivered_at = ?, deliver_error = NULL WHERE id = ?").run(iso(), r.id);
           out.delivered++;
@@ -588,12 +761,21 @@ export function createVoiceNotes(d: NotesDeps) {
         const post = JSON.parse(r.post_json) as { audioUrl: string; segments: number; page?: string };
         let error: string = NOT_DELIVERED_RETRYING;
         let took = false;
+        // the same request id every try: a copy T3 or the console already holds is dropped, never doubled.
+        // A new id only when the note is proved absent (`there === false`, read just now) after REID_AFTER tries under this one.
+        let gen = r.deliver_gen as number;
+        let genTries = (r.gen_tries as number) + 1;
+        if (there === false && genTries > REID_AFTER) {
+          gen++;
+          genTries = 1;
+          console.warn(`[voice] ${r.id}: not in the desk thread, its queue or the held sends after ${REID_AFTER} tries under one id; sent once under ${noteRequestId(r.id, gen)}`);
+        }
+        db.prepare("UPDATE voice_notes SET deliver_gen = ?, gen_tries = ? WHERE id = ?").run(gen, genTries, r.id);
         try {
-          // past DELIVER_TRIES a fresh request id: T3 keeps a taken id's receipt, and a send it took and then lost (22 Nov: T3
-          // restarted mid-queue) came back as a duplicate on every re-send; `seen` above keeps a delivered note from going twice
-          const crid = tries > DELIVER_TRIES ? `voice-note-chat-${r.id}-r${tries}` : `voice-note-chat-${r.id}`;
-          const s = await d.desk!.send(message(n, r.transcript ?? "", post.audioUrl, post.segments), post.page, crid);
+          const s = await d.desk!.send(message(n, r.transcript ?? "", post.audioUrl, post.segments), post.page, noteRequestId(r.id, gen));
           took = !!s && s.pending === false;
+          // the reason the chat shows on the note (a stuck note says why, never only "retrying")
+          if (!took) error = `${NOT_DELIVERED_RETRYING} (${(s as { queued?: boolean } | undefined)?.queued ? "T3 is down: the console holds it and sends it once T3 is back" : "T3 is busy and has not taken it yet"})`;
         } catch (e) {
           error = `${NOT_DELIVERED_RETRYING} (${(e as Error).message.slice(0, 200)})`;
         }
@@ -615,6 +797,19 @@ export function createVoiceNotes(d: NotesDeps) {
       }
     }
     return out;
+  }
+
+  /**
+   * his Send again on a note the chat shows not delivered ("screenshots and images i paste but dont seem to be
+   * sent"): one check and re-send now, under the note's one request id (a copy T3 already holds is dropped, never doubled).
+   */
+  async function redeliver(id: string): Promise<{ note: VoiceNote; delivered: boolean }> {
+    const n = must(id);
+    if (n.state !== "posted") throw new VoiceError(409, "not_posted", `voice note ${id} is ${n.state}: nothing to send again`);
+    if (n.deliveredAt) return { note: n, delivered: true };
+    await deliverCheck(id);
+    const after = must(id);
+    return { note: after, delivered: !!after.deliveredAt };
   }
 
   /** posted notes the chat does not hold yet (retrying, or failed in the last day): the chat shows each plainly. */
@@ -671,7 +866,7 @@ export function createVoiceNotes(d: NotesDeps) {
     return (db.prepare("SELECT * FROM voice_notes WHERE tenant_id = @w AND milestone_id IS @m ORDER BY started_at DESC LIMIT @n").all({ ...sc, n: Math.min(200, Math.max(1, limit)) }) as any[]).map(rowTo);
   }
 
-  return { start, early, segment, finish, accept, resume, deliverCheck, undelivered, timing, discard, audio, list, get };
+  return { start, early, segment, finish, accept, redo, resume, deliverCheck, redeliver, undelivered, timing, discard, audio, list, get };
 }
 export type VoiceNotes = ReturnType<typeof createVoiceNotes>;
 
@@ -793,6 +988,20 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
       return c.json(n.early(c.req.param("nid") ?? "", Number(c.req.param("n")), Number(c.req.header("x-offset")), buf, c.req.header("content-type") ?? ""));
     }),
   );
+  // hear a note's unheard parts again (OpenAI, then Gemini) and, once every part has words, post it again as his message.
+  if (!open)
+    api.post(
+      `${prefix}/notes/:nid/redo`,
+      guard(async (c, n) => {
+        const b = (await json(c)) as { force?: unknown };
+        // a note with no kept link (a card answer) gets the console's public address, not the caller's
+        const pub = sites().teamUrl.replace(/\/$/, "");
+        const audioBase = /^https?:\/\/(localhost|127\.|100\.)/.test(base(c)) && !/example\.com/.test(pub) ? `${pub}${c.req.path.replace(/\/notes\/.*$/, "")}/notes` : base(c);
+        return c.json(await n.redo(c.req.param("nid") ?? "", { audioBase, force: b.force === true }));
+      }, false),
+    );
+  // his Send again on a voice note the chat shows not delivered yet: one re-send now.
+  if (!open) api.post(`${prefix}/notes/:nid/redeliver`, guard(async (c, n) => c.json(await n.redeliver(c.req.param("nid") ?? ""))));
   api.post(`${prefix}/notes/:nid/discard`, guard((c, n) => c.json(n.discard(c.req.param("nid") ?? ""))));
   if (open) return;
   api.get(
@@ -824,8 +1033,24 @@ export function voiceSendHealth(db: DB, nowMs = Date.now()) {
   const slow = sent.filter((x) => x.ms > SEND_SLOW_MS);
   const stuck = (db.prepare("SELECT id FROM voice_notes WHERE accepted_at IS NOT NULL AND accepted_at < ? AND state IN ('recording', 'failed')").all(new Date(nowMs - SEND_STUCK_MS).toISOString()) as { id: string }[]).map((r) => r.id);
   const last = sent.at(-1);
+  // merged here (one in, one out): notes of the last day with a part neither transcriber turned into words.
+  const unheard = (db.prepare("SELECT DISTINCT v.id FROM voice_notes v JOIN voice_note_segments s ON s.note_id = v.id WHERE v.started_at >= ? AND v.state != 'discarded' AND s.text IS NULL AND s.error IS NOT NULL AND v.state != 'recording' ORDER BY v.id").all(since) as { id: string }[]).map((r) => r.id);
+  // merged here (one in, one out): what he sent that the desk's chat still lacks after UNDELIVERED_ALERT_MS:
+  // a voice note re-sent each minute, or a typed message (his pasted images ride on it) the console holds while T3 is down.
+  const late = new Date(nowMs - UNDELIVERED_ALERT_MS).toISOString();
+  const undelivered = (
+    db.prepare("SELECT id FROM voice_notes WHERE state = 'posted' AND delivered_at IS NULL AND post_json IS NOT NULL AND posted_at < ? AND posted_at >= ? ORDER BY posted_at").all(late, new Date(nowMs - DELIVER_WINDOW_MS).toISOString()) as { id: string }[]
+  ).map((r) => r.id);
+  const hasOutbox = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'desk_outbox'").get();
+  const held = hasOutbox
+    ? (db.prepare("SELECT client_request_id id FROM desk_outbox WHERE sent_at IS NULL AND failed_at IS NULL AND created_at < ? ORDER BY seq").all(late) as { id: string }[]).map((r) => r.id)
+    : [];
   return {
-    state: stuck.length || slow.length ? "alert" : sent.length ? "ok" : "idle",
+    state: stuck.length || slow.length || unheard.length || undelivered.length || held.length ? "alert" : sent.length ? "ok" : "idle",
+    unheard,
+    undelivered,
+    held,
+    undeliveredAfterMs: UNDELIVERED_ALERT_MS,
     limitMs: SEND_SLOW_MS,
     notes: sent.length,
     ...(ms.length ? { medianMs: ms[Math.floor((ms.length - 1) / 2)], slowestMs: ms.at(-1) } : {}),

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { ThoughtBox } from "@/components/afterClose";
 import { CardFeedback } from "@/components/cardFeedback";
+import { useNoteTab } from "@/voice/NoteProvider";
 
 /**
  * vn_e00f1134: an answered card collapses in place to this one green row (the owner, vn_e00f1134: "the card shrinks into a row
@@ -40,6 +41,10 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
   const [commented, setCommented] = useState(false);
   const [back, setBack] = useState<{ s: "busy" } | { s: "failed"; line: string }>();
   const ref = useRef<HTMLDivElement>(null);
+  const tab = useNoteTab();
+  // E948-S174 (vn_3b3cf02e): a voice note still on its way spins on this row, a failed one says why with Send again
+  const going = !!entry.voice && !entry.failed;
+  const failed = entry.voice ? entry.failed : undefined;
   useEffect(() => sentMounted(slot), [slot]);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -98,7 +103,7 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
   return (
     <div
       ref={ref}
-      className={cn("min-w-0 touch-pan-y rounded-xl border border-emerald-600/40 bg-card px-3 py-2 text-card-foreground", className)}
+      className={cn("min-w-0 touch-pan-y rounded-xl border bg-card px-3 py-2 text-card-foreground", entry.voice || entry.dropped ? "border-border" : "border-emerald-600/40", className)}
       style={dx ? { transform: `translateX(${dx}px)`, opacity: Math.max(0.2, 1 - Math.abs(dx) / 300), transition: dragging ? "none" : "transform 180ms ease-out, opacity 180ms ease-out" } : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -106,27 +111,47 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
       onPointerCancel={onPointerEnd}
       data-testid="sent-row"
       data-sent-slot={slot}
+      data-sent-state={going ? "sending" : failed ? "failed" : entry.dropped ? "empty" : "sent"}
       data-inbox-card={slot}
       role="status"
       aria-live="polite"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <span className="flex shrink-0 items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400" data-testid="sent-row-word">
-          <Check className="h-4 w-4" strokeWidth={3} aria-hidden /> Sent
-        </span>
+        {going ? (
+          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground" data-testid="sent-row-word">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Sending
+          </span>
+        ) : entry.dropped ? (
+          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground" data-testid="sent-row-word">
+            Not sent
+          </span>
+        ) : failed ? (
+          <span className="flex shrink-0 items-center gap-1 font-medium text-amber-700 dark:text-amber-400" data-testid="sent-row-word">
+            Not sent yet
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400" data-testid="sent-row-word">
+            <Check className="h-4 w-4" strokeWidth={3} aria-hidden /> Sent
+          </span>
+        )}
         <span className="shrink-0 text-muted-foreground" data-testid="sent-row-said">
           {entry.said}
         </span>
         <span className="min-w-0 basis-full truncate text-foreground/85 sm:basis-0 sm:flex-1" title={entry.title} data-testid="sent-row-title">
           {entry.title}
         </span>
-        <span className="ml-auto flex shrink-0 gap-2">
-          {!open && (
+        <span className={cn("ml-auto flex shrink-0 gap-2", going && "hidden")}>
+          {failed && (
+            <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} onClick={() => tab.retry(entry.voice!)} data-testid="sent-row-again">
+              Send again
+            </Button>
+          )}
+          {!open && !failed && !entry.dropped && (
             <Button size="sm" variant="outline" className={cn("h-7 text-xs", PHONE_TAP)} onClick={() => setOpen(true)} data-testid="sent-row-comment">
               <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden /> Add comment
             </Button>
           )}
-          {entry.back && back?.s !== "failed" && (
+          {entry.back && back?.s !== "failed" && !entry.voice && (
             <Button size="sm" variant="ghost" className={cn("h-7 text-xs text-muted-foreground", PHONE_TAP)} disabled={back?.s === "busy"} onClick={() => void bringBack()} data-testid="sent-row-back">
               {back?.s === "busy" ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Undo2 className="h-3.5 w-3.5" aria-hidden />} {back?.s === "busy" ? "Bringing it back…" : "Bring it back"}
             </Button>
@@ -136,6 +161,11 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
           </Button>
         </span>
       </div>
+      {failed && (
+        <p className="pt-1 text-xs text-amber-700 dark:text-amber-400" role="alert" data-testid="sent-row-failed">
+          Your words are kept. {failed.charAt(0).toUpperCase() + failed.slice(1)}{/[.?!]$/.test(failed) ? "" : "."}
+        </p>
+      )}
       {entry.detail && (
         <p className="pt-1 text-xs text-muted-foreground" data-testid="sent-row-detail">
           {entry.detail}
@@ -172,5 +202,6 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
  */
 export function SentOr({ slot, children }: { slot: string; children: ReactNode }) {
   const sent = useSent(slot);
-  return sent ? <SentRow slot={slot} entry={sent} /> : <>{children}</>;
+  // E948-S174: the card's slot for a voice note sent from inside it (it collapses to this row at once)
+  return sent ? <SentRow slot={slot} entry={sent} /> : <div className="contents" data-card-slot={slot}>{children}</div>;
 }

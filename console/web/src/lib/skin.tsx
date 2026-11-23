@@ -70,6 +70,8 @@ export type ScreenId =
   | "goalSets"
   /** Posting limits: every rule that can stop a post, who set it, where to change it; both skins, under Settings. */
   | "postingLimits"
+  /** Post stats: every post's likes, replies and views; both skins (the owner: "I don't mind having it in both places"). */
+  | "postStats"
   /** Settings (docs/design/console.md): readiness, red lines and What you build on top, then every operator page (console only). */
   | "settings";
 
@@ -141,7 +143,7 @@ const CONSOLE_WORDS: Words = {
 };
 
 // Social-only screens are left out of the console skin.
-const ALL_SCREENS: ScreenId[] = ["goalSets", "team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits", "yourAi", "postingLimits"];
+const ALL_SCREENS: ScreenId[] = ["goalSets", "team", "company", "settings", "book", "chat", "messages", "milestones", "spines", "personas", "runs", "threads", "tickets", "hosts", "secrets", "services", "teamSkills", "testers", "seats", "browserAuth", "credits", "yourAi", "postingLimits", "postStats"];
 
 /**
  * the social skin is the console with a violet theme and favicon, one
@@ -164,7 +166,7 @@ export const SKINS: Record<SkinId, Skin> = {
       },
       milestones: "Campaigns", milestone: "campaign", milestonesWord: "campaigns", addMilestone: "Add campaign", teamSkills: "Skills" },
     // Plan §3: hidden are Hosts, Seats, Threads, Secrets (keys come as approval cards), Testers and the Book.
-    screens: new Set<ScreenId>(["goalSets", "performance", "team", "chat", "messages", "milestones", "spines", "personas", "runs", "tickets", "services", "teamSkills", "credits", "browserAuth", "setup", "postingLimits"]),
+    screens: new Set<ScreenId>(["goalSets", "performance", "team", "chat", "messages", "milestones", "spines", "personas", "runs", "tickets", "services", "teamSkills", "credits", "browserAuth", "setup", "postingLimits", "postStats"]),
     reach: new Set(SOCIAL_REACH),
     campaigns: true,
     favicon: { svg: "/favicon-social.svg", touch: "/apple-touch-icon-social.png" },

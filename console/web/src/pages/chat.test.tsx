@@ -485,7 +485,8 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     expect(within(notes[1]).getByTestId("chat-undelivered-state").textContent).toMatch(/^Voice note not delivered\. Its words are kept/);
   });
 
-  it("a send queued while T3 is down shows as its own bubble: '✓ Sent', the console has it", async () => {
+  // E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e): the console holds it, the desk does not yet: it spins, never ✓ Sent
+  it("a send queued while T3 is down shows as its own bubble, spinning Sending until the desk has it", async () => {
     const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));
     const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true, queued: true });
     renderChat();
@@ -496,7 +497,8 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     await waitFor(() => expect(send).toHaveBeenCalled());
     const q = await screen.findByTestId("chat-queued");
     expect(q.textContent).toContain("move it to PLAN-17");
-    expect(q.textContent).toContain("✓ Sent · the desk reads it as soon as T3 answers");
+    expect(q.textContent).toContain("Sending · the desk gets it as soon as T3 answers");
+    expect(q.textContent).not.toContain("✓");
     expect(box.value).toBe("");
     expect(screen.queryByTestId("chat-send-error")).toBeNull();
   });

@@ -13,8 +13,8 @@ import { SidebarNav } from "@/components/Layout";
  * live, the Activity header's rule): green and pulsing when > 0 (static under prefers-reduced-motion), grey otherwise.
  */
 
-// the goals no objective holds sit in the sidebar's folded More objectives; these tests read it open.
-beforeEach(() => localStorage.setItem("sidebar.moreObjectives.open", "1"));
+// with objectives the sidebar lists no other goals; these tests read the goal list of a workspace with none yet.
+beforeEach(() => void vi.spyOn(api, "listScorecards").mockResolvedValue({ nodes: [] } as never));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

@@ -95,7 +95,7 @@ describe("one inbox pattern: what is ready leads its own section", () => {
         const id = s.getAttribute("data-testid");
         const toggle = s.querySelector(`[data-testid="${id}-toggle"]`);
         expect(toggle, `${id} folds`).toBeTruthy();
-        expect(toggle!.querySelector("svg"), `${id} has its chevron`).toBeTruthy();
+        expect(toggle!.querySelector(".fold-chevron"), `${id} has the shared fold chevron`).toBeTruthy();
       }
       // a section holding a ready card still folds when he taps it
       const review = screen.getByTestId("waiting-for-review");

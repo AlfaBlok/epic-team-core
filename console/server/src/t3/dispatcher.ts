@@ -41,7 +41,7 @@ export interface Dispatcher {
   /** `signal` (`--signal TEXT`) is the failure text; one matching "could not start this turn" makes the broker avoid the seat 10 min. */
   done(seat: string, failed?: boolean, signal?: string): Promise<void>;
   /** `status` JSON of the pool (read-only). Optional: a dispatcher without it has no seat counts. */
-  status?(): Promise<{ name: string; capacity: number; available: number }>;
+  status?(): Promise<{ name: string; capacity: number; available: number; ceiling?: number; open?: number }>;
   /** live agent sessions on the dispatcher's host (the main server) vs the infra repo S9 cap; live null = unreadable. */
   sessions?(): Promise<HostSessions>;
 }
@@ -82,7 +82,11 @@ export function runnerDispatcher(run: (args: string[]) => Promise<string>): Disp
     },
     async status() {
       const j = JSON.parse(await run(["status"]));
-      return { name: String(j.name ?? "dispatcher"), capacity: Number(j.capacity), available: Number(j.available) };
+      // the team ceiling (open reservations allowed) and how many are open, when the broker sends them
+      const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : undefined);
+      const ceiling = num(j.ceiling);
+      const open = num(j.open);
+      return { name: String(j.name ?? "dispatcher"), capacity: Number(j.capacity), available: Number(j.available), ...(ceiling !== undefined ? { ceiling } : {}), ...(open !== undefined ? { open } : {}) };
     },
     async sessions() {
       const j = JSON.parse(await run(["sessions"]));

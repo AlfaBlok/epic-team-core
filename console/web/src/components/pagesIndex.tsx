@@ -13,7 +13,9 @@ import { cn } from "@/lib/utils";
 import { PAGES_PATH } from "@/lib/routePaths";
 import type { ScorecardsBody } from "@/api/pursuit-types";
 import { indexScorecards, scorecardHref, SET_NAME } from "@/lib/scorecards";
-import { placePages, wheelCounts, type PlacedPage } from "@/lib/wheelPages";
+import { homeFilesOf, placeHomeFiles, placePages, wheelCounts, type PlacedPage } from "@/lib/wheelPages";
+import { HomeFilesList, useHomeTab } from "@/components/wheelPages";
+import { FoldChevron } from "@/components/foldChevron";
 export { PAGES_PATH };
 
 /**
@@ -82,7 +84,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function Fold({ open, onToggle, className, children, testId }: { open: boolean; onToggle: () => void; className?: string; children: React.ReactNode; testId: string }) {
   return (
     <button type="button" onClick={onToggle} aria-expanded={open} className={cn("flex min-h-[40px] w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-accent md:min-h-[32px]", className)} data-testid={testId}>
-      <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+      <FoldChevron open={open} className="text-muted-foreground" />
       {children}
     </button>
   );
@@ -138,8 +140,8 @@ export function NameForm({ p, onDone, label }: { p: PageView; onDone: () => void
  * Every page sits in the wheel it was made for (vn_dad96778): one line per objective in his order with its pages,
  * opening that objective's Pages tab, then the pages no objective holds. The list below still holds them all together.
  */
-function ByWheel({ placed, nodes }: { placed: PlacedPage[]; nodes: ScorecardsBody["nodes"] }) {
-  const wheels = wheelCounts(placed, nodes);
+function ByWheel({ placed, nodes, files }: { placed: PlacedPage[]; nodes: ScorecardsBody["nodes"]; files?: Map<string, unknown[]> }) {
+  const wheels = wheelCounts(placed, nodes, files);
   const loose = placed.filter((p) => !p.wheel);
   if (!placed.length) return null;
   const line = (w: { name: string; count: number }) => (
@@ -390,6 +392,18 @@ export function PagesIndexPage() {
     });
 
   const searching = q.trim().length > 0;
+  // every page and note kept in the repo that the Pages tabs home, here together; the ones no objective
+  // holds are named, so none is missing anywhere.
+  const homes = useHomeTab("all", "pages");
+  const homeIx = useMemo(() => indexScorecards(sets.data), [sets.data]);
+  const homePlaced = useMemo(() => placeHomeFiles(homes.data?.entries, homeIx), [homes.data, homeIx]);
+  // each objective's kept files exactly as its Pages tab lists them, so the line's count is the tab's.
+  const homeByWheel = useMemo(() => new Map((sets.data?.nodes ?? []).map((n) => [n.id, homeFilesOf(homes.data?.entries, homeIx, n.id)])), [sets.data, homes.data, homeIx]);
+  const homeShown = useMemo(() => {
+    const words = q.trim().toLowerCase();
+    const all = homes.data?.entries ?? [];
+    return words ? all.filter((e) => `${e.title} ${e.row ?? ""} ${e.open}`.toLowerCase().includes(words)) : all;
+  }, [homes.data, q]);
   const shown = useMemo(() => (data ? filterGroups(data.groups, q) : []), [data, q]);
   const repos = useMemo(() => {
     const order: string[] = [];
@@ -417,15 +431,18 @@ export function PagesIndexPage() {
       <PageHeader title="Pages" description="Every page the team made, together: by objective, then by repo and epic. Each objective has its own Pages tab." />
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the page list…</div>}
       {error && <div className="text-sm text-destructive">Could not read the page list: {error.message}</div>}
+      {/* the search first, above everything (the owner, 22 Nov: "Here we need a search function"). */}
+      {data && data.total > 0 && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input type="search" aria-label="Search pages" className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search pages" data-testid="pages-search" />
+        </div>
+      )}
       {data && !searching && <PinnedPages pages={data.pinned ?? []} />}
-      {placed && !searching && <ByWheel placed={placed} nodes={sets.data?.nodes ?? []} />}
+      {placed && !searching && <ByWheel placed={placed} nodes={sets.data?.nodes ?? []} files={homeByWheel} />}
       {data && data.total === 0 && <div className="text-sm text-muted-foreground">No pages yet: docs/pages/registry.json names them.</div>}
       {data && data.total > 0 && (
         <div className="grid gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input type="search" aria-label="Search pages" className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search pages, epics, repos…" data-testid="pages-search" />
-          </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span data-testid="pages-summary">
               {searching ? `${plural(shownPages, "page")} match, of ${data.total}` : `${plural(data.total, "page")} in ${plural(data.groups.length, "epic")} across ${plural(repos.length, "repo")}`}
@@ -467,6 +484,16 @@ export function PagesIndexPage() {
           );
         })}
       </div>
+      {(homes.data || homes.loading) && (
+        <div className="grid gap-1 border-t border-border pt-3">
+          <HomeFilesList entries={homeShown} loading={homes.loading} title="Pages and notes kept in the repo" empty={q.trim() ? `No page or note in the repo matches “${q.trim()}”.` : "No page or note in the repo yet."} testId="pages-home-files" />
+          {homes.data && !q.trim() && (
+            <p className="text-xs text-muted-foreground" data-testid="pages-home-files-summary">
+              {homes.data.entries.length - homePlaced.notPlaced.length} sit on an objective's Pages tab, {homePlaced.notPlaced.length} on none yet. Every one of the {homes.data.homed} files the Pages tabs keep is in this list.
+            </p>
+          )}
+        </div>
+      )}
       {data && data.total > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="pages-rule">
           {data.total} pages. The row that makes a page adds it here; an hourly check and the weekly harmonizer pass name any page without a parent.

@@ -65,8 +65,11 @@ describe("the SocialApp Home: key results with a traffic light each", () => {
     expect((await screen.findByTestId("goal-headline")).textContent).toBe("5 testers using SocialApp");
     expect(screen.getByTestId("goal-count").textContent).toBe("0 of 5");
     const krs = screen.getAllByTestId("goal-kr");
-    expect(krs.map((k) => k.getAttribute("data-light"))).toEqual(["red", "amber", "green"]);
-    expect(krs[1].querySelector('[data-testid="goal-kr-count"]')!.textContent).toBe("88 of 500by 22 Nov");
+    // a table: key result, target, current in its colour; green first, then amber, then red (vn_68cda1fe)
+    expect(screen.getByTestId("goal-krs-head").textContent).toBe("Key resultTargetCurrent");
+    expect(krs.map((k) => k.getAttribute("data-light"))).toEqual(["green", "amber", "red"]);
+    expect(krs[1].querySelector('[data-testid="goal-kr-target"]')!.textContent).toBe("500by 22 Nov");
+    expect(krs[1].querySelector('[data-testid="goal-kr-count"]')!.textContent).toBe("88");
     expect(screen.getByTestId("goal-rule").textContent).toBe(RULE);
   });
 

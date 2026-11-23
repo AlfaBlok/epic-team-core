@@ -17,10 +17,12 @@ export function NewApplications() {
   const { data, error } = useQuery(() => (on ? api.listTesters() : Promise.resolve(undefined)), [on], { tag: "inbox" });
   if (!on || error || !data) return null;
   const n = data.newCount ?? data.signups.filter((s) => !s.seenAt && (s.offer || "tester-10").includes("tester-10")).length;
-  const total = data.signups.filter((s) => (s.offer || "tester-10").includes("tester-10")).length;
+  // the same count as the Applications tracker (the team's own tests left out) when the server gives it.
+  const total = data.counted ?? data.signups.filter((s) => (s.offer || "tester-10").includes("tester-10")).length;
   return (
     <section className="mb-6" data-testid="new-applications">
-      <Link to="/testers" className="group block">
+      {/* /testers opens the Applications tracker on its objective; opening it here clears the new count. */}
+      <Link to="/testers" className="group block" onClick={() => void api.markTestersSeen().catch(() => undefined)}>
         <Card className={n ? "border-emerald-600/60 transition-colors group-hover:border-emerald-600" : "transition-colors group-hover:border-foreground/20"}>
           <CardContent className="flex flex-wrap items-center gap-x-3 gap-y-1 p-4 text-sm">
             <Users className="h-4 w-4 shrink-0" />
@@ -28,7 +30,7 @@ export function NewApplications() {
               {n ? `${n} new application${n === 1 ? "" : "s"}` : "No new applications"}
             </span>
             <span className="text-muted-foreground">
-              {total} tester application{total === 1 ? "" : "s"} in all, from epicspine.dev/testers · open the list
+              {total} application{total === 1 ? "" : "s"} in all, the team's own tests left out · open the Applications tracker
             </span>
           </CardContent>
         </Card>

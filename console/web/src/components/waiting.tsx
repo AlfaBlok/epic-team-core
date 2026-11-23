@@ -1,4 +1,6 @@
+import { cardKey } from "@/lib/countCheck";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { aboutFrom } from "@/lib/about";
 import { askCard as voiceAsk, SectionCallButton } from "@/voice/SectionCall";
 import { ParkButton, parkAsk } from "@/components/parkButton";
 import { useSlotReady } from "@/components/slot";
@@ -9,11 +11,11 @@ import { useProject } from "@/lib/project";
 import { AlarmClock, BookOpen, Check, ChevronDown, ExternalLink, Loader2, RotateCw, Send } from "lucide-react";
 import { StampButton } from "@/components/planning";
 import { LinkedText } from "@/components/outcome";
-import { api, ASK_VERB, codeLabel, SNOOZE_CHOICES, isStructured, jobActive, needsAnswer, type OwnerActivity, type OwnerResponse, type MilestoneStatusView, type MonitorAlertAsk, type PendingItem, type SnoozeChoice, type SpineRef, type StatusBatch, type WaitingItem, type WakeResult } from "@/api";
+import { api, ASK_VERB, codeLabel, SNOOZE_CHOICES, isStructured, jobActive, needsAnswer, type JoinedReview, type OwnerActivity, type OwnerResponse, type MilestoneStatusView, type MonitorAlertAsk, type PendingItem, type SnoozeChoice, type SpineRef, type StatusBatch, type WaitingItem, type WakeResult } from "@/api";
 import { askBookLink } from "@/lib/book";
 import { invalidate, mutate, useQuery, useWaitingList } from "@/lib/data";
 import { useInboxSearch } from "@/lib/inboxSearch";
-import { onReconnecting } from "@/api/real";
+import { ApiError, isTransient, onReconnecting } from "@/api/real";
 import { clearSnoozeError, relayOf, snoozeItem, unsnoozeItem, useSnoozes, withSnoozes } from "@/lib/snooze";
 import { formatDateTime, formatRelative, milestoneName } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -47,7 +49,8 @@ import { ownYesNo } from "@/lib/oneDecision";
 import { AskVerdictTap } from "@/components/askLog";
 import { askLead, askLeadUrl, cardBody, cardHeading, KIND_WORD, projectLabel, splitSteps } from "@/lib/askLead";
 import { faceLabel, faceLinks, IMAGE_URL, isChoice } from "@/lib/faceLink";
-import { deployerName, sites } from "@/lib/identity";
+import { deployerName, keyVaultName, sites } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 /** the Mac list (tailnet, scripts/laptop_ticket.py --list): every needs-Mac-agent ticket with its one command. */
 /** the Mac list (a page on the worker server), from the sites the page carries */
@@ -446,7 +449,7 @@ function FyiCardBody({ item, showMilestone = false, qualify = false }: { item: W
   return (
     <CardShell kind="decided" className="text-sm" data-testid="fyi-card" id={waitingAnchor(item.id)}>
       {/* E948-S60: the one shell: the kind word first, then who decided, the code, the project, the age. */}
-      <CardMeta kind="Decided" since={item.since} sinceWhat="decided" data-testid="fyi-meta">
+      <CardMeta kind="Decided" about={item.about ?? aboutFrom(item.title, item.question)} since={item.since} sinceWhat="decided" data-testid="fyi-meta">
         <span>by {decidedByName(item.decidedBy)}</span>
         {code && <span>{code}</span>}
         {showMilestone && (
@@ -576,11 +579,30 @@ export function foldSameKey(list: WaitingItem[]): { items: WaitingItem[]; folded
   return { items: out, folded };
 }
 
+/**
+ * why a paste was not saved stays on the card even when the list redraws it (the note lived only in the box, so a
+ * redraw dropped it and the owner saw the card come back empty).
+ */
+const keyNotes = new Map<string, { ok: boolean; text: string }>();
+/** a failed save in plain words: a restart the card could not wait out, a lost connection, or the console's own reason. */
+export function keyFailText(e: unknown): string {
+  if (isTransient(e)) return "Not saved: the console was restarting and did not answer for a minute. Nothing was stored. Paste the key again and press Save key.";
+  if (e instanceof ApiError && (e.status === 404 || e.status === 409) && /not open any more|answered already|not found/.test(e.message))
+    return "This ask is already answered: the key was saved on an earlier try. Nothing else to do.";
+  return `Not saved: ${(e as Error).message}`;
+}
+
 export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem & { secret: { app: string; name: string } }; disabled?: boolean; wake?: boolean }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ ok: boolean; text: string }>();
+  const [note, setNoteState] = useState<{ ok: boolean; text: string } | undefined>(() => keyNotes.get(item.id));
+  const setNote = (n: { ok: boolean; text: string } | undefined) => {
+    if (n && !n.ok) keyNotes.set(item.id, n);
+    else keyNotes.delete(item.id);
+    setNoteState(n);
+  };
   const unit = useWords().milestone;
+  const vault = keyVaultName();
   const save = async () => {
     const v = value;
     setValue("");
@@ -589,7 +611,10 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
     setNote(undefined);
     try {
       const res = await mutate(() => api.saveKey(item.id, { value: v, milestoneId: item.milestoneId, wake, ...relayOf(item) }));
-      const where = res.stored.deployed === false ? `stored in the secret store (no ${deployerName()} app for ${res.stored.app}, so not set in an env)` : `stored and set in ${deployerName()}`;
+      // said only after our own read-back from the vault, and where exactly the item is
+      const where = res.stored.vault
+        ? `saved and checked in your ${res.stored.vault}${res.stored.where ? `: ${res.stored.where}` : ", in Team keys"}`
+        : res.stored.deployed === false ? `stored in the secret store (no ${deployerName()} app for ${res.stored.app}, so not set in an env)` : `stored and set in ${deployerName()}`;
       const saved = `Saved: ${res.stored.app} ${res.stored.name} is ${where}.${res.wake ? ` ${wakeLine(res.wake, undefined, { unit })}` : ""}`;
       setNote({ ok: true, text: saved });
       // (the owner, vn_e00f1134: "I pasted a key ... then the card disappeared"): the card becomes its green Sent row in place
@@ -600,7 +625,7 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
         ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
       });
     } catch (e) {
-      setNote({ ok: false, text: `Not saved: ${(e as Error).message}` });
+      setNote({ ok: false, text: keyFailText(e) });
     } finally {
       setBusy(false);
     }
@@ -620,8 +645,8 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
         Paste the key here
       </label>
       <p className="text-xs text-muted-foreground">
-        It goes straight to the secret store for <span className="font-mono">{item.secret.app}</span> as <span className="font-mono">{item.secret.name}</span>
-        {item.sameKey?.length ? <> and answers {[item.code, ...item.sameKey].filter(Boolean).join(" and ")} at once</> : null}. The console never shows or keeps it.
+        {vault ? <>It goes straight into your {vault}, in Team keys, </> : <>It goes straight to the secret store </>}for <span className="font-mono">{item.secret.app}</span> as <span className="font-mono">{item.secret.name}</span>
+        {item.sameKey?.length ? <> and answers {[item.code, ...item.sameKey].filter(Boolean).join(" and ")} at once</> : null}.{vault ? " The console never shows it." : " The console never shows or keeps it."}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -845,6 +870,48 @@ function ImprovementFacts({ improvement }: { improvement: NonNullable<WaitingIte
 }
 
 /** one snoozed ask: code, question, until when, Unsnooze (takes the date off its spine line; the card is back). */
+/**
+ * E948-S187: the review card of the same work arrived after this ask: one card, the ask's, shows its result and its
+ * question; his answer here answers both rows (lib/sameTopic.ts answerJoined).
+ */
+export function JoinedWork({ joined }: { joined: JoinedReview[] }) {
+  return (
+    <div className="mt-3 grid gap-3 border-t pt-3" data-testid="ask-joined">
+      {joined.map((j) => (
+        <div key={j.id} className="grid gap-1 text-sm" data-testid="ask-joined-card" data-row={j.ref}>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">The work for this is ready</div>
+          {j.title && <p className="leading-snug text-foreground">{j.title}</p>}
+          {j.evidence && (
+            <p className="leading-snug">
+              <a className="font-medium text-foreground underline underline-offset-2" href={j.evidence.url} target="_blank" rel="noreferrer" data-testid="ask-joined-evidence">
+                {j.evidence.label}
+              </a>
+              {j.evidence.look && <span className="block text-[13px] text-muted-foreground">{j.evidence.look}</span>}
+            </p>
+          )}
+          {j.delivered && j.delivered.length > 0 && (
+            <ul className="grid gap-0.5 text-[13px] text-foreground/85" data-testid="ask-joined-delivered">
+              {j.delivered.map((d, i) => (
+                <li key={i}>
+                  <LinkedText text={/^[✓✗]/.test(d.text) ? d.text : `${d.ok ? "✓" : "✗"} ${d.text}`} />
+                </li>
+              ))}
+            </ul>
+          )}
+          {j.decision && (
+            <p className="text-[13px] text-foreground/85" data-testid="ask-joined-decision">
+              <LinkedText text={j.decision} />
+            </p>
+          )}
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground" data-testid="ask-joined-both">
+        One answer here settles both: the question above and this result.
+      </p>
+    </div>
+  );
+}
+
 function SnoozedRow({ item, qualify, showMilestone }: { item: WaitingItem; qualify: boolean; showMilestone: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -875,6 +942,7 @@ function SnoozedRow({ item, qualify, showMilestone }: { item: WaitingItem; quali
       <div className="flex min-w-0 items-center gap-x-2 whitespace-nowrap" title={`${code ? `${code} ` : ""}${question}${showMilestone && item.milestoneTitle ? `\n${item.milestoneTitle}` : ""}`}>
         <RowCode item={item} qualify={qualify} />
         <button type="button" className={cn("min-w-[4rem] flex-1 text-left", full ? "whitespace-normal break-words" : "truncate")} aria-expanded={full} onClick={() => setFull(!full)} data-testid="snoozed-question">
+          <FoldChevron open={full} className="mr-1.5" />
           {question}
         </button>
         {showMilestone && <span className="hidden min-w-0 max-w-[30%] truncate text-xs text-muted-foreground sm:inline">{item.milestoneTitle}</span>}
@@ -944,6 +1012,8 @@ function WaitingCardBody({
   /** wake (or steer) the persona who asked with the answer; on by default. */
   const [wake] = useState(true);
   const sendAsRef = useRef<[string, "answer" | "feedback"]>(["answer", "answer"]);
+  /** E948-S174: why the last press did not reach its owner, for a voice note's row */
+  const why = useRef<string | undefined>(undefined);
   const sendAs = () => sendAsRef.current;
   const r = item.response;
   /**
@@ -969,7 +1039,10 @@ function WaitingCardBody({
     deliver: async (reply) => {
       setAnswer("");
       const [as, kind] = voiceAs();
-      if (!(await answerOrFeedback(as, kind, reply))) throw new Error("the card did not take it, open the card to see why");
+      // E948-S174: the row says the card's own reason (refused, or recorded and not delivered), never Sent over it
+      why.current = undefined;
+      const ok = await answerOrFeedback(as, kind, reply);
+      if (!ok || why.current) throw new Error(why.current ?? "the card did not take it");
     },
     disabled: !!pending,
   });
@@ -978,7 +1051,7 @@ function WaitingCardBody({
   const active = jobActive(r);
   useEffect(() => {
     if (!active) return;
-    const t = setInterval(() => invalidate("inbox"), ANSWER_POLL_MS);
+    const t = setInterval(() => invalidate("inbox", "background"), ANSWER_POLL_MS);
     return () => clearInterval(t);
   }, [active]);
   const held = !!pending?.held;
@@ -1136,9 +1209,11 @@ function WaitingCardBody({
       // a stored answer whose job runs (or failed) is on the card from the next refresh, with its steps.
       hold = res.delivery === "sent" || !!res.spine || !!res.job;
       if (!hold) setError(`Recorded, not delivered: ${res.deliveryError ?? res.delivery}`);
+      if (!reached) why.current = `recorded, not delivered: ${res.deliveryError ?? res.spine?.status ?? res.delivery}`;
       return true;
     } catch (e) {
       setError((e as Error).message);
+      why.current = (e as Error).message;
       return false;
     } finally {
       off();
@@ -1242,7 +1317,7 @@ function WaitingCardBody({
     >
       <CardContent className="grid grid-cols-1 p-4">
         {/* the one meta line, its age right after the kind word as on every card */}
-        <CardMeta kind={kindWord} kindTestId="card-kind" since={item.since} sinceWhat="issued" data-testid="card-meta">
+        <CardMeta kind={kindWord} about={item.about ?? aboutFrom(item.title, item.question)} kindTestId="card-kind" since={item.since} sinceWhat="issued" data-testid="card-meta">
           {project &&
             (showMilestone && item.milestoneId ? (
               <Link className="hover:text-foreground hover:underline" to={`/milestones/${item.milestoneId}`}>
@@ -1252,7 +1327,7 @@ function WaitingCardBody({
               <span>{project}</span>
             ))}
           {/* the owner's level from the Prioritizer, a grey word ("red line" when it is one); a tap shows why. */}
-          <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
+          <OwnerPriorityTag p={item.ownerPriority} urgent={isUrgentAsk(item)} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
           {item.source === "needs_jordi" && <span>persona request</span>}
           {item.improvement && <span data-testid="improvement-tag">improvement request</span>}
         </CardMeta>
@@ -1266,6 +1341,7 @@ function WaitingCardBody({
           data-testid="ask-lead"
           data-kind={lead.kind}
         >
+          <FoldChevron open={open} className="mr-1.5" />
           {heading}
         </button>
         {body && (
@@ -1274,7 +1350,8 @@ function WaitingCardBody({
           </p>
         )}
         {lead.why && (
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground" data-testid="ask-why">
+          // the owner: "all greyed out". The why is read, so it is in the question's ink, not the meta grey
+          <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="ask-why">
             Why: <LinkedText text={lead.why} />
           </p>
         )}
@@ -1300,6 +1377,7 @@ function WaitingCardBody({
           </>
         )}
         {item.improvement && <ImprovementFacts improvement={item.improvement} />}
+        {item.joined && item.joined.length > 0 && <JoinedWork joined={item.joined} />}
         {/* E948-S69: the options are the buttons themselves (below); a "your own" option takes its words here. */}
         {showControls && options.length > 0 && ownPicked && (
           <div className="mt-2.5 grid" data-testid="ask-options">
@@ -1973,7 +2051,7 @@ export function WaitingOnYou({
                   r.sent || !r.item ? (
                     r.sent && <SentRow key={r.slot} slot={r.slot} entry={r.sent} />
                   ) : (
-                    <Open key={r.item.id}>
+                    <Open key={r.item.id} item={r.item}>
                       <WaitingCard item={r.item} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
                     </Open>
                   ),
@@ -1995,7 +2073,7 @@ export function WaitingOnYou({
                 </Open>
               )
             ) : (
-              <Open key={r.card!.id}>
+              <Open key={r.card!.id} item={r.card!}>
                 <WaitingCard item={r.card!} showMilestone={showMilestone} readOnly={readOnly} qualify={qualify} />
               </Open>
             ),
@@ -2155,6 +2233,7 @@ function AnsweredRow({ item: i, done, showMilestone, readOnly, qualify }: { item
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
+        <FoldChevron open={open} className="self-center" />
         <RowCode item={i} qualify={!!qualify} />
         <span className="min-w-0 flex-1 truncate" data-testid="answered-question">{question}</span>
         {/* not on a phone: the section already says Answered, and the question keeps the line (it was cut to two words) */}
@@ -2192,9 +2271,9 @@ function WholeAskLoader({ item, ...rest }: { item: WaitingItem; showMilestone?: 
  * E948-S141: an open item drawn in Blocked on you (one card, one status row, or an ask set of `n` asks): the live inbox
  * check (lib/countCheck) counts these and fails when the section's pill says another number. Layout-neutral.
  */
-function Open({ n = 1, children }: { n?: number; children: ReactNode }) {
+function Open({ n = 1, item, children }: { n?: number; item?: Pick<WaitingItem, "repo" | "code">; children: ReactNode }) {
   return (
-    <div className="contents" data-inbox-open={n === 1 ? "" : String(n)}>
+    <div className="contents" data-inbox-open={n === 1 ? "" : String(n)} data-card-key={item ? cardKey("ask", item.repo, item.code) : undefined}>
       {children}
     </div>
   );
@@ -2215,7 +2294,7 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
     <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
-      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} since={item.since} sinceWhat="issued">
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} about={aboutFrom(item.title)} since={item.since} sinceWhat="issued">
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
@@ -2303,7 +2382,7 @@ function MonitorAlertBody({ item }: { item: PendingItem }) {
   const asks = m?.asks ?? [];
   return (
     <CardShell kind="monitor_alert" className="text-sm" data-testid="monitor-alert" data-kind={item.kind} data-pending-id={item.id} id={waitingAnchor(item.id)}>
-      <CardMeta kind="Alert" since={item.since} sinceWhat="issued">
+      <CardMeta kind="Alert" about={aboutFrom(item.title.replace(/^Monitor alert:\s*/, ""))} since={item.since} sinceWhat="issued">
         <span data-testid="monitor-alert-state">{m?.why.includes("stop") ? "Stopped" : "Check overdue"}</span>
       </CardMeta>
       <div className={CARD_TITLE}>{item.title.replace(/^Monitor alert:\s*/, "")}</div>

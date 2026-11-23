@@ -1,7 +1,7 @@
 import { rowClaim, shortHolder } from "@/lib/claim";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight, SquareArrowOutUpRight, X } from "lucide-react";
+import { SquareArrowOutUpRight, X } from "lucide-react";
 import type { MilestoneTree, TreeColor, TreeNode } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { HoldWord } from "@/components/planning";
 import { ownerLabel } from "@/lib/owner";
 import { ownerName } from "@/lib/identity";
+import { FoldChevron } from "@/components/foldChevron";
 
 /** palette (not the sidebar status dots): the persona's goal is every dot green. */
 export const TREE_DOT: Record<TreeColor, string> = {
@@ -480,9 +481,10 @@ function Row({
           aria-label={hasKids ? (expanded ? `Collapse ${node.id}` : `Expand ${node.id}`) : undefined}
           className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground", !hasKids && "invisible")}
           onClick={toggle}
+          aria-expanded={hasKids ? expanded : undefined}
           tabIndex={hasKids ? 0 : -1}
         >
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <FoldChevron open={expanded} className="m-px" />
         </button>
         <TreeDot node={node} ready={ready} className="mt-0.5" />
         {(node.waiting ?? 0) > 1 && (
@@ -571,7 +573,7 @@ function Row({
                 title="Finished epics (spines.py run_state finished): closed work, not counted"
                 onClick={toggleFold}
               >
-                {shown ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <FoldChevron open={shown} />
                 {finished.length} closed · {shown ? "hide" : "show"}
               </button>
             </li>

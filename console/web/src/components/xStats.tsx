@@ -1,7 +1,7 @@
-import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import type { XStatsAccount, XStatsBody, XStatsTotals } from "@/api/pages-types";
-import { PageHeader } from "@/components/common";
+import { Link, useSearchParams } from "react-router-dom";
+import { PageHeader, RelTime } from "@/components/common";
 import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { X_STATS_PATH } from "@/lib/routePaths";
@@ -98,6 +98,46 @@ function Posts({ a }: { a: XStatsAccount }) {
   );
 }
 
+/** when the stats are read: once a day at 17:35 Berlin time (the agent-team-x-stats timer, before the 18:00 briefing). */
+export const REFRESH_CADENCE = "Once a day at 17:35 Berlin time";
+/** a read older than this (a day and two hours) is late: the daily read missed. */
+export const LATE_AFTER_MS = 26 * 3600_000;
+
+/**
+ * how fresh the stats are, how often they refresh, where their settings are and how an account is added (his 22 Nov
+ * note: "the last refresh time there made extremely clear ... what's the refresh cadence, where the
+ * settings related to this, and how do I add accounts").
+ */
+export function XStatsFreshness({ readAt, now = Date.now() }: { readAt?: string; now?: number }) {
+  const late = !!readAt && now - Date.parse(readAt) > LATE_AFTER_MS;
+  return (
+    <dl className="grid gap-x-4 gap-y-2 rounded-md border p-3 text-sm sm:grid-cols-[9rem_1fr]" data-testid="x-stats-freshness">
+      <dt className="text-muted-foreground">Last refreshed</dt>
+      <dd className={cn("font-medium", late && "text-destructive")} data-testid="x-stats-last-refresh">
+        {readAt ? (
+          <>
+            <RelTime iso={readAt} now={now} /> <span className="font-normal text-muted-foreground">· {when(readAt)}</span>
+            {late && <span className="font-normal"> · late, the daily read missed</span>}
+          </>
+        ) : (
+          "not read yet"
+        )}
+      </dd>
+      <dt className="text-muted-foreground">Refreshes</dt>
+      <dd data-testid="x-stats-cadence">{REFRESH_CADENCE}, before your evening briefing. The last 7 days are read each time.</dd>
+      <dt className="text-muted-foreground">Settings</dt>
+      <dd data-testid="x-stats-settings">
+        Nothing to set here. The sign-ins it reads with are on <Link to="/connections" className="underline underline-offset-2">Connections</Link>.
+      </dd>
+      <dt className="text-muted-foreground">Add an account</dt>
+      <dd data-testid="x-stats-add-account">
+        X: tell the team in <Link to="/chat" className="underline underline-offset-2">Chat</Link>, for example "Add @handle to Post stats", and it shows from the next read.
+        Reddit, TikTok and YouTube: every post a campaign publishes shows here by itself.
+      </dd>
+    </dl>
+  );
+}
+
 export function XStatsPage() {
   const [params, setParams] = useSearchParams();
   const date = params.get("date") || undefined;
@@ -115,6 +155,7 @@ export function XStatsPage() {
       {loading && !data && <div className="text-sm text-muted-foreground">Reading the X stats…</div>}
       {error && <div className="text-sm text-destructive">Could not read the X stats: {error.message}</div>}
       {data && !day && <div className="text-sm text-muted-foreground">No X stats stored yet.</div>}
+      {data && !day && <XStatsFreshness />}
       {day && (
         <>
           <div className="rounded-md border-2 border-foreground/80 p-3" data-testid="x-stats-answer">
@@ -126,6 +167,7 @@ export function XStatsPage() {
               {readN} of {accs.length} accounts read · {posted} posted in the window · read {when(day.readAt)}
             </p>
           </div>
+          <XStatsFreshness readAt={day.readAt} />
           <div className="grid gap-2 sm:grid-cols-2" data-testid="x-stats-accounts">
             {accs.map((a) => (
               <AccountBox key={anchor(a)} a={a} before={prev?.accounts[a.handle]} />

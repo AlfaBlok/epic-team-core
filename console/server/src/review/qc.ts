@@ -115,10 +115,29 @@ const RUN = (row: string) => `the quality check runs on ${workerHost()} every 15
  * the gate's word on the check: undefined = it passed (or the repo does not run it yet); else why the card is held.
  * `cardText` is the card file as it is now (its fingerprint must match the one the check saw).
  */
+/**
+ * The card texts the check's fingerprint may match: as it is, then without what changes no word it judged: an `about:` line
+ * (E948-S172), a `look:` line and the evidence link pointed inside the same page (E948-S180: `#<id>`, `focus=`).
+ * scripts/card_qc.py seen_variants does the same.
+ */
+export function qcSeenCard(t: Buffer | string): string[] {
+  const raw = String(t);
+  const bareLink = (line: string) => line.replace(/([?&])focus=[^&#)\s"']*&?/g, "$1").replace(/[?&](?=[)\s"']|$)/g, "").replace(/#[^)\s"']*/g, "");
+  return [
+    ...new Set(
+      [raw, raw.replace(/^about:.*\r?\n/im, "")].flatMap((base) => {
+        const noLook = base.replace(/^look:.*\r?\n/im, "");
+        return [base, noLook, noLook.replace(/^(evidence:.*)$/im, bareLink)];
+      }),
+    ),
+  ];
+}
+
 export function qcVerdict(o: { row: string; required: boolean; qc: QcResult | undefined; cardText: Buffer | string | undefined }): QcVerdict | undefined {
   const { row, qc } = o;
   if (!qc) return o.required ? { kind: "fails-qc", reason: "not checked yet", problems: [`the quality check has not looked at it yet: ${RUN(row)}`] } : undefined;
-  if (o.cardText !== undefined && cardSha(o.cardText) !== qc.cardSha)
+  // E948-S172: an `about:` line added after the check changes no word it judged (the topic line above the project): it keeps the check
+  if (o.cardText !== undefined && !qcSeenCard(o.cardText).some((t) => cardSha(t) === qc.cardSha))
     return { kind: "fails-qc", reason: "changed since its check", problems: [`the card changed after the quality check of ${qc.checkedAt}: ${RUN(row)}`] };
   const missed = qc.words.filter((w) => w.status === "missed");
   if (missed.length)

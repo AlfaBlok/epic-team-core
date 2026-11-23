@@ -5,7 +5,7 @@ import type { Assignment, Milestone, Persona, Run, Store } from "../store.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { ticketId } from "../adapters/outcome.js";
 import { FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE } from "../inbox/asks.js";
-import { START_FAIL_RULE, WORKER_FINISH_RULE, WORKER_TIER_RULE } from "../cycle/prompts.js";
+import { CONTEXT_BRIEF_STEP, START_FAIL_RULE, WORKER_FINISH_RULE, WORKER_TIER_RULE } from "../cycle/prompts.js";
 import type { ChatScope } from "./scope.js";
 import { chatCaller } from "./milestoneChat.js";
 import { DEFAULT_TENANT } from "../db.js";
@@ -259,6 +259,7 @@ export function createChatDispatch(d: ChatDispatchDeps) {
       ];
     return [
       `1. Launch the worker with the T3 \`delegate_task\` tool (mode async), \`target.providerInstanceId\` = providerInstanceId, \`clientRequestId\` = \`<row id>-${child.id.slice(0, 12)}\` (the console binds its thread to this run), \`title\` = \`<row id> <what it does, a few words>\` (every session is named by its ticket). Its brief names \`Bound epic: <spine path>\` and the row,`,
+      `   opens with the row's context to read first (${CONTEXT_BRIEF_STEP(base).replace(/^Then the brief opens with /, "")}),`,
       `   says: end every commit message with the trailer line \`Run: ${child.id}\`; and carries briefRules verbatim.`,
       `2. ${patch({ threadId: "<childThreadId>" })}`,
       `3. When it returns: verify its diff and checks, integrate per the repo's Integration policy, then ${patch({ outcome: "progressed|failed|blocked|monitoring", summary: "<one line>", endedAt: "<ISO-8601 UTC now>" })}`,

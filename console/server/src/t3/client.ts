@@ -68,6 +68,12 @@ export interface T3Client {
   listChildThreads?(projectId: string, parentThreadId: string): Promise<T3ChildThread[]>;
   /** messages waiting in a thread's queue to start a turn (a stopped queue waits for the user: not counted). */
   queuedCount?(threadId: string): Promise<number>;
+  /** the messages waiting in a thread's queue (text may be cut: `truncated`), oldest first. */
+  queueItems?(threadId: string): Promise<{ queuedRunId: string; text: string; truncated: boolean }[]>;
+  /** one queued message's whole text. */
+  queueRead?(threadId: string, queuedRunId: string): Promise<string>;
+  /** take one message out of a thread's queue. */
+  queueCancel?(threadId: string, queuedRunId: string): Promise<void>;
   /** interrupt the running turn of a thread (t3_thread_interrupt; no-op when it has none). Optional: a client without it cannot stop. */
   interruptThread?(threadId: string, reason?: string, clientRequestId?: string): Promise<void>;
   /**
@@ -124,6 +130,11 @@ export interface T3ChildThread {
 }
 
 export class T3Error extends Error {}
+
+/** T3 answers a tool name it does not have with JSON-RPC -32602 "Tool '<name>' not found". */
+export function isToolNotFound(e: unknown, tool: string): boolean {
+  return e instanceof Error && e.message.includes(`Tool '${tool}' not found`);
+}
 
 /** socket-level failures worth retrying (the request died before T3 answered). */
 export const TRANSIENT_CODES = new Set(["ECONNRESET", "UND_ERR_SOCKET", "ECONNREFUSED"]);
@@ -355,6 +366,27 @@ export class McpT3Client implements T3Client {
     return withT3Retry(`tools/call ${tool}`, () => this.callOnce(tool, args), this.retryDelaysMs);
   }
 
+  /** Which tool name this T3 answered to last (key: the first name, true = the second one answered): T3 0.1.x merged t3_queue_list/read/cancel into
+   * `t3_queue {action}` and update_scheduled_task into `schedule_task {scheduledTaskId}` (one host may run 0.1.x while
+   * another stays on 0.0.x). */
+  private readonly legacyTool = new Map<string, boolean>();
+
+  /** Call `a`, or `b` when this T3 says `a` is "not found" (and back again after an upgrade or a rollback); remembers
+   * which one answered. Put first the name whose call cannot be mistaken on the other version: schedule_task exists on
+   * both but needs prompt and schedule on 0.0.46, so update_scheduled_task goes first there. */
+  async callEither(a: [string, Json], b: [string, Json]): Promise<Json> {
+    const first = this.legacyTool.get(a[0]) ? b : a;
+    const second = first === a ? b : a;
+    try {
+      return await this.call(first[0], first[1]);
+    } catch (e) {
+      if (!(e instanceof T3Error) || !isToolNotFound(e, first[0])) throw e;
+      const r = await this.call(second[0], second[1]);
+      this.legacyTool.set(a[0], second === b);
+      return r;
+    }
+  }
+
   private async callOnce(tool: string, args: Json): Promise<Json> {
     const { sid } = await this.post({
       jsonrpc: "2.0",
@@ -403,7 +435,7 @@ export class McpT3Client implements T3Client {
     return ((r.tasks ?? []) as Json[]).map(toTask).filter((t): t is T3ScheduledTask => !!t);
   }
   async updateScheduledTask(id: string, patch: Json) {
-    return toTask(await this.call("update_scheduled_task", { scheduledTaskId: id, ...patch }));
+    return toTask(await this.callEither(["update_scheduled_task", { scheduledTaskId: id, ...patch }], ["schedule_task", { scheduledTaskId: id, ...patch }]));
   }
   async deleteScheduledTask(id: string) {
     await this.call("delete_scheduled_task", { scheduledTaskId: id });
@@ -509,9 +541,23 @@ export class McpT3Client implements T3Client {
     };
   }
   async queuedCount(threadId: string) {
-    const r = await this.call("t3_queue_list", { threadId, limit: 100 });
+    const r = await this.callEither(["t3_queue", { action: "list", threadId, limit: 100 }], ["t3_queue_list", { threadId, limit: 100 }]);
     const held = new Set(["stopped", "paused", "held", "cancelled", "failed", "delivered"]);
     return ((r.items ?? []) as Json[]).filter((i) => !held.has(String(i.status ?? i.state ?? "").toLowerCase())).length;
+  }
+  async queueItems(threadId: string) {
+    const r = await this.callEither(["t3_queue", { action: "list", threadId, limit: 100 }], ["t3_queue_list", { threadId, limit: 100 }]);
+    const held = new Set(["stopped", "paused", "held", "cancelled", "failed", "delivered"]);
+    return ((r.items ?? []) as Json[])
+      .filter((i) => !held.has(String(i.status ?? i.state ?? "").toLowerCase()) && typeof i.queuedRunId === "string")
+      .map((i) => ({ queuedRunId: String(i.queuedRunId), text: String(i.text ?? ""), truncated: !!i.truncated }));
+  }
+  async queueRead(threadId: string, queuedRunId: string) {
+    const r = await this.callEither(["t3_queue", { action: "read", threadId, queuedRunId }], ["t3_queue_read", { threadId, queuedRunId }]);
+    return String(r.text ?? r.item?.text ?? "");
+  }
+  async queueCancel(threadId: string, queuedRunId: string) {
+    await this.callEither(["t3_queue", { action: "cancel", threadId, queuedRunId }], ["t3_queue_cancel", { threadId, queuedRunId }]);
   }
   async listChildThreads(projectId: string, parentThreadId: string) {
     const r = await this.call("t3_thread_list", { projectId, includeSubagents: true, limit: 100 });

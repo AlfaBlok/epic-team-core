@@ -11,7 +11,7 @@ export function identityScript(id: Identity = identity(), s: Sites = sites()): s
   // the sites the web client links to (web lib/identity.ts sites()): its two skins, the customer sites, the Mac list
   const webSites = { teamUrl: s.teamUrl, socialUrl: s.socialUrl, customerHosts: process.env.CONSOLE_CUSTOMER_HOSTS ?? s.customerHosts, socialMovedTo: process.env.CONSOLE_SOCIAL_MOVED_TO ?? s.socialMovedTo, macListUrl: s.macListUrl, bookQuestionsUrl: s.bookQuestionsUrl };
   // JSON in a script element: escape what could end it or start a comment, and the two line separators JSON allows
-  const json = JSON.stringify({ owner: id.owner, homeWorld: id.homeWorld, homeRepo: id.homeRepo, mainHost: id.mainHost, workerHost: id.workerHost, memory: id.memory, socialWorld: id.socialWorld, opsRepo: id.opsRepo, org: id.org, socialProduct: id.socialProduct, deployer: id.deployer, sites: webSites })
+  const json = JSON.stringify({ owner: id.owner, homeWorld: id.homeWorld, homeRepo: id.homeRepo, mainHost: id.mainHost, workerHost: id.workerHost, memory: id.memory, socialWorld: id.socialWorld, opsRepo: id.opsRepo, org: id.org, socialProduct: id.socialProduct, deployer: id.deployer, ...(id.vault ? { vault: id.vault } : {}), sites: webSites })
     .replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
   return `<script>window.__IDENTITY__=${json}</script>`;
 }

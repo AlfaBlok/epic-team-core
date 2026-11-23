@@ -8,6 +8,8 @@
  * SAME message of his, in order. Every part still needs two characters of words, so nothing short slips through.
  */
 
+import type { DB } from "../db.js";
+
 /** His words only: lower case, letters and digits, one space between words. */
 export const saidWords = (t: string): string =>
   t
@@ -40,6 +42,11 @@ export function saidIn(message: string, quote: string): boolean {
 
 /** Is `quote` in one of these messages of his? */
 export const saidInAny = (messages: { text: string }[], quote: string): boolean => messages.some((m) => saidIn(m.text, quote));
+/** the request id (one request, one row) of his newest message holding `quote`, or true when it holds it with no id; false when none does. */
+export const saidRequest = (messages: { text: string; request?: string }[], quote: string): string | boolean => {
+  for (let i = messages.length - 1; i >= 0; i--) if (saidIn(messages[i].text, quote)) return messages[i].request ?? true;
+  return false;
+};
 
 /**
  * The desk files rows from his words, and those rows are his ask (L-37,
@@ -52,17 +59,44 @@ export const saidInAny = (messages: { text: string }[], quote: string): boolean 
 export const ADD_WORDS_MAX_MS = 24 * 60 * 60_000;
 export const MIN_ADD_WORDS = 8;
 export function hisWordsIn(
-  messages: { text: string; at?: string }[],
+  messages: { text: string; at?: string; request?: string }[],
   quote: string,
   now: number,
   maxMs = ADD_WORDS_MAX_MS,
-): { text: string; at: string } | string {
+): { text: string; at: string; request?: string } | string {
   if (saidWords(quote).length < MIN_ADD_WORDS) return `chat (his words, verbatim, at least ${MIN_ADD_WORDS} characters) is required`;
   const recent = messages.filter((m) => {
     const at = Date.parse(m.at ?? "");
     return Number.isFinite(at) && now - at <= maxMs;
   });
   if (!recent.length) return `he has written nothing in the desk chat in the last ${Math.round(maxMs / 3_600_000)} hours`;
-  for (let i = recent.length - 1; i >= 0; i--) if (saidIn(recent[i].text, quote)) return { text: recent[i].text, at: recent[i].at! };
+  for (let i = recent.length - 1; i >= 0; i--)
+    if (saidIn(recent[i].text, quote)) return { text: recent[i].text, at: recent[i].at!, ...(recent[i].request ? { request: recent[i].request } : {}) };
   return `chat is not in any of his desk messages of the last ${Math.round(maxMs / 3_600_000)} hours`;
+}
+
+/**
+ * E948-S178 (the owner 22 Nov 20:58Z, same note as vn_facd277a): rows he asked for went in as drafts saying "he has written
+ * nothing in the desk chat in the last 24 hours", though he had spoken minutes before. His voice notes reach the team by
+ * several routes (the top bar's mic, a card's mic, Chat; delivered into the desk thread through T3 or kept on the card),
+ * and the check read only the live desk thread. Every voice note he recorded keeps its transcript in `voice_notes`, so
+ * each one of the last `maxMs` counts as his desk words, whichever route carried it and whether or not the thread read
+ * shows it.
+ */
+export function voiceNoteWords(db: DB, world: string, now: number, maxMs = ADD_WORDS_MAX_MS): { text: string; at: string; note: string }[] {
+  const since = new Date(now - maxMs).toISOString();
+  try {
+    const rows = db
+      .prepare("SELECT id, transcript, COALESCE(finished_at, started_at) at FROM voice_notes WHERE tenant_id = ? AND transcript IS NOT NULL AND transcript != '' AND COALESCE(finished_at, started_at) >= ? ORDER BY at")
+      .all(world, since) as { id: string; transcript: string; at: string }[];
+    return rows.map((r) => ({ text: r.transcript, at: r.at, note: r.id }));
+  } catch {
+    return []; // a console without voice notes (no table yet)
+  }
+}
+
+/** his messages from every route, oldest first: the desk thread's and his voice notes', each once. */
+export function everyRouteWords<A extends { text: string; at?: string }, B extends { text: string; at?: string }>(thread: A[], voice: B[]): (A | B)[] {
+  const t = (m: { at?: string }) => Date.parse(m.at ?? "") || 0;
+  return [...thread, ...voice].sort((a, b) => t(a) - t(b));
 }

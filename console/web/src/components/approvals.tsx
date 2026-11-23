@@ -9,6 +9,7 @@ import { Empty, ErrorBox, Loading } from "@/components/common";
 import { cn } from "@/lib/utils";
 import { formatRelative } from "@/lib/format";
 import { useWords } from "@/lib/skin";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * the milestone's standing approvals (epicspine-skill docs/doctrine/standing-approvals.md). Own grants first,
@@ -184,6 +185,7 @@ function GrantRow({ m, g, onDone }: { m: Milestone; g: ApprovalGrant; onDone: (t
       <div className="flex flex-wrap items-center gap-2 text-xs">
         {g.uses > 0 ? (
           <button type="button" className="underline" onClick={() => setShowUses((v) => !v)} aria-expanded={showUses}>
+            <FoldChevron open={showUses} className="mr-1" />
             used {g.uses}×
           </button>
         ) : (

@@ -161,8 +161,16 @@ describe("E948-S60 every card type ends with the feedback block", () => {
       const kind = meta!.firstElementChild as HTMLElement;
       expect(kind.matches("[data-card-kind-word]"), "the meta line does not open with the kind word").toBe(true);
       expect(kind.textContent?.trim()).toMatch(/^[A-Z][a-z]+$/);
-      // nothing with words comes before the meta line
-      const before = [...shell!.querySelectorAll<HTMLElement>("*")].filter((e) => !!(e.compareDocumentPosition(meta!) & Node.DOCUMENT_POSITION_FOLLOWING) && !e.contains(meta!) && e.children.length === 0 && (e.textContent ?? "").trim());
+      // E948-S172 (his vn_106f5727: "somewhere there that says what's the topic"): the card opens with its About line, plain
+      // words, 8 or fewer, no codes; nothing else with words comes before the meta line
+      const about = shell!.querySelector<HTMLElement>("[data-card-about]");
+      expect(about, "the card does not open with an About line").toBeTruthy();
+      expect(about!.textContent).toMatch(/^About: \S/);
+      const topic = about!.textContent!.replace(/^About: /, "");
+      expect(topic.split(/\s+/).length, `the About line is longer than 8 words: ${topic}`).toBeLessThanOrEqual(8);
+      expect(topic, "the About line names a code").not.toMatch(/\b[A-Z]{1,5}\d*-[A-Z]?\d+\b|EPIC-\d+/);
+      expect(about!.compareDocumentPosition(meta!) & Node.DOCUMENT_POSITION_FOLLOWING, "the About line is not above the meta line").toBeTruthy();
+      const before = [...shell!.querySelectorAll<HTMLElement>("*")].filter((e) => !!(e.compareDocumentPosition(meta!) & Node.DOCUMENT_POSITION_FOLLOWING) && !e.contains(meta!) && !about!.contains(e) && e.children.length === 0 && (e.textContent ?? "").trim());
       expect(before.map((e) => e.textContent), "words come before the meta line").toEqual([]);
       const blocks = [...shell!.querySelectorAll<HTMLElement>("[data-card-feedback]")];
       const block = blocks[blocks.length - 1];

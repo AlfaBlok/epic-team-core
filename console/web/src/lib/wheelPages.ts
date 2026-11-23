@@ -41,15 +41,17 @@ export function placePages(pages: PagesBody | undefined, body: ScorecardsBody | 
   const nodes = body?.nodes ?? [];
   const all = [...(pages.groups ?? []).flatMap((g) => g.pages)];
   return all.map((p) => {
+    // the registry's own `objective` wins: a page made for one objective, from a row whose spine hangs
+    // in another's tree (check rows that all live in one epic), shows on the objective it was made for.
+    const named = byObjective(p, nodes);
+    if (named) return { ...p, wheel: named };
     const byRow = p.row ? homeOf(ix, nodes, { repo: p.repo, code: p.row }) : undefined;
     let home = byRow;
     if (!home && p.epic) {
       const spine = epics.get(`${repoKey(p.repo)}:${p.epic}`);
       if (spine) home = homeOf(ix, nodes, { repo: p.repo, path: spine.slice(spine.indexOf(":") + 1) });
     }
-    if (home) return { ...p, wheel: { id: home.pursuit.id, name: nameOf(home.pursuit) } };
-    const named = byObjective(p, nodes);
-    return named ? { ...p, wheel: named } : { ...p };
+    return home ? { ...p, wheel: { id: home.pursuit.id, name: nameOf(home.pursuit) } } : { ...p };
   });
 }
 
@@ -79,6 +81,13 @@ export function pagesOfObjective(pages: PagesBody | undefined, body: ScorecardsB
     for (const p of g.pages) {
       const rowSpine = p.row ? ix.codes.get(`${repoKey(p.repo)}:${p.row}`) : undefined;
       const spine = rowSpine && scope.has(rowSpine) ? rowSpine : epics.get(`${repoKey(p.repo)}:${p.epic}`);
+      // a page that names a known objective sits only there: on that objective's tab, or a set inside it that holds its spine.
+      const named = p.objective ? ix.byId.get(p.objective) : undefined;
+      if (named) {
+        const top = ix.pursuitOf.get(nodeId)?.id ?? nodeId;
+        if (p.objective === nodeId || (top === p.objective && spine && scope.has(spine))) out.push(p);
+        continue;
+      }
       if (spine && scope.has(spine)) out.push(p);
       // a page no tree holds goes where it names itself (the objective's own tab, not its sets).
       else if (p.objective === nodeId && !inAnyTree(rowSpine, ix) && !inAnyTree(spine, ix)) out.push(p);
@@ -95,8 +104,10 @@ export function pagesOfMilestone(pages: PagesBody | undefined, repo: string | un
 }
 
 /** the global list's view by wheel: each objective in his order with its page count, then the pages not placed. */
-export function wheelCounts(placed: PlacedPage[], nodes: ScorecardNode[]): { id: string; name: string; count: number; world?: boolean }[] {
+export function wheelCounts(placed: PlacedPage[], nodes: ScorecardNode[], files?: Map<string, unknown[]>): { id: string; name: string; count: number; world?: boolean }[] {
   const by = new Map<string, number>();
+  // the pages and notes kept in the repo count on their objective too: each line opens a tab that lists both.
+  for (const [id, es] of files ?? []) by.set(id, (by.get(id) ?? 0) + es.length);
   const worlds = new Map<string, string>();
   for (const p of placed)
     if (p.wheel) {
@@ -109,3 +120,41 @@ export function wheelCounts(placed: PlacedPage[], nodes: ScorecardNode[]): { id:
     ...[...worlds].map(([id, name]) => ({ id, name, count: by.get(id)!, world: true })),
   ];
 }
+
+/**
+ * The files a wheel tab homes, placed like its pages. An entry names the row that made it (its folder or the
+ * commit that added it) and, for a weekly log, its spine; the objective whose tree holds that spine shows it. Every
+ * entry no objective holds is returned as `notPlaced`, so the global list shows it and none is missing anywhere.
+ */
+type Homed = { repo: string; row?: string; spine?: string; objective?: string };
+const spineOfHome = (e: Homed, ix: ScorecardIndex) => (e.spine ? `${repoKey(e.repo)}:${e.spine}` : e.row ? ix.codes.get(`${repoKey(e.repo)}:${e.row}`) : undefined);
+/** the objective a file names itself (its row's key result, its row's epic, its path: homePlace.ts), when no tree holds its spine. */
+const namedTop = (e: Homed, ix: ScorecardIndex, spine: string | undefined) =>
+  e.objective && ix.pursuitOf.get(e.objective)?.id === e.objective && !inAnyTree(spine, ix) ? e.objective : undefined;
+
+export function placeHomeFiles<T extends Homed>(entries: T[] | undefined, ix: ScorecardIndex): { by: Map<string, T[]>; notPlaced: T[] } {
+  const by = new Map<string, T[]>();
+  const notPlaced: T[] = [];
+  const tops = [...ix.scope.keys()].filter((id) => ix.pursuitOf.get(id)?.id === id);
+  for (const e of entries ?? []) {
+    const spine = spineOfHome(e, ix);
+    const home = (spine ? tops.find((id) => ix.scope.get(id)!.has(spine)) : undefined) ?? namedTop(e, ix, spine);
+    if (!home) notPlaced.push(e);
+    else by.set(home, [...(by.get(home) ?? []), e]);
+  }
+  return { by, notPlaced };
+}
+
+/** the files one objective (or a set inside it) holds: their row's spine, or their log's spine, is in its subtree. */
+export function homeFilesOf<T extends Homed>(entries: T[] | undefined, ix: ScorecardIndex, nodeId: string): T[] {
+  const scope = ix.scope.get(nodeId);
+  if (!scope || !entries) return [];
+  return entries.filter((e) => {
+    const spine = spineOfHome(e, ix);
+    // its spine in this subtree; or, no tree holding it, the objective it names (the objective's own tab, not its sets).
+    return (!!spine && scope.has(spine)) || namedTop(e, ix, spine) === nodeId;
+  });
+}
+
+/** where a homed file opens: read-only, through the console (its pages sandboxed). */
+export const homeFileUrl = (e: { repo: string; open: string }) => `/api/homes/file/${encodeURIComponent(e.repo)}/${e.open.split("/").map(encodeURIComponent).join("/")}`;

@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { aboutFrom } from "@/lib/about";
 import { ObjectiveName } from "@/components/objectiveName";
 import { ParkButton } from "@/components/parkButton";
 import { scorecardHref as scorecardHref0, SET_NAME } from "@/lib/scorecards";
@@ -56,7 +57,7 @@ function answerWords(c: TeamCard): string {
 function Meta({ card, noBy }: { card: TeamCard; noBy?: boolean }) {
   const href = scorecardHref(card);
   return (
-    <CardMeta kind={TEAM_KIND_WORD[card.kind]} since={card.at} data-testid="team-card-meta">
+    <CardMeta kind={TEAM_KIND_WORD[card.kind]} about={aboutFrom(card.title)} since={card.at} data-testid="team-card-meta">
       {card.scorecardName || card.scorecard ? (
         href ? (
           <Link className="hover:text-foreground hover:underline" to={href} data-testid="team-card-scorecard">
@@ -396,7 +397,7 @@ export function CampaignGoalCard({ t }: { t: { name: string; openUrl: string; ap
 function CampaignGoalBody({ t }: { t: { name: string; openUrl: string; app: string; text: string } }) {
   return (
     <CardShell kind="goal" className="text-sm" data-testid="goal-talk-line" data-team-kind="goal">
-      <CardMeta kind={TEAM_KIND_WORD.goal}>
+      <CardMeta kind={TEAM_KIND_WORD.goal} about={`the goal number for ${t.name}`}>
         <span>{t.name}</span>
       </CardMeta>
       <div className={CARD_TITLE}>{t.name} has no goal number of yours yet.</div>
@@ -461,7 +462,7 @@ function AdvisorSetBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c:
   return (
     <section className="grid min-w-0 gap-3" data-testid="advisor-set" data-week={set.week}>
       <CardShell kind="advisor" className="text-sm" data-testid="team-card" data-team-kind="advisor">
-        <CardMeta kind="Suggestions" since={card.at} data-testid="advisor-header">
+        <CardMeta kind="Suggestions" about={aboutFrom(card.title) ?? "this week's suggestions"} since={card.at} data-testid="advisor-header">
           <span>from the Senior advisor</span>
           <span data-testid="advisor-week">{week}</span>
           <span>
@@ -525,7 +526,7 @@ function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: Suggesti
   const v = item.verdict;
   return (
     <CardShell kind="advisor-item" className="text-sm" data-testid="advisor-item" data-item={item.id} data-verdict={v?.state ?? "open"}>
-      <CardMeta kind={TEAM_KIND_WORD.advisor} since={card.at}>
+      <CardMeta kind={TEAM_KIND_WORD.advisor} about={aboutFrom(item.title, card.title)} since={card.at}>
         <span>
           {n} of {of}
         </span>

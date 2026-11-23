@@ -3,7 +3,7 @@ import { Slot, SlotStack, useSlotReady } from "@/components/slot";
 import { RedLineBand } from "@/components/ownerPriority";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { InboxLine } from "@/components/inboxLine";
-import { ArrowDown, ArrowUp, ChevronDown, Clock, ExternalLink, MessageSquare, MessagesSquare, Phone, Pin, PinOff, Plus, Workflow } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, ExternalLink, MessageSquare, MessagesSquare, Phone, Pin, PinOff, Plus, Workflow } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
 import { useQuery, useWaitingList } from "@/lib/data";
@@ -24,6 +24,7 @@ import { WaitingOnYou } from "@/components/waiting";
 import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReviews, InboxUrgent } from "@/components/review";
 import { FoldSection, InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { useInboxPlace } from "@/lib/inboxPlace";
+import { InboxNewLine } from "@/components/InboxNewLine";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
 import { SCORECARDS_PATH } from "@/lib/scorecards";
@@ -53,11 +54,13 @@ import { MILESTONE_PAGE, moveFocus, nextFocusPosition, pageMilestones, progressL
 import { LoadMore } from "@/components/loadMore";
 import { useFocusSave } from "@/lib/useFocusSave";
 import { RecentlyClosed } from "@/components/afterClose";
+import { InboxSentBack } from "@/components/sentBack";
 import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
+import { FoldChevron } from "@/components/foldChevron";
 
 /**
  * the console skin's
@@ -357,6 +360,8 @@ export function TeamPage({
   const inboxPlace = useInboxPlace();
   return (
     <OpenAsksContext.Provider value={openAskCodes(waiting)}>
+      {/* the owner: new cards wait behind a quiet "N new" line, so the card he reads never moves */}
+      {(campaigns ? only !== "goals" : !settings) && <InboxNewLine visit={inboxPlace.visit} />}
       {!settings && (
         <PageHeader
           title={campaigns && only !== "inbox" ? "Home" : campaigns ? "Inbox" : w.team}
@@ -439,6 +444,13 @@ export function TeamPage({
             {keeps.review && (
               <Slot name="social-review" fallback={420}>
                 <InboxDoneForReview />
+              </Slot>
+            )}
+            {/* (the owner 23 Nov 00:39Z): only a card he sent back that a worker is on now shows here, and he swipes it away;
+                one nobody is on is started by the console and waits on Hosts, never here. */}
+            {keeps.review && (
+              <Slot name="social-sent-back">
+                <InboxSentBack />
               </Slot>
             )}
             {keeps.kinds.length > 0 && (
@@ -527,6 +539,13 @@ export function TeamPage({
             {keeps.review && (
               <Slot name="review" fallback={420}>
                 <InboxDoneForReview />
+              </Slot>
+            )}
+            {/* (the owner 23 Nov 00:39Z): only a card he sent back that a worker is on now shows here, and he swipes it away;
+                one nobody is on is started by the console and waits on Hosts, never here. */}
+            {keeps.review && (
+              <Slot name="sent-back">
+                <InboxSentBack />
               </Slot>
             )}
             {keeps.kinds.length > 0 && (
@@ -681,7 +700,7 @@ export function MoreOnHome({ children, label }: { children: ReactNode; label?: s
         }}
         data-testid="home-more-toggle"
       >
-        <ChevronDown className={cn("h-4 w-4 shrink-0", open && "rotate-180")} aria-hidden />
+        <FoldChevron open={open} />
         {open ? "Less" : (label ?? "More: red lines, recently closed, what the team is doing")}
       </button>
       {open && <div className="mt-3" data-testid="home-more-body">{children}</div>}

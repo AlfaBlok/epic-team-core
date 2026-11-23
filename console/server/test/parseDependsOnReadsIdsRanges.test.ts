@@ -149,3 +149,14 @@ describe("E914-S9 the tree's ready", () => {
     expect(ready("E901-S5")).toBe(false); // still the owner's
   });
 });
+
+describe("a row waiting on a finished row moved to its epic's archive", () => {
+  it("stays ready: the archive's done row counts like the ledger's", () => {
+    e1("done (account live)");
+    // E902-S1 (done) leaves e2's ledger for e2.archive.md, ids kept
+    write("demo/docs/spines/e2.md", spine("EPIC-902", "two", "| E902-S2 | Ticket worker | seat pool | Open thing | open | none | go |\n"));
+    expect(!!find(buildTree(reposRoot, M, SPINES).root, "E901-S3")?.ready).toBe(false); // not found anywhere yet
+    write("demo/docs/spines/e2.archive.md", `# Archive of EPIC-902: finished rows\n\nArchive of: [EPIC-902: two](e2.md)\n\n## Issue Ledger\n\n${LEDGER}| E902-S1 | Ticket worker | seat pool | Done thing | done (abc) | none | none |\n`);
+    expect(!!find(buildTree(reposRoot, M, SPINES).root, "E901-S3")?.ready).toBe(true);
+  });
+});

@@ -113,7 +113,9 @@ describe("Urgent: one section at the very top of his inbox", () => {
     expect(screen.queryByTestId("inbox-urgent")).toBeNull();
   });
 
-  it("the count check reads Urgent: its asks count red, its finished work green", async () => {
+  // E948-S178 (vn_facd277a, 22 Nov 20:57Z: "The one in Urgent is a red one ... it's being counted as one of the green ones"):
+  // every card in Urgent counts red, its finished work too
+  it("the count check reads Urgent: every card in it counts red, never green", async () => {
     serve([PLAIN, DAD], [DONE, PRESSED_REVIEW]);
     inbox();
     const urgent = await screen.findByTestId("inbox-urgent");
@@ -122,7 +124,7 @@ describe("Urgent: one section at the very top of his inbox", () => {
     const r = inboxCountCheck();
     expect(r.sections.find((s) => s.section === "inbox-urgent")).toMatchObject({ pill: 2, cards: 2, folded: false });
     expect(r.mismatches).toEqual([]);
-    expect(urgent.querySelectorAll('[data-inbox-tone="red"]')).toHaveLength(1);
-    expect(urgent.querySelectorAll('[data-inbox-tone="green"]')).toHaveLength(1);
+    expect(urgent.querySelectorAll('[data-inbox-tone="red"]')).toHaveLength(2);
+    expect(urgent.querySelectorAll('[data-inbox-tone="green"]')).toHaveLength(0);
   });
 });

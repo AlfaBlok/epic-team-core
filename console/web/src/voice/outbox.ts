@@ -281,6 +281,8 @@ export interface DrainApi {
   start(base: string, cid: string, page?: string): Promise<{ id: string }>;
   segment(base: string, id: string, n: number, blob: Blob, seconds: number): Promise<unknown>;
   finish(base: string, id: string, segments: number, page?: string, skip?: number[]): Promise<{ state: string }>;
+  /** E948-S174: an empty recording's note is thrown away on the console too */
+  discard?(base: string, id: string): Promise<unknown>;
 }
 /** A note no tab touched for this long, and not held here, is sent as it is (its page was closed or reloaded mid-note). */
 export const ABANDON_MS = 3 * 60_000;
@@ -291,6 +293,13 @@ export const RETRY_FIRST_MS = 20_000;
 export const RETRY_MAX_MS = 30 * 60_000;
 export const backoffMs = (tries: number) => Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** Math.max(0, tries - 1));
 const status = (e: unknown) => (e as { status?: number })?.status;
+/** E948-S174: a kept note with no audio to send: no part on the console, and no bytes or no seconds here. */
+export function emptyNote(n: Pick<OutNote, "done" | "seconds">, parts: Pick<OutPart, "blob" | "seconds">[]): boolean {
+  if (n.done.length) return false;
+  const audio = parts.filter((p) => p.blob && p.blob.size > 0);
+  return !audio.length || (!(n.seconds > 0) && !audio.some((p) => p.seconds > 0));
+}
+
 /** The console's answer for a note it already closed (409 note_closed: posted, transcribed, empty or thrown away; 404: gone). */
 export const closed = (e: unknown) => (status(e) === 404 && /^no voice note/.test((e as Error).message ?? "")) || (status(e) === 409 && /\bis (posted|transcribed|discarded|empty)\b/.test((e as Error).message ?? ""));
 
@@ -337,6 +346,13 @@ export function drain(api: DrainApi = fetchDrainApi(), store = outbox(), now = D
 /** One kept note to the console. True: the console confirmed it (posted, or nothing was heard); it left the outbox. */
 async function sendOne(n: OutNote, api: DrainApi, store: OutboxStore, now = Date.now): Promise<boolean> {
   const parts = await store.parts(n.cid);
+  // E948-S174: an empty recording (0 s, or no audio bytes) with nothing on the console is dropped, never retried
+  if (emptyNote(n, parts)) {
+    if (n.id) await api.discard?.(n.base, n.id).catch(() => undefined);
+    for (const p of parts) await store.delPart(n.cid, p.n);
+    await settle(store, n.cid, false, now());
+    return false;
+  }
   if (!n.id) {
     if (!parts.length && !n.done.length) {
       // Nothing recorded and nothing on the console: nothing to keep.
@@ -378,6 +394,7 @@ export function fetchDrainApi(f: typeof fetch = (...a) => fetch(...a)): DrainApi
   const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return {
     start: async (base, cid, page) => (await call<{ note: { id: string } }>(`${base}/notes`, json({ clientId: cid, ...(page ? { page } : {}) }))).note,
+    discard: (base, id) => call(`${base}/notes/${id}/discard`, json({})),
     segment: (base, id, n, blob, seconds) =>
       call(`${base}/notes/${id}/segments/${n}`, { method: "POST", headers: { "content-type": blob.type || "audio/webm", "x-seconds": seconds.toFixed(2), "x-quick": "1" }, body: blob }),
     // quick: confirmed once its audio is safe on the console; the console writes and posts it by itself.

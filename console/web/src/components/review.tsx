@@ -1,4 +1,6 @@
+import { cardKey } from "@/lib/countCheck";
 import { saysNeedle, useInboxSearch, useSearchNeedle } from "@/lib/inboxSearch";
+import { aboutFrom } from "@/lib/about";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSlotReady } from "@/components/slot";
 import { OwnerPriorityTag } from "./ownerPriority";
@@ -15,7 +17,7 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
-import { CARD_WORD, DECIDE_QUESTION, isDecisionCard, leadsFirst, leadsSection } from "@/lib/cardKind";
+import { CARD_WORD, countsRed, DECIDE_QUESTION, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
 import { LeadLines } from "@/components/readyFirst";
 import { useMinuteClock } from "@/components/deadlineFirst";
 import { cn } from "@/lib/utils";
@@ -48,6 +50,7 @@ import { paragraphs, slotShort, slotWords as slotUtc, splitTitle } from "@/lib/p
 import { keepPlace } from "@/lib/keepPlace";
 import { unmarkSent, useKeepSent, useSent } from "@/lib/sentRows";
 import { SentOr, SentRow } from "@/components/sentRow";
+import { FoldChevron } from "@/components/foldChevron";
 
 /** the server adds the milestone's title to each card it lists. */
 type Listed = ReviewItem & { milestoneTitle?: string };
@@ -215,7 +218,8 @@ export function WaitingForReview({
                 data-testid="review-feed-item"
                 data-inbox-card={`review:${i.id}`}
                 data-inbox-open=""
-                data-inbox-tone={isDecisionCard(i.face) ? "red" : "green"}
+                data-card-key={cardKey("row", i.repo, i.ref)}
+                data-inbox-tone={countsRed(i) ? "red" : "green"}
                 data-lead={leadsSection(i.face) ? "yes" : undefined}
               >
                 {leadsSection(i.face) && (
@@ -272,7 +276,7 @@ export function WaitingForReview({
  * would sit in, so nothing shows twice and every pill still counts what its section draws. Empty, it is not drawn.
  */
 export const URGENT_SECTION = "Urgent";
-export const isUrgentReview = (i: Pick<ReviewItem, "ownerPriority" | "face">) => !!i.ownerPriority?.pressing || i.face?.ready?.why === "urgent";
+export { isUrgentReview };
 /** 0: he asked for it by name to be first, or it is labelled urgent; 1: pressing (asked again, frustrated). */
 export const urgentRank = (p: OwnerPriority | undefined, labelled = false) => (labelled || p?.pressing?.kind === "first" ? 0 : 1);
 const pressOrder = (p: OwnerPriority | undefined) => p?.pressing?.order ?? Number.MAX_SAFE_INTEGER;
@@ -300,7 +304,7 @@ export function InboxUrgent() {
     open.length > 0 ? (
       <div className="mb-[18px] grid min-w-0 grid-cols-1 gap-[18px]" data-testid="urgent-asks">
         {open.map((i) => (
-          <div key={i.id} className="min-w-0" data-testid="urgent-ask" data-inbox-open="" data-inbox-tone="red" data-urgent={i.urgent ? "label" : i.ownerPriority?.pressing?.kind}>
+          <div key={i.id} className="min-w-0" data-testid="urgent-ask" data-inbox-open="" data-inbox-tone="red" data-card-key={cardKey("ask", i.repo, i.code)} data-urgent={i.urgent ? "label" : i.ownerPriority?.pressing?.kind}>
             <WaitingCard item={i} showMilestone qualify={qualify} />
           </div>
         ))}
@@ -465,6 +469,7 @@ function SnoozedReviewRow({ item }: { item: Listed }) {
     <li className="min-w-0 text-sm" data-testid="review-snoozed-row" data-review-id={item.id}>
       <div className="flex min-w-0 items-center gap-x-2 whitespace-nowrap" title={title}>
         <button type="button" className={cn("min-w-[4rem] flex-1 text-left", full ? "whitespace-normal break-words" : "truncate")} aria-expanded={full} onClick={() => setFull(!full)}>
+          <FoldChevron open={full} className="mr-1.5" />
           {title}
         </button>
         {item.snoozedUntil && (
@@ -1004,10 +1009,11 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   return (
     <article className={CARD_FRAME} data-card-shell="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
       {/* vn_7c5aa36e, vn_4d2a86f9: its age right after the kind word, from when it reached his inbox, as on every card */}
-      <CardMeta kind={isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review} kindTestId="review-kind-word" since={item.inboxSince ?? item.createdAt} data-testid="review-crumb">
+      <CardMeta about={face.about ?? aboutFrom(face.title)} kind={isDecisionCard(face) ? CARD_WORD.decision : CARD_WORD.review} kindTestId="review-kind-word" since={item.inboxSince ?? item.createdAt} data-testid="review-crumb">
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {/* on a phone the long objective tag wraps inside the card, never past its edge */}
-        {item.ownerPriority && <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
+        {/* E948-S168: an urgent card says Urgent in its meta line, never only "High priority" */}
+        {(item.ownerPriority || isUrgentReview(item)) && <OwnerPriorityTag p={item.ownerPriority} urgent={isUrgentReview(item)} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
       </CardMeta>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
@@ -1020,6 +1026,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
         onClick={() => setOpen(!open)}
         data-testid="review-title"
       >
+        <FoldChevron open={open} className="mr-1.5" />
         <span className={cn(heading !== phoneHeading && "max-sm:hidden")} data-heading="computer">
           {heading}
         </span>
@@ -1062,6 +1069,12 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
       <a className={CARD_LINK} href={face.evidence.url} target="_blank" rel="noreferrer" data-testid="review-go">
         {face.evidence.label} ↗
       </a>
+      {/* E948-S180 (the owner 22 Nov: "You lead my attention to what you want to show me"): what to look at behind the link. */}
+      {face.evidence.look && (
+        <p className="m-0 mt-1 text-sm text-muted-foreground" data-testid="review-look">
+          {face.evidence.look}
+        </p>
+      )}
       {/* vn_e751eeeb: the steps his answer decides, one plain sentence a line (never joined after their own full stops). */}
       {next.length > 0 && choices && (
         <section className="mt-3 text-sm text-foreground/85" data-testid="review-decision-next">
@@ -1324,7 +1337,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
 function OldCard({ item }: { item: Listed }) {
   return (
     <CardShell as="article" kind="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
-      <CardMeta kind="Review" since={item.inboxSince ?? item.createdAt}>
+      <CardMeta kind="Review" about={aboutFrom(item.title)} since={item.inboxSince ?? item.createdAt}>
         {milestoneLabel(item.milestoneTitle) && <span>{milestoneLabel(item.milestoneTitle)}</span>}
       </CardMeta>
       <div className={CARD_TITLE}>
@@ -1429,7 +1442,7 @@ function PostReviewCardBody(card: CardProps) {
     <CardShell as="article" kind="post" data-testid="review-card" data-review-id={item.id} data-kind="post">
       {/* E948-S60: the one shell: the kind word first, then the project and the campaign, like every card. */}
       {/* how long: from the commit that made it held; an old server's day-only date reads in days */}
-      <CardMeta kind={p.kind === "outreach" ? "Reply" : "Post"} since={item.inboxSince ?? item.createdAt?.replace(/T00:00:00(?:\.000)?Z$/, "")} data-testid="review-crumb">
+      <CardMeta about={aboutFrom(p.kind === "outreach" ? p.thread?.title : undefined, p.title, p.campaign)} kind={p.kind === "outreach" ? "Reply" : "Post"} since={item.inboxSince ?? item.createdAt?.replace(/T00:00:00(?:\.000)?Z$/, "")} data-testid="review-crumb">
         {p.project.url ? <A href={p.project.url}>{p.project.name}</A> : <span>{p.project.name}</span>}
         {campaignHref ? <A href={campaignHref}>{p.campaign}</A> : <span>{p.campaign}</span>}
         <span>waiting for you</span>

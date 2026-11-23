@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
-import { KrEvidence, TrafficLight, keyResultsOf, krMeasured, lightOf, titleOf } from "@/components/goalSets";
+import { KeyResultSheet, TrafficLight, keyResultsOf, krMeasured, lightOf, titleOf } from "@/components/goalSets";
+import { byRingColour } from "@/lib/ringOrder";
 import { splitVoiceReply } from "@/components/ownerPriority";
 import { shortTo, useAnswerVoice } from "@/voice/AnswerVoice";
 import { ReplyPlay } from "@/voice/ReplyVoice";
-import { cn } from "@/lib/utils";
 import { BRIEFING_PARAM, briefingHref, isBriefMe } from "@/lib/briefing";
 
 /**
@@ -56,7 +56,7 @@ export function keyResultLines(r: ScorecardRow): [string, string] {
 /** what Play says: the objective, each key result, then the question. */
 export function spoken(n: ScorecardNode, place: number): string {
   const [a, b] = objectiveLines(n, place);
-  const krs = keyResultsOf(n).map((r) => keyResultLines(r).join(": "));
+  const krs = byRingColour(keyResultsOf(n)).map((r) => keyResultLines(r).join(": "));
   return [`Objective ${a}`, b, ...krs, "What do you think of it?"].join("\n\n");
 }
 
@@ -114,6 +114,7 @@ export function Briefing({ nodes, kind, onClose }: { nodes: ScorecardNode[]; kin
 function BriefingStep({ n, place, kind, filed, onBack, onNext }: { n: ScorecardNode; place: number; kind: "objective" | "campaign"; filed: boolean; onBack?: () => void; onNext: (answered: boolean) => void }) {
   const krs = keyResultsOf(n);
   const [head, sub] = objectiveLines(n, place);
+  const [openKr, setOpenKr] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [state, setState] = useState<{ s: "sending" } | { s: "failed"; why: string }>();
   const sending = state?.s === "sending";
@@ -160,29 +161,11 @@ function BriefingStep({ n, place, kind, filed, onBack, onNext }: { n: ScorecardN
           <ReplyPlay id={`briefing-${n.id}`} text={spoken(n, place)} />
         </div>
       </div>
+      {/* the same three-column table as the objectives screen: key result, target, current, green first (vn_68cda1fe). */}
       {krs.length > 0 && (
-        <ul className="grid min-w-0 gap-0 overflow-hidden rounded-lg border" data-testid="briefing-krs">
-          {krs.map((r) => {
-            const [a, b] = keyResultLines(r);
-            const stale = krMeasured(r).stale;
-            return (
-              <li key={r.label} className="flex min-w-0 items-start gap-2 border-b px-3 py-2 last:border-b-0" data-testid="briefing-kr" data-state={r.state}>
-                <span className="mt-[5px] shrink-0">
-                  <TrafficLight light={r.state} size="sm" testId="briefing-kr-light" />
-                </span>
-                <span className="grid min-w-0">
-                  <span className="text-[15px] text-foreground [overflow-wrap:anywhere]" data-testid="briefing-kr-name">
-                    {a}
-                  </span>
-                  <span className={cn("text-sm [overflow-wrap:anywhere]", stale ? "italic text-muted-foreground/70" : "text-muted-foreground")} data-testid="briefing-kr-now">
-                    {b}
-                  </span>
-                  <KrEvidence r={r} />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="min-w-0" data-testid="briefing-krs">
+          <KeyResultSheet krs={krs} setId={n.id} open={openKr} onOpen={setOpenKr} />
+        </div>
       )}
       <div className="grid gap-2">
         <p className="flex items-center gap-1.5 text-sm font-medium">

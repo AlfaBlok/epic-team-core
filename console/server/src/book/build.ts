@@ -6,6 +6,7 @@ import type { SpineNode, SpinesJson } from "../adapters/spines.js";
 import { FEATURES_FILE, readFeatureLists, readTopJourneys, type FeatureList, type TopJourneys } from "./features.js";
 import { deliverablesFor, firstDates, readCards, readDocEntries, readNotedPreviews, type Deliverable, type PreviewEntry } from "./deliverables.js";
 import { applyFolds, readFolds } from "../folds.js";
+import { readArchiveOf } from "../adapters/spineArchive.js";
 
 /**
  * the Epic Book, one page that answers "where are we". Built from `spines.py --json` (goal,
@@ -398,7 +399,9 @@ export function buildRepoBook(
     const state = stateOf(status, waitingOn, asks.length);
     counts[state]++;
     const markdown = readSpine(repo.path, n.path);
-    const decisions = parseDecisions(markdown);
+    const archive = readArchiveOf(path.join(repo.path, n.path));
+    // its older decisions moved to the archive stay on its Book page
+    const decisions = archive ? [...parseDecisions(markdown), ...parseDecisions(archive)].sort((x, y) => y.date.localeCompare(x.date)) : parseDecisions(markdown);
     const mine = commitsFor(n, ix);
     const events: BookEvent[] = [
       ...mine.map((c) => ({ date: c.date, kind: "commit" as const, text: c.subject, sha: c.sha })),
@@ -430,7 +433,7 @@ export function buildRepoBook(
       result: clean(cs.result),
       phase: clean(cs.phase),
       spineChangedAt: commits.find((c) => c.files.includes(n.path))?.date ?? null,
-      made: deliverablesFor({ repoDir: repo.path, repoName: repo.name, remote: repo.remote, spinePath: n.path, markdown, number: epicNumber(n.title || ""), ...made }),
+      made: deliverablesFor({ repoDir: repo.path, repoName: repo.name, remote: repo.remote, spinePath: n.path, markdown: withArchiveText(markdown, archive), number: epicNumber(n.title || ""), ...made }),
       ...(repo.remote ? { href: `https://github.com/${repo.remote}/blob/main/${n.path}` } : {}),
     };
   });
@@ -453,4 +456,9 @@ export function assembleBook(repos: BookRepo[], now: Date): Book {
   const counts: Record<BookState, number> = { moving: 0, stuck: 0, parked: 0, done: 0 };
   for (const r of repos) for (const k of Object.keys(counts) as BookState[]) counts[k] += r.counts[k];
   return { builtAt: now.toISOString(), repos, counts };
+}
+
+/** an epic's spine and its archive's finished rows, read as one: what it made stays on its Book page. */
+export function withArchiveText(markdown: string, archive: string | undefined): string {
+  return archive ? `${markdown}\n\n${archive.replace(/^# .*$/m, "")}` : markdown;
 }

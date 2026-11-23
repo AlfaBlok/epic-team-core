@@ -101,6 +101,7 @@ export function useVoiceNote(props: {
       }
     },
     extra: <SpeakRepliesSwitch compact />,
+    bubble: true,
     api: props.api,
     media: props.media,
     clock: props.clock,

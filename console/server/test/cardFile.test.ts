@@ -145,7 +145,7 @@ describe("E948-S26 what becomes a card (decided from the spine)", () => {
     repoWith(
       [
         { id: "E941-S1", title: "card", status: "review", evidence: LIVE },
-        { id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none" },
+        { id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none; confirm: no — nothing for Sam to open and judge" },
         { id: "E941-S3", title: "GitHub only", status: "review", evidence: LIVE },
         { id: "E941-S4", title: "Cluster F (violation 8 + grey runs monitoring, desk_placement, ask_memory): Unblocker rubric settings", status: "review", evidence: LIVE },
         { id: "E941-S5", title: "an example", status: "review", evidence: LIVE },
@@ -382,7 +382,7 @@ describe("E963-S8 a row that closes itself is written done in the spine at once"
     const r = repoWith(
       [
         { id: "E941-S1", title: "card", status: "review", evidence: LIVE },
-        { id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none" },
+        { id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none; confirm: no — nothing for Sam to open and judge" },
         { id: "E941-S3", title: "GitHub only", status: "review", evidence: LIVE },
         { id: "E941-S5", title: "an example", status: "review", evidence: LIVE },
       ],
@@ -413,8 +413,30 @@ describe("E963-S8 a row that closes itself is written done in the spine at once"
     expect(await review.closeSelf()).toEqual([]);
   });
 
+  it("the console never closes a ticket by default: a row with no confirm line at all goes back to its worker", async () => {
+    // (a ticket the owner asked for on 22 Nov 10:06Z was closed 4 minutes after it reached review, and again at 00:03Z)
+    const r = repoWith([{ id: "E941-S2", title: "no confirm line", status: "review", evidence: LIVE, next: "followups: none" }], { "E941-S2": GOOD("E941-S2").replace("confirm: yes\n", "") });
+    const { review } = setup();
+    const agents = await listed(review, "agents");
+    expect(agents.map((i) => [i.ref, i.verdict.kind])).toEqual([["E941-S2", "needs-rewriting"]]);
+    expect(agents[0].verdict.problems?.[0]).toMatch(/^the row says neither `confirm: yes` nor `confirm: no`/);
+    expect(await review.closeSelf()).toEqual([]);
+    expect(r.rowLine(EPIC, "E941-S2")!.split(" | ")[4]).toBe("review");
+  });
+
+  it("a row he sent back never closes itself: what would have closed it goes back to its worker, and the spine keeps it in review", async () => {
+    // (the owner 23 Nov 00:29Z: "Closed by the team, it should not be possible ... I never ask for this")
+    const r = repoWith([{ id: "E941-S2", title: "no confirm", status: "review (iteration 3)", evidence: LIVE, next: "followups: none; confirm: no — nothing for Sam to open and judge" }], { "E941-S2": GOOD("E941-S2").replace("confirm: yes\n", "") });
+    const { review } = setup();
+    const agents = await listed(review, "agents");
+    expect(agents.map((i) => [i.ref, i.verdict.kind])).toEqual([["E941-S2", "needs-rewriting"]]);
+    expect(agents[0].verdict.problems?.[0]).toMatch(/^Sam sent this card back, so only his press closes it/);
+    expect(await review.closeSelf()).toEqual([]);
+    expect(r.rowLine(EPIC, "E941-S2")!.split(" | ")[4]).toBe("review (iteration 3)");
+  });
+
   it("a refused write is retried later, not every minute", async () => {
-    const r = repoWith([{ id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none" }], { "E941-S2": GOOD("E941-S2").replace("confirm: yes\n", "") });
+    const r = repoWith([{ id: "E941-S2", title: "no confirm", status: "review", evidence: LIVE, next: "followups: none; confirm: no — nothing for Sam to open and judge" }], { "E941-S2": GOOD("E941-S2").replace("confirm: yes\n", "") });
     const { review } = setup();
     fs.writeFileSync(path.join(tmp, "home_repo", "dirty.txt"), "x"); // uncommitted change: the writer refuses
     expect(await review.closeSelf()).toMatchObject([{ ref: "E941-S2", status: "skipped" }]);

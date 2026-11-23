@@ -89,49 +89,27 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
     expect(rows.filter((r) => r.getAttribute("data-kind") !== "ask").length).toBe(Number(side.review));
   });
 
-  it("a milestone an objective holds is not listed again; one no objective holds is a goal row whose pills equal its Inbox tab's", async () => {
+  it("with objectives the sidebar lists only them: a goal no objective holds is not listed (its page opens by its link: the next test)", async () => {
+    // the owner, 22 Nov: "I don't want to see a single word, a single objective that doesn't have key results"
     const held = await api.createMilestone({ title: "Held by Launch", repo: "Acme/home_repo", path: "docs/spines/root.md", owner: "Sam", bigRoot: 1 });
     const house = await api.createMilestone({ title: "House decision", repo: "Acme/house_decision", path: "EPIC.md", owner: "Sam", bigRoot: 2 });
     vi.spyOn(api, "listScorecards").mockResolvedValue(objective(held.id));
     const batch = { milestones: [statusOf(house.id, [ask("h1", house.id, "H-A1")]), statusOf(held.id, [])], items: [ask("h1", house.id, "H-A1")], needsYou: 1, at: "2026-11-15T12:00:00Z" };
     vi.spyOn(api, "listStatus").mockResolvedValue(batch as never);
     vi.spyOn(api, "getMilestoneStatus").mockImplementation(async (id: string) => batch.milestones.find((s) => s.milestoneId === id)! as never);
-    vi.spyOn(api, "listReviewItems").mockResolvedValue([{ id: "rv-h", title: "Pick the house", ref: "H-S1", repo: "Acme/house_decision", path: "EPIC.md", state: "review", liveUrl: "https://x", createdAt: "2026-11-15", milestoneId: house.id }] as never);
+    vi.spyOn(api, "listReviewItems").mockResolvedValue([] as never);
     vi.spyOn(api, "listPursuits").mockResolvedValue({ staleDays: 3, pursuits: [] } as never);
     render(
       <MemoryRouter initialEntries={["/"]}>
         <SidebarNav />
-        <Routes>
-          <Route path="/milestones/:id" element={<MilestonePage />} />
-          <Route path="*" element={null} />
-        </Routes>
-        <Where />
       </MemoryRouter>,
     );
-    // the goals no objective holds sit in the folded More objectives
-    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
-    const list = await screen.findByTestId("sidebar-milestones");
-    await waitFor(() => expect(within(list).getByText("House decision")).toBeTruthy());
-    // the objective's milestone is the objective (listed once, above, with its wheel), never a second entry
-    expect(within(list).queryByText("Held by Launch")).toBeNull();
-    expect(screen.queryByTestId("sidebar-focus-heading")).toBeNull();
-    const row = within(list).getByText("House decision").closest("a")! as HTMLAnchorElement;
-    expect(within(row).getByTestId("sidebar-goal-wheel")).toBeTruthy();
-    await waitFor(() => expect(within(row).getByTestId("sidebar-needs-you").textContent).toBe("1"));
-    const side = { ask: within(row).getByTestId("sidebar-needs-you").textContent, review: within(row).getByTestId("sidebar-review").textContent };
-    expect(side).toEqual({ ask: "1", review: "1" });
-    // the green 1 of his screenshot opens the Inbox tab that lists it
-    fireEvent.click(within(row).getByTestId("sidebar-review"));
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(`/milestones/${encodeURIComponent(house.id)}?tab=inbox`));
-    const tab = await screen.findByTestId("set-tab-inbox");
-    expect(tab.getAttribute("aria-current")).toBe("page");
-    await waitFor(() => expect(within(tab).getByTestId("tab-inbox-asks").textContent).toBe(side.ask));
-    expect(within(tab).getByTestId("tab-inbox-review").textContent).toBe(side.review);
-    // the same screen as an objective's: the answer box and the objective's tabs
-    expect(screen.getByTestId("set-answer-box")).toBeTruthy();
-    expect(within(screen.getByTestId("set-tabs")).getAllByRole("link").map((l) => l.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Board", "Inbox", "Chat desk", "Context", "Personas", "Pages"]);
-    // and the tab lists the card the green pill counted
-    expect(await within(screen.getByTestId("goal-inbox")).findByText(/Pick the house/)).toBeTruthy();
+    await screen.findByTestId("nav-pages-toggle");
+    // no Other goals fold, no goal row: the sidebar is his objectives, tools and settings
+    expect(screen.queryByTestId("nav-other-goals-toggle")).toBeNull();
+    expect(screen.queryByTestId("sidebar-milestones")).toBeNull();
+    expect(screen.queryAllByTestId("big-root")).toHaveLength(0);
+    expect(screen.queryByText("House decision", { selector: "nav *, [data-testid=sidebar-milestones] *" })).toBeNull();
   });
 
   it("a milestone he retired leaves the list; its page still opens by its link", async () => {
@@ -150,11 +128,10 @@ describe("every sidebar entry is a goal, opened one way, its pills the ones its 
         </Routes>
       </MemoryRouter>,
     );
-    // the goals no objective holds sit in the folded More objectives
-    fireEvent.click(await screen.findByTestId("more-objectives-toggle"));
-    const list = await screen.findByTestId("sidebar-milestones");
-    await waitFor(() => expect(within(list).getByText("Travel plans")).toBeTruthy());
-    expect(within(list).queryByText("Market bots")).toBeNull();
+    // neither is listed in the sidebar (no Other goals fold)
+    await screen.findByTestId("nav-pages-toggle");
+    expect(screen.queryByTestId("nav-other-goals-toggle")).toBeNull();
+    expect(screen.queryByText("Market bots", { selector: "[data-testid=sidebar-milestones] *" })).toBeNull();
     expect(house.id).not.toBe(bots.id);
     // its old link still opens its own page
     expect(await screen.findByTestId("set-answer-box")).toBeTruthy();
