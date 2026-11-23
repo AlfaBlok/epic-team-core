@@ -2331,9 +2331,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const commitRow = (() => { try { return o.commitRow?.(p, m); } catch { return undefined; } })();
     const deckUrl = deckUrlOf(m);
     const mine = a.objective && o.objectiveOf ? await o.objectiveOf(a.objective).catch(() => undefined) : undefined;
+    // another switched-on Delivery Manager on the same objective from another milestone: then the one on the objective's first epic is its manager
+    const otherManagerOn = (x: typeof a) => store.listAssignments().some((y) => y.id !== x.id && y.enabled && y.objective === x.objective && y.milestoneId !== x.milestoneId && isDeliveryManager(store.getPersona(y.personaId)?.name));
     let prompt =
       buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl, !!jobBase) +
-      (a.objective ? "\n\n" + objectiveSection(a.objective, mine, isDeliveryManager(p.name)) : "") +
+      (a.objective ? "\n\n" + objectiveSection(a.objective, mine, isDeliveryManager(p.name), m.repo && otherManagerOn(a) ? `${m.repo}: ${m.path}` : undefined) : "") +
       (owned?.block ? "\n\n" + owned.block : "") +
       (map ? "\n\n" + map : "") +
       (commitRow ? "\n\n" + commitRow : "") +

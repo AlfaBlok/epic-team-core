@@ -254,7 +254,7 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
     const s = chat.current();
     if (!d.since || !m || !s) return undefined;
     try {
-      const last = (await chat.jordiMessages()).at(-1)?.at;
+      const last = (await chat.jordiMessages(Number.POSITIVE_INFINITY)).at(-1)?.at; // his previous message, however old
       return await d.since(m, last ?? s.createdAt);
     } catch {
       return undefined;

@@ -41,6 +41,8 @@ export const TAIL_MESSAGES = 120;
 export const VIEW_BUDGET_MS = 250;
 /** a cold read of a long thread starts this many items (positions) from its end, not at position 0. */
 export const TAIL_WINDOW = 300;
+/** how far back the owner's own words are read from the live thread (the desk's Add and answers, E948-S193). */
+export const RECENT_WORDS_MS = 24 * 60 * 60_000;
 /** newest messages kept in desk_view_cache (the first screen shows 30). */
 export const CACHED_MESSAGES = 40;
 /** A message that never reached `completed` this long after its last update stops holding the read cursor back. */
@@ -469,21 +471,60 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   };
 
   /**
-   * read positions [start, cache.from) into the cache (older messages), then cache.from = start. Pages forward
-   * from start until they pass what is already read.
+   * read positions [start, cache.from) into the cache (older messages), one TAIL_WINDOW at a time from the newest down;
+   * cache.from drops only past a window read whole, so a read cut by the page budget leaves no hole (the next call goes on).
+   * E948-S193: it paged forward from `start` and set cache.from = start after MAX_PAGES whatever it had reached. T3 pages
+   * are small (about 30 positions, 40 pages reach position ~1250 of the desk's ~5000), so a full read after a console
+   * restart held only the thread's first days and claimed the rest: on 22 Nov 20:49Z and 20:59Z the Add found "nothing in
+   * the desk chat in the last 24 hours" though his notes of 20:47 to 20:58Z were in the thread.
+   * An unknown end (an earlier thread whose item count could not be read) still reads forward from `start`.
    */
   async function readBack(k: Cache, start: number): Promise<void> {
     const read = reader(k.threadId);
-    const stop = k.from;
-    if (start >= stop) return;
-    let after: number | undefined = start > 0 ? start - 1 : undefined;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const r = await read(k.threadId, { afterPosition: after, limit: 100 });
-      for (const m of r.messages) if (m.position < stop && !k.byItem.has(m.itemId)) k.byItem.set(m.itemId, m);
-      if (r.nextPosition === null || r.nextPosition >= stop - 1 || !r.hasMore) break;
-      after = r.nextPosition;
+    if (start >= k.from) return;
+    let pages = 0;
+    const window = async (lo: number, stop: number): Promise<boolean> => {
+      let after: number | undefined = lo > 0 ? lo - 1 : undefined;
+      for (;;) {
+        if (pages++ >= MAX_PAGES) return false;
+        const r = await read(k.threadId, { afterPosition: after, limit: 100 });
+        for (const m of r.messages) if (m.position < stop && !k.byItem.has(m.itemId)) k.byItem.set(m.itemId, m);
+        if (r.nextPosition === null || r.nextPosition >= stop - 1 || !r.hasMore) return true;
+        after = r.nextPosition;
+      }
+    };
+    if (k.from >= Number.MAX_SAFE_INTEGER) {
+      if (await window(start, k.from)) k.from = start;
+      return;
     }
-    k.from = start; // a cache replaced meanwhile is simply dropped (earlier sessions' caches are read the same way)
+    while (k.from > start) {
+      const lo = Math.max(start, k.from - TAIL_WINDOW);
+      if (!(await window(lo, k.from))) return; // out of pages: the next call goes on from here
+      k.from = lo; // a cache replaced meanwhile is simply dropped (earlier sessions' caches are read the same way)
+    }
+  }
+
+  /**
+   * E948-S193: the live thread's messages back to `since` (ms), read from its end: a cold cache starts TAIL_WINDOW items
+   * before the end (the item count from the status read) and reads back window by window until a cached message is older
+   * than `since` or the thread's start. His words of the last 24 hours never wait on reading the thread from its first day.
+   */
+  async function refreshSince(threadId: string, since: number): Promise<Map<string, T3ThreadMessage>> {
+    const k = cacheFor(threadId);
+    let tailOf = 1; // any known value: a warm cache reads on from its cursor, never the whole thread first
+    if (k.cursor === undefined && k.byItem.size === 0 && k.from === 0) {
+      const st = await clientOn(hostOfThread(threadId)).readThreadStatus(threadId);
+      const count = Number((st.raw as { itemCount?: unknown } | undefined)?.itemCount);
+      tailOf = Number.isFinite(count) && count > 0 ? count : 1;
+    }
+    await refresh(threadId, { tailOf });
+    const oldestAt = () => Math.min(...[...k.byItem.values()].map((m) => Date.parse(m.updatedAt ?? "")).filter(Number.isFinite));
+    while (k.from > 0 && !(oldestAt() < since)) {
+      const was = k.from;
+      await readBack(k, Math.max(0, k.from - TAIL_WINDOW));
+      if (k.from === was) break; // page budget spent: the next call goes on
+    }
+    return k.byItem;
   }
 
   /**
@@ -855,11 +896,16 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     return syncing;
   }
 
-  /** the owner's own messages in the live thread (plumbing excluded, page hint stripped), oldest first. */
-  async function jordiMessages(): Promise<{ text: string; at?: string; position: number; request?: string }[]> {
+  /**
+   * the owner's own messages in the live thread of the last `maxMs` (default 24 h; plumbing excluded, page hint stripped),
+   * oldest first. Read from the thread's end (refreshSince), never from its first message (E948-S193).
+   */
+  async function jordiMessages(maxMs = RECENT_WORDS_MS): Promise<{ text: string; at?: string; position: number; request?: string }[]> {
     const s = current();
     if (!s || !d.t3) return [];
-    const all = [...(await refresh(s.threadId)).values()].filter((m) => m.role === "user").sort((a, b) => a.position - b.position);
+    const since = now() - maxMs;
+    const all = [...(await refreshSince(s.threadId, since)).values()]
+      .filter((m) => Date.parse(m.updatedAt ?? "") >= since).filter((m) => m.role === "user").sort((a, b) => a.position - b.position);
     return all.filter((m) => !isPlumbing(m.text)).map((m) => {
       const text = splitSince(m.text.replace(PAGE_PREFIX, "")).text;
       const request = requestIdOf(m.itemId, text);
@@ -871,7 +917,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   async function newestUserMessage(): Promise<{ text: string; at?: string; seed: boolean; plumbing: boolean } | undefined> {
     const s = current();
     if (!s || !d.t3) return undefined;
-    const last = [...(await refresh(s.threadId)).values()].filter((m) => m.role === "user").sort((a, b) => b.position - a.position)[0];
+    const last = [...(await refreshSince(s.threadId, now())).values()].filter((m) => m.role === "user").sort((a, b) => b.position - a.position)[0];
     if (!last) return undefined;
     return { text: last.text, at: last.updatedAt, seed: last.text.startsWith(p.seedMarker), plumbing: isPlumbing(last.text) };
   }

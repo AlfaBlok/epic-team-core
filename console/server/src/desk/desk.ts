@@ -546,7 +546,10 @@ export function createDesk(d: DeskDeps) {
       // E948-S178: his voice notes count from every route (top bar, card, Chat, through T3 or not), not the thread alone
       const voice = voiceNoteWords(d.db, homeWorld(), now());
       if (!current() || !d.t3) return voice.length ? hisWordsIn(voice, said, now()) : "there is no live desk thread";
-      const thread = await chat.jordiMessages().catch(() => []);
+      const thread = await chat.jordiMessages().catch((e) => {
+        console.warn(`desk: reading his words from the desk thread failed, voice notes only: ${errorText(e)}`); // E948-S193: never silent
+        return [];
+      });
       return hisWordsIn(everyRouteWords(thread, voice), said, now());
     },
 

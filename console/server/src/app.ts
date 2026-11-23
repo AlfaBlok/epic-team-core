@@ -4415,11 +4415,13 @@ export function createApp(
         const m = milestoneId ? store.getMilestone(milestoneId) : undefined;
         const claimed = new Set(m ? claimsFor(store, m).map((x) => x.ticket) : []);
         const steps = ((await ready().catch(() => undefined)) ?? []).filter((x) => !claimed.has(x));
+        const summary = ending.patch.summary ?? run.summary;
         const why = stalledWake({
           persona,
           outcome: ending.patch.outcome ?? run.outcome,
-          summary: ending.patch.summary ?? run.summary,
-          ready: steps,
+          summary,
+          // a ready row with a written reason (`not started <row>: …`) is accounted for, not stalled
+          ready: unaccountedReady({ ready: steps, launchedRows: [], summary }),
           launched: store.listRuns({ parentRunId: id, limit: 50 }).length,
         });
         stalledPatch.stalled =

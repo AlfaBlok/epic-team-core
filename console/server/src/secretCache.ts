@@ -42,7 +42,7 @@ function storeStamp(): string {
 export const secretReads = { n: 0 };
 
 /** a first source for a store file's value (app = its folder, name = the file); undefined = it has none. */
-export type SecretSource = { name: string; read(app: string, name: string): Promise<string | undefined>; warm?(): boolean };
+export type SecretSource = { name: string; read(app: string, name: string): Promise<string | undefined>; warm?(): boolean; stats?(): Record<string, number> };
 let source: SecretSource | undefined;
 const SOURCE_WAIT_MS = 90_000;
 const tally = { source: 0, store: 0, storeNames: new Set<string>(), since: new Date().toISOString() };
@@ -75,6 +75,7 @@ export function secretSourceHealth(): {
   fromCopy: number;
   copyNames: string[];
   since: string;
+  memory?: Record<string, number>;
   worlds: { fromSource: number; fromCopy: number; copyNames: string[]; stored?: Record<string, number> };
 } {
   return {
@@ -83,6 +84,7 @@ export function secretSourceHealth(): {
     fromCopy: tally.store,
     copyNames: [...tally.storeNames].sort(),
     since: tally.since,
+    ...(source?.stats ? { memory: source.stats() } : {}),
     worlds: { fromSource: worldTally.source, fromCopy: worldTally.store, copyNames: [...worldTally.storeNames].sort(), ...(worldStored ? { stored: worldStored() } : {}) },
   };
 }

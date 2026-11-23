@@ -105,9 +105,21 @@ describe("an assignment names its objective", () => {
     expect(s).toMatch(/^## Your objective: you are its objective manager/);
     expect(s).toContain("App: Finish the vault move (`vault` in docs/pursuits.json): you work this objective only");
     expect(s).toContain("its key results green, not tickets closed");
+    expect(s).toContain("/scripts/kr_orphans.py --objective vault");  // red with nothing moving it gets its plan step's ticket
+    expect(s).toContain("kr_orphans.py write vault <n>");
     expect(s).toContain("Your report opens with each key result");
     expect(s).toContain("app: docs/spines/accounts.md");
     expect(objectiveSection("gone")).toContain("`gone` in docs/pursuits.json");
+  });
+
+  it("a Delivery Manager of another world's spine the objective lists after its own is its second manager, on its own spine", () => {
+    const o = { name: "App: Keep the feeds running", epics: ["feeds: docs/spines/root.md", "listings: docs/spines/root.md"] };
+    const s = objectiveSection("feeds", o, true, "acme/listings: docs/spines/root.md");
+    expect(s).toMatch(/^## Your objective: you are a second manager from your own world/);
+    expect(s).toContain("Bind and dispatch from your own spine only");
+    expect(s).toContain("feeds: docs/spines/root.md) has its own objective manager");
+    expect(objectiveSection("feeds", o, true, "acme/feeds: docs/spines/root.md")).toMatch(/^## Your objective: you are its objective manager/);
+    expect(objectiveSection("feeds", o, true, "acme/elsewhere: docs/x.md")).toMatch(/^## Your objective: you are its objective manager/);
   });
 
   it("a whole-team persona that names an objective only has its home there and still serves all", () => {

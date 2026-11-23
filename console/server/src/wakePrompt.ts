@@ -379,12 +379,24 @@ export function buildWakePrompt(
  * harvester, Epic Spine health, Alignment) only has its home there: that objective's Personas tab lists it, and it
  * keeps serving every objective its remit names (the owner: "they serve all").
  */
-export function objectiveSection(id: string, o?: { name: string; epics: string[] }, onlyThis = true): string {
+export function objectiveSection(id: string, o?: { name: string; epics: string[] }, onlyThis = true, own?: string): string {
   const what = `${o ? `${o.name} (\`${id}\` in docs/pursuits.json)` : `\`${id}\` in docs/pursuits.json`}`;
   if (!onlyThis)
     return [
       "## Your home objective",
       `- ${what}: its Personas tab lists you. You still serve every objective your remit names; this only says where you show.`,
+    ].join("\n");
+  // a Delivery Manager of another world's spine that this objective lists after its own: it keeps working its own
+  // spine's rows for this objective, never the first epic's (that one has its own objective manager).
+  const spineKey = (e: string) => e.replace(/^[^:]*\//, "").replace(/\.git$/, "").toLowerCase();
+  const first = o?.epics[0];
+  if (own && first && spineKey(own) !== spineKey(first) && o?.epics.some((e) => spineKey(e) === spineKey(own)))
+    return [
+      "## Your objective: you are a second manager from your own world",
+      `- ${what}: your own spine (${own}) is one of its epics. Bind and dispatch from your own spine only; its first epic (${first}) has its own objective manager, never work its rows.`,
+      "- Your aim is its key results green where your spine moves them: each wake, list the ones that are not green and that your rows move, and start a worker on the next of your rows for each.",
+      "- Ask the owner only what only he can answer (a decision, a login, his taste); everything else you settle yourself and do.",
+      "- Your report opens with each key result your rows move: green, or red and what you started on it, or red and the ask it waits on.",
     ].join("\n");
   return [
     "## Your objective: you are its objective manager",
@@ -393,6 +405,8 @@ export function objectiveSection(id: string, o?: { name: string; epics: string[]
     "- Its key results, plan and tickets are its Key results and Plan tabs; a row of another objective is left to that objective's own personas.",
     // the owner, 23 Nov 11:21Z: "These guys wake up and their goal is to get the things to green and they dispatch ... as needed"
     "- Your aim is its key results green, not tickets closed. Each wake, before the steps above: list its key results that are not green; for each, the next open step of its plan; start a worker on the row that is that step (a step with no row gets one first); a red key result with nothing moving it and no step that could is an ask, the same wake.",
+    // the owner, 23 Nov 11:21Z: "The wheel is not turning by itself. Why not? ... Do what you need to do. Ask what you need to ask. Get it done."
+    `- A red key result with no ready, running or waiting ticket under it is yours to move this wake, never left: run \`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py --objective ${id}\` and take each ORPHAN line. Its \`next plan step\` is read from the Plan tab; do what its \`do now\` says: \`write\` (\`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py write ${id} <n> --by <your run id>\` writes one ready ticket under that key result for that plan step, then start its worker in this wake), \`restart\` (set that row ready and start it), \`ask\` (the step is the owner's own: money, publishing, his accounts, a choice of direction: one coded ask), \`plan\` (write the next step on the Plan tab first, then \`write\`). Never write a ticket the plan does not hold. Your report counts them: red with nothing moving it, at the start and at the end of the wake (target 0).`,
     "- Ask the owner only what only he can answer (a decision, a login, his taste); everything else you settle yourself and do.",
     "- Your report opens with each key result: green, or red and what you started on it, or red and the ask it waits on.",
   ].join("\n");

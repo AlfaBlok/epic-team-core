@@ -1544,7 +1544,12 @@ export function PersonasTab({ m, objective }: { m: Milestone; /** shown on an ob
   const w = useWords();
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
-  const { data: runs = [] } = useQuery(() => api.listRuns({ milestoneId: m.id }), [m.id]);
+  const { data: ownRuns = [] } = useQuery(() => api.listRuns({ milestoneId: m.id }), [m.id]);
+  // an objective's personas may wake on other milestones (a second manager from its own world): their runs and that world's name
+  const elsewhere = objective ? [...new Set(personasOfObjective(assignments, { id: objective.id, milestoneId: m.id, shared: objective.shared }).map((a) => a.milestoneId))].filter((x) => x !== m.id).sort() : [];
+  const { data: otherRuns = [] } = useQuery(() => (elsewhere.length ? Promise.all(elsewhere.map((id) => api.listRuns({ milestoneId: id }))).then((r) => r.flat()) : Promise.resolve([])), [elsewhere.join(",")]);
+  const { data: milestones = [] } = useQuery(() => (elsewhere.length ? api.listMilestones() : Promise.resolve([])), [elsewhere.length > 0]);
+  const runs = otherRuns.length ? [...ownRuns, ...otherRuns] : ownRuns;
   const { data: cycle } = useQuery(() => api.getCycle(), []);
   const { data: needsOwner = [] } = useQuery(() => api.listNeedsOwner(), []);
   const cycleOff = cycle?.enabled === false;
@@ -1578,7 +1583,7 @@ export function PersonasTab({ m, objective }: { m: Milestone; /** shown on an ob
             <CardContent className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{objective && isDm(a) ? "Objective manager" : (p?.name ?? a.personaId)}</span>
+                  <span className="font-medium">{objective && isDm(a) ? (a.milestoneId === m.id || !mine.some((x) => isDm(x) && x.enabled && x.milestoneId === m.id) ? "Objective manager" : `Second manager · ${milestones.find((x) => x.id === a.milestoneId)?.title ?? "own world"}`) : (p?.name ?? a.personaId)}</span>
                   {p && <Badge variant="outline">{p.model}</Badge>}
                   {p && !a.writeEnabled && <Badge variant="gray">diagnose only</Badge>}
                   <ParkedBadge a={a} />

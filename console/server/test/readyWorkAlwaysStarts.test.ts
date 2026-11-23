@@ -140,6 +140,23 @@ describe("app: the finishing PATCH of a Delivery manager wake", () => {
     expect(p.json.stalled).toBeUndefined();
   });
 
+  it("no worker but a written reason on every ready row: accepted the first time, not stalled", async () => {
+    const { call, a } = await setup();
+    const r = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
+    const p = await call("PATCH", `/api/runs/${r.id}`, { outcome: "progressed", summary: "outcome: progressed: nothing started\nnot started T1: needs the schema first\nnot started T2: waits on the owner", endedAt: end() });
+    expect(p.status).toBe(200);
+    expect(p.json.stalled).toBeUndefined();
+  });
+
+  it("no worker and a reason on only one of two ready rows: refused, then stalled naming the other", async () => {
+    const { call, a } = await setup();
+    const r = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
+    const body = { outcome: "progressed", summary: "outcome: progressed: nothing started\nnot started T1: needs the schema first", endedAt: end() };
+    expect((await call("PATCH", `/api/runs/${r.id}`, body)).json.error.message).toMatch(/no written reason: T2\./);
+    const p2 = await call("PATCH", `/api/runs/${r.id}`, body);
+    expect(p2.json.stalled).toMatch(/after a refusal: T2$/);
+  });
+
   it("never for another persona, nor for a failed wake", async () => {
     const { call, a } = await setup("steward");
     const r = (await call("POST", "/api/runs", { assignmentId: a.id })).json;
