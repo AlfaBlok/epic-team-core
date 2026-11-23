@@ -100,6 +100,8 @@ export interface CycleOptions {
    * Default NO_THREAD_CLOSE_MS.
    */
   noThreadCloseMs?: number;
+  /** re-attach to sandboxed jobs a restart left running this long after start (default 5 s; tests 0). */
+  resumeJobsAfterMs?: number;
   bootstrapModel?: string;
   /** M1 seats.json. A wake whose home thread sits on a limited / logged-out seat goes to a new home thread on a seat with headroom. */
   seatsFile?: string;
@@ -1975,14 +1977,66 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
         .start({ runId: run.id, world, assignmentId: a.id, personaId: p.id, model: p.model, stub, repo: m.repo, ...(box ? { box } : {}) })
         .catch((e): JobEnd => ({ ok: false, result: "failed", detail: errorText(e) }))
         .then((end) => {
+          if (end.detached) return; // a console restart; the job runs on and the next console waits for it
           if (getLink(a.id)?.pendingRunId === run.id) clearLinkField(a.id, "pending_run_id");
-          const cur = store.getRun(run.id);
-          if (cur?.outcome !== "running") return;
-          const why = end.ok ? "the job ended without the persona's report" : `job server ${end.result}${end.detail ? `: ${end.detail}` : ""}`;
-          store.updateRun(run.id, { outcome: "failed", endedAt: iso(), summary: `${cur.summary} · ${why}${end.server ? ` (${end.server})` : ""}`.slice(0, 2000) });
+          jobEnded(run.id, end, "the persona's");
         }),
     );
     return store.getRun(run.id)!;
+  }
+
+  /** a job ended with its run still open: the run fails with the job's reason (never left running). */
+  function jobEnded(runId: string, end: JobEnd, whose: string): void {
+    const cur = store.getRun(runId);
+    if (cur?.outcome !== "running") return;
+    const why = end.ok ? `the job ended without ${whose} report` : `job server ${end.result}${end.detail ? `: ${end.detail}` : ""}`;
+    store.updateRun(runId, { outcome: "failed", endedAt: iso(), summary: `${cur.summary} · ${why}${end.server ? ` (${end.server})` : ""}`.slice(0, 2000) });
+  }
+
+  /**
+   * at start, wait again for every sandboxed job a restart left running (its run open, route `sandbox:<host>`):
+   * the job ran on on its host, so its real end (the agent's own report, or the job's reason) is recorded, never a
+   * failure because the console was away. Once per start; a job already gone ends its run with what its host says.
+   */
+  const resumed = new Set<string>();
+  function resumeJobs(): string[] {
+    const route = jobRoute;
+    if (!route?.resume) return [];
+    const rows = db.prepare("SELECT id FROM runs WHERE outcome = 'running' AND route LIKE 'sandbox:%' ORDER BY started_at LIMIT 100").all() as { id: string }[];
+    const out: string[] = [];
+    for (const { id } of rows) {
+      if (resumed.has(id)) continue;
+      const run = store.getRun(id);
+      const a = run && store.getAssignment(run.assignmentId);
+      const m = a && store.getMilestone(a.milestoneId);
+      const world = m && jobWorldOf(m, a!.personaId);
+      if (!run || !a || !world) continue;
+      resumed.add(id);
+      out.push(id);
+      console.log(`sandboxed job ${id} (${world}) outlived the last console: waiting for its end again`);
+      track(
+        route
+          .resume({ runId: id, world, personaId: a.personaId })
+          .catch((e): JobEnd => ({ ok: false, result: "failed", detail: errorText(e) }))
+          .then((end) => {
+            if (end.detached) return;
+            if (!run.parentRunId && getLink(a.id)?.pendingRunId === id) clearLinkField(a.id, "pending_run_id");
+            jobEnded(id, end, run.parentRunId ? "the worker's" : "the persona's");
+          }),
+      );
+    }
+    return out;
+  }
+  if (jobRoute?.resume && o.enabled !== false) {
+    const t = setTimeout(() => {
+      try {
+        resumeJobs();
+      } catch (e) {
+        console.error("resume sandboxed jobs:", e);
+      }
+    }, o.resumeJobsAfterMs ?? 5_000);
+    t.unref();
+    timers.push(t);
   }
 
   /**
@@ -2573,10 +2627,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
         .start({ runId: child.id, world, assignmentId: a.id, personaId: p.id, model: i.model || p.model, stub: message, repo: m.repo, ...(box ? { box } : {}) })
         .catch((e): JobEnd => ({ ok: false, result: "failed", detail: errorText(e) }))
         .then((end) => {
-          const cur = store.getRun(child.id);
-          if (cur?.outcome !== "running") return;
-          const why = end.ok ? "the job ended without the worker's report" : `job server ${end.result}${end.detail ? `: ${end.detail}` : ""}`;
-          store.updateRun(child.id, { outcome: "failed", endedAt: iso(), summary: `${cur.summary} · ${why}${end.server ? ` (${end.server})` : ""}`.slice(0, 2000) });
+          if (end.detached) return; // a console restart; the job runs on and the next console waits for it
+          jobEnded(child.id, end, "the worker's");
         }),
     );
     return store.getRun(child.id)!;
@@ -3155,6 +3207,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     /** notes still waiting for a wake of the assignment. */
     heldNotes,
     reconcile,
+    /** re-attach to sandboxed jobs a restart left running (also once, 5 s after start). */
+    resumeJobs,
     /** one idle-stop sweep, and the threads settled lately (in memory). */
     idleStop,
     idleStops: idleStopper.recent,

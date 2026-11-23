@@ -7,7 +7,7 @@ import { createApp } from "../src/app.js";
 import { openDb, type DB } from "../src/db.js";
 import { buildScorecards } from "../src/scorecards.js";
 import { ASSIGNMENTS_FILE, assignmentEntryOf, parseAssignments } from "../src/team/assignmentRecord.js";
-import { objectiveSection, buildWakePrompt } from "../src/wakePrompt.js";
+import { objectiveSection, buildWakePrompt, redFirstLine } from "../src/wakePrompt.js";
 
 /**
  * The owner asked for one Delivery Manager per objective on its Personas tab: an assignment names the
@@ -110,6 +110,15 @@ describe("an assignment names its objective", () => {
     expect(s).toContain("Your report opens with each key result");
     expect(s).toContain("app: docs/spines/accounts.md");
     expect(objectiveSection("gone")).toContain("`gone` in docs/pursuits.json");
+  });
+
+  it("the wake message names the objective's red key results and the one command, read whole every wake", () => {
+    const card = JSON.stringify({ keyResults: [{ label: "Five testers", colour: "red" }, { label: "Cap", colour: "green" }] });
+    const l = redFirstLine("vault", card);
+    expect(l).toContain("Red key results (1): Five testers.");
+    expect(l).toContain("kr_orphans.py --objective vault");
+    expect(redFirstLine("vault", JSON.stringify({ keyResults: [{ label: "Cap", colour: "green" }] }))).toBe("");
+    expect(redFirstLine("vault", "not json")).toBe("");
   });
 
   it("an objective manager's wake opens with its red key results that nothing moves", () => {

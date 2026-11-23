@@ -49,6 +49,12 @@ export interface JobRoute {
    * desk's seed and the chat so far; resolves with the agent's reply text (never throws). None = this console has no chat route.
    */
   chat?(i: JobChatTurn): Promise<JobEnd & { reply?: string }>;
+  /**
+   * wait again for a job that outlived a console restart (a sandboxed job keeps running on its host; the console
+   * that started it is gone). Resolves when the job ended, like `start`; `detached` again when this console stops too.
+   * None = this route's jobs end with the console that started them.
+   */
+  resume?(i: { runId: string; world: string; personaId?: string }): Promise<JobEnd>;
 }
 export interface JobChatTurn {
   /** the turn's id (a safe name: letters, digits, `._-`). */
@@ -76,6 +82,11 @@ export interface JobEnd {
   result: string;
   server?: string;
   detail?: string;
+  /**
+   * the job is still running on its host but this console stopped waiting for it (a restart): the run stays
+   * open and its token alive; the next console re-attaches with `resume` and records the real end.
+   */
+  detached?: boolean;
 }
 
 /** The world gate with the job worlds let through (their wakes never reach a shared host). */

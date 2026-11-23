@@ -68,7 +68,7 @@ import { createMilestoneChats, spinesBindRunner } from "./desk/milestoneChat.js"
 import { sinceBlock } from "./desk/since.js";
 import { mountChatScope } from "./desk/scope.js";
 import { claimsFor, claimsSection, mountChatDispatch, rowClaimRefusal, rowOf } from "./desk/dispatch.js";
-import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, dispatchOrderSection, hasStandingDuty, noteAck } from "./wakePrompt.js";
+import { DEFAULT_MAX_WORKERS, NOTE_ACK_RULE, dispatchOrderSection, hasStandingDuty, noteAck, redFirstLine } from "./wakePrompt.js";
 import { roomyMaxFromEnv } from "./cycle/workerRoom.js";
 import { getWorkerLaunch } from "./cycle/workerLaunch.js";
 import { readyRows } from "./adapters/nightQueue.js";
@@ -1096,6 +1096,15 @@ export function createApp(
     const out = [`Read first (${name}):`];
     if (answer) out.push(`- Where we are now: ${answer}`);
     if (w?.words) out.push(`- ${ownerName()}'s newest word on it${w.said ? ` (${w.said.slice(0, 10)})` : ""}: "${w.words.replace(/\s+/g, " ").slice(0, 240)}"`);
+    const home = pursuits.homeDir();
+    let card: string | null = null;
+    try {
+      card = home ? fs.readFileSync(path.join(home, SCORECARD_DIR, `${objective}.json`), "utf8") : null;
+    } catch {
+      card = null;
+    }
+    const red = redFirstLine(objective, card);
+    if (red) out.push(red);
     return out.length > 1 ? out.join("\n") : "";
   };
   const totemMapFor = (m: { repo?: string; path: string }): string => {

@@ -377,6 +377,22 @@ export function buildWakePrompt(
 }
 
 /**
+ * the wake message's own line for an objective with red key results: the message is read whole every wake, unlike the
+ * long prompt a long-lived thread diffs against its last one, so the red ones and the one command come first there.
+ */
+export function redFirstLine(id: string, scorecardText: string | null): string {
+  let krs: { label?: unknown; colour?: unknown }[] = [];
+  try {
+    krs = (scorecardText ? (JSON.parse(scorecardText) as { keyResults?: typeof krs }).keyResults : undefined) ?? [];
+  } catch {
+    return "";
+  }
+  const red = krs.filter((k) => String(k?.colour ?? "").toLowerCase() === "red").map((k) => String(k?.label ?? "").slice(0, 80));
+  if (!red.length) return "";
+  return `- Red key results (${red.length}): ${red.join(" · ")}. If you are its objective manager, first of all: run \`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py --objective ${id}\` and act on each ORPHAN line's \`do now\` in this wake (write and start its plan ticket, restart its row, or one ask). Report \`red with nothing moving it: <n at start> -> <n at end>\`.`;
+}
+
+/**
  * A persona that names one objective (several objectives share one milestone, one Delivery Manager each).
  * Its Delivery Manager is the objective's manager: it works that objective's epics only, aims at its key results green, under the milestone's spine; the rest of the milestone
  * belongs to other personas. Any other persona (a whole-team one: Prioritizer, Strategist, Performance, Learning
