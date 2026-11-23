@@ -86,7 +86,7 @@ export async function writeMonitoring(d: MonitorWriteDeps, r: MonitorReport): Pr
         text: setStateField(text, "Monitoring", value, ["Waiting on", "Next action"]),
         msg: `Monitoring: ${value}`.slice(0, 120),
         body:
-          `A run reported monitoring${d.runId ? ` (${d.runId})` : ""}; the agent-team console wrote its Monitoring line into Current State ` +
+          `A run reported monitoring${d.runId ? ` (${d.runId})` : ""}; the agent-team console wrote its Monitoring line into Current State of ${d.path} ` +
           "(whether an epic monitors is read from this line, never from the console's run log).",
       };
     },

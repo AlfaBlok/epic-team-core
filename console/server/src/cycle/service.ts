@@ -181,6 +181,8 @@ export interface CycleOptions {
   objectiveOf?: (id: string) => Promise<{ name: string; epics: string[] } | undefined>;
   /** the milestone's product map (totemMap.ts, root L-77): its totems to read first and write back last; "" = no map. */
   totemMap?: (m: Milestone) => Promise<string | undefined>;
+  /** the persona's line on naming its row in every commit (status/personaRows.ts); undefined = none. */
+  commitRow?: (p: Persona, m: Milestone) => string | undefined;
   /** a few lines for the wake message itself: where the objective stands and the owner's newest word on it. */
   wakeFirst?: (m: Milestone) => string;
   /** the repo's open desk-to-desk notes from other worlds (desk/inbox.ts; undefined = none, or not the repo's home milestone). */
@@ -2326,6 +2328,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const services = o.teamServices ? await o.teamServices(p, run.id).catch(() => undefined) : undefined;
     const owned = o.ownerObjectives ? await o.ownerObjectives(m).catch(() => undefined) : undefined;
     const map = o.totemMap ? await o.totemMap(m).catch(() => undefined) : undefined;
+    const commitRow = (() => { try { return o.commitRow?.(p, m); } catch { return undefined; } })();
     const deckUrl = deckUrlOf(m);
     const mine = a.objective && o.objectiveOf ? await o.objectiveOf(a.objective).catch(() => undefined) : undefined;
     let prompt =
@@ -2333,6 +2336,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       (a.objective ? "\n\n" + objectiveSection(a.objective, mine, isDeliveryManager(p.name)) : "") +
       (owned?.block ? "\n\n" + owned.block : "") +
       (map ? "\n\n" + map : "") +
+      (commitRow ? "\n\n" + commitRow : "") +
       (priority ? "\n\n" + priority : "") +
       (order ? "\n\n" + order : "") +
       (objectives ? "\n\n" + objectives : "") +

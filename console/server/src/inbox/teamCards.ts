@@ -1,4 +1,5 @@
 import { repoRowIds } from "../status/rowIds.js";
+import { withRow } from "../status/personaRows.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -76,6 +77,8 @@ export interface TeamCard {
   /** the persona that made it, and its run */
   by: string;
   run?: string;
+  /** the row its commit names: the post's own, else the maker's standing row from the catalog. */
+  row?: string;
   at: string;
   /** the Mexico City day it counts against */
   day: string;
@@ -151,7 +154,8 @@ export function checkPost(b: Record<string, unknown>, day = dayOf(new Date().toI
   if (!title) return { ok: false, code: "no_title", message: "title is one plain sentence" };
   const scorecard = typeof b.scorecard === "string" && /^[\w-]{1,80}$/.test(b.scorecard) ? b.scorecard : undefined;
   const keyResult = str(b.keyResult, 160);
-  const base = { kind, by, title, scorecard, scorecardName: str(b.scorecardName, 120), ...(keyResult ? { keyResult } : {}), run: str(b.run, 80), source: str(b.source, 400) };
+  const row = typeof b.row === "string" && /^(?:[\w-]+:)?[A-Z]{1,4}\d*-[A-Z]{0,3}\d+[a-z]?$/.test(b.row.trim()) ? b.row.trim() : undefined;
+  const base = { kind, by, title, scorecard, scorecardName: str(b.scorecardName, 120), ...(keyResult ? { keyResult } : {}), run: str(b.run, 80), ...(row ? { row } : {}), source: str(b.source, 400) };
   if (kind === "digest") {
     const d = (b.digest ?? {}) as Record<string, unknown>;
     if (!scorecard) return { ok: false, code: "no_scorecard", message: "a digest belongs to one scorecard (a pursuit id)" };
@@ -348,6 +352,8 @@ export function mountTeamCards(
     worlds?: () => string[];
     /** his active and inactive objectives (docs/pursuits.json); absent = every card counts. */
     objectives?: () => CardObjectives | undefined;
+    /** a persona's standing row (docs/functions/catalog.json): named in the commits of its cards. */
+    rowOf?: (persona: string) => string | undefined;
   },
 ): void {
   const now = o.now ?? (() => new Date().toISOString());
@@ -450,7 +456,8 @@ export function mountTeamCards(
     if (world && !WORLD_CARD_KINDS.includes(body.kind as TeamCardKind)) return c.json(kindRefused(String(body.kind)), 403);
     const ch = checkPost(body, dayOf(now()));
     if (!ch.ok) return c.json({ error: { code: ch.code, message: ch.message } }, 400);
-    const card = world ? { ...ch.card, world } : ch.card;
+    const row = ch.card.row ?? o.rowOf?.(ch.card.by);
+    const card = { ...ch.card, ...(row ? { row } : {}), ...(world ? { world } : {}) };
     const dir = dirOf(world);
     if (world && !dir) return c.json({ error: { code: "no_world_repo", message: `no checkout of ${world}'s repo on this console; nothing saved` } }, 503);
     // a dry run checks the body and the limits against the files as they are (a persona tries before it writes the words)
@@ -463,7 +470,7 @@ export function mountTeamCards(
     const r = await write(
       `team card ${card.kind}`,
       (doc) => addCard(doc, card, at, others),
-      (made) => `${made.by}: ${made.kind} card for the owner's inbox: ${made.title.slice(0, 80)}`,
+      (made) => withRow(`${made.by}: ${made.kind} card for the owner's inbox: ${made.title.slice(0, 80)}`, made.row),
       (made) => `${made.by}${made.world ? ` (${made.world})` : ""} posted a ${made.kind} card (${made.id}) to the owner's inbox through the console${made.run ? ` (run ${made.run})` : ""}.`,
       dir,
     );
@@ -497,7 +504,7 @@ export function mountTeamCards(
     const r = await write(
       `team card answer ${id}`,
       (doc) => answerCard(doc, id, { at, text, via, ...(pick !== undefined ? { pick } : {}), ...(attachments.length ? { attachments } : {}) }),
-      (card) => `The owner answered the ${card.kind} card ${card.id}`,
+      (card) => withRow(`The owner answered the ${card.kind} card ${card.id}`, card.row ?? o.rowOf?.(card.by)),
       (card) => `The owner's answer on the console (${via}): ${text.slice(0, 300)}${pick !== undefined && card.goal ? `\nPicked: ${card.goal.options[pick]?.goal}` : ""}\nThe card's maker (${card.by}) reads it on its next wake.`,
       dirOf(where),
     );
@@ -555,7 +562,7 @@ export function mountTeamCards(
     const r = await write(
       `team card advisor ${id}`,
       (doc) => applyAdvisorVerdict(doc, id, { verdict, items: ids, at, via, ...(text ? { text } : {}), ...(attachments.length ? { attachments } : {}), rows }),
-      (card) => `The owner ${verdict === "accept" ? "accepted" : verdict === "decline" ? "declined" : "answered"} ${ids.length} of the ${ADVISOR_BY}'s suggestions (${card.advisor?.week})`,
+      (card) => withRow(`The owner ${verdict === "accept" ? "accepted" : verdict === "decline" ? "declined" : "answered"} ${ids.length} of the ${ADVISOR_BY}'s suggestions (${card.advisor?.week})`, card.row ?? o.rowOf?.(card.by)),
       () => `${verdict === "accept" ? `Ready rows: ${Object.entries(rows).map(([k, v]) => `${k} ${v}`).join(", ")}. ` : ""}${text ? `His words (${via}): ${text.slice(0, 300)}` : ""}`.trim() || "From his inbox.",
     );
     if (r.status === 200 && failed.length) return c.json({ ...(r.body as object), rows, failed }, 200);

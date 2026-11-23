@@ -90,6 +90,7 @@ import { mountPriority } from "./cycle/priorityRoutes.js";
 import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
 import { workspaceDataDir } from "./workspaceData.js";
 import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, isTestWorld, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
+import { personaRows, standingRow, standingRowSection } from "./status/personaRows.js";
 import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as parseTeamCards, TEAM_CARDS_FILE } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { chatSection, inForceWords, readHisWords } from "./desk/hisObjectives.js";
@@ -1244,6 +1245,8 @@ export function createApp(
     launchDrafts: launchDraftsOf, // launch board reds with no owner row
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
     totemMap: async (m) => totemMapFor(m),
+    // every persona commit names its row (its standing row from docs/functions/catalog.json)
+    commitRow: (p, m) => (personaRows(pursuits.homeDir()).size ? standingRowSection(p.name, standingRow(pursuits.homeDir(), p.name), m.path) : undefined),
     wakeFirst: (m) => wakeFirst(m), // the product's map: read its totems first, write back last (root L-77)
     ownerObjectives: async (m) => (ownerObjectivesNow && worldOf(m.id) === DEFAULT_TENANT ? ownerObjectivesNow() : undefined), // his objectives open every wake and brief
     // a persona that names an objective works its epics only
@@ -2177,7 +2180,7 @@ export function createApp(
   // a card world's (the social world's) idea cards live in one of its own repos; the world is already a card world's
   // (code-chosen), so its repos are looked up unscoped: the owner's inbox reads them from the home world.
   const cardStore = createStore(db);
-  mountTeamCards(api, { writer: spine, repo: () => pursuits.homeDir(), objectives: () => objectiveIds(pursuits.homeDir()), worldRepo: (w) => cardRepoOf(w, worldRepos(db, cardStore, read.reposRoot, w)) });
+  mountTeamCards(api, { writer: spine, repo: () => pursuits.homeDir(), objectives: () => objectiveIds(pursuits.homeDir()), worldRepo: (w) => cardRepoOf(w, worldRepos(db, cardStore, read.reposRoot, w)), rowOf: (by) => standingRow(pursuits.homeDir(), by) });
   // every one-off page the team serves, grouped by repo and epic (docs/pages/registry.json, pagesIndex.ts).
   const pagesList = createPagesReader({ reposRoot: read.reposRoot });
   // a page on a steps page's host opens its secure copy, where Voice records at the first press
