@@ -223,6 +223,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/trackers$`)],
   // the campaign's Plan tab: the plan of the wheel it serves (the same campaignWheels as Trackers), read only.
   ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/wheel-plan$`)],
+  // the campaign's Key results, Context and Pages tabs: the key results, where-we-are and pages of the wheel it
+  // serves (the same campaignWheels), read only.
+  ["GET", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/wheel$`)],
   // the owner writes the Plan's eight sections (the campaign's own spine, through the same campaignMilestone).
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/plan/sections$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/campaigns/${ID}/(slide|slide/keep|slide/undo|observation|product-note)$`)], // product-note, a Product tab slide note

@@ -1483,6 +1483,21 @@ const mockMail = () => ({
     async getCampaignTotems() {
       return ok(mockTotems());
     },
+    /** a campaign's Key results, Context and Pages tabs: the objective it serves. */
+    async getCampaignWheel() {
+      return ok({
+        product: "Notes",
+        wheels: [
+          {
+            id: "notes-channels",
+            name: "Notes: Get every channel working",
+            keyResults: [{ n: 1, label: "Every channel posted in the last 7 days", target: "5", value: "4", colour: "amber", note: "not yet: LinkedIn", owner: "build" }],
+            where: { path: "docs/scorecards/notes-channels.md", present: true, answer: "Four of five channels post; LinkedIn is next.", open: ["When does LinkedIn post?"], changed: [] },
+            pages: [],
+          },
+        ],
+      });
+    },
     /** a campaign's Plan tab: the plan of the wheel it serves, one key result with two steps. */
     async getCampaignWheelPlan() {
       return ok({

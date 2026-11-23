@@ -86,34 +86,72 @@ export function topicWords(text: string | undefined): Set<string> {
   return out;
 }
 
-/** why two open cards are one topic, or undefined. */
-export function sameTopic(a: TopicCard, b: TopicCard): string | undefined {
-  if (a.kind === "ask" && b.kind === "ask") {
+/**
+ * E948-S192: a card read once for the pair check (its tickets in upper case, its page-host pages, its topic words), so
+ * the every-pair check below is set lookups only. Before, each of the ~2,400 pairs of a 70-card inbox parsed every
+ * link and split both About lines again: 1.8 s of a phone's 2.6 s of script before his first card showed.
+ */
+interface Prepared {
+  card: TopicCard;
+  /** its tickets, upper case, in order */
+  tickets: string[];
+  ticketSet: Set<string>;
+  /** an ask's tickets and its row, upper case */
+  askNames: Set<string>;
+  ref?: string;
+  /** its page-host pages, in order */
+  pages: string[];
+  pageSet: Set<string>;
+  words: Set<string>;
+  wordList: string[];
+}
+function prepare(c: TopicCard): Prepared {
+  const tickets = c.tickets.map((t) => t.toUpperCase());
+  const pages = c.pages.map(topicPage).filter((p): p is string => !!p);
+  const words = topicWords(c.about);
+  return {
+    card: c,
+    tickets,
+    ticketSet: new Set(tickets),
+    askNames: new Set([...tickets, ...(c.row ? [c.row.toUpperCase()] : [])]),
+    ...(c.ref ? { ref: c.ref.toUpperCase() } : {}),
+    pages,
+    pageSet: new Set(pages),
+    words,
+    wordList: [...words],
+  };
+}
+
+function samePrepared(a: Prepared, b: Prepared): string | undefined {
+  const [ka, kb] = [a.card.kind, b.card.kind];
+  if (ka === "ask" && kb === "ask") {
     // two asks: the same code (one ask in two places) or both unblocking one row
-    const ta = new Set(a.tickets.map((t) => t.toUpperCase()));
-    const ticket = b.tickets.map((t) => t.toUpperCase()).find((t) => ta.has(t));
+    const ticket = b.tickets.find((t) => a.ticketSet.has(t));
     if (ticket) return `same ticket ${ticket}`;
-  } else if (a.kind !== b.kind) {
+  } else if (ka !== kb) {
     // an ask and a review card: the ask names the card's row (its code, what it unblocks, the row it was raised on)
-    const [ask, card] = a.kind === "ask" ? [a, b] : [b, a];
-    const ref = card.ref?.toUpperCase();
-    if (ref && [...ask.tickets, ...(ask.row ? [ask.row] : [])].some((t) => t.toUpperCase() === ref)) return `same ticket ${ref}`;
+    const [ask, card] = ka === "ask" ? [a, b] : [b, a];
+    if (card.ref && ask.askNames.has(card.ref)) return `same ticket ${card.ref}`;
   }
   // two review cards are two rows (one row code in two epics is another check's, E948-S182): only a page or a topic joins them
-  const pa = new Set(a.pages.map(topicPage).filter(Boolean));
-  const page = b.pages.map(topicPage).find((p) => p && pa.has(p));
+  const page = b.pages.find((p) => a.pageSet.has(p));
   if (page) return `same page ${page}`;
   // the About line only (his topic line, E948-S172): a title is a sentence about the work, not its topic
-  const wa = topicWords(a.about);
-  const wb = topicWords(b.about);
+  const wa = a.words;
+  const wb = b.words;
   if (!wa.size || !wb.size) return undefined;
-  const shared = [...wa].filter((w) => wb.has(w));
+  const shared = a.wordList.filter((w) => wb.has(w));
   const same = shared.length === wa.size && shared.length === wb.size;
   // at least two topic words and nearly all of them shared (or all of the shorter About), whatever the wording around
   // them: "Acme testers invite" and "Acme testers feedback" stay two cards
   const most = shared.length >= 2 && (shared.length / Math.max(wa.size, wb.size) >= 3 / 4 || shared.length === Math.min(wa.size, wb.size));
   if (same || most) return `same topic: ${shared.join(" ")}`;
   return undefined;
+}
+
+/** why two open cards are one topic, or undefined. */
+export function sameTopic(a: TopicCard, b: TopicCard): string | undefined {
+  return samePrepared(prepare(a), prepare(b));
 }
 
 /**
@@ -132,13 +170,14 @@ const before = (a: TopicCard, b: TopicCard) => {
  * group maps to the one it folds into. Groups are joined through any pair (A and B one ticket, B and C one page: one card).
  */
 export function foldSameTopic(cards: TopicCard[]): Map<string, Fold> {
+  const prepared = cards.map(prepare);
   const parent = cards.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const why = new Map<number, string>();
   for (let i = 0; i < cards.length; i++)
     for (let j = i + 1; j < cards.length; j++) {
       if (cards[i].id === cards[j].id) continue;
-      const r = sameTopic(cards[i], cards[j]);
+      const r = samePrepared(prepared[i], prepared[j]);
       if (!r) continue;
       const [x, y] = [find(i), find(j)];
       if (x !== y) parent[y] = x;
@@ -259,8 +298,23 @@ export function inboxTopicCards(asks: InboxAsk[] | undefined, reviews: InboxRevi
   return out;
 }
 
+/**
+ * E948-S192: the last answers, by the lists' identity: the inbox's sections, top bar and sidebar each fold the same
+ * fetched lists, so one load folds once (the lists are never changed in place: a refetch is a new array).
+ */
+const NONE: readonly unknown[] = [];
+const recent = new WeakMap<object, WeakMap<object, Map<string, Fold>>>();
+
 /** every open card of his inbox checked against every other: the card each folded one goes into. */
 export function inboxFolds(asks: InboxAsk[] | undefined, reviews: InboxReview[] | undefined): Map<string, Fold> {
+  const ka = (asks ?? NONE) as object;
+  const kr = (reviews ?? NONE) as object;
+  const hit = recent.get(ka)?.get(kr);
+  if (hit) return hit;
   const cards = inboxTopicCards(asks, reviews);
-  return cards.length < 2 ? new Map() : foldSameTopic(cards);
+  const out = cards.length < 2 ? new Map<string, Fold>() : foldSameTopic(cards);
+  let inner = recent.get(ka);
+  if (!inner) recent.set(ka, (inner = new WeakMap()));
+  inner.set(kr, out);
+  return out;
 }

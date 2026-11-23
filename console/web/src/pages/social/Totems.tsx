@@ -122,8 +122,8 @@ export function WorkTab({ m }: { m: Milestone }) {
   const row = params.get("row");
   return (
     <div data-testid="work-tab">
-      <TabHead title="Tasks">
-        The campaign's tasks: the rows of its epic file's Issue Ledger. Each one has an owner, a status and an outcome. Research, a logo, a thread to answer and a post to write all land here.
+      <TabHead title="Board">
+        This campaign's own work: the rows of its epic file. Each one has an owner, a status and an outcome. Research, a logo, a thread to answer and a post to write all land here.
       </TabHead>
       {q.error && !t ? (
         <ErrorBox error={q.error} />

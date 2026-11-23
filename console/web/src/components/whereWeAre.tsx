@@ -19,6 +19,13 @@ export function WhereWeAreBox({ id }: { id: string }) {
   const head = <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Where we are</div>;
   if (loading && !data) return <section className="rounded-xl border bg-card p-4 text-sm text-muted-foreground" data-testid="where-we-are">{head}Reading…</section>;
   if (error || !data) return <section className="rounded-xl border bg-card p-4 text-sm text-muted-foreground" data-testid="where-we-are">{head}Could not read it{error ? `: ${error.message}` : ""}.</section>;
+  // drawn in place (no component of its own here), so the box that said Reading… is the box that shows it.
+  return WhereWeAreView({ data });
+}
+
+/** the where-we-are drawn from its parts (an objective's Context reads it by id, a campaign's from the wheel it serves). */
+export function WhereWeAreView({ data }: { data: WhereWeAre }) {
+  const head = <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Where we are</div>;
   if (!data.present)
     return (
       <section className="grid gap-1.5 rounded-xl border border-dashed bg-card p-4" data-testid="where-we-are" data-present="false">

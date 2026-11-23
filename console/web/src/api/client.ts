@@ -3,7 +3,7 @@ import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, Com
 import type { BuildingList } from "./building-types";
 import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
-import type { CampaignTrackers, CampaignWheelPlan, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
+import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
 import type { AskLogSummary, HomeTabBody, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
@@ -569,6 +569,8 @@ export interface ApiClient {
   /** the campaign's Trackers tab: the tracker tables of the wheel it serves (docs/trackers, never made up). */
   getCampaignTrackers(tenantId: string, milestoneId: string): Promise<CampaignTrackers>;
   getCampaignWheelPlan(tenantId: string, milestoneId: string): Promise<CampaignWheelPlan>;
+  /** the campaign's Key results, Context and Pages tabs: the objective it serves. */
+  getCampaignWheel(tenantId: string, milestoneId: string): Promise<CampaignWheel>;
   /** the campaign's Plan tab: its marketing plan from the spine's `## Plan` section (docs/campaign-plan.md). */
   getCampaignPlan(tenantId: string, milestoneId: string): Promise<MarketingPlan>;
   /** the campaign's daily briefings, the morning talk kept on it (latest, then older ones). */

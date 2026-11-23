@@ -7,37 +7,48 @@ import { wheelTabsOf } from "@/lib/wheelTabs";
  * a campaign page in the social skin (the social product's wheel) has fixed tabs, one per kind of node of that product's
  * data graph its personas need (the owner: "the product type or the benefits type is an important type ... Because the
  * personas need this totem in their graph. And then this totem in the graph gets exposed to the UX via these tabs"). The
- * one list is the product's graph file, read through lib/wheelTabs.ts, never one written here: Plan
- * (the campaign's marketing plan, eight fixed sections: campaigns only), Product (what it pushes, what it can do, what it costs), Benefits
- * (what it does for its users), Social kit (posts a day, channels), Inbox, Chat, Pipeline (its posts), Tasks, Trackers (its
- * objective's shortlists), Observations, History. Settings and personas sit behind one
- * header button. Old links land on the tab that now holds what they showed.
+ * one list is the product's graph file, read through lib/wheelTabs.ts, never one written here. The owner asked for
+ * "the same tabs" on every wheel: it opens with an objective's nine tabs, same names and order (Key results, Plan, Inbox,
+ * Chat, Personas, Board, Context, Pages, Trackers), then the product's own (Product, Benefits, Pipeline, History). The social kit
+ * sits under the Plan and the lessons in the Context, as on an objective. Settings sit behind one header button. Old
+ * links land on the tab that now holds what they showed.
  */
 const SOCIAL_WHEEL = wheelTabsOf("campaign");
 export const FIVE_TABS: readonly string[] = SOCIAL_WHEEL.map((t) => t.id);
 export type FiveTab = string;
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
-export const FIVE_LABELS: Record<string, string> = { ...Object.fromEntries(SOCIAL_WHEEL.map((t) => [t.id, t.label])), settings: "Settings and personas" };
+export const FIVE_LABELS: Record<string, string> = { ...Object.fromEntries(SOCIAL_WHEEL.map((t) => [t.id, t.label])), settings: "Settings" };
+/** the tab a campaign opens on: the first, Key results, as an objective does. */
+export const FIRST_TAB: FiveTab = FIVE_TABS[0] ?? "plan";
 
+/** an old tab, or one of an objective's ids, and the tab that holds it now (with the part it scrolls to, when inside one). */
 const OLD: Record<string, FiveTab> = {
   deck: "plan",
   brief: "plan",
-  summary: "plan",
+  summary: "table",
   definitions: "plan",
+  kit: "plan",
+  observations: "context",
   approvals: "waiting",
+  inbox: "waiting",
   tree: "work",
   backlog: "work",
+  kanban: "work",
+  board: "work",
   activity: "history",
-  personas: "settings",
   settings: "settings",
 };
+/** an old tab now held inside another: the anchor that tab scrolls to. */
+export const FOLDED_PART: Record<string, string> = { kit: "campaign-kit", observations: "campaign-lessons" };
 
-/** ?tab= → one of the tabs (or the Settings and personas view); no tab = Plan. An old Work › Posts link opens Pipeline. */
+/** ?tab= → one of the tabs (or the Settings view); no tab = Key results. An old Work › Posts link opens Pipeline. */
 export function fiveTabFromParams(params: URLSearchParams): FiveTab {
   const t = params.get("tab") ?? "";
   if (t === "work" && params.get("view") === "posts") return "pipeline";
   if (FIVE_TABS.includes(t)) return t;
-  return OLD[t] ?? (params.get("node") ? "work" : "plan");
+  const old = OLD[t];
+  if (old && (old === "settings" || FIVE_TABS.includes(old))) return old;
+  return params.get("node") ? "work" : FIRST_TAB;
 }
 
 /** The note a slide's "This slide" box sends to the campaign chat: the prefix the Repo desk acts on (seed v11). */

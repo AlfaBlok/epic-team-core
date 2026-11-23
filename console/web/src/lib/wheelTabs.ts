@@ -10,7 +10,7 @@ export type WheelKind = "objective" | "campaign";
 
 const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
 
-/** a build without a product graph: the objective's nine and the campaign's own. */
+/** a build without a product graph: the objective's nine; a campaign opens with the same nine, then its own. */
 const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
   objective: [
     { id: "table", label: "Key results", shows: ["key-results"] },
@@ -24,17 +24,19 @@ const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
     { id: "trackers", label: "Trackers", shows: ["trackers"] },
   ],
   campaign: [
-    { id: "plan", label: "Plan", shows: ["marketing-plan"] },
-    { id: "product", label: "Product", shows: ["product-deck"] },
-    { id: "kit", label: "Social kit", shows: ["social-kit"] },
+    { id: "table", label: "Key results", shows: ["key-results"] },
+    { id: "plan", label: "Plan", shows: ["marketing-plan", "social-kit"] },
     { id: "waiting", label: "Inbox", shows: ["inbox"] },
     { id: "chat", label: "Chat", shows: ["His words"] },
+    { id: "personas", label: "Personas", shows: ["personas"] },
+    { id: "work", label: "Board", shows: ["Epics"] },
+    { id: "context", label: "Context", shows: ["where-we-are", "Ideas and insights"] },
+    { id: "pages", label: "Pages", shows: ["pages"] },
+    { id: "trackers", label: "Trackers", shows: ["trackers"] },
+    { id: "product", label: "Product", shows: ["product-deck"] },
     { id: "pipeline", label: "Pipeline", shows: ["Posts"] },
-    { id: "work", label: "Tasks", shows: ["Epics"] },
-    { id: "observations", label: "Lessons", shows: ["Ideas and insights"] },
     { id: "history", label: "History", shows: ["Outcomes"] },
-  ],
-};
+  ],};
 
 const hosted: Partial<Record<WheelKind, readonly WheelTab[]>> = Object.assign({}, ...Object.values(plugs).map((m) => m.HOSTED_WHEEL_TABS ?? {}));
 

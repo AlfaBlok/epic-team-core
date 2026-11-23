@@ -63,6 +63,22 @@ const PLAN: MarketingPlan = {
     quotes: [],
   })),
 };
+// the objective the campaign serves, as its Key results, Context and Pages tabs read it.
+const WHEEL = {
+  product: "Memo",
+  wheels: [
+    {
+      id: "memo-channels",
+      name: "Memo: Get every channel working",
+      keyResults: [
+        { n: 1, label: "Every channel posted in the last 7 days", target: "5", value: "4", colour: "amber", note: "not yet: LinkedIn", owner: "build", measuredAt: new Date().toISOString() },
+        { n: 2, label: "Every post read back", target: "100%", value: "100%", colour: "green" },
+      ],
+      where: { path: "docs/scorecards/memo-channels.md", present: true, answer: "Four of five channels post; LinkedIn is next.", open: ["When does LinkedIn post?"], changed: [] },
+      pages: [{ url: "http://pages.example:9001/", title: "Channel check", row: "E907-S3", repo: "social", epic: "EPIC-911" }],
+    },
+  ],
+};
 let sent: string[] = [];
 beforeEach(() => {
   totems = mockTotems();
@@ -73,6 +89,7 @@ beforeEach(() => {
   vi.spyOn(api, "getCampaignTotems").mockImplementation(async () => totems);
   vi.spyOn(api, "getCampaignPlan").mockResolvedValue(PLAN);
   vi.spyOn(api, "getCampaignWheelPlan").mockResolvedValue(WHEEL_PLAN);
+  vi.spyOn(api, "getCampaignWheel").mockResolvedValue(WHEEL);
   vi.spyOn(api, "getMilestoneChat").mockResolvedValue({ messages: [] } as never);
   vi.spyOn(api, "sendMilestoneChatMessage").mockImplementation(async (_id: string, text: string) => (sent.push(text), { threadId: "t", pending: true }));
 });
@@ -101,14 +118,55 @@ const page = (path: string, skin: Skin = SKINS.social) =>
   );
 
 describe("E964-S14 five fixed tabs", () => {
-  it("opens on Plan (it took the Deck's place); the graph's tabs Plan, Product, Benefits, Social kit, Inbox, Chat, Pipeline, Tasks, Trackers, Lessons, History; Summary, Tree, Activity, Personas, Settings are gone; one Settings and personas button", async () => {
+  // the owner: the same tabs on every wheel, a campaign's as an objective's.
+  it("opens on Key results; an objective's nine tabs in their order, then the product's own Product, Benefits, Pipeline, History; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Plan", "Product", "Benefits", "Social kit", "Inbox", "Chat", "Pipeline", "Tasks", "Trackers", "Lessons", "History"]);
-    expect(await screen.findByTestId("plan-tab")).toBeTruthy();
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Product", "Benefits", "Pipeline", "History"]);
+    expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
-    for (const gone of ["Summary", "Tree", "Activity", "Personas", "Settings", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
-    expect(screen.getByTestId("settings-and-personas").getAttribute("href")).toBe("/milestones/ms-memo?tab=settings");
+    for (const gone of ["Summary", "Tree", "Activity", "Settings", "Social kit", "Lessons", "Tasks", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
+    expect(screen.getByTestId("campaign-settings").getAttribute("href")).toBe("/milestones/ms-memo?tab=settings");
+  });
+
+  it("Key results: the objective it serves, each key result with its light, now against target", async () => {
+    page("/milestones/ms-memo");
+    const wheel = await screen.findByTestId("campaign-kr-wheel");
+    expect(within(wheel).getByText("Memo: Get every channel working")).toBeTruthy();
+    expect(within(wheel).getByTestId("campaign-kr-count").textContent).toBe("1 of 2 green");
+    const krs = within(wheel).getAllByTestId("campaign-kr");
+    expect(krs.map((k) => k.getAttribute("data-light"))).toEqual(["amber", "green"]);
+    expect(within(krs[0]).getByTestId("campaign-kr-now").textContent).toBe("On its way4of 5");
+    expect(krs[0].id).toBe("kr-memo-channels-1");
+  });
+
+  it("Context: the objective's one where-we-are, then the campaign's lessons", async () => {
+    page("/milestones/ms-memo?tab=context");
+    expect((await screen.findByTestId("where-answer")).textContent).toBe("Four of five channels post; LinkedIn is next.");
+    expect(await screen.findByTestId("obs-force-count")).toBeTruthy();
+    expect(screen.getByTestId("campaign-lessons")).toBeTruthy();
+  });
+
+  it("Pages: the pages made for the objective it serves", async () => {
+    vi.spyOn(api, "homeTab").mockResolvedValue({ product: "all", tab: "pages", label: "Pages", repos: ["social"], patterns: [], homed: 0, covered: 0, entries: [] });
+    page("/milestones/ms-memo?tab=pages");
+    const tab = await screen.findByTestId("wheel-pages");
+    await waitFor(() => expect(tab.getAttribute("data-count")).toBe("1"));
+    expect(within(tab).getByText("Channel check")).toBeTruthy();
+  });
+
+  it("Personas is a tab of its own; Settings opens behind the header button", async () => {
+    page("/milestones/ms-memo?tab=personas");
+    expect((await screen.findByTestId("tab-personas")).getAttribute("data-state")).toBe("active");
+    cleanup();
+    page("/milestones/ms-memo?tab=settings");
+    expect(await screen.findByTestId("settings-view")).toBeTruthy();
+  });
+
+  it("a campaign that serves no objective says its key results are the objective's", async () => {
+    vi.spyOn(api, "getCampaignWheel").mockResolvedValue({ product: null, wheels: [] });
+    page("/milestones/ms-memo");
+    expect((await screen.findByTestId("campaign-wheel-none")).textContent).toMatch(/serves no objective yet/);
   });
 
   // the owner 22 Nov: "benefits is like an extreme thing ... We need a tracker, man. Trackers are everywhere".
@@ -170,8 +228,10 @@ describe("E964-S14 five fixed tabs", () => {
 
   it("old links land on the tab that holds what they showed", () => {
     const t = (s: string) => fiveTabFromParams(new URLSearchParams(s));
-    expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["plan", "plan", "plan", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "settings", "history", "work"]);
+    expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["table", "plan", "table", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "personas", "history", "work"]);
     expect(t("tab=deck")).toBe("plan");
+    // an objective's own ids open the same tabs, and the parts folded in open their holder.
+    expect([t("tab=inbox"), t("tab=kanban"), t("tab=board"), t("tab=kit"), t("tab=observations"), t("tab=settings")]).toEqual(["waiting", "work", "work", "plan", "context", "settings"]);
   });
 
   it("the console skin keeps its tabs on the same campaign", async () => {
@@ -180,7 +240,7 @@ describe("E964-S14 five fixed tabs", () => {
     expect(screen.queryByTestId("five-tabs")).toBeNull();
   });
 
-  it("Tasks: the goal path, Add task (a row through the tree writer), then the task groups (Waiting on me and Pipeline are tabs of their own)", async () => {
+  it("Board: the goal path, Add task (a row through the tree writer), then the task groups (Waiting on me and Pipeline are tabs of their own)", async () => {
     const add = vi.spyOn(api, "addToTree").mockResolvedValue({ kind: "row", path: "x", id: "E911-S7", ready: true } as never);
     page("/milestones/ms-memo?tab=work&row=E911-S4");
     expect((await screen.findByTestId("goal-path")).textContent).toBe("Memo social presence›Reddit awareness week 37›3 tasks");
@@ -198,6 +258,7 @@ describe("E964-S14 five fixed tabs", () => {
   it("Observations: in force, a proposed brief change with Add to the brief / Not now, retired kept", async () => {
     const decide = vi.spyOn(api, "decideProposal").mockResolvedValue({ commit: "abc" });
     page("/milestones/ms-memo?tab=observations");
+    expect((await screen.findByTestId("tab-context")).getAttribute("data-state")).toBe("active");
     expect((await screen.findByTestId("obs-force-count")).textContent).toBe("2");
     expect(screen.getByTestId("obs-proposals").textContent).toContain("End every reply on one specific question.");
     fireEvent.click(screen.getByTestId("proposal-add"));
@@ -233,9 +294,10 @@ describe("E964-S14 five fixed tabs", () => {
     expect(screen.getAllByTestId("history-files-row")[0].querySelector("a")?.getAttribute("href")).toBe("/api/homes/file/memo/docs/log/launch/2026-W47.md");
   });
 
-  it("Social kit (a node of the graph) is a tab of its own: the campaign's channels, never under the plan", async () => {
+  it("Social kit sits under the Plan, as on an objective; an old ?tab=kit link opens the Plan there", async () => {
     page("/milestones/ms-memo?tab=kit");
     expect(await screen.findByTestId("campaign-kit")).toBeTruthy();
+    expect(screen.getByTestId("tab-plan").getAttribute("data-state")).toBe("active");
     expect(screen.queryByTestId("campaign-under-plan")).toBeNull();
   });
 

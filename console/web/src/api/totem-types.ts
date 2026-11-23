@@ -77,3 +77,20 @@ export interface CampaignWheelPlan {
   product: string | null;
   wheels: { id: string; name: string; plan: import("./pursuit-types").WheelPlan; keyResults: string[] }[];
 }
+/** GET /api/tenants/:id/campaigns/:mid/wheel: the objective a campaign serves, as an objective's own tabs
+ * read it: its key results (now against target), its where-we-are and the pages made for it. */
+export interface CampaignKeyResult {
+  n: number;
+  label: string;
+  target?: string;
+  value?: string;
+  colour?: string;
+  note?: string;
+  owner?: string;
+  measuredAt?: string;
+  evidence?: { what?: string; url?: string };
+}
+export interface CampaignWheel {
+  product: string | null;
+  wheels: { id: string; name: string; keyResults: CampaignKeyResult[]; where: import("./pursuit-types").WhereWeAre; pages: import("./pages-types").PageView[] }[];
+}

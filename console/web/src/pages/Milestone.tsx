@@ -25,7 +25,8 @@ import { EpicDeckLink } from "@/components/epicDeckLink";
 import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
-import { FIVE_LABELS, FIVE_TABS, fiveTabFromParams, type FiveTab } from "@/lib/totems";
+import { FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
+import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
 import { BenefitsTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignTrackersTab } from "@/components/trackersTab";
 import { worldId } from "@/lib/useSocial";
@@ -439,8 +440,8 @@ function MilestoneScreen() {
             {card && <CampaignActions m={m} card={card} />}
             {five && (
               <Button asChild size="sm" variant="outline">
-                <Link to="?tab=settings" data-testid="settings-and-personas" title="This campaign's personas and its settings">
-                  <Settings2 /> Settings and personas
+                <Link to="?tab=settings" data-testid="campaign-settings" title="This campaign's settings">
+                  <Settings2 /> Settings
                 </Link>
               </Button>
             )}
@@ -460,9 +461,9 @@ function MilestoneScreen() {
       {!five && card?.channels?.length ? <CampaignChannels card={card} /> : null}
       {five && scope ? (
         <>
-          <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === "plan" ? {} : { tab: t }, { replace: true })} />
-          {/* under the plan: where the campaign runs now, then its quiet lines (its channels are the Social kit tab's). */}
-          {ftab === "plan" && (
+          <CampaignFiveTabs m={m} tab={ftab} scope={scope} waitingCount={waitingCount} onTab={(t) => setParams(t === FIRST_TAB ? {} : { tab: t }, { replace: true })} />
+          {/* under the key results: where the campaign runs now, then its quiet lines (its channels are under the Plan). */}
+          {ftab === FIRST_TAB && (
             <section className="mt-8 grid gap-4 border-t pt-6" data-testid="campaign-under-plan">
               <MilestoneStrip status={status} waitingHref="?tab=waiting" />
               {meta}
@@ -589,13 +590,29 @@ function MilestoneScreen() {
 
 /**
  * a campaign's fixed tabs in the social skin: one per kind of node of the product's data graph, listed once in its
- * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. Tree is the
- * goal path at the top of Tasks; Activity is History (its Runs view, the old History its Posts and replies view);
- * Personas and Settings sit behind the header's Settings and personas button.
+ * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. An objective's nine
+ * tabs first (Key results, Plan, Inbox, Chat, Personas, Board, Context, Pages, Trackers), then the product's own
+ * (Product, Benefits, Pipeline, History). The social kit sits under the Plan, the lessons in the Context, as on an
+ * objective; an old ?tab=kit or ?tab=observations link opens that tab and scrolls to its part. Settings sit behind the
+ * header's Settings button.
  */
 function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone; tab: FiveTab; scope: Parameters<typeof CampaignProvider>[0]["scope"]; waitingCount: number; onTab: (t: FiveTab) => void }) {
   // the campaign's Trackers tab reads the tables of the wheel it serves.
   const loadTrackers = useCallback(async () => api.getCampaignTrackers(await worldId(), m.id), [m.id]);
+  const [params] = useSearchParams();
+  const part = FOLDED_PART[params.get("tab") ?? ""];
+  // an old link to a tab now folded into another brings that part into view once it has drawn.
+  useEffect(() => {
+    if (!part) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(part);
+      if (!el && ++tries < 40) return;
+      clearInterval(timer);
+      el?.scrollIntoView?.({ block: "start" });
+    }, 150);
+    return () => clearInterval(timer);
+  }, [part]);
   const oldHistory = (
     <CampaignProvider scope={scope}>
       <HistoryPage />
@@ -622,28 +639,36 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         ))}
       </TabsList>
       <div className="mt-4 min-w-0">
-        {tab === "plan" && <PlanTab m={m} />}
-        {/* the social kit node of the product's graph: each channel, its account and sign-in, how often it posts. */}
-        {tab === "kit" && scope && (
-          <div className="grid gap-3" data-testid="campaign-kit">
-            {scope.card.channels?.length ? (
-              <CampaignChannels card={scope.card} />
-            ) : (
-              <p className="text-sm text-muted-foreground">No channel set up yet. The social kit holds each channel this campaign posts on, its account and how often it posts.</p>
+        {tab === "table" && <CampaignKeyResultsTab m={m} />}
+        {tab === "plan" && (
+          <div className="grid gap-10">
+            <PlanTab m={m} />
+            {/* the social kit node of the product's graph, under the plan as on an objective: each channel, its account and sign-in, how often it posts. */}
+            {scope && (
+              <section id="campaign-kit" className="grid scroll-mt-4 gap-3 border-t pt-6" data-testid="campaign-kit">
+                <h2 className="text-lg font-semibold">Social kit</h2>
+                {scope.card.channels?.length ? (
+                  <CampaignChannels card={scope.card} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No channel set up yet. The social kit holds each channel this campaign posts on, its account and how often it posts.</p>
+                )}
+              </section>
             )}
           </div>
         )}
         {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
+        {tab === "personas" && <PersonasTab m={m} />}
         {tab === "pipeline" && (
           <CampaignProvider scope={scope}>
             <PipelinePage approval={false} />
           </CampaignProvider>
         )}
         {tab === "work" && <WorkTab m={m} />}
+        {tab === "context" && <CampaignContextTab m={m} lessons={<ObservationsTab m={m} />} />}
+        {tab === "pages" && <CampaignPagesTab m={m} repo={scope?.card.repo} />}
         {tab === "benefits" && <BenefitsTab m={m} />}
         {tab === "trackers" && <CampaignTrackersTab load={loadTrackers} />}
-        {tab === "observations" && <ObservationsTab m={m} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}
         {tab === "chat" && (
           <>
@@ -654,12 +679,8 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {tab === "settings" && (
           <div className="grid gap-6" data-testid="settings-view">
             <Link to="?" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-4 w-4" /> Back to the plan
+              <ArrowLeft className="h-4 w-4" /> Back to the key results
             </Link>
-            <section className="grid gap-2">
-              <h2 className="text-lg font-semibold">Personas</h2>
-              <PersonasTab m={m} />
-            </section>
             <section className="grid gap-2">
               <h2 className="text-lg font-semibold">Settings</h2>
               <SettingsTab m={m} />
