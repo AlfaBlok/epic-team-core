@@ -21,10 +21,11 @@ import { CampaignRedirect } from "@/pages/social/CampaignRedirect";
 import { HOSTED_ROUTES, type ScreenRoute } from "@/lib/hostedPlug";
 import { lazyPage } from "@/lib/lazyPage";
 // in the first download, never fetched later: it must open with no connection.
-import { OnDevicePage } from "@/voice/OnDevice";
 
 // Home and the sidebar ship in the first download; every other screen is its own script, fetched the first
 // time it opens (lib/lazyPage.tsx). A cold open was one 1.7 MB script (495 KB zipped) holding every screen.
+// the notes kept on this device open with their page, not with the inbox
+const OnDevicePage = lazyPage(() => import("@/voice/OnDevice"), "OnDevicePage");
 const CardInventoryPage = lazyPage(() => import("@/components/cardInventory"), "CardInventoryPage");
 // Home too (its goals view and the goal-sets code under it): the Inbox opens without them.
 const HomePage = lazyPage(() => import("@/components/homeView"), "HomePage");

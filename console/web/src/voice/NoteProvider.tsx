@@ -9,7 +9,9 @@ import { ON_DEVICE_PATH } from "@/lib/routePaths";
 import { deskFallback } from "./deskFallback";
 import { hookLinks } from "./linkGuard";
 import { markSent, sentOf } from "@/lib/sentRows";
-import { browserNoteMedia, EMPTY_RECORDING_TEXT, fetchNotesApi, KEPT_FAILED_TEXT, WAITING_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, NoteEngine, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteEngine";
+import { EMPTY_RECORDING_TEXT, KEPT_FAILED_TEXT, WAITING_TEXT, localNoteStore, memoryNoteStore, MIC_BUSY_TEXT, noteMicrophone, type NoteClock, type NoteMedia, type NotePhase, type NotesApi, type NoteStore, type NoteView, type SentNote } from "./noteShared";
+import { LazyNote, withFirstMic } from "./lazyNote";
+import { noteEngineCode } from "./voiceCode";
 
 /**
  * Like a call (
@@ -29,7 +31,8 @@ export interface HeldNote {
   /** The origin: a chat's note route (`/api/voice`), or `card:<id>` for a card's box. */
   key: string;
   base: string;
-  engine: NoteEngine;
+  /** the recorder, loaded on his first tap (lazyNote.ts). */
+  engine: LazyNote<Awaited<ReturnType<typeof noteEngineCode>>>;
   /** The api a page passed (tests); production passes none. */
   given?: NotesApi;
   /** Where Send lands it, for the pill: "Chat", or the card's title. */
@@ -153,8 +156,15 @@ export class NoteTab {
       } catch {
         /* storage off */
       }
-    const api = o.api ?? fetchNotesApi(base, undefined, o.fill ? { fill: true } : {});
-    const h: HeldNote = { key, base, given: o.api, to: o.to ?? "Chat", docks: 0, route, engine: new NoteEngine(api, o.media ?? browserNoteMedia(), o.clock, store, o.api ? undefined : { store: outbox(), base, ...(o.fill ? { fill: true } : {}), ...(o.to ? { to: o.to } : {}) }) };
+    // the recorder's code is fetched on his first tap (or for a note kept from before a reload), never with the page
+    const build = (m: Awaited<ReturnType<typeof noteEngineCode>>, first?: Promise<MediaStream>) => {
+      const api = o.api ?? m.fetchNotesApi(base, undefined, o.fill ? { fill: true } : {});
+      const media = withFirstMic(o.media ?? m.browserNoteMedia(), first);
+      const engine = new m.NoteEngine(api, media, o.clock, store, o.api ? undefined : { store: outbox(), base, ...(o.fill ? { fill: true } : {}), ...(o.to ? { to: o.to } : {}) });
+      return { engine, unused: media.unused };
+    };
+    const mic = o.media ? () => o.media!.microphone() : noteMicrophone;
+    const h: HeldNote = { key, base, given: o.api, to: o.to ?? "Chat", docks: 0, route, engine: new LazyNote(noteEngineCode, build, store, mic) };
     h.engine.subscribe((v) => this.seen(h, v));
     this.held.set(key, h); // no change event: this may run while a page renders
     if (!o.fill) void h.engine.recover();
@@ -377,7 +387,7 @@ const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
  * It reads the engine's AnalyserNode (the recording's own stream) about 12 times a second: up at once, down slowly, so a word
  * shows. With reduced motion the bar goes and the number alone changes, twice a second. The strip and the floating pill use it.
  */
-export function LevelMeter({ engine, phase, value = 0, tid = "note" }: { engine?: Pick<NoteEngine, "readLevel">; phase: NotePhase; value?: number; tid?: string }) {
+export function LevelMeter({ engine, phase, value = 0, tid = "note" }: { engine?: Pick<LazyNote, "readLevel">; phase: NotePhase; value?: number; tid?: string }) {
   const [reduce] = useState(reducedMotion);
   // what the meter last sampled; until its first sample (and in tests, whose clock is fake) the engine's own tick
   const [sampled, setSampled] = useState<number>();
@@ -425,7 +435,7 @@ export function LevelMeter({ engine, phase, value = 0, tid = "note" }: { engine?
  * Cancel: throws the note away. A note of a minute or more asks once ("Throw away 1:12?" Discard / Keep), so a stray tap never
  * loses a long note; the question goes after 5 s.
  */
-export function CancelNote({ engine, elapsedS }: { engine: NoteEngine; elapsedS: number }) {
+export function CancelNote({ engine, elapsedS }: { engine: Pick<LazyNote, "discard">; elapsedS: number }) {
   const [asking, setAsking] = useState(false);
   useEffect(() => {
     if (!asking) return;

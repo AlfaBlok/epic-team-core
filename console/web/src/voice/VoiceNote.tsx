@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Mic } from "lucide-react";
-import { KEPT_FAILED_TEXT, type NoteClock, type NoteMedia, type NotesApi, type NoteStore } from "./noteEngine";
+import { KEPT_FAILED_TEXT, type NoteClock, type NoteMedia, type NotesApi, type NoteStore } from "./noteShared";
 import { clockOf } from "./NoteProvider";
 import { useNote, type NoteState } from "./useNote";
 import { SpeakRepliesSwitch } from "./ReplyVoice";
 import { speakRepliesOn, unlockReplyAudio } from "./speak";
 import { useDeskVoiceBase } from "./deskBase";
 import { memoryName } from "@/lib/identity";
-import type { NoteView } from "./noteEngine";
+import type { NoteView } from "./noteShared";
 
 /**
  * rework (the owner's review, 2026-11-02): voice notes in every chat (the Team desk, a milestone's or campaign's chat; one

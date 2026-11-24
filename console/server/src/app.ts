@@ -141,7 +141,7 @@ import { carryNeedsJordi } from "./inbox/carry.js";
 import { carryE62s8 } from "./repoState/carryE62s8.js";
 import { createSpineWriter, type SpineWrite, type SpineWriter } from "./inbox/spineWrite.js";
 import { groupEdits } from "./inbox/groupWrite.js";
-import { createCloneWriter } from "./inbox/writeClone.js";
+import { cloneDirFor, createCloneWriter } from "./inbox/writeClone.js";
 import { createPresses } from "./press/presses.js";
 import { mountPresses, whoPressed, type PressWorker } from "./press/mount.js";
 import { createAfterClose, mountAfterClose } from "./review/afterClose.js";
@@ -1721,7 +1721,7 @@ export function createApp(
   // One spine writer (one git lock per checkout) for inbox answers and the Secrets ledger.
   let clones: ReturnType<typeof createCloneWriter> | undefined;
   const sharedWriter = createSpineWriter({
-    onHeal: (h) => console.warn(`spine write: ${h.repoDir} held ${h.dropped.length} unpushed console commit(s) (${h.dropped.join("; ")}): kept on ${h.backup}, main reset to origin`),
+    onHeal: (h) => console.warn(`spine write: ${h.repoDir} held ${h.dropped.length} local commit(s) origin lacks by SHA, its own unpushed ones or ones origin already holds rewritten (${h.dropped.slice(0, 5).join("; ")}${h.dropped.length > 5 ? "; …" : ""}): kept on ${h.backup}, main reset to origin`),
     // press writes answer at the local commit; the push follows in the background, the shared checkout after it
     backgroundPush: !!opts.backgroundPush,
     // CONSOLE_PRESS_HOOKS=full runs the repo's hooks on every press commit again (rollback of the secret check)
@@ -2789,6 +2789,10 @@ export function createApp(
   // Manager's wake and, in production, one WhatsApp per episode); it was silent while the main server's the code repo stayed diverged.
   checkoutSync = createCheckoutSync({
     dirs: () => [...new Set(store.listMilestones({ includeSettled: false }).flatMap((m) => resolveRepo(read.reposRoot, m.repo)?.path ?? []))],
+    // the console's own write clones too, alarming when one is ahead of origin
+    ...(clones?.enabled && opts.writeClones
+      ? { clones: () => [...new Set(store.listMilestones({ includeSettled: false }).flatMap((m) => resolveRepo(read.reposRoot, m.repo)?.path ?? []))].map((shared) => ({ shared, clone: clones!.cloneOf(shared) ?? cloneDirFor(opts.writeClones!.root, shared) })) }
+      : {}),
     git: gitOut(15_000),
     ...(opts.checkoutSync?.afterMs !== undefined ? { afterMs: opts.checkoutSync.afterMs } : {}),
     // a checkout left behind is pulled by the self-healing puller (cycle/syncRecover.ts) every 5 min until it follows main

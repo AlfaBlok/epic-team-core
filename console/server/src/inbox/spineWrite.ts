@@ -754,8 +754,29 @@ async function undoOwnCommit(g: Run, pre: string): Promise<boolean> {
 }
 
 /**
+ * whether origin already holds the content of every local commit, under other SHAs. Seen in production: a world's
+ * origin history was rewritten (a purge of personal data); the console's clone kept the old history (agents' commits
+ * and its own, all on origin rewritten) and refused every write for 30 hours, an owner's answer among them.
+ * True when the local HEAD's tree is the tree of a commit origin made after the merge base (the same snapshot), or,
+ * with no local merge, `git cherry` finds every local patch upstream. Then moving to origin loses nothing.
+ */
+export async function upstreamHasAll(g: Run): Promise<boolean> {
+  const tree = await g(["rev-parse", "HEAD^{tree}"]);
+  const base = await g(["merge-base", "HEAD", `origin/${MAIN}`]);
+  if (tree.ok && tree.out) {
+    const range = base.ok && base.out ? `${base.out}..origin/${MAIN}` : `origin/${MAIN}`;
+    const trees = await g(["log", "--format=%T", "-n", "5000", range]);
+    if (trees.ok && trees.out.split("\n").includes(tree.out)) return true;
+  }
+  const merges = await g(["rev-list", "--merges", `origin/${MAIN}..HEAD`]);
+  if (!merges.ok || merges.out) return false;
+  const ch = await g(["cherry", `origin/${MAIN}`, "HEAD"]);
+  return ch.ok && !!ch.out && !ch.out.split("\n").some((l) => l.startsWith("+"));
+}
+
+/**
  * before a write, a checkout ahead of origin is healed only when every local commit is the console's own (its
- * trailer) and was never pushed: HEAD is kept on `backup/console-<sha>`, then main is reset to origin. Any other
+ * trailer) and was never pushed, or origin already holds every local commit's content (upstreamHasAll): HEAD is kept on `backup/console-<sha>`, then main is reset to origin. Any other
  * commit (a person's, an agent's) is left alone and the write is refused.
  */
 async function dropOwnStrays(g: Run): Promise<{ ok: true; backup: string; dropped: string[] } | { ok: false; reason: string }> {
@@ -763,7 +784,8 @@ async function dropOwnStrays(g: Run): Promise<{ ok: true; backup: string; droppe
   if (!local.ok) return { ok: false, reason: local.err };
   const recs = local.out.split("\x1e").map((x) => x.trim()).filter(Boolean).map((r) => r.split("\x1f"));
   const foreign = recs.filter((r) => !(r[2] ?? "").includes(CONSOLE_TRAILER));
-  if (!recs.length || foreign.length) return { ok: false, reason: `${foreign.length} local commit(s) not made by the console, e.g. ${(foreign[0]?.[0] ?? "").slice(0, 8)} “${foreign[0]?.[1] ?? ""}”: push or rebase them` };
+  // anyone's commits whose content origin already holds under other SHAs (a rewritten origin) hold no work
+  if (!recs.length || (foreign.length && !(await upstreamHasAll(g)))) return { ok: false, reason: `${foreign.length} local commit(s) not made by the console, e.g. ${(foreign[0]?.[0] ?? "").slice(0, 8)} “${foreign[0]?.[1] ?? ""}”: push or rebase them` };
   const head = (await g(["rev-parse", "HEAD"])).out;
   const backup = `backup/console-${head.slice(0, 8)}`;
   const b = await g(["branch", "-f", backup, head]);
@@ -1009,7 +1031,14 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     if (!local.ok) return { ok: false, reason: local.err };
     const recs = local.out.split("\x1e").map((x) => x.trim()).filter(Boolean).map((r) => r.split("\x1f"));
     const foreign = recs.filter((r) => !(r[2] ?? "").includes(CONSOLE_TRAILER));
-    if (foreign.length) return { ok: false, reason: `${foreign.length} local commit(s) not made by the console, e.g. ${(foreign[0]?.[0] ?? "").slice(0, 8)} “${foreign[0]?.[1] ?? ""}”: push or rebase them` };
+    if (foreign.length) {
+      // origin rewritten under the checkout: every local commit is already there, kept on a backup branch
+      const healed = await dropOwnStrays(g);
+      if (!healed.ok) return healed;
+      pend.delete(repoDir);
+      opts.onHeal?.({ repoDir, backup: healed.backup, dropped: healed.dropped });
+      return { ok: true };
+    }
     if (behind > 0) {
       const rebase = await g(["rebase", `origin/${MAIN}`], { timeout: 60_000 });
       if (!rebase.ok) {

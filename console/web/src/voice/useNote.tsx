@@ -4,8 +4,8 @@ import { Mic, Play, SendHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
-import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView, SentNote } from "./noteEngine";
-import { DEFAULT_MAX_MIN, EMPTY_RECORDING_TEXT, KEPT_FAILED_TEXT, WAITING_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteEngine";
+import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView, SentNote } from "./noteShared";
+import { DEFAULT_MAX_MIN, EMPTY_RECORDING_TEXT, KEPT_FAILED_TEXT, WAITING_TEXT, lengthText, MIC_BUSY_TEXT } from "./noteShared";
 import { useDeskVoiceBase } from "./deskBase";
 import { CancelNote, clockOf, LevelMeter, LiveDot, noteOn, outText, useNoteTab, type HeldNote } from "./NoteProvider";
 

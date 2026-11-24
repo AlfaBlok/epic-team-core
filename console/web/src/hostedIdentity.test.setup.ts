@@ -18,3 +18,12 @@ afterEach(() => {
     /* node environment: no storage */
   }
 });
+
+// the voice engines load on first tap in the app (voice/voiceCode.ts); a test drives the engine tick by tick,
+// so its code is fetched before the tests run (after each file's own imports, so a pinned identity is the one it reads).
+// voice/lazyLoad.test.ts checks the load on tap itself.
+import { beforeAll } from "vitest";
+beforeAll(async () => {
+  const { callEngineCode, noteEngineCode } = await import("./voice/voiceCode");
+  await Promise.all([callEngineCode(), noteEngineCode()]);
+});

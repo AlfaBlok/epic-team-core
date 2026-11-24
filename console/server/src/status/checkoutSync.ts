@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
 import type { GitOut } from "../freshness.js";
@@ -42,6 +43,13 @@ export function createCheckoutSync(o: {
    */
   heal?: (dir: string) => Promise<{ ok: boolean; reason?: string }>;
   healEveryMs?: number;
+  /**
+   * the console's own write clones (inbox/writeClone.ts), each with the shared checkout it writes for. A clone
+   * behind origin is normal (it fast-forwards at its next write); one ahead of origin refuses every write to its repo,
+   * so only ahead counts. One clone sat 18 ahead and 165 behind for 30 hours, unseen, because only the shared
+   * checkouts were watched. Never healed here: the spine writer heals it at its next write when origin holds it all.
+   */
+  clones?: () => { shared: string; clone: string }[];
 }) {
   const now = () => o.now?.() ?? Date.now();
   const afterMs = o.afterMs ?? CHECKOUT_SYNC_AFTER_MS;
@@ -65,12 +73,18 @@ export function createCheckoutSync(o: {
     return { branch, ahead, behind };
   }
 
+  const cloneFor = new Map<string, string>();
   async function tick(): Promise<CheckoutSyncState[]> {
     const t = now();
-    const dirs = [...new Set(o.dirs().map((d) => path.resolve(d)))];
+    const shared = [...new Set(o.dirs().map((d) => path.resolve(d)))];
+    cloneFor.clear();
+    for (const c of o.clones?.() ?? []) if (fs.existsSync(path.join(c.clone, ".git"))) cloneFor.set(path.resolve(c.shared), path.resolve(c.clone));
+    const clones = new Set(cloneFor.values());
+    const dirs = [...shared, ...[...clones].filter((c) => !shared.includes(c))];
     for (const dir of dirs) {
       let s = await check(dir);
-      if (s && s.behind > 0 && o.heal && t - (healedAt.get(dir) ?? -Infinity) >= healEveryMs) {
+      if (s && clones.has(dir)) s = s.ahead ? s : undefined; // a clone only behind is fine
+      else if (s && s.behind > 0 && o.heal && t - (healedAt.get(dir) ?? -Infinity) >= healEveryMs) {
         healedAt.set(dir, t);
         const h = await o.heal(dir).catch((e) => ({ ok: false, reason: (e as Error).message }));
         if (!h.ok) o.log?.(`checkout sync: ${dir} is ${s.behind} behind origin/main and the self-healing pull failed: ${h.reason ?? "no reason"}`);
@@ -84,7 +98,7 @@ export function createCheckoutSync(o: {
       }
       const prev = out.get(dir);
       const since = prev?.since ?? new Date(t).toISOString();
-      const cur: CheckoutSyncState = { dir, repo: path.basename(dir), ...s, since, alert: t - Date.parse(since) > afterMs };
+      const cur: CheckoutSyncState = { dir, repo: clones.has(dir) ? `${path.basename(dir)} (console write copy)` : path.basename(dir), ...s, since, alert: t - Date.parse(since) > afterMs };
       out.set(dir, cur);
       if (cur.alert && !alerted.has(dir)) {
         alerted.add(dir);
@@ -105,7 +119,9 @@ export function createCheckoutSync(o: {
   };
   /** The Delivery Manager's wake line for the checkout of `dir` (undefined when it is in sync or not yet alerting). */
   const section = (dir: string | undefined): string | undefined => {
-    const s = dir ? out.get(path.resolve(dir)) : undefined;
+    const own = dir ? out.get(path.resolve(dir)) : undefined;
+    const copy = dir ? out.get(cloneFor.get(path.resolve(dir)) ?? "") : undefined;
+    const s = own?.alert ? own : copy;
     if (!s?.alert) return undefined;
     return [
       "## Console checkout out of sync",

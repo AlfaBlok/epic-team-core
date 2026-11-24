@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { NoteClock, NoteMedia, NotesApi } from "./noteEngine";
+import type { NoteClock, NoteMedia, NotesApi } from "./noteShared";
 import { clearNoteState, useNote, type NoteState } from "./useNote";
 import { useInboxHold } from "@/lib/inboxHold";
 

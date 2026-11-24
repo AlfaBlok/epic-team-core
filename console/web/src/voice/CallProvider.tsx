@@ -4,7 +4,10 @@ import { Mic, MicOff, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CALL_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
-import { browserMedia, CallEngine, fetchVoiceApi, type Media, type Phase, type VoiceApi } from "./engine";
+import type { Media, Phase, VoiceApi } from "./engine";
+import { fetchVoiceApi } from "./callApi";
+import { LazyCall } from "./lazyCall";
+import { callEngineCode, isPromise } from "./voiceCode";
 
 /**
  * A call is the tab's, never a page's: leaving
@@ -16,7 +19,8 @@ import { browserMedia, CallEngine, fetchVoiceApi, type Media, type Phase, type V
  */
 export interface HeldCall {
   base: string;
-  engine: CallEngine;
+  /** the call engine, loaded when he taps Call (lazyCall.ts). */
+  engine: LazyCall;
   api: VoiceApi;
   /** The api a page passed (tests); production passes none. */
   given?: VoiceApi;
@@ -67,16 +71,10 @@ export class CallTab {
   call(base: string, o: { api?: VoiceApi; media?: (audio: HTMLAudioElement) => Media; callee?: string; where?: string } = {}): HeldCall {
     const had = this.held.get(base);
     if (had && had.given === o.api) return had;
-    const m = () => (o.media ?? browserMedia)(this.audioEl());
     const api = o.api ?? fetchVoiceApi(undefined, base);
-    const h: HeldCall = {
-      base,
-      api,
-      given: o.api,
-      callee: o.callee ?? "the desk",
-      where: o.where,
-      docks: 0,
-      engine: new CallEngine(api, {
+    const made = (e: Awaited<ReturnType<typeof callEngineCode>>) => {
+      const m = () => (o.media ?? e.browserMedia)(this.audioEl());
+      return new e.CallEngine(api, {
         // Late-bound: the audio element is made when a call first needs it.
         microphone: () => m().microphone(),
         peer: () => m().peer(),
@@ -84,6 +82,19 @@ export class CallTab {
         play: (st) => m().play(st),
         wakeLock: () => m().wakeLock?.() ?? Promise.resolve(undefined),
         session: (hs) => m().session?.(hs),
+      });
+    };
+    const h: HeldCall = {
+      base,
+      api,
+      given: o.api,
+      callee: o.callee ?? "the desk",
+      where: o.where,
+      docks: 0,
+      // the engine's code is fetched when he taps Call, never with the page (kept after: a second call starts at once)
+      engine: new LazyCall(() => {
+        const code = callEngineCode();
+        return isPromise(code) ? code.then(made) : made(code);
       }),
     };
     // the Team desk's call walks his whole inbox and his objectives: it presses and files from any page.

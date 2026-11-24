@@ -2,7 +2,7 @@ import { useContext, useMemo, useSyncExternalStore } from "react";
 import { UNSAFE_LocationContext } from "react-router-dom";
 import { Mic, SendHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView } from "./noteEngine";
+import type { NoteClock, NoteMedia, NotesApi, NoteStore, NoteView } from "./noteShared";
 import { noteOn, useNoteTab } from "./NoteProvider";
 import { useVoiceState, type NoteState } from "./useNote";
 

@@ -66,5 +66,8 @@ export function settleWritten(db: DB, repoDirOf: (milestoneId: string) => string
     ).run(now, WRITTEN_BY_ASKER, at, r.id);
     out.push(r.id);
   }
+  // an answer in the spine whose console job failed before (the asker wrote it in after the console's try was
+  // refused) is done: the card showed "Written to the spine" and still "Try 1 failed: … diverged" under it.
+  db.prepare(`UPDATE jordi_responses SET job_state = 'done', job_error = NULL, job_next_at = NULL WHERE spine_status = 'written' AND delivery = 'sent' AND job_state = 'failed'`).run();
   return out;
 }
