@@ -48,7 +48,7 @@ const qs = (p: Record<string, string>) => {
 };
 
 /** one console API call (the hosted pages' own clients use it too, web/src/hosted/api). */
-export async function apiCall<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string> } = {}): Promise<T> {
+export async function apiCall<T>(method: string, path: string, body?: unknown, o: { idempotent?: boolean; headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<T> {
   return call<T>(method, path, body, o);
 }
 
