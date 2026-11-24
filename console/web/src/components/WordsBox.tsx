@@ -30,6 +30,7 @@ export function WordsBox({
   className,
   boxClassName,
   testid = "words-box",
+  draftKept,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -51,6 +52,8 @@ export function WordsBox({
   /** Extra classes for the text area (its height). */
   boxClassName?: string;
   testid?: string;
+  /** the box keeps its words across a reload itself (the chat's draft): a new build may reload the page under it. */
+  draftKept?: boolean;
 }) {
   // on a phone the long-press menu of a text box
   // has no Paste for a picture alone, so the box has its own Paste: it reads the clipboard (iOS asks with its small Paste
@@ -153,7 +156,7 @@ export function WordsBox({
       {/* the words take the whole width, one or two
           lines that grow as he types (to 40% of a phone's height); the paperclip, the voice note and the box's own press sit in
           a short row under them, inside the same frame, on every screen and in every box (the one box everywhere). */}
-      <div className="flex min-w-0 flex-col rounded-md border bg-background" data-testid="words-field">
+      <div className="flex min-w-0 flex-col rounded-md border bg-background" data-testid="words-field" {...(draftKept ? { "data-draft-kept": "" } : {})}>
         <AnswerTextarea
           className={cn("min-h-10 w-full min-w-0 resize-none border-0 bg-transparent px-3 py-2 text-sm shadow-none focus-visible:outline-none", "max-sm:min-h-11 max-sm:max-h-[40dvh]", boxClassName)}
           rows={rows}

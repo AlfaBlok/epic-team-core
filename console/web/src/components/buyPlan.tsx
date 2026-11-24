@@ -15,8 +15,11 @@ import { Card } from "@/components/ui/card";
 export const BUY_LABEL = (p: Pick<PlanState, "price">) => `Buy ${p.price.name}, €${p.price.eurPerMonth} a month`;
 /** one seat bundle's button words, like "5 seats, €649 a month". */
 export const BUNDLE_LABEL = (b: { seats: number; eurPerMonth: number }) => `${b.seats} seats, €${b.eurPerMonth.toLocaleString("en-GB")} a month`;
-/** what a seat is, in one line, wherever the bundles show. */
-export const SEAT_WORDS = "A seat is one AI teammate working for you. We run the AI and the servers, so there is nothing to set up.";
+/** the locked model in one line ("your AI subscription, our console"), wherever the plan shows. */
+export const PLAN_WORDS =
+  "Your AI subscription, our console. Your team runs on your own AI seats, vault, repo and cloud. We host the console for €49 a month, and can run your compute at cost plus 20%.";
+/** @deprecated the seat bundles are retired; kept as the plan's words for older imports. */
+export const SEAT_WORDS = PLAN_WORDS;
 /** the own-AI button's words, like "Own AI, €49 a month". */
 export const OWN_AI_LABEL = (o: { eurPerMonth: number }) => `Own AI, €${o.eurPerMonth} a month`;
 /** what own AI is, in one line. */
@@ -166,7 +169,7 @@ export function PlanCard({ world }: { world: string | undefined }) {
             <p className="mt-1 text-sm text-muted-foreground">
               {plan.bundles?.length
                 ? `Pick how many seats. ${SEAT_WORDS}${plan.ownAi ? ` ${OWN_AI_WORDS}${plan.ownAi.testMode ? " Own AI is in test mode for now: no real money moves." : ""}` : ""} Monthly, cancel any time.`
-                : `One plan, €${plan.price.eurPerMonth} a month. Your team plans, builds and reports on your projects. Cancel any time.`}
+                : `${PLAN_WORDS}${plan.ownAi?.testMode ? " In test mode for now: no real money moves." : ""} Monthly, cancel any time.`}
             </p>
             {back === "cancelled" && <p className="mt-1 text-sm text-muted-foreground" data-testid="plan-cancelled">The payment was cancelled. Nothing was charged.</p>}
           </div>
@@ -189,9 +192,9 @@ export function HomeBuyLine() {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm" data-testid="home-buy-line">
       <p className="min-w-0 flex-1 basis-56">
-        Your world is on the free plan. {plan.price.name} keeps your team working with its AI included, from €{plan.price.eurPerMonth.toLocaleString("en-GB")} a month.{" "}
+        Your world is on the free plan. {plan.price.name} keeps your team working on your own AI, €{plan.price.eurPerMonth.toLocaleString("en-GB")} a month.{" "}
         <Link to="/credits" className="underline underline-offset-2">
-          Pick your seats
+          See the plan
         </Link>
       </p>
     </div>

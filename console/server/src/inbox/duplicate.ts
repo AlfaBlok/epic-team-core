@@ -90,7 +90,8 @@ export function withTrace(text: string, hit: { cand: DupCandidate } | undefined)
  * Merged before he sees it: a newer card in nearly the same words as an older one still open is held back to its owner
  * to fold into the older (his words from both kept), never shown twice. The bar is strict, so a different question in
  * the same topic still reaches him: at least SAME_SHARED content words shared and SAME_SCORE of all of them (Jaccard).
- * scripts/inbox_dupes.py names looser pairs (by meaning) for the Delivery Manager; it never merges them.
+ * What slips through he taps as Duplicate or already answered: scripts/duplicate_taps.py logs each tap once a day and the
+ * Delivery Manager wake follows it to its cause and fix.
  */
 export const SAME_SHARED = 4;
 export const SAME_SCORE = 0.6;

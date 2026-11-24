@@ -25,6 +25,11 @@ export const FOCUS_GAP_MS = 30_000;
 /** The 5-minute check reloads a visible page only after this long with no key, click, touch or scroll. */
 export const IDLE_MS = 2 * 60_000;
 export const RELOADED_KEY = "console-build-reloaded";
+/**
+ * a build check not answered in this long is given up: his phone off its network kept the one check
+ * in flight for good, so the page never saw the new build and ran the old app for hours after the fix was live.
+ */
+export const CHECK_TIMEOUT_MS = 10_000;
 
 const ENTRY = /<script\b[^>]*\bsrc="([^"]*\/assets\/index-[^"]+?\.js(?:\?[^"]*)?)"/i;
 
@@ -52,7 +57,10 @@ const TEXT_INPUT = /^(text|search|email|url|tel|number|password|)$/;
 
 /** Words or files the user has put in and not sent: a reload would lose them. */
 export function hasUnsent(doc: Document = document): boolean {
-  for (const t of Array.from(doc.querySelectorAll("textarea"))) if (t.value.trim()) return true;
+  // a box that keeps its own words across a reload (the chat's draft lives in sessionStorage) loses nothing: a typed but
+  // unsent chat line no longer keeps the whole app on an old build
+  const kept = (e: Element) => !!e.closest("[data-draft-kept]");
+  for (const t of Array.from(doc.querySelectorAll("textarea"))) if (t.value.trim() && !kept(t)) return true;
   for (const i of Array.from(doc.querySelectorAll("input"))) if (TEXT_INPUT.test(i.type) && !i.readOnly && i.value.trim()) return true;
   for (const e of Array.from(doc.querySelectorAll<HTMLElement>("[contenteditable='true'], [contenteditable='']"))) if (e.textContent?.trim()) return true;
   return !!doc.querySelector("[data-testid='chat-attach-item']");
@@ -99,7 +107,8 @@ export class BuildWatch {
     if (!this.loaded) return Promise.resolve();
     this.inflight ??= (async () => {
       try {
-        const r = await this.d.fetch("/", { cache: "no-store", credentials: "same-origin", headers: { Accept: "text/html" } });
+        const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(CHECK_TIMEOUT_MS) : undefined;
+        const r = await this.d.fetch("/", { cache: "no-store", credentials: "same-origin", headers: { Accept: "text/html" }, ...(signal ? { signal } : {}) });
         if (!r.ok || r.redirected) return;
         const e = entryOf(await r.text());
         if (e && e !== this.loaded && e !== this.newer) {
@@ -150,6 +159,23 @@ export class BuildWatch {
     this.tryReload();
   }
 
+  /**
+   * his Refresh press: look for a newer build now and, if one is live, move onto it at once (asked for by hand, so not
+   * held by the once-per-tab rule; still never under a voice note or call). True: reloading.
+   */
+  async refreshNow(): Promise<boolean> {
+    await this.check();
+    const n = this.newer;
+    if (!n || this.d.busy()) return false;
+    try {
+      this.d.storage?.setItem(RELOADED_KEY, n);
+    } catch {
+      /* storage off: a by-hand press cannot loop */
+    }
+    this.d.reload();
+    return true;
+  }
+
   /** The user touched the page (a key, click, touch or scroll). */
   input(): void {
     this.lastInput = (this.d.now ?? Date.now)();
@@ -171,13 +197,19 @@ export class BuildWatch {
     const focus = () => void this.back("focus");
     const input = () => this.input();
     const INPUTS = ["keydown", "pointerdown", "touchstart", "wheel", "scroll"] as const;
+    // back from the back-forward cache or back online (his phone's network came back): check at once
+    const back = () => void this.back("visible");
     doc.addEventListener("visibilitychange", seen);
     win.addEventListener("focus", focus);
+    win.addEventListener("pageshow", back);
+    win.addEventListener("online", back);
     for (const e of INPUTS) win.addEventListener(e, input, { passive: true, capture: true });
     const t = win.setInterval(() => void this.tick(), CHECK_EVERY_MS);
     return () => {
       doc.removeEventListener("visibilitychange", seen);
       win.removeEventListener("focus", focus);
+      win.removeEventListener("pageshow", back);
+      win.removeEventListener("online", back);
       for (const e of INPUTS) win.removeEventListener(e, input, { capture: true });
       win.clearInterval(t);
     };
@@ -191,6 +223,22 @@ const sessionStore = (): Storage | undefined => {
     return undefined;
   }
 };
+
+/** the app's one build watch (set by NewBuild), so a page's Refresh can move onto a newer build. */
+let appWatch: BuildWatch | undefined;
+/**
+ * a by-hand Refresh: ask the service worker to look for a new version, and reload onto a newer build when one is live.
+ * True: the page is reloading (the caller need not read again).
+ */
+export async function refreshApp(): Promise<boolean> {
+  try {
+    const reg = typeof navigator !== "undefined" ? await navigator.serviceWorker?.getRegistration?.("/") : undefined;
+    void reg?.update().catch(() => undefined);
+  } catch {
+    /* no worker */
+  }
+  return appWatch ? appWatch.refreshNow() : false;
+}
 
 /** In the app (inside the call and note owners): watches for a newer build; shows the Reload bar when it cannot reload itself. */
 export function NewBuild(props: { enabled?: boolean; deps?: Partial<BuildWatchDeps> }) {
@@ -214,11 +262,13 @@ export function NewBuild(props: { enabled?: boolean; deps?: Partial<BuildWatchDe
   const [hidden, setHidden] = useState<string>();
   useEffect(() => {
     if (!watch) return;
+    appWatch = watch;
     const off = watch.subscribe(setNewer);
     const unhook = watch.start();
     return () => {
       off();
       unhook();
+      if (appWatch === watch) appWatch = undefined;
     };
   }, [watch]);
   if (!newer || hidden === newer) return null;

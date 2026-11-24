@@ -23,6 +23,8 @@ class FakeT3 implements T3Client {
   threads = new Map<string, { messages: T3ThreadMessage[]; status: string; items: number }>();
   /** Delay of every read (a slow T3). */
   delayMs = 0;
+  /** reads see no message past this position (a thread still catching up after a restart). */
+  cutAt = Infinity;
   private n = 0;
   ops = (op: string) => this.calls.filter((c) => c.op === op);
   push(threadId: string, role: "user" | "assistant", text: string, status = "completed") {
@@ -63,7 +65,7 @@ class FakeT3 implements T3Client {
   async readThreadMessages(threadId: string, opts: { afterPosition?: number; limit?: number } = {}): Promise<T3MessagePage> {
     this.calls.push({ op: "readThreadMessages", args: { threadId, ...opts } });
     if (this.delayMs) await sleep(this.delayMs);
-    const all = (this.threads.get(threadId)?.messages ?? []).filter((m) => opts.afterPosition === undefined || m.position > opts.afterPosition);
+    const all = (this.threads.get(threadId)?.messages ?? []).filter((m) => (opts.afterPosition === undefined || m.position > opts.afterPosition) && m.position <= this.cutAt);
     const page = all.slice(0, opts.limit ?? 100);
     return { messages: page, nextPosition: page.length ? page[page.length - 1].position : (opts.afterPosition ?? null), hasMore: all.length > page.length, archived: false };
   }
@@ -411,5 +413,28 @@ describe("an older page never waits on a slow T3", () => {
     expect(page.messages).toHaveLength(30);
     expect(page.messages.every((m) => m.position! < before && m.position! >= before - TAIL_WINDOW)).toBe(true);
     expect(page.hasEarlier).toBe(true);
+  });
+});
+
+describe("a read still catching up after a restart never shows an older chat", () => {
+  it("the last good view answers (stale) and is kept; the full read replaces it once it lands", async () => {
+    const tid = await longThread(300);
+    const warm = deskOf();
+    const good = await warm.view({ limit: 30 });
+    expect(good.messages.at(-1)!.text).toBe("answer 300");
+    const cached = db.prepare("SELECT view FROM desk_view_cache").get() as { view: string };
+    // the restarted console's first reads end far back in the thread (his phone was shown a chat from two days before)
+    t3.cutAt = t3.threads.get(tid)!.items - 200;
+    const restarted = deskOf();
+    const v = await restarted.view({ limit: 30 });
+    expect(v.stale).toBe(true);
+    expect(v.messages.at(-1)!.text).toBe("answer 300");
+    expect((db.prepare("SELECT view FROM desk_view_cache").get() as { view: string }).view).toBe(cached.view);
+    t3.cutAt = Infinity;
+    t3.push(tid, "assistant", "the newest answer");
+    let next = await restarted.view({ limit: 30 });
+    for (let i = 0; i < 5 && next.messages.at(-1)!.text !== "the newest answer"; i++) next = await restarted.view({ limit: 30 });
+    expect(next.messages.at(-1)!.text).toBe("the newest answer");
+    expect(next.stale).toBeUndefined();
   });
 });

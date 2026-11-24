@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { BundleButtons, SEAT_WORDS, usePlan } from "./buyPlan";
+import { BundleButtons, PLAN_WORDS, usePlan } from "./buyPlan";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, Building2, Presentation, Bot, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, ListChecks, Crosshair, Pin, Armchair, Server, KeyRound, Sparkles, Coins, Globe, Search as SearchIcon } from "lucide-react";
@@ -1199,7 +1199,7 @@ export function BillingNote() {
       ) : (
         <div className="flex flex-col gap-2">
           <p className="min-w-0">
-            Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid. {SEAT_WORDS}
+            Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid. {PLAN_WORDS}
           </p>
           {plan && <BundleButtons plan={plan} size="sm" testid="billing-pay" />}
         </div>

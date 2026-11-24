@@ -39,6 +39,9 @@ export const TAIL_MESSAGES = 120;
  * past it the last good view answers (memory, else the desk_view_cache row) and the live read lands for the next poll.
  */
 export const VIEW_BUDGET_MS = 250;
+/** the newest message position a view shows (-Infinity: none). */
+export const newestPosition = (v: { messages: { position?: number }[] }): number =>
+  v.messages.reduce((m, x) => (typeof x.position === "number" && x.position > m ? x.position : m), -Infinity);
 /** a cold read of a long thread starts this many items (positions) from its end, not at position 0. */
 export const TAIL_WINDOW = 300;
 /** how far back the owner's own words are read from the live thread (the desk's Add and answers, E948-S193). */
@@ -1265,6 +1268,14 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
         if (!isT3Unavailable(e)) throw e;
         const host = current()?.host;
         return downView(host && host !== mainHost() ? host : undefined); // never the raw ECONNREFUSED
+      }
+      // after a restart the first reads of a long thread come in pages from an older point: a view that ends before the
+      // last good one is a read still catching up, never the chat. The last good view answers (stale, so the app reads again
+      // in a second) and the partial one is neither kept nor saved; before this the phone was shown a chat from two days back.
+      const prev = lastView();
+      if (prev && prev.threadId === v.threadId && newestPosition(v) < newestPosition(prev)) {
+        mustWait = false;
+        return { ...prev, sending: v.sending, status: v.status, working: v.working, stale: true };
       }
       lastGood = v;
       mustWait = false;

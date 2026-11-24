@@ -1992,12 +1992,14 @@ export interface PlanState {
   paid: boolean;
   awaiting: boolean;
   price: { name: string; eurPerMonth: number };
-  /** the seat bundles on sale (2, 5, 16 seats); older consoles leave it out */
+  /** empty now (the seat bundles are retired); older consoles leave it out */
   bundles?: { seats: number; eurPerMonth: number }[];
   /** the seats the world's plan includes now */
   seats?: number;
   /** own AI, the team on the customer's own AI key, no seats (Stripe test mode until real payments are proven) */
   ownAi?: { eurPerMonth: number; testMode: boolean };
+  /** optional compute on our cloud at cost plus this markup */
+  compute?: { markupPct: number };
   /** how the world's AI is paid now */
   ai?: "own" | "included";
   subscription?: { status: string; since: string; testMode: boolean };

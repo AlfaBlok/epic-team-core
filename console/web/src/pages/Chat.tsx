@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useInRouterContext, useNavigate, useSearchParams } from "react-router-dom";
 import { briefingHref, isBriefMe } from "@/lib/briefing";
-import { ArrowDown, ExternalLink, Loader2, Mic, Phone, Send, X } from "lucide-react";
+import { ArrowDown, ExternalLink, Loader2, Mic, Phone, RefreshCw, Send, X } from "lucide-react";
 import { api, type ChatRead, type DeskChat, type DeskMessage } from "@/api";
 import { useOwnCall } from "@/voice/OwnCall";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { INBOX_PATH } from "@/components/inboxLine";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { invalidate, pollWhileVisible, useQuery } from "@/lib/data";
 import { SavedCopyLine } from "@/components/SavedCopyLine";
+import { refreshApp } from "@/components/NewBuild";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { useCallDock } from "@/voice/CallPanel";
 import { clockOf, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
@@ -95,6 +96,51 @@ function keepChat(key: string, c: DeskChat) {
     /* full or private mode: memory only */
   }
 }
+/** the newest message position a chat shows (-Infinity: none). */
+export const newestAt = (c: DeskChat): number => c.messages.reduce((m, x) => (typeof x.position === "number" && x.position > m ? x.position : m), -Infinity);
+
+
+/**
+ * his phone opened the chat drawn from the copy it kept at 19:00, with no sign it was old, while its
+ * network (Tailscale waking up) had not answered yet; he took it for the current chat. The kept copy still paints at once,
+ * but after this long without a fresh answer the chat says how old it is, with a Refresh beside it.
+ */
+export const CHAT_FRESH_WAIT_MS = 1_500;
+/** a chat whose last fresh answer is older than this (polls every 15 s) is out of date and says so. */
+export const CHAT_OUT_OF_DATE_MS = 60_000;
+
+const hhmm = (t: number, now = Date.now()) => {
+  const d = new Date(t);
+  const n = new Date(now);
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.toDateString() === n.toDateString() ? time : `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} ${time}`;
+};
+
+/**
+ * what the chat's freshness line says (undefined: nothing, the chat is current). `freshAt`: this page's last fresh answer;
+ * `newestAt`: when the newest line on screen was written; `openedAt`: when the page opened; `failing`: the last read failed.
+ */
+export function chatFreshText(o: { freshAt?: number; newestAt?: number; openedAt: number; failing?: boolean; now?: number }): string | undefined {
+  const now = o.now ?? Date.now();
+  const upTo = o.newestAt !== undefined ? `Showing the chat up to ${hhmm(o.newestAt, now)}` : "Showing a saved chat";
+  if (o.freshAt === undefined) {
+    if (!o.failing && now - o.openedAt < CHAT_FRESH_WAIT_MS) return undefined;
+    return o.failing ? `${upTo}. Can't reach the team, retrying.` : `${upTo}. Getting the newest…`;
+  }
+  if (o.failing || now - o.freshAt >= CHAT_OUT_OF_DATE_MS) return `${upTo}. Can't reach the team, retrying.`;
+  return undefined;
+}
+
+/** when the newest line a chat shows was written (undefined: no dated line). */
+export const newestLineAt = (c: DeskChat | undefined): number | undefined => {
+  let t: number | undefined;
+  for (const m of c?.messages ?? []) {
+    const at = Date.parse((m as { at?: string }).at ?? "");
+    if (Number.isFinite(at) && (t === undefined || at > t)) t = at;
+  }
+  return t;
+};
+
 /** Tests: forget every kept chat. */
 export function forgetChats() {
   chatCache.clear();
@@ -573,6 +619,15 @@ export function ChatView({
   /** the history's height before an older page was put on top (the scroll position is kept across it). */
   const anchor = useRef<number | undefined>(undefined);
   const [error, setError] = useState<Error | undefined>();
+  /** this page's last fresh answer from the console (undefined: only the kept copy is drawn so far). */
+  const [freshAt, setFreshAt] = useState<number | undefined>();
+  const [openedAt] = useState(() => Date.now());
+  const [refreshing, setRefreshing] = useState(false);
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClock((n) => n + 1), 1_000);
+    return () => clearInterval(t);
+  }, []);
   // what he typed stays while he visits other pages (this tab only), like the voice note he is recording.
   const draftKey = cacheKey ? `chat-draft:${cacheKey}` : undefined;
   const [text, setText] = useState(() => {
@@ -611,6 +666,12 @@ export function ChatView({
     try {
       const c = await fetchChat({ limit: CHAT_PAGE });
       if (!alive.current) return;
+      // a read that ends before what is on screen (the console catching up after a restart) never replaces it
+      const shownNow = chatRef.current;
+      if (shownNow && shownNow.threadId === c.threadId && newestAt(c) < newestAt(shownNow)) {
+        setError(undefined);
+        return;
+      }
       // what slid out of the newest page while the chat was open stays shown, above it
       const prev = chatRef.current;
       let o = olderRef.current;
@@ -629,6 +690,7 @@ export function ChatView({
       setChat(c);
       setOlder(o);
       if (cacheKey && c.available) keepChat(cacheKey, c);
+      if (!c.stale) setFreshAt(Date.now());
       setError(undefined);
     } catch (e) {
       if (alive.current) setError(e as Error);
@@ -953,6 +1015,20 @@ export function ChatView({
           {error && <div className="mb-2"><ErrorBox error={error} muted /></div>}
           {/* a transcript the app drew from its saved copy (the console out of reach) says so, with its age */}
           <SavedCopyLine />
+          <ChatFreshLine
+            text={chatFreshText({ freshAt, newestAt: newestLineAt(chat), openedAt, failing: !!error })}
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              try {
+                // a newer build is live: move onto it (his draft stays); otherwise read the newest lines now
+                if (await refreshApp()) return;
+                await load();
+              } finally {
+                if (alive.current) setRefreshing(false);
+              }
+            }}
+          />
           {chat.unreachable && (
             // the desk's host (the worker server over the tunnel) cannot be reached: the last good transcript stays, one quiet line
             <div role="status" className="mb-2 shrink-0 text-xs text-muted-foreground" data-testid="chat-unreachable">
@@ -1082,6 +1158,7 @@ export function ChatView({
               </p>
             )}
             <WordsBox
+              draftKept={!!draftKey}
               value={text}
               onChange={setText}
               files={files}
@@ -1274,5 +1351,29 @@ function TicketLine({ m }: { m: DeskMessage }) {
         line
       )}
     </p>
+  );
+}
+
+/**
+ * the chat's freshness: when it shows a copy that is not the newest (the console not reached yet, or no fresh answer for a
+ * minute) one quiet line says from when; the Refresh beside it is always there and always reads fresh.
+ */
+function ChatFreshLine({ text, refreshing, onRefresh }: { text?: string; refreshing: boolean; onRefresh: () => void }) {
+  return (
+    <div className="mb-1 flex min-h-6 shrink-0 items-center gap-2 text-xs text-muted-foreground" data-testid="chat-fresh">
+      <span role="status" aria-live="polite" className="min-w-0 flex-1" data-testid="chat-fresh-text">
+        {text ?? ""}
+      </span>
+      <button
+        type="button"
+        className={cn(PHONE_TAP, "inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 hover:bg-accent disabled:opacity-60")}
+        onClick={onRefresh}
+        disabled={refreshing}
+        aria-label="Refresh the chat"
+        data-testid="chat-refresh"
+      >
+        <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} /> {refreshing ? "Refreshing" : "Refresh"}
+      </button>
+    </div>
   );
 }
