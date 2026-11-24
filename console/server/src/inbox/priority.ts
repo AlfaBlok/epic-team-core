@@ -1,17 +1,54 @@
 import type { Milestone, Store } from "../store.js";
-import { FIRST_TIER, tierOf, type JordiPriority, type Locatable, type ObjectiveMark, type PriorityLookup } from "./jordiPriority.js";
+import { resolveRepo } from "../adapters/repos.js";
+import { FIRST_TIER, objectiveOf, tierOf, worldObjectiveDefs, type JordiPriority, type Locatable, type ObjectiveMark, type PriorityLookup } from "./jordiPriority.js";
 
 /**
  * the owner's lists ("Blocked, waiting on you", "Done, waiting for your review") follow milestone priority:
  * the sidebar's order, the owner's big roots by their position first, then the other milestones as listed (created order),
  * settled ones last. Rank 0 is the top milestone; an item with no known milestone sorts after every ranked one.
  */
-export function milestoneRanks(ms: Pick<Milestone, "id" | "bigRoot" | "createdAt" | "settledAt">[]): Map<string, number> {
+export function milestoneRanks(
+  ms: Pick<Milestone, "id" | "bigRoot" | "createdAt" | "settledAt">[],
+  objectiveOf?: (m: Pick<Milestone, "id">) => number | undefined,
+): Map<string, number> {
   const roots = ms.filter((m) => m.bigRoot != null).sort((a, b) => a.bigRoot! - b.bigRoot! || a.createdAt.localeCompare(b.createdAt));
   const rest = ms.filter((m) => m.bigRoot == null);
   const order = [...roots, ...rest.filter((m) => !m.settledAt), ...rest.filter((m) => m.settledAt)];
-  return new Map(order.map((m, i) => [m.id, i]));
+  if (!objectiveOf) return new Map(order.map((m, i) => [m.id, i]));
+  // the owner: "It needs to be dynamic based on the priority of the objective". A milestone ranks by the objective it
+  // moves, his order in the objectives file read now; the hand-set big-root position only orders milestones his
+  // objectives do not reach, after every one they do.
+  const n = new Map(order.map((m) => [m.id, objectiveOf(m) ?? Number.MAX_SAFE_INTEGER]));
+  const ranked = order.map((m, i) => ({ m, i })).sort((a, b) => n.get(a.m.id)! - n.get(b.m.id)! || a.i - b.i);
+  return new Map(ranked.map(({ m }, i) => [m.id, i]));
 }
+
+/**
+ * the world's milestones ranked by his objectives (ticket → key result → objective → his order, all read from the repo at
+ * this call): each milestone by the objective its epic file or repo moves (objectiveOf: the objective whose epics list
+ * its spine, else whose own repo it lives in, else whose words its title says). Every list and queue ranks by this.
+ */
+export function worldRanks(store: Pick<Store, "listMilestones">, reposRoot: string, opts: { includeSettled?: boolean } = { includeSettled: true }): Map<string, number> {
+  const ms = store.listMilestones(opts);
+  const defs = worldObjectiveDefs(store, reposRoot);
+  if (!defs.length) return milestoneRanks(ms);
+  // the same milestones and the same parsed objectives give the same ranks: an inbox read pays one string compare
+  const key = `${reposRoot}\0${ms.map((m) => `${m.id}|${m.repo}|${m.path}|${m.bigRoot ?? ""}|${m.settledAt ?? ""}|${m.title}`).join("\0")}`;
+  const hit = ranksMemo.get(key);
+  if (hit && hit.defs === defs) return hit.ranks;
+  const names = new Map<string, string>();
+  const nameOf = (repo: string) => names.get(repo) ?? names.set(repo, resolveRepo(reposRoot, repo)?.name ?? repo).get(repo)!;
+  const byId = new Map(ms.map((m) => [m.id, m]));
+  const ranks = milestoneRanks(ms, (m) => {
+    const x = byId.get(m.id);
+    const repo = x?.repo ? nameOf(x.repo) : undefined;
+    return x ? objectiveOf(defs, { ...(repo ? { repo } : {}), ...(x.path ? { path: x.path } : {}), title: x.title })?.n : undefined;
+  });
+  if (ranksMemo.size > 20) ranksMemo.clear();
+  ranksMemo.set(key, { defs, ranks });
+  return ranks;
+}
+const ranksMemo = new Map<string, { defs: unknown; ranks: Map<string, number> }>();
 
 type Ranked = { milestoneId?: string; alsoIn?: string[] };
 
@@ -81,4 +118,5 @@ export function byObjective<T extends Locatable>(rows: T[], objectiveOf: (row: T
 }
 
 /** The store's milestones (this world's, settled included) as ranks. */
-export const storeRanks = (store: Pick<Store, "listMilestones">) => milestoneRanks(store.listMilestones({ includeSettled: true }));
+export const storeRanks = (store: Pick<Store, "listMilestones">, reposRoot?: string) =>
+  reposRoot ? worldRanks(store, reposRoot) : milestoneRanks(store.listMilestones({ includeSettled: true }));

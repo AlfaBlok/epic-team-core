@@ -125,9 +125,24 @@ export function unglueAboutText(v: string): { text: string; about?: string } {
   return { text: (v.slice(0, m.index) + v.slice(m.index + m[0].length)).trim(), about: m[1]!.trim() };
 }
 
+/**
+ * aboutOf kept per input. The inbox list works it out for every item (400) on every read, the same texts each
+ * time; its regular expressions were a tenth of the list's time. Bounded: a full map starts over.
+ */
+const aboutMemo = new Map<string, { about: string; given: boolean } | undefined>();
+const ABOUT_MEMO_MAX = 5_000;
+function aboutKept(i: AboutInput): { about: string; given: boolean } | undefined {
+  const k = `${i.about ?? ""}\u0000${i.question ?? ""}\u0000${i.title ?? ""}\u0000${i.goal ?? ""}\u0000${i.name ?? ""}`;
+  if (aboutMemo.has(k)) return aboutMemo.get(k);
+  const t = aboutOf(i);
+  if (aboutMemo.size >= ABOUT_MEMO_MAX) aboutMemo.clear();
+  aboutMemo.set(k, t);
+  return t;
+}
+
 /** an inbox item with its About line: the ask's own, else derived (every card, every kind, old stored views too). */
 export function withAbout<T extends { about?: string; aboutGiven?: true; question?: string; title?: string; milestoneTitle?: string; spine?: { title: string } }>(it: T): T {
-  const t = aboutOf({ about: it.aboutGiven ? it.about : undefined, question: it.question, title: it.title, goal: it.spine?.title ?? it.milestoneTitle });
+  const t = aboutKept({ about: it.aboutGiven ? it.about : undefined, question: it.question, title: it.title, goal: it.spine?.title ?? it.milestoneTitle });
   if (!t) return it;
   return { ...it, about: t.about, ...(t.given ? { aboutGiven: true as const } : {}) };
 }

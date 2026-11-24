@@ -6,16 +6,22 @@
  * Two cheap things on a GET that answers 200 with application/json:
  *  - an ETag (a hash of the body) and `Cache-Control: private, no-cache` (unless the route set its own): the browser
  *    keeps the answer and asks again with If-None-Match; an unchanged list comes back as a 304 with no body;
- *  - gzip when the body is 1 KB or more and the caller accepts it (about 4.7 times smaller for the sidebar's calls).
+ *  - gzip when the body is 1 KB or more and the caller accepts it (about 4.7 times smaller for the sidebar's calls);
+ *    brotli instead when it accepts br (every https browser: the inbox lists 9 to 13% smaller again).
  * Streams (text/event-stream), downloads and anything already encoded pass untouched. A caller with no HTTP cache (curl,
  * node fetch, agents) never sends If-None-Match, so it always gets the full answer as before.
  */
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
-import { gzip as gzipCb } from "node:zlib";
+import zlib, { brotliCompress as brotliCb, gzip as gzipCb } from "node:zlib";
 import type { MiddlewareHandler } from "hono";
 
 const gzip = promisify(gzipCb);
+const brotli = promisify(brotliCb) as (b: Buffer, o: zlib.BrotliOptions) => Promise<Buffer>;
+/** brotli quality for JSON answers: 5 packs the 650 KB asks list in ~14 ms (11 would take over a second). */
+export const BROTLI_QUALITY = 5;
+/** `br` named in Accept-Encoding without q=0. */
+export const acceptsBrotli = (h: string | undefined) => !!h && h.split(",").some((t) => /^\s*br\s*(;|$)/i.test(t) && !/;\s*q\s*=\s*0(\.0*)?\s*$/i.test(t));
 const GZIP_MIN = 1024;
 
 /** true when an If-None-Match header names this ETag (weak compare, as browsers send it back). */
@@ -49,6 +55,14 @@ export function leanJson(o: { gzipMin?: number } = {}): MiddlewareHandler {
     if (etagMatches(c.req.header("If-None-Match"), etag)) {
       headers.delete("Content-Type");
       c.res = new Response(null, { status: 304, headers });
+      return;
+    }
+    // brotli when the browser takes it (every https browser does): the inbox's lists come out 9 to 13% smaller
+    // than gzip at about the same cost (quality 5, in zlib's thread pool like gzip, never on the main thread).
+    if (body.length >= min && acceptsBrotli(c.req.header("Accept-Encoding"))) {
+      const packed = await brotli(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: body.length } });
+      headers.set("Content-Encoding", "br");
+      c.res = new Response(new Uint8Array(packed), { status: 200, headers });
       return;
     }
     if (body.length >= min && /\bgzip\b/i.test(c.req.header("Accept-Encoding") ?? "")) {

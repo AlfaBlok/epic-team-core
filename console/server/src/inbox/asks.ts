@@ -321,7 +321,7 @@ export const ASK_LINE_FORMAT =
 export const ASK_WRITING_RULE =
   "Writing an ask: ask only for the step that blocks now, never a later step (a scan 'when pinged', keys 'before Wave 2' stay plan text until next). " +
   `Lead with the decision in plain words: what, why it matters, your recommendation, so ${ownerName()} can answer in seconds; ids, jargon and steps after. ` +
-  "One decision per ask; never fold non-blocking extras into a blocking ask.";
+  "One decision per ask; never fold non-blocking extras into a blocking ask. Key results go to the objective's manager, not an ask.";
 /**
  * the question opens with one line by kind and a one-line why; his inbox card shows that line big and folds the rest.
  */
@@ -386,6 +386,8 @@ export interface HumanAsk {
   risk?: string | null;
   /** `why the owner:` (`why <who>:`): why an agent cannot decide it. */
   why?: string | null;
+  /** E907-S66: every `why:` value the line carries, in order (a plain `why:` often quotes his words). */
+  whyAll?: string[];
   /** E948-S172 `about:` the card's topic in his words ("your reply to Dad"), its first line: `About: …`. */
   about?: string | null;
   /** E907-S8: every `about:` value the line carries, in order (the last one is `about`). */
@@ -720,7 +722,11 @@ export function parseAsks(markdown: string, specRel = "", repoDir?: string): Loc
       else if (key === "effort") ask.effort = stripInline(val) || null;
       else if (key === "impact") ask.impact = stripInline(val) || null;
       else if (key.startsWith("risk")) ask.risk = stripInline(val) || null;
-      else if (key.startsWith("why")) ask.why = stripInline(val) || null;
+      else if (key.startsWith("why")) {
+        ask.why = stripInline(val) || null;
+        // E907-S66: a plain `why:` (his words that started it) is kept when a later `why <who>:` replaces ask.why
+        if (ask.why) ask.whyAll = [...(ask.whyAll ?? []), ask.why];
+      }
       else if (key === "about") {
         ask.about = stripInline(val) || null;
         // E907-S8: every `about:` on the line (the console appends its own `about: FYI` after the writer's topic).

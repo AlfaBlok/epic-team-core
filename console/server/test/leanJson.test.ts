@@ -1,9 +1,9 @@
 // JSON answers go out with an ETag (304 when unchanged) and gzipped; streams and other answers pass untouched.
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { describe, expect, it } from "vitest";
-import { etagMatches, leanJson } from "../src/leanJson.js";
+import { acceptsBrotli, etagMatches, leanJson } from "../src/leanJson.js";
 
 const big = { rows: Array.from({ length: 400 }, (_, i) => ({ id: i, title: `row ${i} of the sidebar list` })) };
 function app() {
@@ -20,7 +20,7 @@ function app() {
 
 describe("leanJson", () => {
   it("gzips a large JSON answer for a caller that accepts it, with an ETag and no-cache", async () => {
-    const res = await app().request("/big", { headers: { "Accept-Encoding": "gzip, deflate, br" } });
+    const res = await app().request("/big", { headers: { "Accept-Encoding": "gzip, deflate" } });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Encoding")).toBe("gzip");
     expect(res.headers.get("Content-Type")).toMatch(/^application\/json/);
@@ -30,6 +30,26 @@ describe("leanJson", () => {
     const raw = Buffer.from(await res.arrayBuffer());
     expect(raw.length).toBeLessThan(JSON.stringify(big).length / 3);
     expect(JSON.parse(gunzipSync(raw).toString())).toEqual(big);
+  });
+
+  // every https browser takes brotli; the inbox lists come out smaller than gzip
+  it("sends brotli to a browser that takes it, smaller than gzip, same ETag", async () => {
+    const a = app();
+    const br = await a.request("/big", { headers: { "Accept-Encoding": "gzip, deflate, br, zstd" } });
+    const gz = await a.request("/big", { headers: { "Accept-Encoding": "gzip" } });
+    expect(br.headers.get("Content-Encoding")).toBe("br");
+    expect(br.headers.get("ETag")).toBe(gz.headers.get("ETag"));
+    const raw = Buffer.from(await br.arrayBuffer());
+    expect(raw.length).toBeLessThan(Buffer.from(await gz.arrayBuffer()).length);
+    expect(JSON.parse(brotliDecompressSync(raw).toString())).toEqual(big);
+  });
+
+  it("reads br in Accept-Encoding only when it is offered", () => {
+    expect(acceptsBrotli("gzip, deflate, br")).toBe(true);
+    expect(acceptsBrotli("br;q=0.9, gzip")).toBe(true);
+    expect(acceptsBrotli("gzip, br;q=0")).toBe(false);
+    expect(acceptsBrotli("gzip, brotli")).toBe(false);
+    expect(acceptsBrotli(undefined)).toBe(false);
   });
 
   it("answers 304 with no body when the list did not change", async () => {

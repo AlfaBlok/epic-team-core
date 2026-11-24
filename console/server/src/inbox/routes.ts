@@ -32,6 +32,7 @@ import { scrub, type SecretPut, type WorldKeys } from "../plug/keys.js";
 import { hooks } from "../plug/hooks.js";
 import { dropMirror, mirrorApproval, type Mirror } from "./approvalMirror.js";
 import path from "node:path";
+import { tableVersion } from "../tableVersion.js";
 import { milestoneWorld, worldArgs, worldGuard } from "../tenancy/world.js"; // lists of the caller's world only
 import { credentialWorld } from "../auth/identity.js";
 import type { ReadModelHost } from "../readModel/host.js";
@@ -491,14 +492,36 @@ export function mountInbox(
     const old = db.prepare("SELECT kind, text FROM jordi_responses WHERE id = ?").get(r.replacesId) as Row | undefined;
     return old ? { ...r, replacedAnswer: answerWord(old.kind, old.text) } : r;
   };
-  const listResponses = (f: { milestoneId?: string; itemId?: string } = {}) =>
-    (
-      db
-        .prepare(
-          `SELECT * FROM jordi_responses WHERE (? IS NULL OR milestone_id = ?) AND (? IS NULL OR item_id = ?) AND ${worldGuard()} ORDER BY created_at DESC, rowid DESC`,
-        )
-        .all(f.milestoneId ?? null, f.milestoneId ?? null, f.itemId ?? null, f.itemId ?? null, ...worldArgs(store.tenant)) as Row[]
-    ).map((r) => withReplaced(withEnv(toResponse(r))));
+  /**
+   * every stored answer of the world, parsed, kept until the table changes (tableVersion: a trigger counts
+   * every write, from any connection). The inbox read and parsed all of them (570 rows, 1.6 MB of JSON) twice on every
+   * request, about half of the asks list's time. The kept objects are shared: callers copy, never change them.
+   */
+  let responsesVersion: (() => number | undefined) | undefined;
+  const parsedResponses = new Map<string, { v: number; rows: JordiResponse[] }>();
+  const allResponses = (): JordiResponse[] => {
+    responsesVersion ??= tableVersion(db, "jordi_responses");
+    const v = responsesVersion();
+    const world = store.tenant ?? "";
+    const hit = parsedResponses.get(world);
+    if (v !== undefined && hit?.v === v) return hit.rows;
+    const rows = (
+      db.prepare(`SELECT * FROM jordi_responses WHERE ${worldGuard()} ORDER BY created_at DESC, rowid DESC`).all(...worldArgs(store.tenant)) as Row[]
+    ).map((r) => withReplaced(toResponse(r)));
+    if (v !== undefined) parsedResponses.set(world, { v, rows });
+    return rows;
+  };
+  /** the stored answers (newest first), of one milestone or item when asked, each with its thread's environment. */
+  const listResponses = (f: { milestoneId?: string; itemId?: string } = {}) => {
+    const envOf = new Map<string, string | undefined>(); // one lookup per thread for the whole list
+    const env = (t: string) => (envOf.has(t) ? envOf.get(t) : (envOf.set(t, o.deps.threadEnvironment?.(t)), envOf.get(t)));
+    return allResponses()
+      .filter((r) => (!f.milestoneId || r.milestoneId === f.milestoneId) && (!f.itemId || r.itemId === f.itemId))
+      .map((r) => {
+        const e = r.threadId ? env(r.threadId) : undefined;
+        return e ? { ...r, environmentId: e } : r;
+      });
+  };
   const getResponse = (id: string) => {
     const r = db.prepare(`SELECT * FROM jordi_responses WHERE id = ? AND ${worldGuard()}`).get(id, ...worldArgs(store.tenant)) as Row | undefined;
     return r && withReplaced(withEnv(toResponse(r)));
@@ -934,15 +957,23 @@ export function mountInbox(
   /** a write grant is changed on the assignment, not by changing the answer. */
   const changeBlocked = (r: JordiResponse) => !!(r.item as { grantedScope?: string }).grantedScope;
   /** the first wake of the owning assignment that started after the answer (the owner may have read it). */
-  const withOwnerRun = (r: JordiResponse, it: Partial<WaitingItem>): JordiResponse => {
+  const withOwnerRun = (r: JordiResponse, it: Partial<WaitingItem>, wakes: (assignmentId: string) => string[] = wakeStarts()): JordiResponse => {
     const ids = [...new Set([it.owner?.assignmentId, r.assignmentId].filter((x): x is string => !!x))];
     const since = ids
-      .flatMap((a) => store.listRuns({ assignmentId: a, limit: 50 }))
-      .filter((x) => x.kind === "wake" && x.startedAt > r.createdAt)
-      .map((x) => x.startedAt)
+      .flatMap(wakes)
+      .filter((startedAt) => startedAt > r.createdAt)
       .sort()[0];
     return since ? { ...r, ownerRunSince: since } : r;
   };
+  /** an assignment's last 50 runs' wake start times, read once per list (was once per answered card, each a copy of 50 runs). */
+  function wakeStarts(): (assignmentId: string) => string[] {
+    const kept = new Map<string, string[]>();
+    return (a) => {
+      let w = kept.get(a);
+      if (!w) kept.set(a, (w = store.listRuns({ assignmentId: a, limit: 50 }).filter((x) => x.kind === "wake").map((x) => x.startedAt)));
+      return w;
+    };
+  }
 
   /**
    * Attach the owner's latest answer to each item. State comes from the spine: an open item whose answer was written is
@@ -982,7 +1013,8 @@ export function mountInbox(
     // match a written response to an answered line by file + question too.
     const qkey = (path?: string, question?: string) => `${path ?? ""}\u0000${question ?? ""}`;
     const byQuestion = new Map<string, JordiResponse>();
-    for (const r of listResponses()) {
+    const responses = listResponses(); // once per request (was twice)
+    for (const r of responses) {
       if (!latest.has(r.itemId)) latest.set(r.itemId, r);
       if (r.spine?.status === "written" && !byQuestion.has(qkey(r.item.path, r.item.question))) byQuestion.set(qkey(r.item.path, r.item.question), r);
     }
@@ -994,8 +1026,9 @@ export function mountInbox(
     // every code the list holds as a live line, whatever its state: a stored record of that code never comes back as a second card
     const listedCodes = new Set(items.filter((i) => i.source === "ask" && i.code).map((i) => codeKey(i.repo, i.code)));
     const byCode = new Map<string, JordiResponse>();
-    for (const r of listResponses()) if (r.spine?.status === "written" && r.item.code && !byCode.has(codeKey(r.item.repo, r.item.code))) byCode.set(codeKey(r.item.repo, r.item.code), r);
+    for (const r of responses) if (r.spine?.status === "written" && r.item.code && !byCode.has(codeKey(r.item.repo, r.item.code))) byCode.set(codeKey(r.item.repo, r.item.code), r);
     const unique = uniqueCodes(items);
+    const wakes = wakeStarts();
     const shownByCode = new Set<string>();
     const out = items.flatMap((it): (WaitingItem & { response?: JordiResponse })[] => {
       const byId = latest.get(it.id) ?? (it.legacyId ? latest.get(it.legacyId) : undefined);
@@ -1005,7 +1038,7 @@ export function mountInbox(
       // ask keeps one id, so his written answer may be found by that id too; the same rule holds.
       const sameCode = it.state === "open" && (!r || r.spine?.status === "written") ? answeredByCode(byCode, it, unique) : undefined;
       if (sameCode) shownByCode.add(sameCode.id);
-      if (sameCode) return [{ ...it, state: "answered" as const, answer: answerWord(sameCode.kind, sameCode.text), response: withOwnerRun(sameCode, it) }];
+      if (sameCode) return [{ ...it, state: "answered" as const, answer: answerWord(sameCode.kind, sameCode.text), response: withOwnerRun(sameCode, it, wakes) }];
       if (!r) return [it];
       // A free-text `Waiting on:` item whose answer is now an `[answered]` line is carried by that line's card.
       if (it.source === "heuristic" && r.spine?.status === "written" && answeredLines.has(qkey(it.path, it.question))) return [];
@@ -1013,7 +1046,7 @@ export function mountInbox(
       // the answered tag drops the ask's kind; the ask as it was answered keeps it, so Change answer offers that
       // kind's buttons (an approve ask: Changes wanted, never a plain answer box the server would read as feedback).
       const kind = it.source === "ask" && it.ask === "unknown" && r.item.ask && r.item.ask !== "unknown" ? { ask: r.item.ask } : {};
-      return [{ ...it, ...kind, ...(now ? { state: "answered" as const, answer: now } : {}), response: withOwnerRun(r, it) }];
+      return [{ ...it, ...kind, ...(now ? { state: "answered" as const, answer: now } : {}), response: withOwnerRun(r, it, wakes) }];
     });
     if (scope.adhoc) return out;
     const present = new Set(items.flatMap((i) => (i.legacyId ? [i.id, i.legacyId] : [i.id])));
@@ -1092,7 +1125,7 @@ export function mountInbox(
     // ASKER_BUDGET_MS the card goes out without its asker (the blame finishes into the cache for the next read).
     const askerOf = async (it: WaitingItem) =>
       read.askers && it.id in read.askers ? (read.askers[it.id] ?? undefined) : await withinBudget(askerFor(reads, it), ASKER_BUDGET_MS);
-    const full = await Promise.all(withRubric(db, byMilestonePriority(items, storeRanks(store), worldPriorities(store, o.deps.reposRoot))).map(async (it) => (wantsAsker(it) ? { ...it, asker: await askerOf(it) } : it)));
+    const full = await Promise.all(withRubric(db, byMilestonePriority(items, storeRanks(store, o.deps.reposRoot), worldPriorities(store, o.deps.reposRoot))).map(async (it) => (wantsAsker(it) ? { ...it, asker: await askerOf(it) } : it)));
     // the web app's Inbox asks for `view=list` (done and superseded items as one-line rows, no second copy
     // of each item inside its answer): 1.78 MB became ~0.2 MB. Agents' curl without `view` still get every field.
     const topical = full.map(withAbout);

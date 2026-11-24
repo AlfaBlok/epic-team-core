@@ -215,7 +215,7 @@ import { socialHead, TEAM_HEAD } from "./brand.js";
 import { requestScopedStore } from "./auth/scopedStore.js";
 import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
-import { byMilestonePriority, byObjective, milestoneRanks, storeRanks } from "./inbox/priority.js";
+import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
@@ -634,7 +634,7 @@ export function createApp(
     reads.drop(dir, { stale: true });
     book?.invalidate();
     readModel?.dirty(dir, { stale: true }); // a pull is re-read within the rescan gap
-    const ranks = milestoneRanks(store.listMilestones({ includeSettled: true }));
+    const ranks = worldRanks(store, read.reposRoot);
     void reads
       .rewarm(dir, (ms) => [...ms].sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity)))
       .catch((e) => console.warn(`trees rewarm ${path.basename(dir)}: ${e instanceof Error ? e.message : e}`));
@@ -1195,6 +1195,8 @@ export function createApp(
     },
     // a queued row's objective (its key result, epic, repo, words), so his first objective leads the queue by default
     queueObjective: (m, row) => queueObjectiveOf(m, row)?.n,
+    // milestones in his objectives' order (ties inside one objective), never a hand-set rank
+    milestoneRanks: () => worldRanks(store, read.reposRoot, {}),
     wakeHold: (id) => priority?.holdsWake(id),
     seatsFile: read.seatsFile,
     teamSkills: opts.teamSkills?.wakeCheck
@@ -2684,7 +2686,7 @@ export function createApp(
    */
   const warmTrees = async () => {
     const t0 = Date.now();
-    const ranks = milestoneRanks(store.listMilestones({ includeSettled: true }));
+    const ranks = worldRanks(store, read.reposRoot);
     const ms = store
       .listMilestones()
       .filter((m) => !!m.path && !m.settledAt)
@@ -3048,7 +3050,7 @@ export function createApp(
     const titles = new Map(ms.map((m) => [m.id, m.title]));
     const home = (id?: string) => !id || (store.worldOfMilestone?.(id) ?? DEFAULT_TENANT) === DEFAULT_TENANT;
     const items = (await review.list({ state: "review" })).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.ref.localeCompare(b.ref));
-    const reviews: InboxCard[] = byMilestonePriority(items, storeRanks(store), worldPriorities(store, read.reposRoot))
+    const reviews: InboxCard[] = byMilestonePriority(items, storeRanks(store, read.reposRoot), worldPriorities(store, read.reposRoot))
       .filter((i) => home(i.milestoneId) && !isTestItem({ repo: i.repo, code: i.ref, title: i.title }))
       .map((i) => {
         const f = i.face;
@@ -3171,7 +3173,7 @@ export function createApp(
       ];
       const working = all.milestones.filter((m) => m.flow.word === "working").map((m) => ({ milestone: title(m.milestoneId) ?? m.milestoneId, what: m.flow.run?.summary?.slice(0, 120) || m.flow.reason }));
       // the owner's milestones (his world) in priority order, big roots first, each with its state and what waits on him.
-      const ranks = milestoneRanks(store.listMilestones());
+      const ranks = worldRanks(store, read.reposRoot, {});
       const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
       const milestones = [...all.milestones].sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId)).flatMap((st) => {
         const m = store.getMilestone(st.milestoneId);
@@ -3230,7 +3232,7 @@ export function createApp(
   const worldCallKnows = (world: string) => {
     const dirOf = worldRepoDir(read.reposRoot, db, world);
     const dir = (name?: string | null) => (name ? (dirOf(name) ?? resolveRepo(read.reposRoot, name)?.path) : undefined);
-    const ranks = milestoneRanks(store.listMilestones());
+    const ranks = worldRanks(store, read.reposRoot, {});
     const mine = store
       .listMilestones()
       .filter((m) => milestoneWorld(db, m.id) === world)
@@ -3256,7 +3258,7 @@ export function createApp(
     const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
     const mine = (id: string) => milestoneWorld(db, id) === world;
     const title = (id: string) => store.getMilestone(id)?.title;
-    const ranks = milestoneRanks(store.listMilestones());
+    const ranks = worldRanks(store, read.reposRoot, {});
     const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
     const ms = all.milestones.filter((m) => mine(m.milestoneId)).sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId));
     const milestones = ms.map((st) => {
@@ -3288,7 +3290,7 @@ export function createApp(
       return { title: title(st.milestoneId) ?? st.milestoneId, word: st.flow.word, needsYou: open.length, waits: open.slice(0, 2).map((i) => (i.code ? `${i.code} ${i.title}` : i.title)), ...(st.progress ? { pct: st.progress.pct } : {}) };
     };
     // in priority order (focus milestones first, in the owner's order), as the briefing's root tree.
-    const ranks = milestoneRanks(store.listMilestones());
+    const ranks = worldRanks(store, read.reposRoot, {});
     const rank = (id: string) => ranks.get(id) ?? Number.MAX_SAFE_INTEGER;
     const ms = all.milestones.filter((m) => mine(m.milestoneId)).sort((a, b) => rank(a.milestoneId) - rank(b.milestoneId));
     const self = ms.find((m) => m.milestoneId === milestoneId);

@@ -25,14 +25,20 @@ const SCORECARD_DIR = "docs/scorecards";
 
 /** the file a checkout's red lines live in: the objectives file when it holds `redLines`, else docs/priorities.json (a world with no pursuits file). */
 export function redLinesFile(dir: string): string {
+  const text = textOf(path.join(dir, OBJECTIVES_FILE));
+  const hit = redLinesFileMemo.get(dir);
+  if (hit && hit.text === text) return hit.file; // parsed again only when the file changes
+  let file = PRIORITIES_FILE;
   try {
-    const f = JSON.parse(textOf(path.join(dir, OBJECTIVES_FILE)) ?? "{}") as { redLines?: unknown };
-    if (Array.isArray(f.redLines)) return OBJECTIVES_FILE;
+    const f = JSON.parse(text ?? "{}") as { redLines?: unknown };
+    if (Array.isArray(f.redLines)) file = OBJECTIVES_FILE;
   } catch {
     // no objectives file here
   }
-  return PRIORITIES_FILE;
+  redLinesFileMemo.set(dir, { text, file });
+  return file;
 }
+const redLinesFileMemo = new Map<string, { text: string | undefined; file: string }>();
 
 export interface JordiPriority {
   level: JordiLevel;
@@ -649,32 +655,58 @@ function textOf(f: string): string | undefined {
 }
 
 /** a checkout's levels (docs/priorities.json) and red lines (the objectives file when they live there). */
-function readFile(dir: string, name: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; objectives: ObjectiveDef[] } {
+type WorldFile = { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; objectives: ObjectiveDef[] };
+/**
+ * every inbox read (the asks list, the review list) ranks its items by these files. They were parsed again on
+ * every request (about a fifth of the asks list's time on a busy main server); now only when one of them changes. A
+ * file's text is the same string while its mtime is (textOf), so comparing the texts is a pointer compare.
+ */
+const readMemo = new Map<string, { name: string; levels: string | undefined; lines: string | undefined; objectives: ObjectiveDef[]; out: WorldFile }>();
+function readFile(dir: string, name: string): WorldFile {
   const levels = textOf(path.join(dir, PRIORITIES_FILE));
   const lines = textOf(path.join(dir, redLinesFile(dir)));
-  return { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [], objectives: objectivesIn(dir) };
+  const objectives = objectivesIn(dir);
+  const hit = readMemo.get(dir);
+  if (hit && hit.name === name && hit.levels === levels && hit.lines === lines && hit.objectives === objectives) return hit.out;
+  const out = { entries: levels ? parsePriorities(levels, name) : [], redLines: lines ? parseRedLines(lines, name) : [], pressing: levels ? parsePressing(levels, name) : [], objectives };
+  readMemo.set(dir, { name, levels, lines, objectives, out });
+  return out;
 }
 
 /** a checkout's objectives, parsed again only when either file changes. */
-const parsedObjectives = new Map<string, { key: string; defs: ObjectiveDef[] }>();
-function objectivesIn(dir: string): ObjectiveDef[] {
-  const p = textOf(path.join(dir, OBJECTIVES_FILE));
-  if (!p) return [];
-  const w = textOf(path.join(dir, HIS_WORDS_FILE));
-  // each objective's scorecard: its key results' work lists and its fold
-  const cards: Record<string, string | undefined> = {};
+const parsedObjectives = new Map<string, { p: string; w: string | undefined; cards: Record<string, string | undefined>; defs: ObjectiveDef[] }>();
+/** the objective ids of an objectives file's text (its scorecards' names), parsed once per text. */
+const NO_OBJECTIVES: ObjectiveDef[] = [];
+const idsMemo = new Map<string, { p: string; ids: string[] }>();
+function objectiveIds(dir: string, p: string): string[] {
+  const hit = idsMemo.get(dir);
+  if (hit && hit.p === p) return hit.ids;
+  const ids: string[] = [];
   try {
-    for (const o of (JSON.parse(p) as { pursuits?: { id?: unknown }[] }).pursuits ?? []) {
-      if (typeof o?.id === "string" && /^[\w.-]+$/.test(o.id)) cards[o.id] = textOf(path.join(dir, SCORECARD_DIR, `${o.id}.json`));
-    }
+    for (const o of (JSON.parse(p) as { pursuits?: { id?: unknown }[] }).pursuits ?? []) if (typeof o?.id === "string" && /^[\w.-]+$/.test(o.id)) ids.push(o.id);
   } catch {
     // a broken objectives file parses to none below
   }
-  const key = JSON.stringify([p, w, cards]);
+  idsMemo.set(dir, { p, ids });
+  return ids;
+}
+function objectivesIn(dir: string): ObjectiveDef[] {
+  const p = textOf(path.join(dir, OBJECTIVES_FILE));
+  if (!p) return NO_OBJECTIVES;
+  const w = textOf(path.join(dir, HIS_WORDS_FILE));
+  // each objective's scorecard: its key results' work lists and its fold
+  const cards: Record<string, string | undefined> = {};
+  for (const id of objectiveIds(dir, p)) cards[id] = textOf(path.join(dir, SCORECARD_DIR, `${id}.json`));
+  // the same texts (pointer compares, textOf keeps each file's string while its mtime holds), not one
+  // JSON.stringify of every file each request
   const hit = parsedObjectives.get(dir);
-  if (hit && hit.key === key) return hit.defs;
+  const same = (a: Record<string, string | undefined>, b: Record<string, string | undefined>) => {
+    const ka = Object.keys(a);
+    return ka.length === Object.keys(b).length && ka.every((k) => k in b && a[k] === b[k]);
+  };
+  if (hit && hit.p === p && hit.w === w && same(hit.cards, cards)) return hit.defs;
   const defs = parseObjectives(p, w, cards);
-  parsedObjectives.set(dir, { key, defs });
+  parsedObjectives.set(dir, { p, w, cards, defs });
   return defs;
 }
 
@@ -693,9 +725,14 @@ export function worldObjectiveDefs(store: Pick<Store, "listMilestones">, reposRo
  * own). None written yet: undefined, so the lists keep the milestone order exactly as before.
  */
 export function worldPriorities(store: Pick<Store, "listMilestones">, reposRoot: string): PriorityLookup | undefined {
-  const { entries, redLines, pressing, objectives } = worldFiles(store, reposRoot);
-  return entries.length || redLines.length || pressing.length || objectives.length ? lookupOf(entries, redLines, pressing, objectives) : undefined;
+  const files = worldFiles(store, reposRoot);
+  if (lookupMemo?.files === files) return lookupMemo.lookup; // the same files, the same lookup
+  const { entries, redLines, pressing, objectives } = files;
+  const lookup = entries.length || redLines.length || pressing.length || objectives.length ? lookupOf(entries, redLines, pressing, objectives) : undefined;
+  lookupMemo = { files, lookup };
+  return lookup;
 }
+let lookupMemo: { files: WorldFile; lookup: PriorityLookup | undefined } | undefined;
 
 /**
  * the world's red line: the first file (in milestone order) that has one. One world, one file: the Prioritizer
@@ -710,24 +747,35 @@ export function worldRedLines(store: Pick<Store, "listMilestones">, reposRoot: s
   return worldFiles(store, reposRoot).redLines;
 }
 
-function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): { entries: Entry[]; redLines: RedLine[]; pressing: PressingEntry[]; objectives: ObjectiveDef[] } {
+/** the last world's files: the same checkouts' same parsed files give the same object (worldPriorities keeps its lookup). */
+const worldMemo = new Map<string, { parts: WorldFile[]; out: WorldFile }>();
+function worldFiles(store: Pick<Store, "listMilestones">, reposRoot: string): WorldFile {
   const seen = new Set<string>();
-  const entries: Entry[] = [];
-  const pressing: PressingEntry[] = [];
-  let objectives: ObjectiveDef[] = [];
-  let redLines: RedLine[] = [];
+  const parts: WorldFile[] = [];
   for (const m of store.listMilestones({ includeSettled: true })) {
     const r = m.repo ? resolveRepo(reposRoot, m.repo) : undefined;
     if (!r || seen.has(r.path)) continue;
     seen.add(r.path);
-    const f = readFile(r.path, r.name);
+    parts.push(readFile(r.path, r.name));
+  }
+  const key = `${reposRoot}\0${[...seen].join("\0")}`;
+  const hit = worldMemo.get(key);
+  if (hit && hit.parts.length === parts.length && hit.parts.every((x, i) => x === parts[i])) return hit.out;
+  const entries: Entry[] = [];
+  const pressing: PressingEntry[] = [];
+  let objectives: ObjectiveDef[] = [];
+  let redLines: RedLine[] = [];
+  for (const f of parts) {
     entries.push(...f.entries);
     pressing.push(...f.pressing);
     if (!redLines.length) redLines = f.redLines;
     // one world, one objectives file: the first checkout (in milestone order) that has it
     if (!objectives.length) objectives = f.objectives;
   }
-  return { entries, redLines, pressing, objectives };
+  const out = { entries, redLines, pressing, objectives };
+  if (worldMemo.size > 50) worldMemo.clear();
+  worldMemo.set(key, { parts, out });
+  return out;
 }
 
 /** the lines with their counts read now (each remote source at most once an hour; a failed read says so). */

@@ -423,6 +423,8 @@ export function objectiveSection(id: string, o?: { name: string; epics: string[]
     `- ${what}: you work this objective only, never the milestone's other objectives.`,
     ...(o?.epics.length ? [`- Its epics (bind and dispatch from these): ${o.epics.join(" · ")}`] : []),
     "- Its key results, plan and tickets are its Key results and Plan tabs; a row of another objective is left to that objective's own personas.",
+    // E907-S66, the owner on E907-A2, 24 Nov: "I think it's the third time I get this question and answer it ... Why same problem keeps coming back?"
+    "- You own its key result list: workers hand you a proposed key result (a desk note or their report), never their own ask. Each wake, a key result his own words already name (a voice note, a card note: \"another key result is ...\") you add the same wake with `workspace_data.py commit` and show him on its card with one way to drop it, never an ask; one his words do not name waits until you ask once, with the whole list in one card.",
     // the owner, 23 Nov 11:21Z: "These guys wake up and their goal is to get the things to green and they dispatch ... as needed"
     "- Your aim is its key results green, not tickets closed. Each wake, before the steps above: list its key results that are not green; for each, the next open step of its plan; start a worker on the row that is that step (a step with no row gets one first); a red key result with nothing moving it and no step that could is an ask, the same wake.",
     // the owner, 23 Nov 11:21Z: "The wheel is not turning by itself. Why not? ... Do what you need to do. Ask what you need to ask. Get it done."

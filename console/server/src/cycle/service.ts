@@ -121,6 +121,8 @@ export interface CycleOptions {
   /** the objective of his a queued row moves (its place in his order, 0 = his first), so the work queue starts
    * his first objective's rows first by default; undefined = on none (or not the home world). */
   queueObjective?: (m: Milestone | undefined, row: { ticket: string; title?: string | null }) => number | undefined;
+  /** the milestones ranked by his objectives (worldRanks), read at each drain pass; absent = the stored order. */
+  milestoneRanks?: () => Map<string, number>;
   /** priority mode: why this assignment's cadence and timed wakes wait now (undefined = they may run). */
   wakeHold?: (assignmentId: string) => string | undefined;
   /** the wake prompt's pack section for this persona when the milestone repo has a pack on (undefined / "" = none). */
@@ -2800,7 +2802,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   }
   async function drainPass(now: Date, opts: { force?: boolean }): Promise<string[]> {
     if (!o.enabled || !o.t3) return [];
-    const ranks = milestoneRanks(store.listMilestones());
+    const ranks = o.milestoneRanks?.() ?? milestoneRanks(store.listMilestones());
     const queued = (db.prepare("SELECT r.id FROM runs r JOIN cycle_worker_launch w ON w.run_id = r.id WHERE r.outcome = 'deferred'").all() as { id: string }[])
       .map((r) => store.getRun(r.id)!)
       .filter((r): r is Run => !!r)

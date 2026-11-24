@@ -71,6 +71,8 @@ export interface GateAsk {
   contextText?: string | null;
   context?: string | null;
   why?: string | null;
+  /** every `why:` on the line (a plain `why:` quoting his words, then `why the owner:`), E907-S66. */
+  whyAll?: string[];
   impact?: string | null;
   risk?: string | null;
   options?: string[];
@@ -143,6 +145,58 @@ const RESTATES = new RegExp(
 );
 
 const text = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join(" — ");
+
+/**
+ * Rule 2b (E907-S66, his E907-A2 feedback of 24 Nov: "Haven't o replied to this several times already??? Is this a repeat?
+ * I think it's the third time I get this question"): an approve or decide ask whose own quote of his already tells the team
+ * to do exactly the asked thing. Four cards in 36 hours (E907-A1..A4) each quoted his voice note naming the key result and
+ * still asked him to approve it; RESTATES only caught a cited earlier answer. Held: the Delivery Manager does it from his
+ * words and closes the ask (root L-56, L-73).
+ */
+const QUOTED = /["“]([^"”]{12,})["”]/g;
+/** His words tell the team to do something (a key result he names, what he wants, what we need or should do). */
+const DIRECTIVE = /\b(?:(?:another|one|the|a|new)\s+key\s+results?\s+(?:is|are|would be|should be|will be)|i want|i'?d like|we need|we should|should (?:be|have)|let'?s|make (?:it|this|that)|add (?:it|this|that|a|an|the)|can you|please|the (?:target|goal) is|for now the key result)\b/i;
+const NEGATED = /\b(?:don'?t|do not|never|no longer|not)\s+(?:want|need|add|make|measure|count)\b/i;
+const STOP = new Set(
+  "the and for are but not you your yours our ours his her its this that these those with from into onto over under than then them they their there what when where which while who whom whose why how all any each every some such only own same very can will would should could may might must shall have has had does did done doing get got make made been being was were key result results becomes become objective approve decide yes".split(" "),
+);
+const stems = (t: string) =>
+  new Set(
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOP.has(w))
+      .map((w) => w.slice(0, 5)),
+  );
+
+/** The thing the ask asks him to approve: the words it quotes in its question (their headline before a colon), else the question's first clause. */
+function askedThing(question: string): string {
+  const q = [...question.matchAll(QUOTED)].map((m) => m[1]);
+  const thing = q[0] ?? question.replace(/^\W*you\s+(?:approve|decide)\s*:\s*/i, "").split(/[?.]|\s—\s|\bwhy\s*:/i)[0];
+  const head = thing.split(":")[0];
+  return stems(head).size >= 2 ? head : thing;
+}
+
+/** Whether his own quoted words in the ask already tell the team to do the asked thing; returns the quote that does. */
+export function hisWordsAlreadyAsk(a: GateAsk): string | undefined {
+  const kind = a.ask.toLowerCase();
+  if (kind !== "approve" && kind !== "decide") return undefined;
+  const thing = stems(askedThing(a.question));
+  if (thing.size < 2) return undefined;
+  // the asked thing's own quote and the buttons' quotes are the team's words, never his
+  const asked = [...a.question.matchAll(QUOTED)][0]?.[1].trim();
+  const inQuestion = new Set([...(asked ? [asked] : []), ...[...text(...(a.options ?? [])).matchAll(QUOTED)].map((m) => m[1].trim())]);
+  const rest = text(a.question, a.contextText, a.context, ...(a.whyAll ?? [a.why]), a.impact, a.steps);
+  for (const m of rest.matchAll(QUOTED)) {
+    const quote = m[1].trim();
+    if (inQuestion.has(quote) || !DIRECTIVE.test(quote) || NEGATED.test(quote)) continue;
+    const his = stems(quote);
+    const hit = [...thing].filter((w) => his.has(w)).length;
+    if (hit >= Math.min(3, thing.size) && hit / thing.size >= 0.6) return quote;
+  }
+  return undefined;
+}
 
 /**
  * Why this ask must not reach the owner, in plain words for the persona that wrote it; undefined when it passes.
@@ -334,6 +388,10 @@ function wordsProblem(a: GateAsk): string | undefined {
   // 2. it re-states what he already decided
   if (RESTATES.test(all))
     return `it re-states something ${ownerName()} already decided (it cites his earlier answer): act on that answer, never ask him again (root L-56)`;
+  // 2b. its own quote of his already tells the team to do exactly this (E907-S66)
+  const already = hisWordsAlreadyAsk(a);
+  if (already)
+    return `its own quote of ${ownerName()} already asks for this ("${already.slice(0, 120)}${already.length > 120 ? "…" : ""}"): do it from his words and close the ask as asked, never ask him to approve what he said (root L-56, E907-S66)`;
   // 1. what of his it answers
   if (HIS_ASK_ID.test(all) || HIS_WORDS.test(all)) return undefined;
   // 4. an improvement request needs his words: no `why the owner:` stands in for them
@@ -353,7 +411,7 @@ function wordsProblem(a: GateAsk): string | undefined {
 export const ASK_GATE_RULE =
   "The console refuses (422 ask_not_his, or holds back from his inbox and lists to the Delivery Manager) any approve or decide ask that does not name " +
   `what of ${ownerName()}'s it answers (his ask: his words in quotes, a voice note or log id; or a \`why ${ownerName()}:\` that is money, publishing or contacting others, access, ` +
-  "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, and any ask carrying a go-live date he did not set (a dated opening, " +
+  "irreversible, or the goal itself; an improvement request always quotes his words or names his voice note or log id), any ask re-stating what he already decided, any ask whose own quote of his words already tells the team to do the asked thing (a key result he named, what he said he wants: do it from his words, E907-S66), and any ask carrying a go-live date he did not set (a dated opening, " +
   "a dated batch of posts: the team just goes). From 2026-11-12 it also holds any do or provide ask (his hands) with no \`why " + ownerName() + ":\` saying why the team cannot do it itself, and any whose why rests on his Mac, Chrome or sign-in without saying why the Team Browser or the server browser cannot. It also holds any ask that tells him to paste a value into a private box without a \`secret: <app> <NAME>\` (so its card has no box) or to press Approve on a card with no Approve button (E996-S29). Before it reaches him, a fresh agent with only the card's words and links dry-runs every step (is the exact place named, does it exist now, could it be done from these words alone); any no holds it as \"ask needs rewriting: step N <why>\" (E996-S43). It also holds an ask repeating a question he already answered (\"already answered on <date>: <his answer>\": act on it, or ask only what is new and cite the earlier ask) and one longer than 20 minutes (its effort, the time it names, or 3 minutes a step: \"too long for one sitting: split it\", send only the step that blocks now) (E996-S48). Every ask links to where he acts (E948-S85, his voice note of 12 Nov: \"if I need to do an action, I expect a link\"): a do or provide ask carries the https link of the page, site or form he opens first (a spine on GitHub does not count), unless its own card is the place (a `secret:` box, a needs Mac agent ticket, or it says it is answered on this card or by voice note). A do ask whose step is in his own signed-in browser (download a receipt, change a setting) carries `— browser: <one plain prompt he pastes into Claude in Chrome: what to open, what to do, where to put the result>`, never a terminal line or a secret, or is a needs Mac agent ticket when the Mac agent can do it (his vn_e166481b: \"can this type of task ... come with a prompt that I can paste?\"); an approve or decide ask that sends him to read, open, look at, review or try something links that thing. A decide ask that picks among things he has to see (lettered options A, B or C, or mockups, layouts, designs, logos, screens, versions, drafts) links the page or picture of its options, which its card shows on its face above the buttons (E948-S151, his voice note on E940-A10: \"If you don't give me a link, how the fuck do you expect me to choose?\"). A recommendation he did not ask for is a row or a note for the Delivery Manager, never an ask (root L-56). One outage, one card (his words: \"cards are being duplicated\"): while the console's GitHub sign-in alarm is open it holds every ask in any world about a GitHub token, sign-in, login or key and points it at that one alarm; when the alarm closes, those asks close with it: never raise your own ask for it.";
 
 export interface HeldAsk {

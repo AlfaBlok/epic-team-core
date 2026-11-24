@@ -11,6 +11,9 @@ describe("objective name rule", () => {
     expect(OBJECTIVE_NAME_RULE).toContain("`Acme: Get 5 testers`");
     expect(OBJECTIVE_NAME_RULE).toContain("every key result line starts with a capital letter");
     expect(OBJECTIVE_NAME_RULE).toContain("no two names alike");
+    // the product is the one whose scope covers it, never the one whose users it serves
+    expect(OBJECTIVE_NAME_RULE).toContain("docs/totems/<product>.json");
+    expect(OBJECTIVE_NAME_RULE).toContain("never the one whose users it serves");
   });
   it("rides in the worker rule, every wake's objectives block and the desk's standing rules", () => {
     expect(objectivesRule()).toContain(OBJECTIVE_NAME_RULE);

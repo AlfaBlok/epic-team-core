@@ -467,7 +467,8 @@ export function createReview(db: DB, o: ReviewOptions) {
   const notACard = (r: ReviewRow): ActionResult | undefined =>
     r.verdict.kind === "card" ? undefined : { error: 409, code: "not_a_card", message: `${r.ref} is not a card for ${ownerName()} (${r.verdict.reason ?? r.verdict.kind}${r.verdict.problems?.length ? `: ${r.verdict.problems.join("; ")}` : ""}); nothing changed` };
 
-  const liveRow = (url: string, commit?: string) => db.prepare("SELECT ok, status, error, checked_at, plan FROM review_live WHERE url = ? AND commit_sha = ?").get(url, commit ?? "") as LiveRow | undefined;
+  const liveRead = db.prepare("SELECT ok, status, error, checked_at, plan FROM review_live WHERE url = ? AND commit_sha = ?"); // prepared once
+  const liveRow = (url: string, commit?: string) => liveRead.get(url, commit ?? "") as LiveRow | undefined;
 
   /** a card about a plan (its title, task goal or short name says so): its evidence page must open with a diagram. */
   const isPlanRow = (r: ReviewRow) => isPlan(r.face?.title, r.face?.taskGoal, r.face?.tree?.find((t) => t.mark === "this")?.text);

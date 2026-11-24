@@ -12,7 +12,7 @@ import { crossSiteRefusal } from "./csrf.js";
 import { clientAddress } from "../clientAddress.js";
 import { homeWorld, hostOf, platformMoved, platformWorld, sites } from "../identity.js";
 import { companyViewOn } from "../plug/companyView.js";
-import { gunzipSync, inflateSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 
 /**
  * The health answer's `ok`, read through its encoding. leanJson gzips a JSON answer of 1 KB or more when the
@@ -23,7 +23,7 @@ async function healthUp(res: Response): Promise<boolean> {
   try {
     const raw = Buffer.from(await res.clone().arrayBuffer());
     const enc = (res.headers.get("content-encoding") ?? "").toLowerCase();
-    const body = enc === "gzip" ? gunzipSync(raw) : enc === "deflate" ? inflateSync(raw) : raw;
+    const body = enc === "gzip" ? gunzipSync(raw) : enc === "deflate" ? inflateSync(raw) : enc === "br" ? brotliDecompressSync(raw) : raw;
     return (JSON.parse(body.toString("utf8")) as { ok?: unknown }).ok === true;
   } catch {
     return false;

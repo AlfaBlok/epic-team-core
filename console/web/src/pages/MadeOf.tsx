@@ -9,8 +9,10 @@ import { MADE_OF_PATH, WHEEL_CLASS, WHEEL_TABS, type WheelKind, type WheelTab } 
 /**
  * "What an objective is made of" (the owner, vn_cdef45cd, 24 Nov: "it's almost as if you have a class which is
  * objective. And then you can implant an object which is objective ... these properties are like what each of these
- * properties is what showing me on the tabs ... It's both a UX and a data thing"). One sentence, the class drawn with its
- * objects, then one box per tab: what it holds, where it lives, who reads and writes it. Every word comes from the same
+ * properties is what showing me on the tabs ... It's both a UX and a data thing"). Iteration 2 (his card note, 24 Nov
+ * 12:56Z: "a chapter of the knowledge linked to the objective. 10 chapters"): the say-back in one line, the objective drawn
+ * as one book with its contents, the words he picks from, then one box per tab: what it holds, where it lives, who reads
+ * and writes it. Every word comes from the same
  * map the tabs come from (docs/totems/<product>.json `wheel`, through lib/wheelTabs.ts), so it can never disagree with
  * the tabs; scripts/totems.py check refuses a tab missing any of the four.
  */
@@ -60,97 +62,104 @@ function Lives({ text }: { text?: string }) {
   );
 }
 
-/** the class box: its name, then one line per property (tab), product data first marked apart from the console's own. */
-function ClassBox({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
-  const cls = WHEEL_CLASS[kind];
-  return (
-    <div className="w-full max-w-xs rounded-lg border-2 border-foreground/80 bg-card" data-testid="made-of-class">
-      <div className="border-b-2 border-foreground/80 px-3 py-2 text-center">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">class</div>
-        <div className="text-lg font-semibold">{cls.name}</div>
-      </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 px-3 py-2 sm:grid-cols-1">
-        {tabs.map((t) => (
-          <li key={t.id} className="flex items-baseline gap-2 text-sm">
-            <span className={cn("inline-block h-2 w-2 shrink-0 rounded-sm", t.kind === "data" ? "bg-emerald-700" : "bg-foreground/50")} aria-hidden="true" />
-            <a href={`#prop-${t.id}`} className="underline-offset-4 hover:underline">
-              {t.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/** one object of the class: its own name, the same properties as small blocks, always the same shape. */
-function ObjectNode({ name, to, tabs }: { name: string; to?: string; tabs: readonly WheelTab[] }) {
-  const body = (
-    <>
-      <div className="truncate text-sm font-medium">{name}</div>
-      <div className="mt-1.5 flex flex-wrap gap-1" aria-label={`${tabs.length} properties`}>
-        {tabs.map((t) => (
-          <span key={t.id} title={t.label} className={cn("h-2.5 w-4 rounded-sm", t.kind === "data" ? "bg-emerald-700" : "bg-foreground/40")} />
-        ))}
-      </div>
-    </>
-  );
-  return to ? (
-    <Link to={to} className="block min-w-0 rounded-md border bg-card px-3 py-2 hover:border-foreground/50" data-testid="made-of-object">
-      {body}
-    </Link>
-  ) : (
-    <div className="min-w-0 rounded-md border bg-card px-3 py-2" data-testid="made-of-object">
-      {body}
-    </div>
-  );
-}
+type NameOption = { word: string; why: string; collides: string; recommended?: boolean };
 
 function useObjects(kind: WheelKind): { name: string; to?: string }[] {
   const { data } = useGoalSets();
   // a campaign's objects are the campaigns of the app that has them; elsewhere the picture shows the shape alone.
   const campaigns = !!useSkin().campaigns;
   const { data: ms } = useQuery(() => (kind === "campaign" && campaigns ? api.listMilestones() : Promise.resolve([])), [kind, campaigns]);
-  if (kind === "campaign") return (ms ?? []).slice(0, 3).map((m) => ({ name: m.title, to: `/milestones/${encodeURIComponent(m.id)}` }));
+  if (kind === "campaign") return (ms ?? []).slice(0, 4).map((m) => ({ name: m.title, to: `/milestones/${encodeURIComponent(m.id)}` }));
   return topObjectives(data?.nodes)
     .filter((n) => n.kind === "pursuit")
-    .slice(0, 3)
+    .slice(0, 4)
     .map((n) => ({ name: n.headline ?? n.name, to: `/sets/${encodeURIComponent(n.id)}` }));
 }
 
-/** the drawn picture: the class on one side, its objects on the other, joined by "is an object of". */
-function ClassDiagram({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
+/**
+ * The owner's card note (24 Nov 12:56Z): "It's like a chapter of the knowledge linked to the objective. 10
+ * chapters. Each including relevant part of the knowledge required for agents to roll towards objective." Drawn as one
+ * book: the objective on its cover, its contents in order, each line saying what knowledge it holds for the agents.
+ */
+function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
   const cls = WHEEL_CLASS[kind];
   const objects = useObjects(kind);
-  const shown = objects.length ? objects : [{ name: `One ${cls.name.toLowerCase()}` }, { name: `Another ${cls.name.toLowerCase()}` }];
+  const [first, ...rest] = objects;
   return (
-    <figure className="grid items-center gap-3 rounded-xl border bg-muted/30 p-4 sm:grid-cols-[auto_auto_1fr] sm:gap-5" data-testid="made-of-diagram">
-      <ClassBox kind={kind} tabs={tabs} />
-      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground sm:flex-col sm:gap-1" aria-hidden="true">
-        <span className="sm:hidden">▲</span>
-        <span className="whitespace-nowrap">is an object of</span>
-        <span className="hidden items-center sm:flex">
-          <span className="text-sm leading-none text-foreground/70">◀</span>
-          <span className="h-px w-20 bg-foreground/60" />
-        </span>
+    <figure className="grid gap-3" data-testid="made-of-diagram">
+      <div className="rounded-r-xl rounded-l-sm border border-l-[6px] border-foreground/70 bg-card" data-testid="made-of-book">
+        <div className="border-b px-4 py-3 sm:px-6">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{cls.name}</div>
+          <div className="text-lg font-semibold">
+            {first?.to ? (
+              <Link to={first.to} className="text-foreground no-underline hover:underline">
+                {first.name}
+              </Link>
+            ) : (
+              first?.name ?? `Any ${cls.name.toLowerCase()}`
+            )}
+          </div>
+        </div>
+        <div className="px-4 py-3 sm:px-6">
+          <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Contents</div>
+          <ol className="grid" data-testid="made-of-contents">
+            {tabs.map((t, i) => (
+              <li key={t.id} className="border-b border-dashed py-2 last:border-b-0" data-testid="made-of-chapter">
+                <div className="flex items-baseline gap-3">
+                  <span className="w-6 shrink-0 text-right font-mono text-sm text-muted-foreground">{i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="flex items-baseline gap-2">
+                      <a href={`#prop-${t.id}`} className="font-semibold">
+                        {t.label}
+                      </a>
+                      {t.kind === "data" && <span className="text-[11px] uppercase tracking-wider text-emerald-700">this product's own</span>}
+                    </span>
+                    <span className="block text-sm text-muted-foreground">{t.knows ?? t.holds}</span>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
-      <div className="grid min-w-0 gap-2">
-        {shown.map((o) => (
-          <ObjectNode key={o.name} name={o.name} to={o.to} tabs={tabs} />
-        ))}
-        <p className="text-xs text-muted-foreground">
-          Every {cls.name.toLowerCase()} has these {tabs.length} properties, never more or fewer. Only what is inside them differs.
-        </p>
-      </div>
-      <figcaption className="flex flex-wrap gap-4 text-xs text-muted-foreground sm:col-span-3">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-sm bg-emerald-700" /> this product's own data
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-sm bg-foreground/50" /> the console's, the same on every product
-        </span>
+      <figcaption className="text-sm text-muted-foreground">
+        Every {cls.name.toLowerCase()} has the same {tabs.length}, in the same order. Only what is written in them differs.
+        {rest.length > 0 && (
+          <span className="mt-2 flex flex-wrap gap-1.5" data-testid="made-of-objects">
+            {rest.map((o) => (
+              <Link key={o.name} to={o.to ?? "#"} className="rounded-full border px-2 py-0.5 text-xs text-foreground hover:border-foreground/50">
+                {o.name}
+              </Link>
+            ))}
+          </span>
+        )}
       </figcaption>
     </figure>
+  );
+}
+
+/** the words he can pick from for one of these parts; nothing is renamed until he picks on the review card. */
+function Names({ names }: { names: readonly NameOption[] }) {
+  if (!names.length) return null;
+  return (
+    <section className="grid gap-3" data-testid="made-of-names" id="names">
+      <h2 className="text-lg font-semibold">What to call one part: your pick</h2>
+      <ul className="grid gap-2">
+        {names.map((n) => (
+          <li key={n.word} className={cn("grid gap-1 rounded-lg border bg-card px-4 py-3 sm:grid-cols-[8rem_1fr]", n.recommended && "border-emerald-700")} data-testid="made-of-name">
+            <div className="flex items-baseline gap-2 sm:block">
+              <div className="text-base font-semibold" data-testid="made-of-word">{n.word}</div>
+              {n.recommended && <div className="text-[11px] uppercase tracking-wider text-emerald-700">recommended</div>}
+            </div>
+            <div className="grid gap-0.5 text-sm">
+              <span>{n.why}</span>
+              <span className="text-muted-foreground">Clashes with: {n.collides}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">Nothing is renamed until you pick on the review card.</p>
+    </section>
   );
 }
 
@@ -211,13 +220,14 @@ export function MadeOfPage() {
             ))}
           </div>
         </div>
-        <p className="rounded-lg border-l-4 border-emerald-700 bg-card px-4 py-3 text-base" data-testid="made-of-one">
-          {cls.one}
+        <p className="rounded-lg border-l-4 border-emerald-700 bg-card px-4 py-3 text-base" data-testid="made-of-understood">
+          {cls.understood ?? cls.one}
         </p>
       </header>
-      <ClassDiagram kind={kind} tabs={tabs} />
+      <Book kind={kind} tabs={tabs} />
+      <Names names={WHEEL_CLASS.objective.names ?? []} />
       <div className="grid gap-3">
-        <h2 className="text-lg font-semibold">Each property, one tab</h2>
+        <h2 className="text-lg font-semibold">Where each one lives, who reads and writes it</h2>
         <div className="grid gap-3 md:grid-cols-2">
           {tabs.map((t, i) => (
             <PropertyBox key={t.id} t={t} n={i + 1} />
@@ -226,7 +236,7 @@ export function MadeOfPage() {
       </div>
       <p className="text-xs text-muted-foreground">
         Drawn from the same map the tabs are built from, so this page and the tabs always agree. The agents read it too: an
-        agent writes only into one of these properties.
+        agent writes only into one of these {tabs.length}.
       </p>
     </div>
   );

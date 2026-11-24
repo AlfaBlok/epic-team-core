@@ -147,13 +147,16 @@ export function createEnvironments(d: EnvironmentsDeps) {
   }
 
   /** Environment of any thread the console knows: a run of it, else the home thread's host. */
+  // prepared once (the inbox asks this for every card and answer: preparing it each time was most of the cost)
+  let byRun: ReturnType<DB["prepare"]> | undefined;
+  let byLink: ReturnType<DB["prepare"]> | undefined;
   function forThread(threadId: string | undefined): string | undefined {
     if (!threadId) return undefined;
-    const r = db.prepare("SELECT environment_id FROM runs WHERE thread_id = ? AND environment_id IS NOT NULL LIMIT 1").get(threadId) as
-      | { environment_id: string }
-      | undefined;
+    byRun ??= db.prepare("SELECT environment_id FROM runs WHERE thread_id = ? AND environment_id IS NOT NULL LIMIT 1");
+    byLink ??= db.prepare("SELECT host FROM cycle_assignment_link WHERE thread_id = ?");
+    const r = byRun.get(threadId) as { environment_id: string } | undefined;
     if (r) return r.environment_id;
-    const l = db.prepare("SELECT host FROM cycle_assignment_link WHERE thread_id = ?").get(threadId) as { host: string } | undefined;
+    const l = byLink.get(threadId) as { host: string } | undefined;
     return l ? hostEnvironment(l.host === workerHost() ? workerHost() : mainHost()) : undefined;
   }
 

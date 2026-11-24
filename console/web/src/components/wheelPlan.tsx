@@ -6,58 +6,37 @@ import { useQuery } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 /**
- * An objective's Plan tab: the plan of its wheel. The owner (vn_9c02d869, 23 Nov): "The plan is the plan ... we need to
- * have the plan for each of them, man. So that when an agent reads this, he gets the plan ... Don't rewrite what is
- * already in other places." So per key result (its name as the heading, nothing more) it shows how we get it to green:
- * the steps as one drawn line, the approach, each step with what it changes, who and by when, then what proves it green
- * and what we do if it stalls. The key results' numbers, the tickets (a step's row reaches agents in their briefs, never
- * this page) and where we are stay on their own tabs.
+ * An objective's Plan tab: the plan of its wheel. The owner (vn_06b0de06, 24 Nov): "I would like to see the
+ * plan basically answering the steps that we're going to take to accomplish the key result in a very simple way." So per
+ * key result (its name as the heading) it shows only the steps, in order, one short line each with who and by when, drawn
+ * as one line of numbered stops that ends on green. Steps already done fold into one line above them. The approach, what
+ * proves it green and what we do if it stalls stay in the data (`how`, `greenWhen`, `ifStuck`), where agents read them in
+ * their briefs and wake prompts; the screen never shows them. Numbers, tickets and where we are stay on their
+ * own tabs.
  */
 const day = (s?: string) => {
   if (!s) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s; // a step dated in words ("after your pick") keeps its words
   const d = new Date(`${s.slice(0, 10)}T12:00:00Z`);
   return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 };
 
-/** a date for the drawn line; a step dated in words ("after your pick") shows no label there, its words stay in the list. */
-const shortDay = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}/.test(s) ? day(s) : undefined);
-
-/** the drawn step line: one dot per step in order (filled when done), ending on green. */
-function StepLine({ steps, n }: { steps: WheelStep[]; n: number }) {
-  const count = steps.length + 1; // the last stop is the key result green
-  const w = 640, pad = 28, gap = count > 1 ? (w - pad * 2) / (count - 1) : 0;
-  const x = (i: number) => pad + i * gap;
+/** one stop on the drawn line: a numbered dot (ticked when done), the step in one line, who and by when under it. */
+function Step({ s, n, last }: { s: WheelStep; n: number; last?: boolean }) {
   return (
-    <figure className="diagram -mx-1 overflow-hidden" data-testid="plan-line-diagram" aria-label={`Step line for key result ${n}: ${steps.length} steps to green`}>
-      <svg viewBox={`0 0 ${w} 64`} className="block h-auto w-full text-foreground" role="img">
-        <line x1={x(0)} y1={22} x2={x(count - 1)} y2={22} className="stroke-muted-foreground/40" strokeWidth={2} />
-        {steps.map((s, i) => (
-          <g key={i}>
-            <circle cx={x(i)} cy={22} r={11} className={s.done ? "fill-foreground stroke-foreground" : "fill-background stroke-foreground"} strokeWidth={2} />
-            <text x={x(i)} y={26.5} textAnchor="middle" fontSize={12} className={s.done ? "fill-background" : "fill-foreground"}>
-              {s.done ? "✓" : i + 1}
-            </text>
-            <text x={x(i)} y={54} textAnchor="middle" fontSize={12} className="fill-muted-foreground">
-              {shortDay(s.by) ?? ""}
-            </text>
-          </g>
-        ))}
-        <circle cx={x(count - 1)} cy={22} r={11} className="fill-emerald-700 stroke-emerald-700" strokeWidth={2} />
-        <text x={x(count - 1)} y={54} textAnchor="middle" fontSize={12} className="fill-emerald-700">
-          green
-        </text>
-      </svg>
-    </figure>
-  );
-}
-
-function Step({ s, n }: { s: WheelStep; n: number }) {
-  return (
-    <li className={cn("grid grid-cols-[1.5rem_1fr] gap-x-2 border-t py-2.5", s.done && "text-muted-foreground")} data-testid="plan-step">
-      <span className="text-xs tabular-nums text-muted-foreground">{s.done ? "✓" : n}</span>
-      <span className="grid gap-0.5 text-sm leading-snug">
-        <span>{inline(s.do)}</span>
-        {s.changes && <span className="text-muted-foreground" data-testid="plan-step-changes">Changes: {inline(s.changes)}</span>}
+    <li className={cn("relative grid grid-cols-[1.75rem_1fr] gap-x-3 pb-4", s.done && "text-muted-foreground")} data-testid="plan-step" data-done={s.done ? "1" : undefined}>
+      {!last && <span aria-hidden className="absolute bottom-0 left-[0.8125rem] top-7 w-0.5 bg-border" />}
+      <span
+        aria-hidden
+        className={cn(
+          "relative z-[1] grid size-7 place-items-center rounded-full border-2 text-xs tabular-nums",
+          s.done ? "border-muted-foreground bg-muted-foreground text-background" : "border-foreground bg-background text-foreground",
+        )}
+      >
+        {s.done ? "✓" : n}
+      </span>
+      <span className="grid gap-0.5 pt-0.5 text-sm leading-snug">
+        <span data-testid="plan-step-do">{inline(s.do)}</span>
         <span className="text-xs text-muted-foreground">
           <span data-testid="plan-step-owner">{s.owner ?? "no owner yet"}</span> · <span data-testid="plan-step-by">{day(s.by) ?? "no date"}</span>
         </span>
@@ -67,44 +46,43 @@ function Step({ s, n }: { s: WheelStep; n: number }) {
 }
 
 function KeyResultSection({ label, n, k, anchor }: { label: string; n: number; k?: KeyResultPlan; anchor: string }) {
-  const empty = !k || (!k.how && !k.steps.length);
+  const steps = k?.steps ?? [];
+  const done = steps.filter((s) => s.done);
+  const open = steps.filter((s) => !s.done);
   return (
-    <section id={`${anchor}-kr-${n}`} className="grid gap-2" data-testid="plan-kr">
+    <section id={`${anchor}-kr-${n}`} className="grid gap-3" data-testid="plan-kr">
       <h3 className="text-base font-semibold leading-snug">{label}</h3>
-      {empty ? (
+      {!steps.length ? (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground" data-testid="plan-kr-empty">
-          No plan written for it yet.
+          No steps written for it yet.
         </p>
       ) : (
-        <>
-          {k.steps.length > 0 && <StepLine steps={k.steps} n={n} />}
-          <p className="text-sm leading-relaxed" data-testid="plan-how">
-            {k.how ? inline(k.how) : <span className="text-muted-foreground">The approach is not written yet.</span>}
-          </p>
-          {k.steps.length > 0 && (
-            <ol className="grid">
-              {k.steps.map((s, i) => (
-                <Step key={i} s={s} n={i + 1} />
-              ))}
-            </ol>
+        <ol className="grid" data-testid="plan-steps" aria-label={`${open.length} steps to turn it green`}>
+          {done.length > 0 && (
+            <li className="pb-3">
+              <details className="group text-sm text-muted-foreground" data-testid="plan-done">
+                <summary className="cursor-pointer list-none select-none">
+                  <span className="inline-grid size-7 place-items-center rounded-full border-2 border-muted-foreground bg-muted-foreground text-xs text-background align-middle">✓</span>
+                  <span className="ml-3 align-middle">
+                    {done.length} {done.length === 1 ? "step" : "steps"} done
+                  </span>
+                </summary>
+                <ol className="mt-3 grid">
+                  {done.map((s, i) => (
+                    <Step key={i} s={s} n={i + 1} last={i === done.length - 1} />
+                  ))}
+                </ol>
+              </details>
+            </li>
           )}
-          {(k.greenWhen || k.ifStuck) && (
-            <dl className="grid gap-1 border-t pt-2.5 text-sm sm:grid-cols-[7rem_1fr]">
-              {k.greenWhen && (
-                <>
-                  <dt className="text-muted-foreground">Green when</dt>
-                  <dd data-testid="plan-green-when">{inline(k.greenWhen)}</dd>
-                </>
-              )}
-              {k.ifStuck && (
-                <>
-                  <dt className="text-muted-foreground">If it stalls</dt>
-                  <dd data-testid="plan-if-stuck">{inline(k.ifStuck)}</dd>
-                </>
-              )}
-            </dl>
-          )}
-        </>
+          {open.map((s, i) => (
+            <Step key={i} s={s} n={i + 1} />
+          ))}
+          <li className="grid grid-cols-[1.75rem_1fr] items-center gap-x-3" data-testid="plan-green">
+            <span aria-hidden className="size-7 rounded-full bg-emerald-700" />
+            <span className="text-sm font-medium text-emerald-700">Green</span>
+          </li>
+        </ol>
       )}
     </section>
   );
@@ -128,8 +106,8 @@ export function WheelPlanView({ plan, keyResults, title, anchor = "plan" }: { pl
         </p>
         <p className="text-xs text-muted-foreground" data-testid="plan-source">
           {plan.present
-            ? `How each key result gets to green${plan.by ? `, all by ${day(plan.by)}` : ""}.`
-            : "The Delivery Manager writes it: for each key result, how it gets to green, the steps, who and by when."}
+            ? `The steps we take to turn each key result green${plan.by ? `, all by ${day(plan.by)}` : ""}.`
+            : "The Delivery Manager writes it: for each key result, the steps to turn it green, who and by when."}
         </p>
       </div>
       {plan.present && sections.map((s) => <KeyResultSection key={s.n} {...s} anchor={anchor} />)}

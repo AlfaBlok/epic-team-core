@@ -76,10 +76,12 @@ const cut = (s: string | undefined, max: number) => {
 export const TICKETS_RULE =
   "Every open ticket hangs under one key result: a key result's `work` list in its scorecard names it. A line below naming tickets under none: put each in the `work` of the key result it moves (`python3 scripts/kr_tickets.py place <row> <objective id> <key result number>`), or close it when it moves none.";
 export const OBJECTIVE_LINE = "`Objective: <its name>: how this step moves it`";
-/** How every objective is named (the owner: "they have to be short and they need to be well clear"),
+/** How every objective is named (the owner: "they have to be short and they need to be well clear"; which product: the one whose scope covers it),
  * carried by the worker rule, every wake's objectives block and the desk's; scripts/objectives_check.py fails a name that breaks it. */
 export const OBJECTIVE_NAME_RULE =
-  "Name an objective `Product: short goal`: the product it belongs to first, a colon, then 2 to 6 plain words starting with a verb " +
+  "Name an objective `Product: short goal`: the product it belongs to first (the one whose `scope` in docs/totems/<product>.json covers what it is about, never the one whose users it serves: " +
+  "a product that only communicates holds no platform, login or server objective; scripts/objectives_check.py refuses one outside its scope), " +
+  "a colon, then 2 to 6 plain words starting with a verb " +
   "with a capital letter (`Acme: Get 5 testers`, `Acme: Get the team browser fully working`), the owner's words where he said them, no two names alike; " +
   "every key result line starts with a capital letter too; " +
   "the name goes in docs/pursuits.json `name`, the longer sentence stays in its green-when.";

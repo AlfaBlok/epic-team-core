@@ -229,7 +229,8 @@ describe("E964-S14 five fixed tabs", () => {
     expect(within(tab).getAllByTestId("plan-step")).toHaveLength(2);
     expect(tab.id).toBe("plan-memo-channels");
     expect(within(tab).getByTestId("plan-kr").id).toBe("plan-memo-channels-kr-1");
-    expect(within(tab).getByTestId("plan-green-when").textContent).toBe("Every channel posted this week.");
+    expect(within(tab).queryByTestId("plan-green-when")).toBeNull(); // only the steps to green (vn_06b0de06)
+    expect(within(tab).getByTestId("plan-green").textContent).toBe("Green");
     expect(screen.queryByTestId("plan-edit")).toBeNull();
     expect(document.body.textContent).not.toMatch(/marketing plan/i);
   });

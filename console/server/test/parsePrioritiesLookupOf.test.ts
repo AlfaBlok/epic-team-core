@@ -195,6 +195,26 @@ describe("API order with Sam's levels", () => {
     expect(worldPriorities(store(["Acme/repo1"]), tmp)).toBeUndefined();
     expect(worldPriorities(store(["Acme/repo2"]), tmp)?.({ repo: "repo2", path: "docs/spines/root.md" })?.level).toBe("high");
   });
+
+  // parsed once per change of the file (every inbox read ranks by it), never stale after a write
+  it("keeps the parsed files while they stand and reads them again when one changes", () => {
+    const f = path.join(tmp, "repo2", "docs/priorities.json");
+    const write = (level: string, at: number) => {
+      fs.writeFileSync(f, JSON.stringify({ items: [{ ref: "EPIC-902", path: "docs/spines/root.md", level, why: "x" }] }));
+      fs.utimesSync(f, at, at);
+    };
+    const store = { listMilestones: () => [{ repo: "Acme/repo2" }] } as never;
+    write("high", 1_700_000_000);
+    const first = worldPriorities(store, tmp);
+    expect(first?.({ repo: "repo2", path: "docs/spines/root.md" })?.level).toBe("high");
+    expect(worldPriorities(store, tmp)).toBe(first); // nothing changed: the same lookup, nothing parsed
+    write("low", 1_700_000_100);
+    const next = worldPriorities(store, tmp);
+    expect(next).not.toBe(first);
+    expect(next?.({ repo: "repo2", path: "docs/spines/root.md" })?.level).toBe("low");
+    fs.rmSync(f);
+    expect(worldPriorities(store, tmp)).toBeUndefined();
+  });
 });
 
 describe("the stored view (read model) carries Sam's levels too", () => {

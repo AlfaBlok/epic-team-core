@@ -165,7 +165,7 @@ describe("goal sets: the screens", () => {
     expect(screen.queryByTestId("sidebar-inside-chat")).toBeNull();
   });
 
-  it("its Plan tab is the wheel's plan: per key result how it gets to green (a drawn step line, the approach, the steps, green when, if it stalls), never a marketing plan or the key results' numbers", async () => {
+  it("its Plan tab is the wheel's plan: per key result only the plain steps to green, drawn as one line with who and by when (vn_06b0de06), never the approach, a marketing plan or the key results' numbers", async () => {
     const plan = vi.spyOn(api, "getObjectivePlan");
     render(
       <MemoryRouter initialEntries={["/sets/launch?tab=plan"]}>
@@ -184,11 +184,10 @@ describe("goal sets: the screens", () => {
     expect(within(steps[1]).getByTestId("plan-step-by").textContent).toBe("26 Nov");
     expect(tab.textContent).not.toMatch(/marketing|who we reach|the offer|budget/i);
     const kr = within(tab).getAllByTestId("plan-kr")[0];
-    expect(within(kr).getByTestId("plan-line-diagram").querySelector("svg")).toBeTruthy();
-    expect(within(kr).getByTestId("plan-how").textContent).toMatch(/blocks it first/);
-    expect(within(kr).getAllByTestId("plan-step-changes")[0].textContent).toMatch(/what comes first/);
-    expect(within(kr).getByTestId("plan-green-when").textContent).toMatch(/no miss/);
-    expect(within(kr).getByTestId("plan-if-stuck").textContent).toMatch(/one decision/);
+    // only the steps, ending on green: the approach, what each changes, green when and if it stalls stay in the data for agents
+    expect(within(kr).getByTestId("plan-green").textContent).toBe("Green");
+    for (const gone of ["plan-how", "plan-step-changes", "plan-green-when", "plan-if-stuck"]) expect(within(kr).queryByTestId(gone)).toBeNull();
+    expect(kr.textContent).not.toMatch(/blocks it first|what comes first|no miss|one decision/);
     // the heading is the key result's name only: its value, target and ticket list stay on the Key results tab
     expect(kr.querySelector("h3")!.textContent).not.toMatch(/→|\d+%/);
     expect(kr.textContent).not.toMatch(/\b[A-Z]\d*-S\d+\b/); // no ticket codes: the Board tab holds the tickets
