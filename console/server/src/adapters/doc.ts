@@ -3,7 +3,9 @@ import { noteFile } from "./fileDeps.js";
 import path from "node:path";
 import { parseDod, type Dod } from "../dod.js";
 import { parseMonitoring, type MonitorItem } from "./monitoring.js";
-import { field, firstH1, proseLines, section, sections, stripInline, tables } from "./markdown.js";
+import { field, firstH1, proseLines, section, stripInline } from "./markdown.js";
+import { ledgerLines, ledgerSections, type LedgerLine } from "./ledger.js";
+import { ticketIndex, ticketIndexPath } from "../tickets/ticketIndex.js";
 
 /** EpicSpine's status vocabulary (references/compact-state.md): the first word of `Status:` in Current State. */
 export const SPINE_STATUSES = ["draft", "ready", "active", "blocked", "review", "testing", "done", "superseded", "deferred"] as const;
@@ -148,41 +150,46 @@ const NEXT_COL = /^(next action|next step|next)$/i;
 /** the row's date cell (`Last Verified`, `Updated`, `Since`): when it last moved, so the Hosts waiting queue can say since when. */
 const SINCE_COL = /^(last verified|verified|last updated|updated|since)$/i;
 
-function ledgerRows(markdown: string): LedgerRow[] {
+/**
+ * A file's work items from its ledger lines: the ticket index's rows for a file on disk (readDoc), the shared parse
+ * (review/rows.ts `ledgerLines`) for a text with no file (an old version from git). This file no longer parses tables
+ * itself: one parse of a ledger, the one the index is built with. A queue-type table counts only rows whose first cell
+ * looks like a work-item id.
+ */
+export function ledgerOf(markdown: string, lines: LedgerLine[]): LedgerRow[] {
   const out: LedgerRow[] = [];
-  for (const s of sections(markdown)) {
-    const isLedger = LEDGER_SECTION.test(s.title);
-    const q = !isLedger && QUEUE_SECTION.exec(stripInline(s.title));
-    if (!isLedger && !q) continue;
-    for (const t of tables(s.lines)) {
-      const h = t.headers;
-      const iTitle = col(h, TITLE_COL);
-      const iStatus = col(h, STATUS_COL);
-      const iOwner = col(h, OWNER_COL);
-      const iRole = col(h, ROLE_COL);
-      const iNeeds = col(h, NEEDS_COL);
-      const iDeps = col(h, DEPENDS_COL);
-      const iNext = col(h, NEXT_COL);
-      const iSince = col(h, SINCE_COL);
-      for (const r of t.rows) {
-        const id = r.cells[0];
-        if (!id) continue;
-        if (q && !(WORK_ID.test(id) && /\d/.test(id))) continue;
-        out.push({
-          id,
-          title: iTitle >= 0 ? r.cells[iTitle] ?? "" : "",
-          status: iStatus >= 0 ? r.cells[iStatus] || undefined : undefined,
-          owner: iOwner >= 0 ? r.cells[iOwner] || undefined : undefined,
-          ...(iRole >= 0 && r.cells[iRole] ? { role: r.cells[iRole] } : {}),
-          ...(iNeeds >= 0 && r.cells[iNeeds] ? { needs: r.cells[iNeeds] } : {}),
-          ...(iDeps >= 0 && r.cells[iDeps] ? { dependsOn: r.cells[iDeps] } : {}),
-          ...(iNext >= 0 && r.cells[iNext] ? { nextAction: r.cells[iNext] } : {}),
-          ...(iSince >= 0 && r.cells[iSince] ? { since: r.cells[iSince] } : {}),
-          link: mdLink(r.raw),
-          source: isLedger ? "ledger" : q ? q[1].toLowerCase() : "ledger",
-        });
-      }
-    }
+  const kinds = ledgerSections(markdown);
+  for (const l of lines) {
+    const kind = kinds.get(l.line) ?? "";
+    const isLedger = LEDGER_SECTION.test(kind);
+    const q = !isLedger && QUEUE_SECTION.exec(kind);
+    if (kinds.has(l.line) && !isLedger && !q) continue;
+    const cells = l.cells.map(stripInline);
+    const id = cells[0];
+    if (!id) continue;
+    if (q && !(WORK_ID.test(id) && /\d/.test(id))) continue;
+    const h = l.headers;
+    const at = (re: RegExp) => {
+      const i = col(h, re);
+      return i >= 0 ? cells[i] || undefined : undefined;
+    };
+    const opt = (k: keyof LedgerRow, re: RegExp) => {
+      const v = at(re);
+      return v ? { [k]: v } : {};
+    };
+    out.push({
+      id,
+      title: at(TITLE_COL) ?? "",
+      status: at(STATUS_COL),
+      owner: at(OWNER_COL),
+      ...opt("role", ROLE_COL),
+      ...opt("needs", NEEDS_COL),
+      ...opt("dependsOn", DEPENDS_COL),
+      ...opt("nextAction", NEXT_COL),
+      ...opt("since", SINCE_COL),
+      link: mdLink(l.cells),
+      source: q ? q[1].toLowerCase() : "ledger",
+    });
   }
   return out;
 }
@@ -215,11 +222,12 @@ function headerLines(markdown: string): string[] {
   return end < 0 ? lines : lines.slice(0, end);
 }
 
-export function parseDoc(markdown: string): DocInfo {
+/** `rows`: the file's ledger lines (readDoc passes the ticket index's); a bare text is read with the shared parse. */
+export function parseDoc(markdown: string, rows: LedgerLine[] = ledgerLines(markdown)): DocInfo {
   const state = section(markdown, /^current state\b/i);
   const goal = section(markdown, /^(goal|mission|summary)\b/i);
   const dod = parseDod(markdown);
-  const ledger = ledgerRows(markdown);
+  const ledger = ledgerOf(markdown, rows);
   return {
     title: firstH1(markdown),
     statusLine: (state && field(state.lines, "Status")) ?? field(headerLines(markdown), "Status"),
@@ -280,7 +288,7 @@ export function deriveStatus(doc: Pick<DocInfo, "statusLine" | "waitingOn">, pau
 
 // ---------- files + mtime cache ----------
 
-const cache = new Map<string, { mtimeMs: number; size: number; info: DocInfo }>();
+const cache = new Map<string, { mtimeMs: number; size: number; ver: string; info: DocInfo }>();
 
 /** Parsed doc for an absolute path, cached by mtime + size. Undefined if the file is missing. */
 export function readDoc(abs: string): DocInfo | undefined {
@@ -294,10 +302,18 @@ export function readDoc(abs: string): DocInfo | undefined {
   }
   noteFile(abs, `${st.mtimeMs}:${st.size}`); // memoized trees revalidate on these stamps
   if (!st.isFile()) return undefined;
+  // the rows come from the ticket index: a rebuilt index can move a row while the file is the same, so the index's
+  // files are stamps too (WAL: a build writes the -wal file first)
+  const index = ticketIndex();
+  const db = ticketIndexPath();
+  noteFile(db);
+  noteFile(`${db}-wal`);
+  const ver = index.version();
   const hit = cache.get(abs);
-  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.info;
-  const info = parseDoc(fs.readFileSync(abs, "utf8"));
-  cache.set(abs, { mtimeMs: st.mtimeMs, size: st.size, info });
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.ver === ver) return hit.info;
+  const text = fs.readFileSync(abs, "utf8");
+  const info = parseDoc(text, index.holds(abs) ? index.lines(abs) : ledgerLines(text));
+  cache.set(abs, { mtimeMs: st.mtimeMs, size: st.size, ver, info });
   return info;
 }
 

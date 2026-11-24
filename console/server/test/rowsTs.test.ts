@@ -173,6 +173,29 @@ describe("E962-S2 the review list is the spine", () => {
     expect((await call("POST", `/api/review-items/${s1.id}/approve`)).status).toBe(404);
   });
 
+  // A hand edit left an empty `| |` cell in a row and the owner's card press
+  // was refused (12 cells, header 11). One stray empty cell is now dropped with his write, and his answer lands.
+  it("a press on a row with one stray empty cell lands and the row is whole again", async () => {
+    const lines = repo.read(EPIC).split("\n");
+    const i = lines.findIndex((l) => l.startsWith("| E959-S1 |"));
+    const cells = lines[i].split(" | ");
+    const width = cells.length;
+    cells.splice(7, 0, "");
+    lines[i] = cells.join(" | ");
+    fs.writeFileSync(path.join(repo.dir, EPIC), lines.join("\n"));
+    execFileSync("git", ["-C", repo.dir, "commit", "-q", "-am", "a hand edit adds an empty cell"]);
+    execFileSync("git", ["-C", repo.dir, "push", "-q", "origin", "main"]);
+    const { call } = boot({ readModel: true });
+    await milestone(call);
+    const s1 = (await listed(call)).find((x) => x.ref === "E959-S1")!;
+    const r = await call("POST", `/api/review-items/${s1.id}/approve`);
+    expect(r.status).toBe(200);
+    const line = repo.rowLine(EPIC, "E959-S1")!;
+    expect(line).toContain(`| done (approved by Sam ${new Date().toISOString().slice(0, 10)}) |`);
+    expect(line.split(" | ").length).toBe(width);
+    expect(line).not.toMatch(/\|\s+\|/);
+  });
+
   it("Snooze writes ` — snoozed until:` on the row; Unsnooze takes it off; each a commit", async () => {
     const { call } = boot();
     await milestone(call);

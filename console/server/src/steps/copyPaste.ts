@@ -102,7 +102,7 @@ export function copyPasteInHtml(html: string): CopyPasteBlock[] {
   // an agent's part (a <details> or any element marked data-for="agent") is not for the owner
   rest = rest.replace(/<(details|div|section|pre|code)\b[^>]*\sdata-for\s*=\s*["']agent["'][^>]*>[\s\S]*?<\/\1>/gi, "");
   const scan = (re: RegExp, kind: string, inline = false) => {
-    rest = rest.replace(re, (all: string, open: string, body: string) => {
+    rest = rest.replace(re, (_all: string, open: string, body: string) => {
       if (!allowed(open)) {
         const line = commandLine(unescape(body), inline);
         if (line) out.push({ kind, line });

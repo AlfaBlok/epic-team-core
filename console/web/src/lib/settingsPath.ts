@@ -40,6 +40,8 @@ function usePages(input: boolean): Page[] {
     // the owner: the applications are a tracker inside an objective, no menu entry.
     { screen: "testers", to: "/feedback", label: "Voice feedback", what: "voice notes from testers and customers", testId: "op-feedback", input: false },
     { screen: "yourAi", to: "/your-ai", label: "Your AI", what: "the AI your team runs on", testId: "op-your-ai", input: true },
+    // a customer workspace's own server, made in its own cloud account (same gate as Your AI: customers only)
+    { screen: "yourAi", to: "/your-server", label: "Your server", what: "where your agents wake: a server you have or a new one", testId: "op-your-server", input: true },
     { screen: "credits", to: "/credits", label: "Credits", what: "top up your credits", testId: "op-credits", input: true },
     // the owner: "Can we have in the settings somewhere where those blocks are explicit"; each line leads to where its rule is changed.
     { screen: "postingLimits", to: "/posting-limits", label: "Posting limits", what: "every rule that can stop a post", testId: "op-posting-limits", input: true },

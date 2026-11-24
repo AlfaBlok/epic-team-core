@@ -14,6 +14,10 @@ import { GEMINI_NOTE_MODEL, NOTE_MODEL, type Transcriber, type Transcript } from
  * open-source, free; the console reaches it over the tailnet). A paid provider (Gemini) only when ours fails and only when
  * his paid backup is on, and each such part raises an alarm. He picks the model in Settings, Transcription; the same section
  * shows the model in use and what the last 30 days cost.
+ *
+ * (the owner, 24 Nov 20:37Z: "ElevenLabs for all transcription"; Log/2026-11-24.md#^e-798779): ElevenLabs Scribe is
+ * now the default, paid from his grant's credits (33,010,000). Our Whisper takes any part Scribe cannot (no key, refusal,
+ * timeout), and Gemini only when both fail and the paid backup is on. Each Scribe part keeps the credits it spent.
  */
 
 /** voice_settings keys (the platform's, every world). */
@@ -24,7 +28,7 @@ export interface TranscribeModel {
   id: string;
   label: string;
   /** ours: our own server, free. paid: a provider billed per minute. */
-  kind: "ours" | "paid";
+  kind: "ours" | "paid" | "grant";
   /** one short line beside the pick. */
   note: string;
 }
@@ -34,6 +38,7 @@ export interface TranscribeModel {
  * OpenAI transcripts on the worker server (22 Nov; the owner kept small): the page is the site's transcribeResultsUrl.
  */
 export const TRANSCRIBE_MODELS: TranscribeModel[] = [
+  { id: "elevenlabs", label: "ElevenLabs Scribe", kind: "grant", note: "ElevenLabs, paid from your grant's credits. Our Whisper takes any note it cannot." },
   { id: "small", label: "Whisper small", kind: "ours", note: "On our server, free. 6.4% of words differ from OpenAI's on 19 of your notes. About 11 s per audio minute." },
   { id: "large-v3-turbo", label: "Whisper large-v3-turbo", kind: "ours", note: "On our server, free. 3.4% of words differ, on 5 of your notes. About 84 s per audio minute." },
   { id: "gemini", label: "Gemini Flash", kind: "paid", note: "Google, paid: about 0.4 cents a minute." },
@@ -42,7 +47,12 @@ export const TRANSCRIBE_MODELS: TranscribeModel[] = [
  * small by default: on the shared the worker server at the lowest priority it writes out a 2-minute part in about half a minute,
  * where large-v3-turbo took 2 to 4 minutes at the day's load (the Delivery Manager: agents first).
  */
-export const DEFAULT_TRANSCRIBE_MODEL = "small";
+export const DEFAULT_TRANSCRIBE_MODEL = "elevenlabs";
+/** our own Whisper model that takes a part ElevenLabs cannot. */
+export const OWN_FALLBACK_MODEL = "small";
+/** ElevenLabs' speech-to-text model and the grant it is paid from (his billing page, 24 Nov). */
+export const SCRIBE_MODEL = "scribe_v1";
+export const ELEVENLABS_GRANT_CREDITS = 33_010_000;
 
 /** The model test behind the lines above, with the one model measured there that is not offered. */
 export const TRANSCRIBE_BENCHMARK_SUMMARY = "Measured on 19 of your notes, 50 min of speech. Whisper medium: 6.3% of words differ, about 26 s per audio minute.";
@@ -76,7 +86,8 @@ export function localTranscriber(url: string, model: () => string, f: typeof fet
   const base = url.replace(/\/+$/, "");
   return async (audio, o) => {
     if (!base || base === "off") throw new VoiceError(503, "local_off", "our transcription server is not set on this console");
-    const q = new URLSearchParams({ model: model(), caller: "console" });
+    // scribe=0: the console asks ElevenLabs itself first, so the central server goes straight to Whisper.
+    const q = new URLSearchParams({ model: model(), caller: "console", scribe: "0" });
     if (o.prompt) q.set("prompt", o.prompt.slice(-300));
     let r: Response;
     try {
@@ -92,17 +103,59 @@ export function localTranscriber(url: string, model: () => string, f: typeof fet
 }
 
 /**
+ * ElevenLabs Scribe (POST /v1/speech-to-text, multipart) with the console's own key (agent-team-console/ELEVENLABS_API_KEY,
+ * read from the store per call, held in memory only). Its usage comes back as `{provider: "elevenlabs", model, credits,
+ * list_usd, language}`: credits from ElevenLabs' `character-cost` answer header (spent from the grant), list_usd what the
+ * same part would cost at list price (`fiat-cost-before-overages`), kept for the record, not billed.
+ */
+export function elevenlabsTranscriber(key: () => Promise<string | undefined>, model = SCRIBE_MODEL, f: typeof fetch = fetch, timeoutMs = 180_000): Transcriber {
+  return async (audio, o) => {
+    const k = await key();
+    if (!k) throw new VoiceError(503, "no_key", "the console has no ELEVENLABS_API_KEY (secret store agent-team-console/ELEVENLABS_API_KEY)");
+    const form = new FormData();
+    form.append("model_id", model);
+    form.append("tag_audio_events", "false");
+    form.append("file", new Blob([audio.slice()], { type: o.mime || "application/octet-stream" }), o.filename);
+    let r: Response;
+    try {
+      r = await f("https://api.elevenlabs.io/v1/speech-to-text", { method: "POST", headers: { "xi-api-key": k }, body: form, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      throw new VoiceError(502, "elevenlabs_down", `ElevenLabs did not answer (${(e as Error).name === "TimeoutError" ? "too slow" : (e as Error).message.slice(0, 120)})`);
+    }
+    const j = (await r.json().catch(() => ({}))) as any;
+    if (!r.ok || typeof j.text !== "string") throw new VoiceError(502, "elevenlabs_refused", `ElevenLabs did not transcribe the note (${r.status}): ${String(j?.detail?.message ?? j?.detail ?? "no message").slice(0, 200)}`);
+    const num = (h: string) => {
+      const v = Number(r.headers.get(h));
+      return Number.isFinite(v) ? v : 0;
+    };
+    const usage = { provider: "elevenlabs", model, credits: num("character-cost"), list_usd: num("fiat-cost-before-overages"), ...(j.language_code ? { language: j.language_code } : {}) };
+    return { text: j.text.trim(), provider: "elevenlabs", model, usage };
+  };
+}
+
+/**
  * The transcriber every note uses: his pick, read on each part. Ours first; when ours fails and his paid backup is on,
  * the part goes to Gemini and `onBackup` raises the alarm; both failing (or the backup off) is one error naming both,
  * so the part is named unheard and he is told.
  */
-export function pickedTranscriber(o: { db: DB; ours: (model: string) => Transcriber; paid: Transcriber; onBackup?: (why: string, filename: string) => void; log?: (m: string) => void }): Transcriber {
+export function pickedTranscriber(o: { db: DB; ours: (model: string) => Transcriber; paid: Transcriber; eleven?: Transcriber; onBackup?: (why: string, filename: string) => void; log?: (m: string) => void }): Transcriber {
   const log = o.log ?? ((m: string) => console.warn(m));
   return async (audio, opt): Promise<Transcript> => {
     const s = transcriptionSettings(o.db);
     if (s.model === "gemini") return o.paid(audio, opt);
+    let own = s.model;
+    if (s.model === "elevenlabs") {
+      own = OWN_FALLBACK_MODEL;
+      if (o.eleven) {
+        try {
+          return await o.eleven(audio, opt);
+        } catch (e0) {
+          log(`[voice] ${opt.filename}: ${(e0 as Error).message.slice(0, 200)}; our Whisper takes this part`);
+        }
+      }
+    }
     try {
-      return await o.ours(s.model)(audio, opt);
+      return await o.ours(own)(audio, opt);
     } catch (e1) {
       const why = (e1 as Error).message.slice(0, 200);
       if (!s.paidBackup) throw new VoiceError(502, "transcribe_failed", `${why} | the paid backup is off`);
@@ -126,6 +179,13 @@ export function pickedTranscriber(o: { db: DB; ours: (model: string) => Transcri
 /** the model a part was turned into words with, from its provider and usage. */
 export function partModel(provider: string | null, usage: string | null): string {
   if (provider === "gemini") return GEMINI_NOTE_MODEL;
+  if (provider === "elevenlabs") {
+    try {
+      return (JSON.parse(usage ?? "{}") as { model?: string }).model ?? SCRIBE_MODEL;
+    } catch {
+      return SCRIBE_MODEL;
+    }
+  }
   if (provider === "local") {
     try {
       const m = (JSON.parse(usage ?? "{}") as { model?: string }).model;
@@ -139,11 +199,13 @@ export function partModel(provider: string | null, usage: string | null): string
 }
 
 export interface TranscriptionCostLine {
-  provider: "local" | "gemini" | "openai";
+  provider: "local" | "gemini" | "openai" | "elevenlabs";
   model: string;
   parts: number;
   minutes: number;
   usd: number;
+  /** ElevenLabs credits spent from the grant (0 for every other provider). */
+  credits: number;
 }
 
 export interface TranscriptionView {
@@ -161,6 +223,9 @@ export interface TranscriptionView {
     serverMinutes: number;
     /** paid parts that went to the backup because ours failed (the alarm's count). */
     backupParts: number;
+    /** ElevenLabs credits spent in the window, and the grant they come from. */
+    credits: number;
+    grantCredits: number;
   };
   /** the voice calls in the same 30 days (now off), so the whole voice bill shows. */
   calls: { on: boolean; count: number; usd: number };
@@ -176,7 +241,7 @@ export function transcriptionView(db: DB, o: { now?: number; days?: number; call
   let serverMs = 0;
   let backupParts = 0;
   for (const r of rows) {
-    const provider = (r.provider === "local" || r.provider === "gemini" ? r.provider : "openai") as TranscriptionCostLine["provider"];
+    const provider = (r.provider === "local" || r.provider === "gemini" || r.provider === "elevenlabs" ? r.provider : "openai") as TranscriptionCostLine["provider"];
     const model = partModel(r.provider, r.usage);
     if (provider === "local") {
       try {
@@ -187,13 +252,21 @@ export function transcriptionView(db: DB, o: { now?: number; days?: number; call
     }
     if (provider === "gemini" && r.usage?.includes('"backup":true')) backupParts++;
     const k = `${provider}|${model}`;
-    const l = by.get(k) ?? { provider, model, parts: 0, minutes: 0, usd: 0 };
+    const l = by.get(k) ?? { provider, model, parts: 0, minutes: 0, usd: 0, credits: 0 };
     l.parts++;
+    if (provider === "elevenlabs") {
+      try {
+        l.credits += Number((JSON.parse(r.usage ?? "{}") as { credits?: number }).credits) || 0;
+      } catch {
+        /* no usage */
+      }
+    }
     l.minutes += (r.seconds || 0) / 60;
     l.usd += r.cost_usd || 0;
     by.set(k, l);
   }
-  const lines = [...by.values()].map((l) => ({ ...l, minutes: r2(l.minutes, 10), usd: r2(l.usd) })).sort((a, b) => (a.provider === "local" ? -1 : b.provider === "local" ? 1 : b.usd - a.usd));
+  const rank = (p: string) => (p === "elevenlabs" ? 0 : p === "local" ? 1 : 2);
+  const lines = [...by.values()].map((l) => ({ ...l, minutes: r2(l.minutes, 10), usd: r2(l.usd) })).sort((a, b) => rank(a.provider) - rank(b.provider) || b.usd - a.usd);
   const newest = db.prepare("SELECT provider, usage, at FROM voice_note_segments WHERE text IS NOT NULL ORDER BY at DESC LIMIT 1").get() as { provider: string | null; usage: string | null; at: string } | undefined;
   const calls = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(cost_usd), 0) usd FROM voice_calls WHERE started_at >= ?").get(since) as { n: number; usd: number } | undefined;
   return {
@@ -207,6 +280,8 @@ export function transcriptionView(db: DB, o: { now?: number; days?: number; call
       lines,
       serverMinutes: r2(serverMs / 60_000, 10),
       backupParts,
+      credits: lines.reduce((a, l) => a + l.credits, 0),
+      grantCredits: ELEVENLABS_GRANT_CREDITS,
     },
     calls: { on: !!o.callsOn, count: calls?.n ?? 0, usd: r2(calls?.usd ?? 0) },
   };

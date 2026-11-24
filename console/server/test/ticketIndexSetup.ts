@@ -13,6 +13,7 @@ setTicketIndex({
       return [];
     }
   },
+  holds: () => true,
   refresh: async () => {},
   version: () => String(Date.now()),
   tickets: () => [],

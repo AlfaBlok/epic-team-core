@@ -8,7 +8,7 @@ import { errorText } from "../t3/client.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { listRepos } from "../adapters/repos.js";
 import { createPlacements, DELIVERED_MARKER, migratePlacements, type Placement } from "./placements.js";
-import { createChatSession, DeskError, migrateDeskSessions, PAGE_PREFIX, TEAM_KEY, WORKING, type SessionDeps } from "./session.js";
+import { createChatSession, migrateDeskSessions, PAGE_PREFIX, TEAM_KEY, WORKING, type SessionDeps } from "./session.js";
 import { intakeSections, type IntakeRunner } from "./packIntake.js";
 import { DIGEST_MARKER } from "../plug/marks.js";
 import { TESTER_MARKER } from "../plug/marks.js";

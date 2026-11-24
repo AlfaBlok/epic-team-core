@@ -51,6 +51,20 @@ describe("Settings, Transcription", () => {
     await waitFor(() => expect((screen.getAllByRole("radio")[1] as HTMLInputElement).checked).toBe(true));
   });
 
+  it("ElevenLabs Scribe in use: its credits show against the grant and Whisper is named as its fallback", async () => {
+    const v = view({ model: "elevenlabs" });
+    v.inUse = { model: "scribe_v1", provider: "elevenlabs", at: "2026-11-24T23:00:00Z" };
+    v.last30.lines.unshift({ provider: "elevenlabs", model: "scribe_v1", parts: 3, minutes: 6, usd: 0, credits: 1234 });
+    v.last30.credits = 1234;
+    v.last30.grantCredits = 33_010_000;
+    render(<TranscriptionSettings load={async () => v} />);
+    await screen.findByTestId("transcription-settings");
+    expect(screen.getByTestId("transcription-in-use").textContent).toBe("ElevenLabs Scribe, from your grant");
+    expect(screen.getByTestId("transcription-grant").textContent).toContain("1,234 credits · 6 min");
+    expect(screen.getByTestId("transcription-grant-left").textContent).toContain("1,234 of 33,010,000");
+    expect(screen.getByTestId("transcription-settings").textContent).toContain("Our Whisper writes out a note ElevenLabs cannot.");
+  });
+
   it("not his console: nothing shows", async () => {
     const { container } = render(<TranscriptionSettings load={async () => undefined} />);
     await new Promise((r) => setTimeout(r, 0));

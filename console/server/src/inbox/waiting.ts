@@ -6,7 +6,6 @@ import { execFile } from "../spawnHost.js";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import { inside, readDoc } from "../adapters/doc.js";
 import { proseLines, stripInline } from "../adapters/markdown.js";
 import { listRepos, resolveRepo } from "../adapters/repos.js";

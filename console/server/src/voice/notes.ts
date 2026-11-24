@@ -153,6 +153,8 @@ export function noteCost(usage: unknown, seconds: number): number {
   let usd: number;
   // our own Whisper on the worker server costs no money (its server time is shown in Settings, Transcription).
   if (u.provider === "local") return 0;
+  // ElevenLabs Scribe is paid from his grant's credits: its credits are kept on the part, no money.
+  if (u.provider === "elevenlabs") return 0;
   if (u.provider === "gemini") {
     usd = (num(u.audio_tokens) * GEMINI_PRICES.audioIn + num(u.text_tokens) * GEMINI_PRICES.textIn + num(u.output_tokens) * GEMINI_PRICES.out) / 1_000_000;
     if (!usd) usd = (Math.max(0, seconds) * 32 * GEMINI_PRICES.audioIn) / 1_000_000; // 32 audio tokens a second

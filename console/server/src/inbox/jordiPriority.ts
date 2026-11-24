@@ -426,7 +426,7 @@ export function parseObjectives(pursuitsText: string | undefined, wordsText?: st
   });
   // his order as every list shows it: a folded copy takes no place of its own
   const ids = new Set(ps.map((o) => str(o, "id")!));
-  const shown = ps.map((o, i) => !(sheets[i].foldedInto && ids.has(sheets[i].foldedInto!)));
+  const shown = ps.map((_o, i) => !(sheets[i].foldedInto && ids.has(sheets[i].foldedInto!)));
   return ps.map((o, i) => {
     const id = str(o, "id")!;
     const w = ws.find((x) => str(x, "id") === id);

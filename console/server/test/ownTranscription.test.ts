@@ -104,7 +104,7 @@ describe("Settings, Transcription: model in use and the last 30 days", () => {
     seg.run("c", 0, at(0.01), 90, JSON.stringify({ provider: "local", model: "whisper-large-v3-turbo", ms: 60000 }), 0, "local");
     s.db.prepare("INSERT INTO voice_calls (id, started_at, last_beat_at, model, cost_usd) VALUES ('call_1', ?, ?, 'gpt-realtime-2.1-mini', 2.29)").run(at(10), at(10));
     const v = transcriptionView(s.db, { now: T });
-    expect(v.settings).toEqual({ model: "small", paidBackup: true });
+    expect(v.settings).toEqual({ model: "elevenlabs", paidBackup: true }); // Scribe is the default
     expect(v.inUse).toMatchObject({ model: "whisper-large-v3-turbo", provider: "local" });
     expect(v.last30.usd).toBeCloseTo(0.01, 6);
     expect(v.last30.minutes).toBe(4.5);
@@ -120,10 +120,10 @@ describe("Settings, Transcription: model in use and the last 30 days", () => {
     mountTranscription(api, { db: s.db, callsOn: () => false, world: () => undefined, home: "home", now: () => T, refuse: (c) => (c.req.header("x-owner") ? undefined : "not the owner") });
     const g = await api.request("/voice/transcription");
     expect(g.status).toBe(200);
-    expect(((await g.json()) as any).models.map((m: any) => m.id)).toEqual(["small", "large-v3-turbo", "gemini"]);
+    expect(((await g.json()) as any).models.map((m: any) => m.id)).toEqual(["elevenlabs", "small", "large-v3-turbo", "gemini"]);
     const notHim = await api.request("/voice/transcription", { method: "PUT", body: JSON.stringify({ model: "gemini" }), headers: { "content-type": "application/json" } });
     expect(notHim.status).toBe(403);
-    expect(transcriptionSettings(s.db).model).toBe("small");
+    expect(transcriptionSettings(s.db).model).toBe("elevenlabs");
     const him = await api.request("/voice/transcription", { method: "PUT", body: JSON.stringify({ model: "large-v3-turbo", paidBackup: false }), headers: { "content-type": "application/json", "x-owner": "1" } });
     expect(him.status).toBe(200);
     expect(((await him.json()) as any).settings).toEqual({ model: "large-v3-turbo", paidBackup: false });

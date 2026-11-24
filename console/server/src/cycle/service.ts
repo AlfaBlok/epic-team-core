@@ -455,7 +455,6 @@ type Row = Record<string, any>;
 /** one steer the owner sent into a running run's thread. */
 export type RunSteer = { at: string; mode: "steer" | "auto"; message: string };
 const opt = <T>(v: T | null | undefined) => (v == null ? undefined : v);
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function createCycle(db: DB, store: Store, o: CycleOptions) {
   /** the milestone's effort from the owner's pursuits; a bad read is no effort (the pace as set). */

@@ -8,17 +8,19 @@ import { cn } from "@/lib/utils";
  */
 export interface TranscriptionView {
   settings: { model: string; paidBackup: boolean };
-  models: { id: string; label: string; kind: "ours" | "paid"; note: string }[];
+  models: { id: string; label: string; kind: "ours" | "paid" | "grant"; note: string }[];
   /** the model test behind the accuracy and speed lines, and its page when the site has one. */
   benchmark?: { summary: string; url?: string };
   inUse?: { model: string; provider: string; at: string };
-  last30: { usd: number; minutes: number; lines: { provider: string; model: string; parts: number; minutes: number; usd: number }[]; serverMinutes: number; backupParts: number };
+  last30: { usd: number; minutes: number; lines: { provider: string; model: string; parts: number; minutes: number; usd: number; credits?: number }[]; serverMinutes: number; backupParts: number; credits?: number; grantCredits?: number };
   calls: { on: boolean; count: number; usd: number };
 }
 
 const money = (v: number) => `$${v.toFixed(2)}`;
-const WHO: Record<string, string> = { local: "our server, free", gemini: "paid", openai: "paid" };
-const modelName = (m: string) => (m.startsWith("whisper-") ? `Whisper ${m.slice(8)}` : m === "gemini-flash-latest" ? "Gemini Flash" : m === "gpt-4o-mini-transcribe" ? "OpenAI gpt-4o-mini-transcribe" : m);
+const WHO: Record<string, string> = { local: "our server, free", gemini: "paid", openai: "paid", elevenlabs: "from your grant" };
+const modelName = (m: string) =>
+  m.startsWith("whisper-") ? `Whisper ${m.slice(8)}` : m.startsWith("scribe") ? "ElevenLabs Scribe" : m === "gemini-flash-latest" ? "Gemini Flash" : m === "gpt-4o-mini-transcribe" ? "OpenAI gpt-4o-mini-transcribe" : m;
+const count = (n: number) => Math.round(n).toLocaleString("en-US");
 
 export function TranscriptionSettings(props: { load?: () => Promise<TranscriptionView | undefined>; save?: (b: Partial<TranscriptionView["settings"]>) => Promise<TranscriptionView> }) {
   const [v, setV] = useState<TranscriptionView | undefined>();
@@ -57,8 +59,9 @@ export function TranscriptionSettings(props: { load?: () => Promise<Transcriptio
       setBusy(false);
     }
   };
+  const grant = v.last30.lines.filter((l) => l.provider === "elevenlabs");
   const ours = v.last30.lines.filter((l) => l.provider === "local");
-  const paid = v.last30.lines.filter((l) => l.provider !== "local");
+  const paid = v.last30.lines.filter((l) => l.provider !== "local" && l.provider !== "elevenlabs");
   return (
     <section id="transcription" className="mt-6 scroll-mt-20" data-testid="transcription-settings">
       <h2 className="mb-3 text-[15px] font-semibold">Transcription</h2>
@@ -91,6 +94,7 @@ export function TranscriptionSettings(props: { load?: () => Promise<Transcriptio
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-medium">Paid backup when ours fails</span>
             <span className="block text-xs text-muted-foreground">
+              {v.settings.model === "elevenlabs" ? "Our Whisper writes out a note ElevenLabs cannot. " : ""}
               {v.settings.paidBackup ? "On: Gemini writes out a note our server cannot, and you get a message each time." : "Off: a note our server cannot write out reaches the desk with its audio link, and you get a message."}
             </span>
           </span>
@@ -108,6 +112,22 @@ export function TranscriptionSettings(props: { load?: () => Promise<Transcriptio
             </span>
           </div>
           <ul className="mt-1 grid gap-0.5 text-xs text-muted-foreground">
+            {grant.map((l) => (
+              <li key={l.model} className="flex justify-between gap-4" data-testid="transcription-grant">
+                <span>{modelName(l.model)}, from your grant</span>
+                <span className="tabular-nums">
+                  {count(l.credits ?? 0)} credits · {Math.round(l.minutes)} min
+                </span>
+              </li>
+            ))}
+            {grant.length > 0 && v.last30.grantCredits ? (
+              <li className="flex justify-between gap-4" data-testid="transcription-grant-left">
+                <span>Grant used by notes</span>
+                <span className="tabular-nums">
+                  {count(v.last30.credits ?? 0)} of {count(v.last30.grantCredits)}
+                </span>
+              </li>
+            ) : null}
             {ours.map((l) => (
               <li key={l.model} className="flex justify-between gap-4">
                 <span>{modelName(l.model)}, our server</span>

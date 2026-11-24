@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { homeRepo } from "../identity.js";
-import { colsOf, type LedgerLine } from "../review/rows.js";
+import { cellsOf, colsOf, type LedgerLine } from "../adapters/ledger.js";
 
 const expand = (p: string) => (p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p);
 const homeRepoDir = () => path.join(expand(process.env.REPOS_ROOT || "~/github"), homeRepo());
@@ -44,6 +44,8 @@ export interface Ticket {
 export interface TicketIndex {
   /** the ledger lines of one spine file (absolute path), as the index holds them; [] while its checkout is not built. */
   lines(abs: string): LedgerLine[];
+  /** whether the index has read the checkout this file sits in (until then a reader parses the file itself). */
+  holds(abs: string): boolean;
   /** rebuild one checkout now (after the console's own write or pull); resolves when the index holds it. */
   refresh(dir: string): Promise<void>;
   /** changes whenever the index file changes (a kept answer built from it is stale). */
@@ -216,13 +218,27 @@ export function createTicketIndex(o: { file?: string; script?: string; python?: 
       try {
         out = (d.prepare("SELECT line, id, cells, headers FROM ledger WHERE dir = ? AND path = ? ORDER BY line").all(dir, rel) as { line: number; id: string; cells: string; headers: string }[]).map((r) => {
           const headers = JSON.parse(r.headers) as string[];
-          return { line: r.line, id: r.id, cells: JSON.parse(r.cells) as string[], headers, col: colsOf(headers) };
+          // a row with one stray empty cell reads as its header says (the card shows its real fields)
+          const { cells, mended } = cellsOf(JSON.parse(r.cells) as string[], headers, r.id);
+          return { line: r.line, id: r.id, cells, headers, col: colsOf(headers), ...(mended ? { mended } : {}) };
         });
       } catch {
         out = [];
       }
       kept.set(key, out);
       return out;
+    },
+    holds(abs) {
+      const root = rootOf(abs);
+      if (!root) return false;
+      const dir = real(root);
+      const d = current();
+      ensure(root, dir, d);
+      try {
+        return !!d?.prepare("SELECT 1 FROM ledger_repos WHERE dir = ?").get(dir);
+      } catch {
+        return false;
+      }
     },
     refresh(dir) {
       return run(real(dir));

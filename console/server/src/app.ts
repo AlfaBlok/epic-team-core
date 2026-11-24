@@ -221,7 +221,7 @@ import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbo
 import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
-import { localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
+import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
@@ -3386,14 +3386,16 @@ export function createApp(
   // rework (the owner's review): voice notes in every chat (the Team desk, a milestone's or campaign's chat): recorded in
   // segments by the page, transcribed once each (gpt-4o-mini-transcribe), posted as his message; the cost is in the voice budget.
   const notesDir = opts.voice?.notesDir ?? process.env.CONSOLE_VOICE_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "voice-notes");
-  // our own Whisper on the worker server first (free, Settings > Transcription picks its model); the team's shared Gemini
-  // key only when ours fails and his paid backup is on, each such part an alarm. OpenAI is no longer asked.
+  // ElevenLabs Scribe first (his grant; Settings > Transcription picks), our own Whisper on the worker server
+  // when it fails (free); the team's shared Gemini key only when ours fails too and his paid backup is on, each such
+  // part an alarm. OpenAI is no longer asked.
   const transcribeUrl = process.env.CONSOLE_TRANSCRIBE_URL ?? siteConfig().transcribeUrl;
   const transcribe =
     opts.voice?.transcribe ??
     pickedTranscriber({
       db,
       ours: (m) => localTranscriber(transcribeUrl, () => m),
+      eleven: elevenlabsTranscriber(async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")))),
       paid: geminiTranscriber(async () => process.env.GEMINI_API_KEY || (await sudoRead(keyFile("GEMINI_API_KEY")))),
       onBackup: (why, file) => {
         const text = `Our own transcription failed on ${file}, so the paid backup (Gemini) wrote it out. Why: ${why.slice(0, 200)}`;

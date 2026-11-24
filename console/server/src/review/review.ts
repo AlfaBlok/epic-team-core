@@ -486,7 +486,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       return { url: l.url, title: l.title, ...(c ? { checkedAt: c.checked_at, liveStatus: c.status ?? 0, ...(c.error ? { liveError: c.error } : {}) } : {}) };
     });
     const ok = links.length > 0 && r.links.every((l) => liveOf(l.url, r.commit)?.ok === 1);
-    const shown = links.find((l, i) => liveOf(r.links[i].url, r.commit)?.ok !== 1) ?? links[0];
+    const shown = links.find((_l, i) => liveOf(r.links[i].url, r.commit)?.ok !== 1) ?? links[0];
     const err = !links.length ? "no http(s) link in the row's Latest Evidence cell yet" : shown && !ok ? (shown.liveError ? (links.length > 1 ? `${shown.url}: ${shown.liveError}` : shown.liveError) : shown.checkedAt ? undefined : "not checked yet") : undefined;
     return {
       id: r.id,
@@ -673,7 +673,7 @@ export function createReview(db: DB, o: ReviewOptions) {
         const e = editRowStatus(text, r.ref, cell(date));
         if ("skip" in e) return e;
         const t = more ? more(e.text, date) : e.text;
-        return typeof t === "string" ? { text: t, msg, body } : t;
+        return typeof t === "string" ? { text: t, msg, body: e.mended ? `${body}\n\nRow repaired with this write: ${e.mended}.` : body } : t;
       },
     });
     if (w.status !== "written" || !w.sha) {

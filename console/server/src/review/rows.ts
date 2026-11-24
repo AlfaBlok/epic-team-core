@@ -179,72 +179,10 @@ export interface ClosedGoal {
   hidden: string[];
 }
 
-// ---------- the ledger, line by line ----------
+// ---------- the ledger, line by line (adapters/ledger.ts) ----------
 
-const LEDGER_SECTION = /^(issue ledger|phases|child epics|tickets|queue|backlog|sprint|tasks|work items)\b/i;
-const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
-const STATUS_COL = /^(status|state)$/i;
-const TITLE_COL = /^(title|task|item|description|scope|purpose|name|summary)$/i;
-const EVIDENCE_COL = /^(latest evidence|evidence)$/i;
-const VERIFIED_COL = /^(last verified|verified)$/i;
-const NEXT_COL = /^(next action|next step|next)$/i;
-const PR_COL = /^(pr\/branch|pr|branch)$/i;
-const OWNER_COL = /^(owner|assignee)/i;
-
-export function splitRow(line: string): string[] {
-  let s = line.trim();
-  if (s.startsWith("|")) s = s.slice(1);
-  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-  return s.split(/(?<!\\)\|/).map((c) => c.trim());
-}
-const joinRow = (cells: string[]) => `| ${cells.join(" | ")} |`;
-
-export interface LedgerLine {
-  /** 0-based line index in the file. */
-  line: number;
-  id: string;
-  cells: string[];
-  headers: string[];
-  col: { status: number; title: number; evidence: number; verified: number; next: number; pr: number; owner: number };
-}
-
-/** the column of each field a ledger table's headers name (-1: none). */
-export function colsOf(headers: string[]): LedgerLine["col"] {
-  const find = (re: RegExp) => headers.findIndex((x) => re.test(x.trim()));
-  return { status: find(STATUS_COL), title: find(TITLE_COL), evidence: find(EVIDENCE_COL), verified: find(VERIFIED_COL), next: find(NEXT_COL), pr: find(PR_COL), owner: find(OWNER_COL) };
-}
-
-/**
- * Every ledger-section table row with its line, raw cells and the column of each field. The screens (Board, Key results,
- * Inbox) read these rows from the ticket index (tickets/ticketIndex.ts), never from here: this parse is for the
- * console's writers and its "as it reads now" checks of one row (rowIn, a claim before dispatch).
- */
-export function ledgerLines(text: string): LedgerLine[] {
-  const lines = proseLines(text);
-  const out: LedgerLine[] = [];
-  let inLedger = false;
-  let level = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const h = HEADING.exec(lines[i]);
-    if (h) {
-      if (inLedger && h[1].length > level) continue;
-      inLedger = LEDGER_SECTION.test(stripInline(h[2]));
-      level = h[1].length;
-      continue;
-    }
-    if (!inLedger || !lines[i].trim().startsWith("|") || !/^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? "")) continue;
-    const headers = splitRow(lines[i]).map(stripInline);
-    const col = colsOf(headers);
-    let j = i + 2;
-    for (; j < lines.length && lines[j].trim().startsWith("|"); j++) {
-      const cells = splitRow(lines[j]);
-      const id = stripInline(cells[0] ?? "");
-      if (id) out.push({ line: j, id, cells, headers, col });
-    }
-    i = j - 1;
-  }
-  return out;
-}
+export { cellsOf, colsOf, ledgerLines, ledgerSections, mendCells, rowMendLog, setRowMendLog, splitRow, type LedgerLine } from "../adapters/ledger.js";
+import { joinRow, ledgerLines, rowMendLog, splitRow, type LedgerLine } from "../adapters/ledger.js";
 
 export const REVIEW_STATUS = /^review\b/i;
 
@@ -287,7 +225,7 @@ export const cellText = (s: string) =>
     .replace(/(?<!\\)\|/g, "/")
     .trim();
 
-export type RowEdit = { text: string; before: string; after: string; status: string } | { skip: string };
+export type RowEdit = { text: string; before: string; after: string; status: string; mended?: string } | { skip: string };
 
 /**
  * Rewrite row `ref`'s status cell in `text`: `next(current)` returns the new cell, or `{ skip }` to refuse (the row is
@@ -302,6 +240,7 @@ export function editRowStatus(text: string, ref: string, next: (status: string) 
   const status = pick.cells[pick.col.status] ?? "";
   const n = next(status);
   if (typeof n !== "string") return n;
+  if (pick.mended) rowMendLog(`${pick.mended}; the line is rewritten whole with this write`);
   const cells = [...pick.cells];
   while (cells.length <= pick.col.status) cells.push("");
   cells[pick.col.status] = cellText(n);
@@ -309,7 +248,7 @@ export function editRowStatus(text: string, ref: string, next: (status: string) 
   const cr = old.endsWith("\r") ? "\r" : "";
   const line = joinRow(cells) + cr;
   raw[pick.line] = line;
-  return { text: raw.join("\n"), before: old.replace(/\r$/, ""), after: line.replace(/\r$/, ""), status };
+  return { text: raw.join("\n"), before: old.replace(/\r$/, ""), after: line.replace(/\r$/, ""), status, ...(pick.mended ? { mended: pick.mended } : {}) };
 }
 
 /**
@@ -385,7 +324,7 @@ export function evidenceLinks(cell: string, o: { github?: string; fileRel: strin
     const u = url.replace(/[.,;:]+$/, "");
     if (!out.some((l) => l.url === u)) out.push({ url: u, title: title === url ? u : stripInline(title).trim() || u });
   };
-  const rest = cell.replace(MD_LINK, (all, label: string, target: string) => {
+  const rest = cell.replace(MD_LINK, (_all, label: string, target: string) => {
     if (/^https?:\/\//i.test(target)) add(target, label);
     else if (o.github && !/^[a-z]+:/i.test(target) && !target.startsWith("#")) {
       const rel = path.posix.normalize(path.posix.join(path.posix.dirname(o.fileRel), target.split("#")[0]));

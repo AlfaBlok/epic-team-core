@@ -1,3 +1,4 @@
+import { ticketIndexPath } from "../src/tickets/ticketIndex.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -59,7 +60,11 @@ describe("T33-S3 file dependencies", () => {
       trackDeps(() => readDoc(missing));
       noteFile(path.join(root, "fold/docs/spines"));
     });
-    expect([...deps.keys()].sort()).toEqual([path.join(root, "fold/docs/spines"), a, missing].sort());
+    // a read file's rows come from the ticket index: its file and WAL are stamps too, so a rebuilt index
+    // revalidates the memo; the spines read are the rest.
+    const db = ticketIndexPath();
+    expect([...deps.keys()].filter((k) => k !== db && k !== `${db}-wal`).sort()).toEqual([path.join(root, "fold/docs/spines"), a, missing].sort());
+    expect(deps.has(db) && deps.has(`${db}-wal`)).toBe(true);
     expect(depsChanged(deps)).toBe(false);
     write("fold/docs/spines/new.md", spine("N", ""));
     expect(depsChanged(deps)).toBe(true);
