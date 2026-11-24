@@ -29,3 +29,45 @@ describe("git log kept per HEAD", () => {
     expect(await git("/r", ["log"])).toBe("ok");
   });
 });
+
+// a HEAD move keeps every log whose paths the new commits did not touch (one git log per move)
+describe("git log kept across HEAD moves that do not touch its paths", () => {
+  it("a commit to another spine keeps the answer; a commit to its spine asks again; a rewrite asks everything again", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { gitOut } = await import("../src/freshness.js");
+    const { headSha } = await import("../src/gitRefs.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spawn-kept-"));
+    const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
+    const g = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { env, encoding: "utf8" });
+    const commit = (file: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+      g("add", ".");
+      g("commit", "-qm", `${file}: ${text}`);
+    };
+    g("init", "-q");
+    commit("docs/spines/a.md", "1");
+    commit("docs/spines/b.md", "1");
+    const calls: string[] = [];
+    const real = gitOut(10_000);
+    const git = headKeptLog((d, a) => (calls.push(a.join(" ")), real(d, a)), { head: headSha });
+    const logA = () => git(dir, ["log", "-n", "5", "--format=%s", "--", "docs/spines/a.md"]);
+    const logB = () => git(dir, ["log", "-n", "5", "--format=%s", "--", "docs/spines"]);
+    expect(await logA()).toBe("docs/spines/a.md: 1\n");
+    await logB();
+    expect(calls).toHaveLength(2);
+    commit("docs/spines/b.md", "2");
+    expect(await logA()).toBe("docs/spines/a.md: 1\n"); // kept: the move's one log said only b.md moved
+    expect(await logB()).toContain("docs/spines/b.md: 2"); // its folder was touched: asked again
+    expect(calls.filter((c) => c.startsWith("log -n")), JSON.stringify(calls)).toHaveLength(3);
+    expect(calls.filter((c) => c.startsWith("log --left-right"))).toHaveLength(1);
+    commit("docs/spines/a.md", "2");
+    expect(await logA()).toBe("docs/spines/a.md: 2\ndocs/spines/a.md: 1\n");
+    g("reset", "-q", "--hard", "HEAD~2");
+    commit("docs/other.md", "x");
+    expect(await logA()).toBe("docs/spines/a.md: 1\n"); // the a.md: 2 commit was left behind: asked again
+  });
+});

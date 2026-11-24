@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import type { Hono } from "hono";
 import type { DB } from "../db.js";
 import { DEFAULT_TENANT } from "../db.js";

@@ -1,4 +1,5 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -126,8 +126,8 @@ describe("products: each defined once", () => {
       expect(await products.one("nope")).toBeNull();
       expect(products.kit("live")).toEqual({ product: { id: "live", name: "Live" }, kit: expect.objectContaining({ id: "live" }), files: "https://files.example/live/" });
       expect(products.kit("other")).toBeNull();
-      expect(products.kitFile("live", "previews", "banner-x.webp")?.body.toString()).toBe("WEBP");
-      expect(products.kitFile("live", "previews", "../kit.json")).toBeNull();
+      expect((await products.kitFile("live", "previews", "banner-x.webp"))?.body.toString()).toBe("WEBP");
+      expect((await products.kitFile("live", "previews", "../kit.json"))).toBeNull();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -143,7 +143,7 @@ describe("products: each defined once", () => {
       expect(byId.get("house")?.kit).toBeUndefined();
       expect(pursuits.kit("live-testers")).toEqual({ pursuit: { id: "live-testers", name: "Five testers use Live" }, product: { id: "live", name: "Live" }, kit: expect.objectContaining({ id: "live" }), files: "https://files.example/live/" });
       expect(pursuits.kit("live-channels")?.product?.id).toBe("live");
-      expect(pursuits.kitFile("live-channels", "previews", "banner-x.webp")?.body.toString()).toBe("WEBP");
+      expect((await pursuits.kitFile("live-channels", "previews", "banner-x.webp"))?.body.toString()).toBe("WEBP");
       expect(pursuits.kit("house")).toBeNull();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

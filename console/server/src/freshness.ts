@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "./spawnHost.js";
 import { headSha, upstreamSha } from "./gitRefs.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,23 +33,77 @@ export const gitOut =
  * last moves (every scorecards build, every 20 s) and the claims' last commits (every lease check) ran one git spawn per
  * objective and per claim each time, forking the console's whole process: 2.5 s of a 90 s live profile on the main server.
  * Only `log` with no relative date is kept; anything else, or a checkout whose HEAD cannot be read, goes straight to git.
+ *
+ * A HEAD move no longer drops them all. One `git log --name-only` of the commits since the kept HEAD (per
+ * checkout, shared by every kept answer) says which files moved; a log of named paths (`-- docs/spines/x.md`) that none
+ * of those commits touched is the same answer and moves forward to the new HEAD. The main server commits every few
+ * minutes, and each commit used to re-run every objective's and claim's log; now only the ones whose spine it touched.
+ * A rewritten history (a commit left behind), a log with a revision, a glob or no paths is asked again.
  */
 export function headKeptLog(git: GitOut, o: { head?: (dir: string) => string | undefined; max?: number } = {}): GitOut {
   const head = o.head ?? headSha;
   const max = o.max ?? 2_000;
-  const kept = new Map<string, Promise<string>>();
-  return (dir, args) => {
+  type Kept = { p: Promise<string>; paths?: string[] };
+  const byDir = new Map<string, { head: string; kept: Map<string, Kept>; moving?: Promise<void> }>();
+  /** the paths a log names when its answer depends on them alone (no revision, no glob, from the checkout's top). */
+  const pathsOf = (dir: string, args: string[]): string[] | undefined => {
+    const at = args.indexOf("--");
+    if (at < 0 || at === args.length - 1) return undefined;
+    if (args.slice(1, at).some((a) => (!a.startsWith("-") && !/^\d+$/.test(a)) || /^--(all|branches|tags|remotes|glob|follow)\b/.test(a))) return undefined;
+    const paths = args.slice(at + 1);
+    if (paths.some((p) => !p || /[*?[\]:]/.test(p[0]) || /[*?[]/.test(p) || p.startsWith("/") || p.split("/").includes(".."))) return undefined;
+    return fs.existsSync(path.join(dir, ".git")) ? paths.map((p) => p.replace(/^\.\//, "").replace(/\/+$/, "")) : undefined;
+  };
+  const moveForward = (dir: string, st: { head: string; kept: Map<string, Kept> }, to: string): Promise<void> => {
+    const from = st.head;
+    const forward = [...st.kept.values()].some((k) => k.paths);
+    const drop = () => {
+      st.kept.clear();
+      st.head = to;
+    };
+    if (!forward) return Promise.resolve(drop());
+    return git(dir, ["log", "--left-right", "--format=%x01%m", "--name-only", `${from}...${to}`]).then(
+      (out) => {
+        const touched = new Set<string>();
+        let side = "";
+        for (const line of out.split("\n")) {
+          if (line.startsWith("\x01")) side = line.slice(1).trim();
+          else if (line && side) {
+            if (side === "<") return drop(); // a commit HEAD left behind: history was rewritten
+            touched.add(line);
+          }
+        }
+        for (const [key, k] of st.kept) {
+          const hit = !k.paths || [...touched].some((f) => k.paths!.some((p) => f === p || f.startsWith(`${p}/`) || p === "."));
+          if (hit) st.kept.delete(key);
+        }
+        st.head = to;
+      },
+      () => drop(),
+    );
+  };
+  return async (dir, args) => {
     const sha = args[0] === "log" && !args.some((a) => /^--(since|until|after|before)=.*(ago|now|today|yesterday)/i.test(a)) ? head(dir) : undefined;
     if (!sha) return git(dir, args);
-    const key = `${dir}\0${sha}\0${args.join("\0")}`;
-    let p = kept.get(key);
-    if (!p) {
-      p = git(dir, args);
-      p.catch(() => kept.delete(key));
-      kept.set(key, p);
-      if (kept.size > max) kept.delete(kept.keys().next().value!);
+    let st = byDir.get(dir);
+    if (!st) byDir.set(dir, (st = { head: sha, kept: new Map() }));
+    if (st.head !== sha) {
+      const s = st;
+      s.moving ??= moveForward(dir, s, sha).finally(() => (s.moving = undefined));
+      await s.moving;
+      if (s.head !== sha) return git(dir, args); // moved again meanwhile: answer fresh, the next call catches up
     }
-    return p;
+    const key = args.join("\0");
+    let k = st.kept.get(key);
+    if (!k) {
+      const kk: Kept = { p: git(dir, args), paths: pathsOf(dir, args) };
+      k = kk;
+      const s = st;
+      kk.p.catch(() => s.kept.get(key) === kk && s.kept.delete(key));
+      st.kept.set(key, kk);
+      if (st.kept.size > max) st.kept.delete(st.kept.keys().next().value!);
+    }
+    return k.p;
   };
 }
 

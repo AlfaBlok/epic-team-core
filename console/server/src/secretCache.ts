@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "./spawnHost.js";
 import fs from "node:fs";
 import { keyIndexFile } from "./identity.js";
 

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { groupRun } from "../spawnHost.js";
 import { healedLine, lockHealer, type LockHealer } from "../gitStaleLock.js";
 import { CONTENTION_RETRY_MS, gitContention, withRepoLock } from "../repoLock.js";
 import { recoverPull } from "./syncRecover.js";
@@ -22,46 +22,19 @@ const OUT = Symbol.for("console.gitRunner.stdout");
  * spine writer). No prompt ever waits for a terminal.
  */
 export const gitRunner = (timeoutMs = 30_000): GitOutRunner => {
-  const run: GitOutRunner = (repoDir, args) =>
-    new Promise((resolve, reject) => {
-      let err = "";
-      let out = "";
-      let done = false;
-      let child: ReturnType<typeof spawn>;
-      const finish = (code: number | null, why?: string) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (code === 0) return resolve(out);
-        // the first error:/fatal: line (it names the lock file); git's last line is often "remove the file manually".
-        const lines = err.trim().split("\n").filter(Boolean);
-        reject(new Error(lines.find((l) => /^(error|fatal):/.test(l)) || why || lines.pop() || `git ${args[0]} failed`));
-      };
-      try {
-        child = spawn("git", ["-C", repoDir, ...args], {
-          detached: true,
-          stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=15" },
-        });
-      } catch (e) {
-        reject(e as Error);
-        return;
-      }
-      child.stderr?.on("data", (d: Buffer) => void (err.length < 1_000_000 && (err += d.toString())));
-      child.stdout?.on("data", (d: Buffer) => void (out.length < 4_000_000 && (out += d.toString())));
-      const timer = setTimeout(() => {
-        try {
-          if (child.pid) process.kill(-child.pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        finish(null, `timed out after ${timeoutMs} ms (killed with its children)`);
-      }, timeoutMs);
-      child.on("error", (e) => finish(null, e.message));
-      // stderr may still be held by a child: never wait for it past a moment
-      child.on("exit", (code) => void setTimeout(() => finish(code), 500).unref?.());
-      child.on("close", (code) => finish(code));
+  // started by the spawn host (its own process group there, the whole group killed on timeout)
+  const run: GitOutRunner = async (repoDir, args) => {
+    const r = await groupRun("git", ["-C", repoDir, ...args], {
+      timeout: timeoutMs,
+      cap: 4_000_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=15" },
     });
+    if (r.code === 0 && !r.timedOut) return r.out;
+    // the first error:/fatal: line (it names the lock file); git's last line is often "remove the file manually".
+    const lines = r.err.trim().split("\n").filter(Boolean);
+    const why = r.timedOut ? `timed out after ${timeoutMs} ms (killed with its children)` : r.error ?? undefined;
+    throw new Error(lines.find((l) => /^(error|fatal):/.test(l)) || why || lines.pop() || `git ${args[0]} failed`);
+  };
   return Object.assign(run, { [OUT]: true });
 };
 

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import path from "node:path";
 import { HEAL_SCRIPT, healedLine, lockHealer, localHealRunner, type HealResult, type HealRunner } from "../gitStaleLock.js";
 import { type HostId, mainHost, workerHost } from "../identity.js";

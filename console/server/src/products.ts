@@ -243,7 +243,7 @@ export function createProducts(o: { reposRoot: string; pursuits: () => Promise<P
     kitFile(id: string, kind: "previews" | "fonts", name: string) {
       const r = refs();
       const p = r?.list.find((x) => x.id === id);
-      return r && p?.kit ? readKitFile(r.root, p.kit, kind, name) : null;
+      return r && p?.kit ? readKitFile(r.root, p.kit, kind, name) : Promise.resolve(null);
     },
   };
 }

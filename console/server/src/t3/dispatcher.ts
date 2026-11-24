@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { mainHost } from "../identity.js";
 
 /** world-aware pick arguments (plan §6b); the console passes the persona's provider + model setting. */

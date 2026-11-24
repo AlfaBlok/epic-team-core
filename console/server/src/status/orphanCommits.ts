@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { originMainSha } from "../gitRefs.js";
 import type { Hono } from "hono";
 import { movingLimit } from "../cycle/movement.js";

@@ -223,11 +223,11 @@ describe("pursuits: a social kit inside the console", () => {
       expect(body.pursuits.find((p) => p.id === "bad")?.kit).toBeUndefined();
       expect(svc.kit(id)).toEqual({ pursuit: { id, name: file.pursuits[0].name }, kit: { id: "live", name: "Live", tagline: "Agents that post for you." }, files: "http://files.example/live/assets/" });
       expect(svc.kit("bad")).toBeNull();
-      expect(svc.kitFile(id, "previews", "banner-x.webp")?.type).toBe("image/webp");
-      expect(svc.kitFile(id, "fonts", "funnel-sans.woff2")?.body.toString()).toBe("WOFF");
-      expect(svc.kitFile(id, "previews", "../kit.json")).toBeNull();
-      expect(svc.kitFile(id, "previews", "kit.json")).toBeNull();
-      expect(svc.kitFile(id, "fonts", "banner-x.webp")).toBeNull();
+      expect((await svc.kitFile(id, "previews", "banner-x.webp"))?.type).toBe("image/webp");
+      expect((await svc.kitFile(id, "fonts", "funnel-sans.woff2"))?.body.toString()).toBe("WOFF");
+      expect((await svc.kitFile(id, "previews", "../kit.json"))).toBeNull();
+      expect((await svc.kitFile(id, "previews", "kit.json"))).toBeNull();
+      expect((await svc.kitFile(id, "fonts", "banner-x.webp"))).toBeNull();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -235,7 +235,7 @@ describe("pursuits: a social kit inside the console", () => {
 });
 
 describe("pursuits: a kit preview missing on disk is read from git", () => {
-  it("a checkout without media (sparse) still serves the committed preview", () => {
+  it("a checkout without media (sparse) still serves the committed preview", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "pursuits-kit-git-"));
     const home = path.join(root, "home_repo");
     const kitDir = path.join(home, "docs/kits/live");
@@ -253,8 +253,8 @@ describe("pursuits: a kit preview missing on disk is read from git", () => {
     try {
       const svc = createPursuits({ reposRoot: root, board: () => BOARD, git: gitOut(10_000), home: "home_repo" });
       const id = file.pursuits[0].id as string;
-      expect(svc.kitFile(id, "previews", "banner-x.webp")?.body.toString()).toBe("WEBP-IN-GIT");
-      expect(svc.kitFile(id, "previews", "nothing-here.webp")).toBeNull();
+      expect((await svc.kitFile(id, "previews", "banner-x.webp"))?.body.toString()).toBe("WEBP-IN-GIT");
+      expect((await svc.kitFile(id, "previews", "nothing-here.webp"))).toBeNull();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

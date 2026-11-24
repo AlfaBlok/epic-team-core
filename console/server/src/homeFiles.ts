@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "./spawnHost.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -190,18 +190,6 @@ export function cleanSubject(subj: string): string {
 export async function trackedFilesAsync(repoDir: string, roots: string[]): Promise<string[]> {
   if (!roots.length) return [];
   return (await gitOut(repoDir, ["ls-files", "-z", "--", ...roots.map((r) => r || ".")])).split("\0").filter(Boolean);
-}
-
-/** the files git tracks in a repo under these folders (one folder's list, small: read at once). */
-export function trackedFiles(repoDir: string, roots: string[]): string[] {
-  if (!roots.length) return [];
-  try {
-    return execFileSync("git", ["-C", repoDir, "ls-files", "-z", "--", ...roots.map((r) => r || ".")], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] })
-      .split("\0")
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
 }
 
 const humanize = (s: string) =>
@@ -444,7 +432,7 @@ export type FileAnswer = { status: 200; type: string; body: Buffer | string; san
  * the console's sign-in), images and assets as themselves, a note as calm readable text, a folder as its list of files.
  * Only paths a tab homes, in a repo its product names, and never code.
  */
-export function readHomeFile(o: { wheels: HomeWheel[]; repo: string; rel: string; repoDir: string | undefined }): FileAnswer {
+export async function readHomeFile(o: { wheels: HomeWheel[]; repo: string; rel: string; repoDir: string | undefined }): Promise<FileAnswer> {
   const rel = o.rel.replace(/^\/+/, "");
   if (!o.repoDir || rel.split("/").some((s) => s === ".." || s === ".") || rel.includes("\0")) return { status: 400, error: "bad path" };
   const abs = path.join(o.repoDir, rel);
@@ -453,7 +441,7 @@ export function readHomeFile(o: { wheels: HomeWheel[]; repo: string; rel: string
   const clean = rel.replace(/\/+$/, "");
   if (isDir) {
     // a folder: the homed files inside it.
-    const files = trackedFiles(o.repoDir, [clean]).filter((f) => !CODE.test(f) && homedAnywhere(o.wheels, o.repo, f));
+    const files = (await trackedFilesAsync(o.repoDir, [clean])).filter((f) => !CODE.test(f) && homedAnywhere(o.wheels, o.repo, f));
     if (!files.length) return { status: 404, error: "nothing homed here" };
     // relative links: below a folder address ending in `/` they start at the folder, else at its parent.
     const base = rel.endsWith("/") ? "" : `${encodeURIComponent(path.basename(clean))}/`;

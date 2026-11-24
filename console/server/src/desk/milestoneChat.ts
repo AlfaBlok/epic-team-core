@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import path from "node:path";
 import type { Milestone, Persona } from "../store.js";
 import { DEFAULT_DESK_REPO, readRemit } from "./desk.js";

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import fs from "node:fs";
 import { inside } from "../adapters/doc.js";
 import { proseLines, stripInline } from "../adapters/markdown.js";
@@ -44,13 +44,13 @@ export function nextAskCode(text: string, past = ""): string {
 }
 
 /** every ask line `rel` ever had in the checkout's history (added or removed), `""` when git cannot tell. */
-export function pastAskLines(repoDir: string, rel: string): string {
-  try {
-    const out = execFileSync("git", ["-C", repoDir, "log", "--format=", "-p", "-U0", "-G", "[-*] \\[[as]", "--", rel], { encoding: "utf8", timeout: 20_000, maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "ignore"] });
-    return out.split("\n").filter((l) => /^[-+]/.test(l) && !/^(?:\+\+\+|---) /.test(l)).map((l) => l.slice(1)).join("\n");
-  } catch {
-    return "";
-  }
+export function pastAskLines(repoDir: string, rel: string): Promise<string> {
+  // started by the spawn host, the console's thread never waits on this walk of the file's history
+  return new Promise((resolve) =>
+    execFile("git", ["-C", repoDir, "log", "--format=", "-p", "-U0", "-G", "[-*] \\[[as]", "--", rel], { encoding: "utf8", timeout: 20_000, maxBuffer: 64 << 20 }, (err, out) =>
+      resolve(err ? "" : out.split("\n").filter((l) => /^[-+]/.test(l) && !/^(?:\+\+\+|---) /.test(l)).map((l) => l.slice(1)).join("\n")),
+    ),
+  );
 }
 
 export interface RaisedAsk {
@@ -128,10 +128,13 @@ export async function raiseAsk(d: RaiseDeps, m: Milestone, a: RaisedAsk, rel?: s
   let code = "";
   let line = -1;
   let already: string | undefined;
+  let past = "";
   const res: SpineWrite = await d.writer.edit({
     repoDir: repo.path,
     path,
     label: "ask",
+    // the file's past ask lines (a freed code is never reused), read once the checkout is open
+    prepare: async () => void (past = await pastAskLines(repo.path, path)),
     edit: (text, date) => {
       const dup = parseAsks(text).find((x) => x.state === "open" && sameText(x.question) === sameText(oneLine(a.question)));
       if (dup) {
@@ -140,7 +143,7 @@ export async function raiseAsk(d: RaiseDeps, m: Milestone, a: RaisedAsk, rel?: s
         line = dup.line ?? -1;
         return { text, msg: "", body: "" };
       }
-      code = nextAskCode(text, pastAskLines(repo.path, path));
+      code = nextAskCode(text, past);
       const put = appendUnderWaiting(text, askLine(code, a, date, owner.handle));
       line = put.line;
       return {

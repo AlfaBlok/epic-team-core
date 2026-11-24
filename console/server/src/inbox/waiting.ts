@@ -1,7 +1,7 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
 import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
 import { createAskLogReader, repeatProblem, sizeProblem, topicsIn, type PriorAnswer } from "./askRepeat.js";
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -411,16 +411,40 @@ const firstMemoKey = (key: string) => `first:${createHash("sha1").update(key).di
 
 const blameCache = new Map<string, { key: string; times: Promise<(string | undefined)[] | undefined>; failedAt?: number }>();
 
-/** blob sha of `rel` at HEAD, per (HEAD, file): one `git rev-parse` per file per commit, not a blame. */
+/**
+ * blob sha of `rel` at HEAD, per (HEAD, file). The files asked for in one turn of the loop are read with one
+ * `git ls-tree` per (checkout, HEAD), not one `git rev-parse` each: every HEAD move asked again for every spine with an
+ * ask, a git start per spine on the console's thread.
+ */
 const blobMemo = new Map<string, Promise<string | undefined>>();
+const blobBatch = new Map<string, { repoDir: string; head: string; rels: Map<string, (v: string) => void> }>();
 function blobAtHead(repoDir: string, rel: string, head: string): Promise<string | undefined> {
   const k = `${repoDir}\0${head}\0${rel}`;
   let p = blobMemo.get(k);
   if (!p) {
     if (blobMemo.size > 4000) blobMemo.clear();
-    p = new Promise((resolve) =>
-      execFile("git", ["-C", repoDir, "rev-parse", "--verify", "-q", `${head}:${rel}`], { timeout: 5_000 }, (err, out) => resolve(err ? "none" : out.trim())),
-    );
+    p = new Promise<string>((resolve) => {
+      const bk = `${repoDir}\0${head}`;
+      let b = blobBatch.get(bk);
+      if (!b) {
+        const batch = (b = { repoDir, head, rels: new Map<string, (v: string) => void>() });
+        blobBatch.set(bk, batch);
+        setImmediate(() => {
+          blobBatch.delete(bk);
+          const rels = [...batch.rels.keys()];
+          execFile("git", ["-C", repoDir, "ls-tree", "-z", "--full-tree", head, "--", ...rels], { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
+            const found = new Map<string, string>();
+            if (!err)
+              for (const rec of String(out).split("\0")) {
+                const m = /^\d+ blob ([0-9a-f]+)\t(.*)$/s.exec(rec);
+                if (m) found.set(m[2], m[1]);
+              }
+            for (const [r, done] of batch.rels) done(found.get(r) ?? "none");
+          });
+        });
+      }
+      b.rels.set(rel, resolve);
+    });
     blobMemo.set(k, p);
   }
   return p;

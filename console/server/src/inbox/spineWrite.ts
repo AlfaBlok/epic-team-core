@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { spawn } from "node:child_process";
+import { groupRun } from "../spawnHost.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -502,45 +502,17 @@ type Run = (args: string[], o?: { timeout?: number }) => Promise<{ ok: boolean; 
  * the result is returned on the timeout itself, whatever the children do.
  */
 export function runner(dir: string, env: NodeJS.ProcessEnv): Run {
-  return (args, o) =>
-    new Promise((resolve) => {
-      const limit = o?.timeout ?? git_timeout;
-      let out = "";
-      let err = "";
-      let done = false;
-      const tail = (s: string) => s.trim().split("\n").slice(-3).join(" ").slice(0, 400);
-      const finish = (ok: boolean, why?: string) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve({ ok, out: out.trim(), err: tail(err) || why || "", stderr: err });
-      };
-      let child: ReturnType<typeof spawn>;
-      try {
-        child = spawn("git", ["-C", dir, ...args], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-      } catch (e) {
-        resolve({ ok: false, out: "", err: (e as Error).message });
-        return;
-      }
-      const cap = 8 * 1024 * 1024;
-      child.stdout?.on("data", (d: Buffer) => void (out.length < cap && (out += d.toString())));
-      child.stderr?.on("data", (d: Buffer) => void (err.length < cap && (err += d.toString())));
-      const timer = setTimeout(() => {
-        try {
-          if (child.pid) process.kill(-child.pid, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-        err += `${err ? "\n" : ""}git ${args[0]} timed out after ${limit} ms (killed with its children)`;
-        finish(false);
-      }, limit);
-      child.on("error", (e) => finish(false, e.message));
-      child.on("exit", (code, signal) => {
-        // stdio may still be draining: give it a moment, never wait for a child that holds the pipes
-        setTimeout(() => finish(code === 0, `git ${args[0]} exited ${code ?? signal}`), 500).unref?.();
-      });
-      child.on("close", (code, signal) => finish(code === 0, `git ${args[0]} exited ${code ?? signal}`));
-    });
+  // started by the spawn host (its own process group there), never forked from the console
+  return async (args, o) => {
+    const limit = o?.timeout ?? git_timeout;
+    const tail = (s: string) => s.trim().split("\n").slice(-3).join(" ").slice(0, 400);
+    const r = await groupRun("git", ["-C", dir, ...args], { env, timeout: limit, cap: 8 * 1024 * 1024 });
+    if (r.error && r.code === null && !r.timedOut) return { ok: false, out: r.out.trim(), err: tail(r.err) || r.error, stderr: r.err };
+    let err = r.err;
+    if (r.timedOut) err += `${err ? "\n" : ""}git ${args[0]} timed out after ${limit} ms (killed with its children)`;
+    const ok = !r.timedOut && r.code === 0;
+    return { ok, out: r.out.trim(), err: tail(err) || `git ${args[0]} exited ${r.code ?? r.signal}`, stderr: err };
+  };
 }
 
 type WriteInput = {
@@ -569,6 +541,11 @@ export type EditInput = {
   label: string;
   date?: string;
   edit: (text: string, date: string) => FileEdit;
+  /**
+   * awaited once the checkout is open (guards passed, fetched and fast-forwarded), before the file is read and `edit`
+   * runs: what `edit` needs from git (the file's history) is read here, off the console's thread, and is fresh.
+   */
+  prepare?: () => Promise<void>;
   /**
    * false commits with `--no-verify` (the repo's pre-commit hook is not run). Only for a one-field edit the
    * console computes and checks itself (a snooze date on an existing ask line): the epicspine hook spends 2-6 s scanning
@@ -1299,6 +1276,7 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     const c = await open(o, rel, "edit" in o && !fetch ? o.fetchFreshMs : undefined);
     if ("status" in c) return c;
     const { g } = c;
+    if ("edit" in o && o.prepare) await o.prepare();
     // a press write (group) skips the hooks after the secret check and pushes in the background
     const press = "edit" in o && !!o.group;
     const commitAndPush = (files: string[], msg: string, body: string, flip: { before: string; after: string } | undefined) =>
@@ -1455,6 +1433,7 @@ export function createSpineWriter(opts: SpineWriterOptions = {}): SpineWriter {
     const c = await open(first, first.path, freshMs);
     if ("status" in c) return list.map((i) => ({ ...c, path: i.path }));
     const { g, ms } = c;
+    for (const o of list) if (o.prepare) await o.prepare();
     const before = new Map<string, string>(); // each file's text before the batch ("" = it did not exist)
     const wrote: { i: number; msg: string; body: string }[] = [];
     const restore = async () => {

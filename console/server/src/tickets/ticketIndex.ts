@@ -7,7 +7,7 @@
 // the file is a cache of it, rebuilt by git hooks after every commit, pull and push, and by `refresh` after the
 // console's own writes and pulls. The console never writes it: builds run in ticket_index.py's own process.
 import Database from "better-sqlite3";
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

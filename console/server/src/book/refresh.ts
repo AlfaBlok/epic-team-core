@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import fs from "node:fs";
 import type { DB } from "../db.js";
 import { inside } from "../adapters/doc.js";

@@ -1,6 +1,6 @@
 import "./fetchSafeInstall.js"; // first: every outgoing answer is read in full (fetchSafe.ts)
 import { timerPhasesOn } from "./timerPhase.js";
-import { execFile } from "node:child_process";
+import { execFile, startSpawnHost } from "./spawnHost.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -37,6 +37,10 @@ import { hooks } from "./plug/hooks.js";
 import { createStartGate, SESSION_START_GAP_MS } from "./cycle/startGate.js";
 import { loadHosted } from "./plug/hosted.js";
 import { stateDir } from "./identity.js";
+
+// the helper that starts every program (git, ssh, python) starts now, while this process is small, so its one
+// fork is cheap and no later call forks the console.
+startSpawnHost();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // the hosted layer (our plugs and hooks) when its folder is here and CONSOLE_ONE_TEAM is not 1; the core runs without it.

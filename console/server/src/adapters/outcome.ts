@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import type { Dod } from "../dod.js";
 import type { Outcome } from "./spines.js";
 import { statusWordOf } from "./tree.js";

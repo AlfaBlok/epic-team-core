@@ -108,20 +108,20 @@ describe("homed files per tab", () => {
 describe("opening a homed file", () => {
   const open = (repo: string, rel: string) => readHomeFile({ wheels: readHomeWheels(home), repo, rel, repoDir: dirOf(repo) });
   it("serves a page sandboxed, a note as readable text and a folder as its list", async () => {
-    const p = open("home-repo", "docs/status/e907-s3/proof.html");
+    const p = await open("home-repo", "docs/status/e907-s3/proof.html");
     expect(p).toMatchObject({ status: 200, type: "text/html; charset=utf-8", sandbox: true });
-    const n = open("home-repo", "docs/status/2026-11-18-what-runs.md");
+    const n = await open("home-repo", "docs/status/2026-11-18-what-runs.md");
     expect(n.status).toBe(200);
     expect(String((n as { body: string }).body)).toContain("What runs on a schedule");
-    const f = open("home-repo", "docs/status/advisor/");
+    const f = await open("home-repo", "docs/status/advisor/");
     expect(String((f as { body: string }).body)).toContain('href="chart.png"');
-    expect(open("home-repo", "docs/status/e907-s3/homes-1280.webp")).toMatchObject({ status: 200, type: "image/webp" });
+    expect(await open("home-repo", "docs/status/e907-s3/homes-1280.webp")).toMatchObject({ status: 200, type: "image/webp" });
   });
   it("refuses code, files no tab homes and paths that climb out", async () => {
-    expect(open("home-repo", "docs/status/e907-s3/build.py").status).toBe(404);
-    expect(open("home-repo", "docs/totems/epicteam.json").status).toBe(404);
-    expect(open("home-repo", "docs/status/../../etc/passwd").status).toBe(400);
-    expect(open("home-repo", "docs/status/%2e%2e/x").status).toBe(404);
+    expect((await open("home-repo", "docs/status/e907-s3/build.py")).status).toBe(404);
+    expect((await open("home-repo", "docs/totems/epicteam.json")).status).toBe(404);
+    expect((await open("home-repo", "docs/status/../../etc/passwd")).status).toBe(400);
+    expect((await open("home-repo", "docs/status/%2e%2e/x")).status).toBe(404);
   });
 });
 

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { promisify } from "node:util";
 import { ownerPattern } from "../identity.js";
 

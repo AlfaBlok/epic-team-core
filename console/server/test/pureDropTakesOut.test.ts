@@ -115,7 +115,7 @@ describe("in a temp repo", () => {
     const gone = await retireAsk(deps(), m, REL, "T9-A2", "credits are back");
     expect(gone.status).toBe("written");
     expect(onMain()).not.toContain("T9-A2");
-    expect(pastAskLines(repo, REL)).toContain("[ask T9-A2:");
+    expect(await pastAskLines(repo, REL)).toContain("[ask T9-A2:");
     const second = await raiseAsk(deps(), m, { question: "Credits are out again: top up?", askedBy: "the credits gate" });
     expect(second).toMatchObject({ status: "written", code: "T9-A3" });
     expect(onMain()).toContain("Waiting on: Sam: T9-A1; Sam: T9-A3\n");

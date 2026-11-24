@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { headOf } from "../adapters/gitHead.js";
 import { parseDoc, isDoneStatus } from "../adapters/doc.js";
 import type { Seat } from "../adapters/seats.js";

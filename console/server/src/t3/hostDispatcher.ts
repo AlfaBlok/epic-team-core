@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { runnerDispatcher, type Dispatcher } from "./dispatcher.js";
 import { type HostId, workerHost } from "../identity.js";
 

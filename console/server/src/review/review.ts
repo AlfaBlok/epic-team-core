@@ -1,6 +1,6 @@
 import { repoRowIds } from "../status/rowIds.js";
 import { HIS_WORDS_MAX } from "../hisWords.js";
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import { secureDeep } from "../steps/secureLinks.js";
 import { TEXT_WALL_PREFIX, isPlan, planShapeProblem, textWallProblem } from "./pageShape.js";
 import fs from "node:fs";

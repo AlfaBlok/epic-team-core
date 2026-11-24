@@ -82,6 +82,7 @@ import { repoKey } from "./adapters/repoNames.js";
 import { createPursuits, effortForSpine, epicHeading, objectiveIds, priorityLines } from "./pursuits.js";
 import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
 import { createHomeTabs, readHomeFile, readHomeWheels } from "./homeFiles.js";
+import { spawnHostStats } from "./spawnHost.js";
 import { createPlacer } from "./homePlace.js";
 import { wheelTrackers } from "./trackers.js";
 import { isStepId, isStepLabel, labelEdit, PERSONA_LOG_LABELS, readPersonaLog } from "./personaLog.js";
@@ -783,7 +784,7 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null, scans: beat.scans ?? null, saved: beat.saved ?? null };
-    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), spawnHost: spawnHostStats(), plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
@@ -2287,13 +2288,13 @@ export function createApp(
   const homeTabs = createHomeTabs({ wheels: () => readHomeWheels(totemHome()), repoDir: (r) => resolveRepo(read.reposRoot, r)?.path });
   const placeHomes = createPlacer(totemHome);
   const homesHome = () => { const w = credentialWorld(); return !w || w === DEFAULT_TENANT || w === socialWorld(); };
-  api.get("/homes/file/:repo/*", (c) => {
+  api.get("/homes/file/:repo/*", async (c) => {
     if (!homesHome()) return c.json({ error: { code: "not_found" } }, 404);
     const repo = c.req.param("repo");
     const prefix = `/api/homes/file/${repo}/`;
     const at = c.req.path.indexOf(prefix);
     const rel = at < 0 ? "" : decodeURIComponent(c.req.path.slice(at + prefix.length));
-    const a = readHomeFile({ wheels: readHomeWheels(totemHome()), repo, rel, repoDir: resolveRepo(read.reposRoot, repo)?.path });
+    const a = await readHomeFile({ wheels: readHomeWheels(totemHome()), repo, rel, repoDir: resolveRepo(read.reposRoot, repo)?.path });
     if (a.status !== 200) return c.json({ error: a.error }, a.status);
     const headers: Record<string, string> = { "content-type": a.type, "cache-control": "private, max-age=60", "x-content-type-options": "nosniff" };
     // a team page runs in its own origin, never with the console's sign-in (scripts and links still work).
@@ -2382,10 +2383,10 @@ export function createApp(
     const k = pursuits.kit(c.req.param("id"));
     return k ? c.json(k) : c.json({ error: "no_kit" }, 404);
   });
-  api.get("/pursuits/:id/kit/:kind/:name", (c) => {
+  api.get("/pursuits/:id/kit/:kind/:name", async (c) => {
     const kind = c.req.param("kind");
     if (kind !== "previews" && kind !== "fonts") return c.json({ error: "not_found" }, 404);
-    const f = pursuits.kitFile(c.req.param("id"), kind, c.req.param("name"));
+    const f = await pursuits.kitFile(c.req.param("id"), kind, c.req.param("name"));
     return f ? c.body(new Uint8Array(f.body), 200, { "Content-Type": f.type, "Cache-Control": "private, max-age=300" }) : c.json({ error: "not_found" }, 404);
   });
   // the Products section: each product's deck parts, its kit and the objectives naming it.
@@ -2398,10 +2399,10 @@ export function createApp(
     const k = products.kit(c.req.param("id"));
     return k ? c.json(k) : c.json({ error: "no_kit" }, 404);
   });
-  api.get("/products/:id/kit/:kind/:name", (c) => {
+  api.get("/products/:id/kit/:kind/:name", async (c) => {
     const kind = c.req.param("kind");
     if (kind !== "previews" && kind !== "fonts") return c.json({ error: "not_found" }, 404);
-    const f = products.kitFile(c.req.param("id"), kind, c.req.param("name"));
+    const f = await products.kitFile(c.req.param("id"), kind, c.req.param("name"));
     return f ? c.body(new Uint8Array(f.body), 200, { "Content-Type": f.type, "Cache-Control": "private, max-age=300" }) : c.json({ error: "not_found" }, 404);
   });
   // the owner's "wrong place" marks on a landing report's tree, one commit each in the code repo (landing.ts).

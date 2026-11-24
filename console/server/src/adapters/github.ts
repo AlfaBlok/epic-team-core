@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../spawnHost.js";
 import type { Ticket } from "./milestone.js";
 
 export type IssueLister = (slug: string) => Promise<Ticket[]>;

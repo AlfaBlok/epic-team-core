@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "./spawnHost.js";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveRepo } from "./adapters/repos.js";
@@ -733,9 +733,9 @@ export function createPursuits(o: { reposRoot: string; board: () => BoardView | 
       return kit ? { pursuit: { id, name: ref.name }, ...(ref.product ? { product: ref.product } : {}), kit, ...(ref.kit.files ? { files: ref.kit.files } : {}) } : null;
     },
     /** A kit's preview (previews/<name>.webp) or font (../fonts/<name>.woff2), by a plain file name only. */
-    kitFile(id: string, kind: "previews" | "fonts", name: string): { body: Buffer; type: string } | null {
+    kitFile(id: string, kind: "previews" | "fonts", name: string): Promise<{ body: Buffer; type: string } | null> {
       const ref = kitRef(id);
-      return ref ? readKitFile(ref.root, ref.kit, kind, name) : null;
+      return ref ? readKitFile(ref.root, ref.kit, kind, name) : Promise.resolve(null);
     },
   };
   function kitRef(id: string): { root: string; name: string; kit: PursuitKitRef; product?: { id: string; name: string } } | null {
@@ -766,7 +766,7 @@ export function readKit(root: string, ref: PursuitKitRef): Record<string, unknow
 }
 
 /** A kit's preview (previews/<name>.webp) or font (../fonts/<name>.woff2), by a plain file name only. */
-export function readKitFile(root: string, ref: PursuitKitRef, kind: "previews" | "fonts", name: string): { body: Buffer; type: string } | null {
+export async function readKitFile(root: string, ref: PursuitKitRef, kind: "previews" | "fonts", name: string): Promise<{ body: Buffer; type: string } | null> {
   const ext = kind === "previews" ? "webp" : "woff2";
   if (!new RegExp(`^[a-z0-9][a-z0-9-]*\\.${ext}$`).test(name)) return null;
   const rel = kind === "previews" ? path.posix.join(ref.dir, "previews", name) : path.posix.join(path.posix.dirname(ref.dir), "fonts", name);
@@ -776,11 +776,11 @@ export function readKitFile(root: string, ref: PursuitKitRef, kind: "previews" |
   } catch {
     /* not on disk: a checkout without media (sparse) still holds the file in git */
   }
-  try {
-    return { body: execFileSync("git", ["-C", root, "show", `HEAD:${rel}`], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }), type };
-  } catch {
-    return null;
-  }
+  // started by the spawn host, never on the console's thread
+  const body = await new Promise<Buffer | null>((resolve) =>
+    execFile("git", ["-C", root, "show", `HEAD:${rel}`], { encoding: "buffer", timeout: 5_000, maxBuffer: 8 * 1024 * 1024 }, (err, out) => resolve(err ? null : out)),
+  );
+  return body ? { body, type } : null;
 }
 
 /** GET /api/pursuits/<id>/kit: the kit as its kit.json holds it, the pursuit it belongs to, and the full-size file store. */
