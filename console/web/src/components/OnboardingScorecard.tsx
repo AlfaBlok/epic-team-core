@@ -31,7 +31,8 @@ const C = {
  */
 export const STEP_SCREENS: Record<OnboardingTick["id"], { to: string; screen: ScreenId; label: string } | null> = {
   signin: null,
-  vault: null,
+  // the vault step's own screen, Connect your socials.
+  vault: { to: "/socials", screen: "browserAuth", label: "Connect your socials" },
   world: null,
   repos: null,
   seats: null,
@@ -228,7 +229,6 @@ function StepDetail({ s, t, chat, has, className }: { s: Onboarding; t: Onboardi
           {STEP_SCREENS[t.id]!.label}
         </Link>
       )}
-      {t.state !== "done" && t.id === "vault" && <p style={{ color: C.muted }}>Its own screen is being built. Until then your desk walks you through it.</p>}
       {t.state !== "done" && chat && (
         <Link to="/chat" className="text-sm underline" style={{ color: C.accent }}>
           Stuck? Tell your desk

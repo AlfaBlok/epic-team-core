@@ -1,4 +1,4 @@
-import type { Onboarding, OnboardingTick } from "@/api";
+import type { Onboarding, OnboardingTick, Socials } from "@/api";
 import { ownerName, socialWorld } from "@/lib/identity";
 
 /**
@@ -34,5 +34,22 @@ export function mockOnboarding(world = socialWorld()): Onboarding {
       { name: "X_BEARER_TOKEN (x-mcp)", kind: "key", state: "red", why: "The platform lends this key. Your team needs its own." },
     ],
     readAt: "2026-11-11T00:00:00.000Z",
+  };
+}
+
+/** the mock's Connect your socials, a customer half way (helper confirmed, X saved). */
+export function mockSocials(world = socialWorld()): Socials {
+  const ids = [["x", "X"], ["reddit", "Reddit"], ["linkedin", "LinkedIn"], ["instagram", "Instagram"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
+  return {
+    world,
+    stage: "ready",
+    helper: { address: `${world}-vault@example.com`, server: "https://vault.bitwarden.com", state: "confirmed", at: new Date().toISOString() },
+    owner: null,
+    org: "Example team",
+    socials: ids.map(([id, label]) => ({ id, label, inVault: id === "x", lastRead: null })),
+    xConnected: true,
+    connected: 1,
+    platform: false,
+    working: false,
   };
 }

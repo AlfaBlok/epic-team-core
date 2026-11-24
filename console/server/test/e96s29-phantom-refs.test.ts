@@ -37,6 +37,9 @@ describe("E996-S29 the ask gate holds an ask naming a box or button its card doe
     expect(phantomRefProblem({ ask: "provide", question: "Create one Cloudflare API token for the team", secret: { app: "acme", name: "CF_TOKEN" } })).toBeUndefined();
     // a provide ask for words, not a key, needs no box
     expect(phantomRefProblem({ ask: "provide", question: "Read the dossier and answer its open questions: budget, timing, photos" })).toBeUndefined();
+    // an objective's key results are words to talk about, never a key to paste
+    expect(phantomRefProblem({ ask: "provide", question: "You answer: tell me how the key results of a campaign sit next to your key result" })).toBeUndefined();
+    expect(phantomRefProblem({ ask: "provide", question: "You answer: send us the new API key results page token" })).toMatch(/asks Sam for a key/);
   });
 
   it("holds an ask that sends him to press Approve on a card with no Approve button", () => {

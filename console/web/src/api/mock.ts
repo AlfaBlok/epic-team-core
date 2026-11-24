@@ -16,7 +16,7 @@ import { CAMPAIGN_PRODUCT_PARTS, campaignProductFile, campaignTarget, computeMot
 import { sampleCampaignProduct, sampleProduct, sampleMotionSpines, withFeatures, sampleFeatureList } from "@/lib/motionSample";
 import { expandFeatures } from "../../../server/src/social/productFeatures";
 import { mockTotems } from "@/lib/totems";
-import { mockOnboarding } from "@/lib/onboarding";
+import { mockOnboarding, mockSocials } from "@/lib/onboarding";
 import { sampleMessages } from "@/lib/messagesSample";
 import { sampleDigest } from "@/lib/digest";
 import { sampleBook, sampleMilestoneBook } from "@/lib/book";
@@ -1594,6 +1594,12 @@ const mockMail = () => ({
     /** customer zero today ('s path, 2 of 6). */
     async getOnboarding(tenantId: string) {
       return ok(mockOnboarding(tenantId));
+    },
+    async getSocials(tenantId: string) {
+      return ok(mockSocials(tenantId));
+    },
+    async startSocials(tenantId: string) {
+      return ok({ ...mockSocials(tenantId), stage: "make" as const, working: true });
     },
     async fileProductNote(_t: string, _m: string, b: { file: string; slide: string; note: string }) {
       return ok({ n: 1, notes: [{ date: new Date().toISOString().slice(0, 10), file: b.file, slide: b.slide, note: b.note, noteBy: "Sam's" }], commit: "mock" });

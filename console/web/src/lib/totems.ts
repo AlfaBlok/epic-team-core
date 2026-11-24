@@ -8,13 +8,16 @@ import { wheelTabsOf } from "@/lib/wheelTabs";
  * data graph its personas need (the owner: "the product type or the benefits type is an important type ... Because the
  * personas need this totem in their graph. And then this totem in the graph gets exposed to the UX via these tabs"). The
  * one list is the product's graph file, read through lib/wheelTabs.ts, never one written here. The owner asked for
- * "the same tabs" on every wheel: it opens with an objective's nine tabs, same names and order (Key results, Plan, Inbox,
- * Chat, Personas, Board, Context, Pages, Trackers), then the product's own (Product, Benefits, Pipeline, History). The social kit
- * sits under the Plan and the lessons in the Context, as on an objective. Settings sit behind one header button. Old
- * links land on the tab that now holds what they showed.
+ * "the same tabs" on every wheel, then (24 Nov): "it's the same console is what I'm saying. with slightly different data
+ * tabs". So it opens on Key results, then the social product's own data tabs (Pillars, the benefits as the anchor, with the product inside it;
+ * Plan; Pipeline; History), then the console's engine tabs, the same names and order as an objective's (Inbox, Chat,
+ * Personas, Board, Context, Pages, Trackers, Log). The social kit sits under the Plan and the lessons in the Context, as
+ * on an objective. Settings sit behind one header button. Old links land on the tab that now holds what they showed.
  */
 const SOCIAL_WHEEL = wheelTabsOf("campaign");
 export const FIVE_TABS: readonly string[] = SOCIAL_WHEEL.map((t) => t.id);
+/** the product's own data tabs (the rest are the console's engine tabs, the same on every app). */
+export const DATA_TABS: ReadonlySet<string> = new Set(SOCIAL_WHEEL.filter((t) => t.data).map((t) => t.id));
 export type FiveTab = string;
 /** Each tab's name; the breadcrumb (Project › Campaign › Tab) shows it too. */
 export const FIVE_LABELS: Record<string, string> = { ...Object.fromEntries(SOCIAL_WHEEL.map((t) => [t.id, t.label])), settings: "Settings" };
@@ -29,6 +32,7 @@ const OLD: Record<string, FiveTab> = {
   definitions: "plan",
   kit: "plan",
   observations: "context",
+  product: "benefits",
   approvals: "waiting",
   inbox: "waiting",
   tree: "work",
@@ -39,7 +43,7 @@ const OLD: Record<string, FiveTab> = {
   settings: "settings",
 };
 /** an old tab now held inside another: the anchor that tab scrolls to. */
-export const FOLDED_PART: Record<string, string> = { kit: "campaign-kit", observations: "campaign-lessons" };
+export const FOLDED_PART: Record<string, string> = { kit: "campaign-kit", observations: "campaign-lessons", product: "campaign-product" };
 
 /** ?tab= → one of the tabs (or the Settings view); no tab = Key results. An old Work › Posts link opens Pipeline. */
 export function fiveTabFromParams(params: URLSearchParams): FiveTab {

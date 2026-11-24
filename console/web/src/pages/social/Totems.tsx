@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { api, type CampaignTotems, type Milestone, type TotemHistoryLine, type TotemObservation, type TotemTask } from "@/api";
@@ -15,6 +15,7 @@ import { absoluteLinks, splitTaskCodes } from "@/lib/totems";
 import { cn } from "@/lib/utils";
 import { FoldChevron } from "@/components/foldChevron";
 import { HistoryFilesFor } from "./History";
+import { pillarStats, type PillarPost } from "../../../../server/src/social/pillars";
 
 /**
  * the five fixed tabs of a campaign in the social
@@ -269,60 +270,154 @@ const BENEFIT_TONE: Record<string, string> = {
 };
 
 /**
- * The owner 22 Nov: "you're not putting benefits, but benefits is like an extreme thing"; and: "the product type or the
- * benefits type is an important type ... the personas need this totem in their graph". The campaign's Benefits tab, what the product does for the people who use it, each
- * line as they read it (what you get, then how), whether it works today, and the real screen that shows it. One source:
- * the brief's Benefits table, else the product deck's What it does for you (server totems.ts campaignBenefits).
+ * The owner 24 Nov: "I need to understand the pillars of our communication and when we
+ * communicate ... we need to be measuring what pillars are we touching on ... so many posts on this, so many posts on
+ * that ... And how are these posts performing ... What's the feedback loop?". The Pillars tab (it was Benefits):
+ * the benefits are the pillars, one source, the brief's Benefits table (only he edits it). Each post names the pillar
+ * numbers it touches in its Benefit cell; this counts the posts per pillar, how the live ones did, and the posts that name
+ * none. The loop under the head: a pillar, a post that names it, the Reporter's reading, these counts, the Writer's next post.
  */
-export function BenefitsTab({ m }: { m: Milestone }) {
+export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string; campaign?: string }) {
   const q = useTotems(m.id);
+  const [scope, setScope] = useState<"campaign" | "product">(campaign ? "campaign" : "product");
+  const want = scope === "campaign" ? campaign : undefined;
+  const posts = useQuery(async () => api.getSocial(await worldId(), repo, want), [repo, want]);
   const t = q.data;
+  const stats = useMemo(() => pillarStats(t?.benefits?.lines ?? [], (posts.data?.data.posts ?? []) as PillarPost[]), [t, posts.data]);
   if (q.error && !t) return <ErrorBox error={q.error} />;
   if (!t) return <Loading />;
   const b = t.benefits ?? { source: null, lines: [], asked: [] };
+  const byId = new Map(stats.pillars.map((p) => [p.id, p]));
+  const most = Math.max(1, ...stats.pillars.map((p) => p.posts));
+  const counted = posts.data && !posts.error;
+  const where = scope === "campaign" ? "this campaign's" : "the product's";
   return (
-    <div data-testid="benefits-tab" data-lines={b.lines.length}>
-      <TabHead title="Benefits">What this product does for the people who use it, in the words they see. Every post opens on one of these, and only on one that works today.</TabHead>
+    <div data-testid="pillars-tab" data-lines={b.lines.length}>
+      <TabHead
+        title="Pillars"
+        actions={
+          campaign ? (
+            <Pills
+              value={scope}
+              onChange={setScope}
+              testId="pillars-scope"
+              options={[
+                ["campaign", "This campaign"],
+                ["product", "Whole product"],
+              ]}
+            />
+          ) : undefined
+        }
+      >
+        {counted ? (
+          <span data-testid="pillars-answer">
+            {stats.total} of {where} posts, {stats.total - stats.offPillar.count} on a pillar{stats.offPillar.count ? `, ${stats.offPillar.count} on none` : ""}. Every post is about one of these benefits.
+          </span>
+        ) : (
+          "What every post is about: the benefits the product gives the people who use it."
+        )}
+      </TabHead>
+      <ol className="mb-5 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-xs text-muted-foreground" data-testid="pillars-loop" aria-label="How a pillar learns">
+        {["A pillar", "A post names it", "Measured after 48 hours", "Counted here", "The next post leans on what works"].map((x, i, all) => (
+          <li key={x} className="flex items-center gap-1.5">
+            <span className="rounded-md border bg-card px-2 py-1 text-foreground">{x}</span>
+            {i < all.length - 1 && <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
+          </li>
+        ))}
+      </ol>
+      {posts.error && <p className="mb-3 text-sm text-muted-foreground">The posts could not be read now, so the counts are missing.</p>}
       {b.lines.length ? (
-        <ol className="grid gap-3" data-testid="benefit-lines">
-          {b.lines.map((l) => (
-            <li key={l.id} id={`benefit-${l.id}`} className="grid min-w-0 gap-3 rounded-xl border bg-card p-4 sm:grid-cols-[1fr_14rem]" data-testid="benefit-line">
-              <div className="flex min-w-0 gap-3">
-                <span className="mt-0.5 w-5 shrink-0 text-sm tabular-nums text-muted-foreground">{l.id}</span>
-                <div className="grid min-w-0 gap-1">
-                  <p className="font-medium leading-snug [overflow-wrap:anywhere]">{l.benefit}</p>
-                  {l.does && <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{l.does}</p>}
-                  {l.status && (
-                    <span className={cn("mt-1 inline-flex h-6 w-fit items-center self-start rounded-full px-2 text-xs font-medium leading-none", BENEFIT_TONE[l.status] ?? "bg-muted text-muted-foreground")} data-testid="benefit-status">
-                      {l.soon ? `${l.status}, coming soon` : l.status}
-                    </span>
-                  )}
+        <ol className="grid gap-3" data-testid="pillar-lines">
+          {b.lines.map((l) => {
+            const s = byId.get(String(l.id));
+            return (
+              <li key={l.id} id={`pillar-${l.id}`} className="grid min-w-0 scroll-mt-4 gap-3 rounded-xl border bg-card p-4 sm:grid-cols-[1fr_12rem]" data-testid="pillar-line" data-posts={s?.posts ?? 0}>
+                <div className="flex min-w-0 gap-3">
+                  <span className="mt-0.5 w-5 shrink-0 text-sm tabular-nums text-muted-foreground">{l.id}</span>
+                  <div className="grid min-w-0 gap-1">
+                    <p className="font-medium leading-snug [overflow-wrap:anywhere]">{l.benefit}</p>
+                    {l.does && <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{l.does}</p>}
+                    {l.status && (
+                      <span className={cn("mt-1 inline-flex h-6 w-fit items-center self-start rounded-full px-2 text-xs font-medium leading-none", BENEFIT_TONE[l.status] ?? "bg-muted text-muted-foreground")} data-testid="benefit-status">
+                        {l.soon ? `${l.status}, coming soon` : l.status}
+                      </span>
+                    )}
+                    {s && counted && (
+                      <div className="mt-2 grid gap-1.5" data-testid="pillar-numbers">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                            <span className="block h-full rounded-full bg-violet-500" style={{ width: `${(s.posts / most) * 100}%` }} />
+                          </span>
+                          <span className="w-16 shrink-0 text-right text-sm font-semibold tabular-nums" data-testid="pillar-posts">
+                            {s.posts} {s.posts === 1 ? "post" : "posts"}
+                          </span>
+                        </div>
+                        <dl className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground" data-testid="pillar-perf">
+                          {[
+                            ["live", s.live],
+                            ["planned", s.planned],
+                            ["views", s.views],
+                            ["likes", s.likes],
+                            ["replies", s.replies],
+                            ...(s.viewsPerPost !== null ? [["views a post", s.viewsPerPost] as const] : []),
+                          ].map(([k, v]) => (
+                            <div key={k} className="flex gap-1">
+                              <dd className="font-medium tabular-nums text-foreground">{v}</dd>
+                              <dt>{k}</dt>
+                            </div>
+                          ))}
+                        </dl>
+                        {s.best && (
+                          <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="pillar-best">
+                            Best so far:{" "}
+                            {s.best.link ? (
+                              <a href={s.best.link} target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-foreground">
+                                {s.best.title || s.best.id}
+                              </a>
+                            ) : (
+                              s.best.title || s.best.id
+                            )}
+                            , {s.best.views} views
+                          </p>
+                        )}
+                        {s.live > 0 && !s.measured && <p className="text-xs text-muted-foreground">Live, not measured yet.</p>}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-              {l.screen?.url && (
-                <a href={l.screen.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-md border" title={l.screen.label}>
-                  <img src={l.screen.url} alt={l.screen.label} loading="lazy" className="aspect-[16/10] w-full object-cover object-top" />
-                </a>
-              )}
-            </li>
-          ))}
+                {l.screen?.url && (
+                  <a href={l.screen.url} target="_blank" rel="noreferrer" className="block min-w-0 self-start overflow-hidden rounded-md border" title={l.screen.label}>
+                    <img src={l.screen.url} alt={l.screen.label} loading="lazy" className="aspect-[16/10] w-full object-cover object-top" />
+                  </a>
+                )}
+              </li>
+            );
+          })}
         </ol>
       ) : (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="benefits-none">
-          No benefits written for this product yet. They go in the brief's Benefits table, one line each: what it does, what you get, and whether it works today.
+          No pillars written for this product yet. They go in the brief's Benefits table, one line each: what it does, what you get, and whether it works today.
         </p>
+      )}
+      {counted && stats.offPillar.count > 0 && (
+        <section id="pillar-none" className="mt-3 rounded-xl border border-amber-300 p-4 dark:border-amber-800" data-testid="pillar-none">
+          <p className="text-sm font-medium">
+            {stats.offPillar.count} {stats.offPillar.count === 1 ? "post names" : "posts name"} no pillar
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{stats.offPillar.ids.join(", ")}. The Writer names one the next time it touches each.</p>
+        </section>
       )}
       {b.asked.length > 0 && (
         <section className="mt-5 grid gap-2" data-testid="benefits-asked">
           <h3 className="text-sm font-semibold">People asked for</h3>
           <ul className="grid gap-1 text-sm text-muted-foreground">
             {b.asked.map((a) => (
-              <li key={a.id}>{a.text} <span className="text-xs">waits for your Add on Observations</span></li>
+              <li key={a.id}>{a.text} <span className="text-xs">waits for your Add on Lessons</span></li>
             ))}
           </ul>
         </section>
       )}
-      {b.source && <p className="mt-4 text-xs text-muted-foreground">Read from {b.source}</p>}
+      {b.source && <p className="mt-4 text-xs text-muted-foreground">Pillars read from {b.source}, posts from data/posts-ledger.md</p>}
     </div>
   );
 }

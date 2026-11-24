@@ -17,8 +17,9 @@ export const NAMES_KEY_BOX =
 const T3_SECRET_CARD = /\brequest_secret\b/;
 
 /** A provide ask that hands over a key value (an API key, a token, a password, a client secret). */
+// "the key results" of an objective is no key: a provide card that names them asks for words, not a secret
 export const ASKS_FOR_KEY =
-  /\b(?:api[ -]?keys?|tokens?|passwords?|credentials?|client[ -]secrets?|secret[ -]keys?|access[ -]keys?|(?:the|a|one|its|your|new)\s+(?:[\w-]+\s+){0,3}keys?)\b/i;
+  /\b(?:api[ -]?keys?|tokens?|passwords?|credentials?|client[ -]secrets?|secret[ -]keys?|access[ -]keys?|(?:the|a|one|its|your|new)\s+(?:[\w-]+\s+){0,3}keys?(?!\s+results?\b))\b/i;
 
 /** Words that send him to press an Approve button. */
 const NAMES_APPROVE = /\b(?:press|click|tap|hit)\s+(?:the\s+)?["“]?approve["”]?(?:\s+button)?\b/i;

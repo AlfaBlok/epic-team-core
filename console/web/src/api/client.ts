@@ -122,7 +122,7 @@ import type {
   DeskChat,
   ChatAttachment,
   ChatHistory,
-  MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding } from "./types";
+  MessagesView, OnePager, OnePagerKey, CampaignTotems, ProductNote, WorldCounts, Onboarding, Socials } from "./types";
 import type { CampaignInput, CampaignList, CampaignPlan, CampaignRepo, CampaignResult, JobInput, JobResult, NamedCampaignInput, NamedCampaignResult, CampaignTemplate, MarketingPlan, MarketingPlanWrite, CampaignBriefings } from "./campaign-types";
 import type { AskRelay, ConsoleMessage, OwnerActivity, OwnerResponse, LaptopFor, LaptopSession, LaptopView, RedLine, SaveKeyResult, SnoozeDays, SnoozeHours, StepTickInput, WaitingItem, InboxSearchResult, SpokenRead } from "./inbox-types";
 
@@ -591,6 +591,10 @@ export interface ApiClient {
   labelStep(id: string, label: StepLabel | "clear"): Promise<{ id: string; label: string; sha?: string }>;
   /** the world's onboarding scorecard (six ticks read from live state). */
   getOnboarding(tenantId: string): Promise<Onboarding>;
+  /** Connect your socials: where the customer stands, social by social. */
+  getSocials(tenantId: string): Promise<Socials>;
+  /** the owner's Bitwarden email (and which Bitwarden): the team makes its helper. */
+  startSocials(tenantId: string, body: { email: string; server: "com" | "eu" }): Promise<Socials>;
   /** the owner's note on a Product tab slide, filed to the campaign's spine; returns that slide's notes. */
   fileProductNote(tenantId: string, milestoneId: string, note: { file: string; slide: string; note: string }): Promise<{ n: number; notes: ProductNote[]; commit?: string }>;
   keepSlide(tenantId: string, milestoneId: string, slide: { file: string; ref: string }): Promise<{ commit?: string }>;

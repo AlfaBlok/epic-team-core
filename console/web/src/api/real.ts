@@ -524,6 +524,8 @@ export function createRealClient(): ApiClient {
     getPersonaLog: (wheel, days) => call("GET", `/persona-log/${encodeURIComponent(wheel)}${days ? `?days=${days}` : ""}`),
     labelStep: (id, label) => call("POST", "/persona-log/labels", { id, label }),
     getOnboarding: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/onboarding`),
+    getSocials: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/socials`),
+    startSocials: (tenantId, body) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/socials/start`, body),
     fileProductNote: (tenantId, id, note) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/product-note`, note),
     keepSlide: (tenantId, id, slide) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/slide/keep`, slide),
     undoSlide: (tenantId, id, slide) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/slide/undo`, slide),

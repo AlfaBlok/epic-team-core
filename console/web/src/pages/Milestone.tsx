@@ -25,9 +25,9 @@ import { EpicDeckLink } from "@/components/epicDeckLink";
 import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
-import { FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
+import { DATA_TABS, FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
 import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
-import { BenefitsTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
+import { ChatIntro, HistoryTab, ObservationsTab, PillarsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignTrackersTab } from "@/components/trackersTab";
 import { PersonaLogTab } from "@/components/personaLogTab";
 import { worldId } from "@/lib/useSocial";
@@ -591,11 +591,12 @@ function MilestoneScreen() {
 
 /**
  * a campaign's fixed tabs in the social skin: one per kind of node of the product's data graph, listed once in its
- * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. An objective's nine
- * tabs first (Key results, Plan, Inbox, Chat, Personas, Board, Context, Pages, Trackers), then the product's own
- * (Product, Benefits, Pipeline, History). The social kit sits under the Plan, the lessons in the Context, as on an
- * objective; an old ?tab=kit or ?tab=observations link opens that tab and scrolls to its part. Settings sit behind the
- * header's Settings button.
+ * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. The owner 24 Nov: "it's
+ * the same console is what I'm saying. with slightly different data tabs". Key results first, then the product's data
+ * tabs, set apart by a thin rule (Pillars, the benefits as the anchor, with the product inside it; Plan; Pipeline; History), then the
+ * console's engine tabs, the same as an objective's (Inbox, Chat, Personas, Board, Context, Pages, Trackers, Log). The
+ * social kit sits under the Plan, the lessons in the Context, as on an objective; an old ?tab=kit, ?tab=observations or
+ * ?tab=product link opens the tab that holds it and scrolls to its part. Settings sit behind the header's Settings button.
  */
 function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone; tab: FiveTab; scope: Parameters<typeof CampaignProvider>[0]["scope"]; waitingCount: number; onTab: (t: FiveTab) => void }) {
   // the campaign's Trackers tab reads the tables of the wheel it serves.
@@ -628,8 +629,15 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
   return (
     <Tabs value={tab === "settings" ? "" : tab} onValueChange={(v) => onTab(v as FiveTab)}>
       <TabsList className="h-auto w-full flex-wrap justify-start gap-y-1 [&>button]:shrink-0" data-testid="five-tabs">
-        {FIVE_TABS.map((t) => (
-          <TabsTrigger key={t} value={t} className="gap-1.5" data-testid={`tab-${t}`}>
+        {FIVE_TABS.map((t, i) => (
+          <TabsTrigger
+            key={t}
+            value={t}
+            // the product's own data tabs sit between two thin rules: the rest is the console, the same on every app.
+            className={cn("gap-1.5", i > 0 && DATA_TABS.has(t) !== DATA_TABS.has(FIVE_TABS[i - 1]) && "relative ml-2 before:absolute before:-left-1.5 before:inset-y-1.5 before:w-px before:bg-border")}
+            data-testid={`tab-${t}`}
+            data-kind={DATA_TABS.has(t) ? "data" : "engine"}
+          >
             {FIVE_LABELS[t]}
             {t === "waiting" && waitingCount > 0 && (
               <span data-testid="waiting-count" className="rounded-full bg-amber-500 px-1.5 text-[11px] leading-5 text-white">
@@ -657,7 +665,6 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
             )}
           </div>
         )}
-        {tab === "product" && scope && <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />}
         {tab === "waiting" && <WaitingTab m={m} />}
         {tab === "personas" && <PersonasTab m={m} />}
         {tab === "pipeline" && (
@@ -668,7 +675,18 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {tab === "work" && <WorkTab m={m} />}
         {tab === "context" && <CampaignContextTab m={m} lessons={<ObservationsTab m={m} />} />}
         {tab === "pages" && <CampaignPagesTab m={m} repo={scope?.card.repo} />}
-        {tab === "benefits" && <BenefitsTab m={m} />}
+        {tab === "benefits" && (
+          <div className="grid gap-10">
+            <PillarsTab m={m} repo={scope?.card.repo} campaign={scope?.card.campaign?.code} />
+            {/* the owner: "The benefits and then the product and everything is kind of embedded": the product deck, price and feature list under the benefits. */}
+            {scope && (
+              <section id="campaign-product" className="grid scroll-mt-4 gap-3 border-t pt-6" data-testid="benefits-product">
+                <h2 className="text-lg font-semibold">Product</h2>
+                <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />
+              </section>
+            )}
+          </div>
+        )}
         {tab === "trackers" && <CampaignTrackersTab load={loadTrackers} />}
         {tab === "log" && <PersonaLogTab wheel={`milestone:${m.id}`} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}

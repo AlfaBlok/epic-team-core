@@ -39,6 +39,7 @@ const DashboardPage = lazyPage(() => import("@/pages/Settings"), "DashboardPage"
 const MilestonePage = lazyPage(() => import("@/pages/Milestone"), "MilestonePage");
 const PersonasPage = lazyPage(() => import("@/pages/Personas"), "PersonasPage");
 const BrowserAuthPage = lazyPage(() => import("@/pages/BrowserAuth"), "BrowserAuthPage");
+const SocialsPage = lazyPage(() => import("@/pages/Socials"), "SocialsPage");
 const SeatsPage = lazyPage(() => import("@/pages/Lists"), "SeatsPage");
 const ThreadsPage = lazyPage(() => import("@/pages/Lists"), "ThreadsPage");
 const TicketsPage = lazyPage(() => import("@/pages/Lists"), "TicketsPage");
@@ -106,6 +107,8 @@ const CORE_ROUTES: ScreenRoute[] = [
   { screen: "teamSkills", path: TEAM_SKILLS_PATH, element: <TeamSkillsPage /> },
   { screen: "seats", path: "seats", element: <SeatsPage /> },
   { screen: "browserAuth", path: "auth", element: <BrowserAuthPage /> },
+  // Connect your socials (the customer's logins in their own Bitwarden, one helper invite), the vault step's own screen.
+  { screen: "browserAuth", path: "socials", element: <SocialsPage /> },
   { screen: "report", path: "report", element: <ReportPage /> },
   { screen: "yourTeam", path: YOUR_TEAM_PATH, element: <YourTeamPage /> },
   { screen: "calendar", path: "calendar", element: <CalendarPage /> },

@@ -258,6 +258,9 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/social/metrics$`)],
   // the onboarding scorecard, read from the path world only (onboarding/scorecard.ts worldRepos; its own browser, vault, logins).
   ["GET", new RegExp(`^/api/tenants/${ID}/onboarding$`)],
+  // Connect your socials, read from the path world only (its own vault files); start is the owner's (below)
+  ["GET", new RegExp(`^/api/tenants/${ID}/socials$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/socials/start$`)],
   // the performance view (daily KPI series, best post), read from the path world's social repo only (social/kpis.ts worldRepos + socialRepo).
   ["GET", new RegExp(`^/api/tenants/${ID}/social/kpis$`)],
   // the site numbers (daily counts only, no email): the path world's plan decides; a tester's world gets shown: false.
@@ -459,6 +462,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)], // New workspace: an owner login makes one in their own name
   ["PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into (or out of) the workspace's vault: the owner's login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
+  ["POST", new RegExp(`^/api/tenants/${ID}/socials/start$`)], // the owner's Bitwarden email makes the team's helper, owner login only
   ["GET", new RegExp(`^/api/tenants/${ID}/github/(start|repos|check)$`)], // the owner's own GitHub: never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/github/repo(/new)?$`)],
   ["PUT", new RegExp(`^/api/job-worlds/${ID}$`)], // a coupon turns a world's job servers on (money), owner only

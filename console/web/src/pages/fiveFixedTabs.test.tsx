@@ -119,10 +119,12 @@ const page = (path: string, skin: Skin = SKINS.social) =>
 
 describe("E964-S14 five fixed tabs", () => {
   // the owner: the same tabs on every wheel, a campaign's as an objective's.
-  it("opens on Key results; an objective's nine tabs in their order, then the product's own Product, Benefits, Pipeline, History; one Settings button", async () => {
+  it("opens on Key results; then the social product's data tabs Pillars, Plan, Pipeline, History; then the console's engine tabs as on an objective; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log", "Product", "Benefits", "Pipeline", "History"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Pillars", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
+    // "the same console ... with slightly different data tabs": the data tabs are marked, the rest is the console's.
+    expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Pillars", "Plan", "Pipeline", "History"]);
     expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Settings", "Social kit", "Lessons", "Tasks", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
@@ -169,22 +171,40 @@ describe("E964-S14 five fixed tabs", () => {
     expect((await screen.findByTestId("campaign-wheel-none")).textContent).toMatch(/serves no objective yet/);
   });
 
-  // the owner 22 Nov: "benefits is like an extreme thing ... We need a tracker, man. Trackers are everywhere".
-  it("the Benefits tab shows each benefit as the user reads it, whether it works today, and its screen", async () => {
+  // the owner 22 Nov: "benefits is like an extreme thing"; 24 Nov: "what are the pillars of our communication? ...
+  // so many posts on this, so many posts on that ... And how are these posts performing".
+  it("the Pillars tab shows each benefit as a pillar, the posts that touch it, how the live ones did, and the posts on none", async () => {
     totems = { ...totems, benefits: { source: "data/brief.md · Benefits", asked: [{ id: "L-3", text: "Finds the threads where people have your problem." }], lines: [
       { id: "1", does: "Writes posts from your ideas.", benefit: "You show up every day.", status: "works today", soon: false, screen: { label: "Ideas", path: "data/assets/benefits/s1.webp", url: "/s1.webp" } },
       { id: "2", does: "Checks what worked.", benefit: "Posts get better.", status: "half built", soon: true },
     ] } };
+    const base = sampleSocialExport(new Date("2026-11-03T10:00:00Z"));
+    const post = base.posts[0];
+    const posts = [
+      { ...post, id: "P-1", kind: "post", status: "measured", benefit: "1", title: "Voice to posts", link: "https://x.com/a/status/1", metrics: "8 views, 2 likes, 0 reposts", replies: 1 },
+      { ...post, id: "P-2", kind: "post", status: "scheduled", benefit: "1, 2" },
+      { ...post, id: "P-3", kind: "post", status: "scheduled", benefit: "" },
+      { ...post, id: "P-4", kind: "post", status: "pulled", benefit: "2" },
+      { ...post, id: "P-5", kind: "reply", status: "posted", benefit: "2" },
+    ];
+    vi.spyOn(api, "getSocial").mockResolvedValue({ tenantId: "social", repo: "social", data: { ...base, posts } });
     page("/milestones/ms-memo?tab=benefits");
-    const tab = await screen.findByTestId("benefits-tab");
-    const lines = within(tab).getAllByTestId("benefit-line");
+    const tab = await screen.findByTestId("pillars-tab");
+    expect(screen.getByTestId("tab-benefits").textContent).toBe("Pillars");
+    const lines = within(tab).getAllByTestId("pillar-line");
     expect(lines.map((l) => within(l).getByText(/^You show|^Posts get/).textContent)).toEqual(["You show up every day.", "Posts get better."]);
     expect(within(tab).getAllByTestId("benefit-status").map((s) => s.textContent)).toEqual(["works today", "half built, coming soon"]);
     expect(within(lines[0]).getByRole("img").getAttribute("src")).toBe("/s1.webp");
+    await waitFor(() => expect(within(tab).getAllByTestId("pillar-posts").map((x) => x.textContent)).toEqual(["2 posts", "1 post"]));
+    expect(within(lines[0]).getByTestId("pillar-perf").textContent).toMatch(/1live.*1planned.*8views.*2likes.*1replies.*8views a post/);
+    expect(within(lines[0]).getByTestId("pillar-best").textContent).toMatch(/Voice to posts, 8 views/);
+    expect(within(tab).getByTestId("pillar-none").textContent).toMatch(/1 post names no pillar.*P-3/);
+    expect(within(tab).getByTestId("pillars-answer").textContent).toMatch(/^3 of .* posts, 2 on a pillar, 1 on none/);
+    expect(within(tab).getByTestId("pillars-loop").textContent).toMatch(/A pillar.*Counted here/);
     expect(within(screen.getByTestId("benefits-asked")).getByText(/Finds the threads/)).toBeTruthy();
   });
 
-  it("the Benefits tab says so when the product has none written", async () => {
+  it("the Pillars tab says so when the product has none written", async () => {
     totems = { ...totems, benefits: { source: null, lines: [], asked: [] } };
     page("/milestones/ms-memo?tab=benefits");
     expect(await screen.findByTestId("benefits-none")).toBeTruthy();
@@ -231,7 +251,7 @@ describe("E964-S14 five fixed tabs", () => {
     expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["table", "plan", "table", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "personas", "history", "work"]);
     expect(t("tab=deck")).toBe("plan");
     // an objective's own ids open the same tabs, and the parts folded in open their holder.
-    expect([t("tab=inbox"), t("tab=kanban"), t("tab=board"), t("tab=kit"), t("tab=observations"), t("tab=settings")]).toEqual(["waiting", "work", "work", "plan", "context", "settings"]);
+    expect([t("tab=inbox"), t("tab=kanban"), t("tab=board"), t("tab=kit"), t("tab=observations"), t("tab=product"), t("tab=settings")]).toEqual(["waiting", "work", "work", "plan", "context", "benefits", "settings"]);
   });
 
   it("the console skin keeps its tabs on the same campaign", async () => {

@@ -1594,6 +1594,8 @@ export interface SocialPost extends PackRow {
   result: string | null;
   feedback: string | null;
   status: PostState | string | null;
+  /** the pillar numbers (brief Benefits) the post touches, "2" or "1, 5". */
+  benefit?: string | null;
   /** a held post whose slot has passed: Schedule gives it this next free slot (`YYYY-MM-DDTHH:MMZ`, the server's). */
   nextSlot?: string;
 }
@@ -3130,6 +3132,29 @@ export interface OnboardingVaultItem {
   state: "green" | "red";
   why: string;
 }
+/**
+ * Connect your socials (the owner 24 Nov: "Did they set up their X account, meaning that their password is on a bidwarden
+ * wallet where a user has been given invited?"): the screen (GET /tenants/:id/socials).
+ */
+export interface SocialsRow {
+  id: string;
+  label: string;
+  inVault: boolean;
+  lastRead: string | null;
+}
+export interface Socials {
+  world: string;
+  stage: "start" | "make" | "invite" | "confirm" | "save" | "ready";
+  helper: { address: string; server: string | null; state: string; at: string | null };
+  owner: string | null;
+  org: string | null;
+  socials: SocialsRow[];
+  xConnected: boolean;
+  connected: number;
+  platform: boolean;
+  working: boolean;
+}
+
 export interface Onboarding {
   world: string;
   product?: "social" | "team";

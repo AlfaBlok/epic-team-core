@@ -40,7 +40,7 @@ describe("T88-S25 onboarding scorecard", () => {
     expect(document.querySelector('[data-testid="onboarding-scorecard"] input[type="checkbox"]')).toBeNull();
   });
 
-  it("each open step links to the screen where it is done; the vault, with no screen yet, says so (T97-S11)", () => {
+  it("each open step links to the screen where it is done; the vault opens Connect your socials", () => {
     render(<MemoryRouter><ScorecardView s={mockOnboarding()} chat /></MemoryRouter>);
     const open = (id: string) => fireEvent.click(screen.getByTestId(`onboarding-${id}`).querySelector("button")!);
     open("accounts");
@@ -52,8 +52,8 @@ describe("T88-S25 onboarding scorecard", () => {
     const items = screen.getByTestId("onboarding-vault-items").querySelectorAll("li");
     expect([...items].map((li) => li.getAttribute("data-state"))).toEqual(["red", "red", "red", "red"]);
     expect(items[3].textContent).toContain("The platform lends this key.");
-    expect(screen.queryByTestId("onboarding-vault-open")).toBeNull();
-    expect(screen.getByTestId("onboarding-vault-detail").textContent).toContain("Its own screen is being built.");
+    expect(screen.getByTestId("onboarding-vault-open").getAttribute("href")).toBe("/socials");
+    expect(screen.getByTestId("onboarding-vault-detail").textContent).not.toContain("Its own screen is being built.");
     cleanup();
     render(<MemoryRouter><ScorecardView s={mockOnboarding()} has={(x) => x !== "pipeline"} /></MemoryRouter>);
     fireEvent.click(screen.getByTestId("onboarding-post").querySelector("button")!);
