@@ -33,6 +33,7 @@ import type {
   SocialWriteResult,
   SocialAssetUpload,
   Credits,
+  SeatUsage,
   PlanState,
   CreditGrantInput,
   CreditGrantResult,
@@ -623,6 +624,8 @@ export interface ApiClient {
 
   /** a world's credits (balance, plan, gate, 30-day burn, ledger). */
   getCredits(tenantId: string): Promise<Credits>;
+  /** platform only: the 16 seats' week by app. */
+  getSeatUsage?(): Promise<SeatUsage>;
   /** platform only (the home world): a top-up / grant we make by hand; releases held wakes when back above zero. */
   grantCredits(tenantId: string, input: CreditGrantInput): Promise<CreditGrantResult>;
   /** an owner starts the €49 a month Epic Team checkout for their world; answers the Stripe-hosted page's address. */

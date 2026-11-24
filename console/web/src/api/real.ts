@@ -583,6 +583,7 @@ export function createRealClient(): ApiClient {
     listDeckCards: () => call("GET", "/deck-cards"),
     deckCardSeen: (ref) => call("POST", "/deck-cards/seen", ref),
     getCredits: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/credits`),
+    getSeatUsage: () => call("GET", "/platform/seat-usage"),
     startPlanCheckout: (tenantId, seats) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, seats ? { seats } : {}),
     getPlan: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/plan`),
     grantCredits: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/credits/grant`, input),

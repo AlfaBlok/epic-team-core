@@ -2018,6 +2018,33 @@ export interface Credits {
   burn: CreditBurnDay[];
   /** Newest first. */
   ledger: CreditLedgerEntry[];
+  /** the newest grant or top-up and what the runs since used of it, at the last 7 days' pace. */
+  meter?: { credited: number; creditedAt: string; note: string; used: number; left: number; perDay: number; runsOutAt?: string };
+}
+/** GET /api/platform/seat-usage (platform only): the 16 seats' week by app. */
+export interface SeatUsageApp {
+  key: string;
+  name: string;
+  what: string;
+  runs: number;
+  usd: number;
+  usdPerMonth: number;
+  sharePct: number;
+  pctOfSeats: number;
+  fitMore: number;
+  parts: { name: string; world: string; runs: number; usd: number }[];
+}
+export interface SeatUsage {
+  from: string;
+  to: string;
+  days: number;
+  seats: { id: string; org?: string; weeklyPct?: number; resetsAt?: string }[];
+  seatsReporting: number;
+  usedPct: number;
+  sparePct: number;
+  usd: number;
+  usdPerMonth: number;
+  apps: SeatUsageApp[];
 }
 /** POST /api/tenants/:id/credits/grant (platform only: we top up by hand; no payment provider). */
 export interface CreditGrantInput {
