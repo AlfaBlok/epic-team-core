@@ -35,7 +35,7 @@ import { worldId } from "@/lib/useSocial";
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
 import { CampaignGoalBlock } from "@/components/CampaignGoal";
-import { CampaignChannels } from "@/components/CampaignChannels";
+import { CampaignChannels, ChannelStrip } from "@/components/CampaignChannels";
 import { CampaignProvider, campaignsByMilestone, repoLevelIds, useCampaigns } from "@/lib/campaign";
 import { CampaignForceReview, PipelinePage } from "@/pages/social/Pipeline";
 import { HistoryPage } from "@/pages/social/History";
@@ -662,7 +662,16 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
               <section id="campaign-kit" className="grid scroll-mt-4 gap-3 border-t pt-6" data-testid="campaign-kit">
                 <h2 className="text-lg font-semibold">Social kit</h2>
                 {scope.card.channels?.length ? (
-                  <CampaignChannels card={scope.card} />
+                  <>
+                    {/* drawn first, the accounts and counts fold under it (the card check: a plan section is a diagram). */}
+                    <ChannelStrip card={scope.card} />
+                    <details className="text-sm" open={part === "campaign-kit"} data-testid="campaign-kit-detail">
+                      <summary className="cursor-pointer select-none text-muted-foreground">Accounts, cadence and post counts</summary>
+                      <div className="mt-3">
+                        <CampaignChannels card={scope.card} />
+                      </div>
+                    </details>
+                  </>
                 ) : (
                   <p className="text-sm text-muted-foreground">No channel set up yet. The social kit holds each channel this campaign posts on, its account and how often it posts.</p>
                 )}

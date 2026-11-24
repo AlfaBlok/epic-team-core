@@ -1,4 +1,5 @@
 import type { CampaignCard, CampaignChannel } from "@/api/campaign-types";
+import { useDrawWidth } from "@/components/wheelPlan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -139,5 +140,43 @@ export function CampaignChannels({ card, compact = false }: { card: CampaignCard
         ))}
       </div>
     </section>
+  );
+}
+
+const STRIP_FILL: Record<CampaignChannel["signIn"]["state"], string> = {
+  green: "fill-emerald-600",
+  amber: "fill-amber-500",
+  red: "fill-red-600",
+  grey: "fill-muted-foreground/40",
+};
+const STRIP_WORD: Record<CampaignChannel["signIn"]["state"], string> = { green: "signed in", amber: "not checked", red: "signed out", grey: "unknown" };
+
+/**
+ * The social kit drawn (the card check, rule 7): the campaign's channels as stops on one line, each dot coloured by
+ * its sign-in and its post count under the name. The accounts, cadence and counts open under it.
+ */
+export function ChannelStrip({ card }: { card: CampaignCard }) {
+  const chs = card.channels ?? [];
+  const [ref, width] = useDrawWidth();
+  if (!chs.length) return null;
+  const step = width / chs.length;
+  const x = (i: number) => Math.round(step * i + step / 2);
+  return (
+    <div ref={ref} className="w-full min-w-0">
+      <svg width={width} height={74} viewBox={`0 0 ${width} 74`} role="img" className="block max-w-full" data-testid="channel-strip" aria-label={chs.map((c) => `${c.name}: ${STRIP_WORD[c.signIn.state]}, ${c.posts} posts`).join(". ")}>
+        {chs.length > 1 && <line x1={x(0)} x2={x(chs.length - 1)} y1={12} y2={12} className="stroke-border" strokeWidth={2} />}
+        {chs.map((c, i) => (
+          <g key={c.key} data-testid="channel-stop" data-state={c.signIn.state}>
+            <circle cx={x(i)} cy={12} r={9} className={STRIP_FILL[c.signIn.state]} />
+            <text x={x(i)} y={42} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-foreground">
+              {c.name}
+            </text>
+            <text x={x(i)} y={60} textAnchor="middle" fontSize={11} className="fill-muted-foreground">
+              {`${STRIP_WORD[c.signIn.state]} · ${c.posts} posts`}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }

@@ -231,6 +231,10 @@ describe("E964-S14 five fixed tabs", () => {
     expect(within(tab).getByTestId("plan-kr").id).toBe("plan-memo-channels-kr-1");
     expect(within(tab).queryByTestId("plan-green-when")).toBeNull(); // only the steps to green (vn_06b0de06)
     expect(within(tab).getByTestId("plan-green").textContent).toBe("Green");
+    // the card check (rule 7): the steps are a drawing with short labels, the long approach folded away
+    expect(within(tab).getAllByTestId("plan-steps").every((d) => d.tagName.toLowerCase() === "svg")).toBe(true);
+    const approach = within(tab).queryByTestId("plan-approach");
+    if (approach) expect((approach as HTMLDetailsElement).open).toBe(false);
     expect(screen.queryByTestId("plan-edit")).toBeNull();
     expect(document.body.textContent).not.toMatch(/marketing plan/i);
   });
