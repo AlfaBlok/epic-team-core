@@ -14,10 +14,18 @@ export const SAVED_HEADER = "x-saved-copy";
  */
 export const SAVED_CURRENT_MS = 75_000;
 
+/**
+ * the console answers fresh again: every open list is read again at once, and a saved mark older than that fresh answer
+ * stops counting after this grace (a list read once, like who is signed in, is never read again by a poll).
+ */
+export const FRESH_GRACE_MS = 10_000;
+
 type Entry = { keptAt?: number; readAt: number };
 const saved = new Map<string, Entry>();
 const subs = new Set<() => void>();
 const tell = () => subs.forEach((s) => s());
+let freshAt = -Infinity;
+let readAgain: (() => void) | undefined;
 
 /** one read's answer: `header` is its x-saved-copy value (a saved copy) or empty (fresh from the console). */
 export function noteRead(path: string, header: string | null | undefined, now = Date.now()) {
@@ -26,7 +34,14 @@ export function noteRead(path: string, header: string | null | undefined, now = 
     saved.set(path, { keptAt: Number.isFinite(t) ? t : undefined, readAt: now });
     return tell();
   }
-  if (saved.delete(path)) tell();
+  // the first fresh answer after a saved read: read every open list again now; the grace runs from this answer
+  const spell = [...saved.values()].some((e) => e.readAt > freshAt);
+  const had = saved.delete(path);
+  if (spell && saved.size > 0) {
+    freshAt = now;
+    readAgain?.();
+  }
+  if (had || spell) tell();
 }
 
 /** the oldest saved copy the screen draws now (undefined: every read is fresh). `keptAt` undefined: its time is unknown. */
@@ -34,6 +49,7 @@ export function savedCopy(now = Date.now()): { keptAt?: number } | undefined {
   let out: { keptAt?: number } | undefined;
   for (const e of saved.values()) {
     if (now - e.readAt > SAVED_CURRENT_MS) continue;
+    if (e.readAt < freshAt && now - freshAt > FRESH_GRACE_MS) continue;
     if (!out || (e.keptAt ?? -Infinity) < (out.keptAt ?? -Infinity)) out = { keptAt: e.keptAt };
   }
   return out;
@@ -58,7 +74,7 @@ export function useSavedCopy(): { keptAt?: number } | undefined {
   useEffect(() => {
     const bump = () => setTick((t) => t + 1);
     subs.add(bump);
-    const timer = setInterval(bump, 15_000);
+    const timer = setInterval(bump, 5_000);
     return () => {
       subs.delete(bump);
       clearInterval(timer);
@@ -73,6 +89,7 @@ export function useSavedCopy(): { keptAt?: number } | undefined {
  */
 export function onFreshFromWorker(refresh: () => void): () => void {
   const sw = typeof navigator === "undefined" ? undefined : navigator.serviceWorker;
+  readAgain = refresh;
   if (!sw?.addEventListener) return () => undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const on = (e: MessageEvent) => {
@@ -92,4 +109,4 @@ export function onFreshFromWorker(refresh: () => void): () => void {
 }
 
 /** tests only. */
-export const resetSavedCopy = () => (saved.clear(), tell());
+export const resetSavedCopy = () => (saved.clear(), (freshAt = -Infinity), tell());

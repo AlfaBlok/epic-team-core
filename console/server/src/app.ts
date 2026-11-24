@@ -100,6 +100,7 @@ import { chatSection, inForceWords, readHisWords } from "./desk/hisObjectives.js
 import { keyResultLines, objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
 import { inboxWarmHealth } from "./warmInbox.js";
 import { keptJson, sendPrepared } from "./keptJson.js";
+import { ticketIndex } from "./tickets/ticketIndex.js";
 import { SCORECARD_DIR, type ScorecardsBody, applyLiveKeyResults, buildScorecards, createGreenHistory, createSpineFileReader, createWorkFinder } from "./scorecards.js";
 import { createOneOffs } from "./oneOffs.js";
 import { createOutcomes, mountOutcomes, outcomesIn, OutcomeError } from "./outcomes.js";
@@ -188,7 +189,7 @@ import { redCount } from "./status/compute.js";
 import { mountUsage, runLiveUsageLookup, runUsageLookup } from "./usage/routes.js";
 import { mountFreshness, type FreshnessMount } from "./routes/freshness.js";
 import { createNewAskWaker, defaultCadenceFor, gitAuthorRun, type NewAskWaker } from "./cycle/newAskWake.js";
-import { gitOut } from "./freshness.js";
+import { gitOut, headKeptLog } from "./freshness.js";
 import { connectedRepo, mountWorldRepo, worldRepoDir } from "./tenancy/worldRepo.js";
 import { createBook, bookStore, followBook, BOOK_TTL_MS } from "./book/service.js";
 import { indexerLimitsFromEnv, launchIndexer, type IndexerHandle, type IndexerLaunchMode } from "./indexer/launch.js";
@@ -624,6 +625,8 @@ export function createApp(
     reads.drop(dir);
     book?.invalidate();
     readModel?.dirty(dir);
+    // the screens read tickets from the index: rebuild it for this checkout, then read again
+    void ticketIndex().refresh(dir).then(() => readModel?.dirty(dir));
   };
   /**
    * a pull of a checkout (freshness poll, pull on open, Refresh, a run's end, a new-ask pull). Reads keep the
@@ -634,6 +637,7 @@ export function createApp(
     reads.drop(dir, { stale: true });
     book?.invalidate();
     readModel?.dirty(dir, { stale: true }); // a pull is re-read within the rescan gap
+    void ticketIndex().refresh(dir).then(() => readModel?.dirty(dir, { stale: true }));
     const ranks = worldRanks(store, read.reposRoot);
     void reads
       .rewarm(dir, (ms) => [...ms].sort((a, b) => (ranks.get(a.id) ?? Infinity) - (ranks.get(b.id) ?? Infinity)))
@@ -1128,7 +1132,7 @@ export function createApp(
   };
   // the owner's pursuits (docs/pursuits.json of the code repo): scorecard, totems, moving or stalled, and the effort
   // each rank buys (pursuits.ts); only the home world's milestones follow it.
-  const pursuits = createPursuits({ reposRoot: read.reposRoot, board: () => launchBoard?.board() ?? null, git: gitOut(20_000) });
+  const pursuits = createPursuits({ reposRoot: read.reposRoot, board: () => launchBoard?.board() ?? null, git: headKeptLog(gitOut(20_000)) });
   // products, each defined once (docs/scorecard/products.json: its deck and its kit); objectives name theirs.
   const products = createProducts({ reposRoot: read.reposRoot, pursuits: () => pursuits.get() });
   const pursuitEffort = (m: Milestone) => {
@@ -2129,6 +2133,15 @@ export function createApp(
     if (w) return c.json(await worldScorecards(w));
     return sendPrepared(c, await keptScorecards.get());
   });
+  // the ticket index, read only (scripts/ticket_index.py builds it from every spine; the Board, Key results
+  // and Inbox read their rows from it). ?repo= ?state= ?world= ?id= ?open=1; the home world's only (routeScope).
+  // Beside GET /tickets (the Tickets page's ticket files and issues, routes/read.ts), never in its place.
+  api.get("/tickets/index", (c) => {
+    const q = (k: string) => c.req.query(k)?.trim() || undefined;
+    const index = ticketIndex();
+    const tickets = index.tickets({ repo: q("repo"), state: q("state")?.toLowerCase(), world: q("world"), id: q("id"), open: q("open") === "1" });
+    return c.json({ index: index.stats() ?? null, count: tickets.length, tickets });
+  });
   // an objective's one where-we-are: docs/scorecards/<id>.md beside its key results, the top of its Context tab.
   api.get("/scorecards/:id/where-we-are", (c) => {
     const w = connectedWorld();
@@ -2393,7 +2406,7 @@ export function createApp(
 
   // who holds each row (GET /api/claims, the home world) and the lease sweep: a lease that ran out (no commit naming
   // the row) gives the row back to ready through the spine writer; the Delivery Manager's next wake re-dispatches it.
-  const leases = createLeases({ store: () => homeStore, reposRoot: read.reposRoot, writer: spine, git: gitOut(20_000), wrote: dropSpines, log: (m) => console.warn(m) });
+  const leases = createLeases({ store: () => homeStore, reposRoot: read.reposRoot, writer: spine, git: headKeptLog(gitOut(20_000)), wrote: dropSpines, log: (m) => console.warn(m) });
   mountClaims(api, () => leases);
   if (opts.leases?.everyMs) phased(opts.timerPhases, "leases", () => leases.start(opts.leases!.everyMs!));
   // "Commits with no ticket" on the Team home, per world.
@@ -3087,7 +3100,7 @@ export function createApp(
         ...(i.question && i.question !== i.title ? { question: i.question } : {}),
         milestoneId: i.milestoneId,
         // only an ask he answers with his words or a yes; a monitor alert, a stalled goal or a mark goes to the desk.
-        buttons: i.kind === "ask" || i.kind === "needs_jordi" ? askButtons(i.ask) : [],
+        buttons: i.kind === "ask" || i.kind === "needs_jordi" ? askButtons(i.ask, i.question ?? i.title) : [],
       });
     }
     // the goals to set and the team's ideas, after the asks, as his inbox shows them (voice/SectionCall teamCard).

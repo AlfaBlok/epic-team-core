@@ -11,6 +11,7 @@ import { guardMilestoneRepo, repoScopeOf, worldClaims } from "./tenancy/repoScop
 import { personaForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
 import { type HostId, mainHost, ownerName, workerHost } from "./identity.js";
 import { consoleSnoozes, setConsoleSnooze } from "./inbox/consoleSnooze.js";
+import { tableVersion } from "./tableVersion.js";
 
 export interface Milestone {
   id: string;
@@ -522,6 +523,38 @@ export function memoRead<T extends object>(db: DB, key: string, read: () => T[],
   return rows.map((r) => ({ ...r }));
 }
 
+/**
+ * a hot list read kept until one of the tables it reads changes (tableVersion: triggers count every insert, update and
+ * delete, from any connection), or `maxAgeMs` passes (a read whose window moves with the clock). memoRead above drops
+ * every kept list on any write at all, and the console writes many times a second (run heartbeats, usage, presses), so the
+ * runs, closed cards and assignments lists were read again on nearly every request: 15 s of a 90 s live profile on the
+ * main server. A database without the counter (a passive copy) keeps memoRead's rule.
+ */
+const tableMemos = new WeakMap<DB, { versions: Map<string, () => number | undefined>; values: Map<string, { stamp: string; at: number; rows: object[] }> }>();
+const TABLE_MEMO_KEYS = 300;
+export function memoReadOn<T extends object>(db: DB, tables: string[], key: string, read: () => T[], o: { maxAgeMs?: number; now?: () => number } = {}): T[] {
+  let m = tableMemos.get(db);
+  if (!m) tableMemos.set(db, (m = { versions: new Map(), values: new Map() }));
+  const parts: number[] = [];
+  for (const t of tables) {
+    let v = m.versions.get(t);
+    if (!v) m.versions.set(t, (v = tableVersion(db, t)));
+    const n = v();
+    if (n === undefined) return memoRead(db, key, read, o.now);
+    parts.push(n);
+  }
+  const stamp = parts.join(":");
+  const t = (o.now ?? Date.now)();
+  const hit = m.values.get(key);
+  if (hit && hit.stamp === stamp && t - hit.at < (o.maxAgeMs ?? 60_000)) return hit.rows.map((r) => ({ ...r })) as T[];
+  const rows = read();
+  m.values.delete(key);
+  m.values.set(key, { stamp, at: t, rows });
+  // a read keyed by a moving time (a since) makes a new key each call: keep the newest few hundred only
+  if (m.values.size > TABLE_MEMO_KEYS) m.values.delete(m.values.keys().next().value!);
+  return rows.map((r) => ({ ...r }));
+}
+
 function patchRow(db: DB, table: string, id: string, cols: Record<string, unknown>): boolean {
   const set = Object.entries(cols).filter(([, v]) => v !== undefined);
   if (set.length === 0) return !!db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
@@ -674,7 +707,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
 
     // Personas
     listPersonas: () =>
-      memoRead(raw, `personas\0${tenant}`, () => (db.prepare(`SELECT * FROM personas WHERE ${own()} ORDER BY created_at, id`).all({ t: tenant }) as Row[]).map((r) => asRead(toPersona(r)))),
+      memoReadOn(raw, ["personas"], `personas\0${tenant}`, () => (db.prepare(`SELECT * FROM personas WHERE ${own()} ORDER BY created_at, id`).all({ t: tenant }) as Row[]).map((r) => asRead(toPersona(r)))),
     getPersona,
     /** `id` / `createdAt` given when the team repo's persona file already carries it. */
     createPersona(input: { name: string; remit: string; skills: string[]; model: string; mayWrite: boolean; host?: HostId; freshThreadEachWake?: boolean; skipUnchanged?: boolean; id?: string; createdAt?: string }): Persona {
@@ -702,7 +735,8 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
 
     // Assignments
     listAssignments(f: { milestoneId?: string; personaId?: string } = {}) {
-      return memoRead(raw, `assignments\0${tenant}\0${f.milestoneId ?? ""}\0${f.personaId ?? ""}`, () => {
+      const ever = everOnIds(raw);
+      return memoReadOn(raw, ["assignments", "milestones"], `assignments\0${tenant}\0${f.milestoneId ?? ""}\0${f.personaId ?? ""}`, () => {
         const rows = db
           .prepare(
             `SELECT * FROM assignments
@@ -710,9 +744,8 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
              ORDER BY created_at, id`,
           )
           .all({ m: f.milestoneId ?? null, p: f.personaId ?? null, t: tenant }) as Row[];
-        const ever = everOnIds(raw);
-        return rows.map((r) => toAssignment({ ...r, ever_on: r.enabled === 1 || r.parked_at != null || ever.has(r.id as string) ? 1 : 0 }));
-      });
+        return rows.map((r) => toAssignment({ ...r, ever_on: 0 }));
+      }).map((a) => ({ ...a, neverOn: !(a.enabled || a.parkedAt || ever.has(a.id)) }));
     },
     getAssignment,
     createAssignment(input: {
@@ -804,7 +837,7 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
     // Runs
     /** Newest first; 500 rows unless `limit`. With `since` (ISO, started at or after) and no `limit`, no cap. */
     listRuns(f: { milestoneId?: string; assignmentId?: string; parentRunId?: string; since?: string; limit?: number } = {}) {
-      return memoRead(raw, `runs\0${tenant}\0${JSON.stringify([f.milestoneId, f.assignmentId, f.parentRunId, f.since, f.limit])}`, () => {
+      return memoReadOn(raw, ["runs"], `runs\0${tenant}\0${JSON.stringify([f.milestoneId, f.assignmentId, f.parentRunId, f.since, f.limit])}`, () => {
         // only the given filters are in the WHERE, so SQLite can use runs_assignment / runs_milestone
         // (`@a IS NULL OR assignment_id = @a` forced a scan and sort of every run on each call).
         const by: [string | undefined, string][] = [
@@ -831,8 +864,19 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
      * the running child runs (a worker's claim on a row) of one milestone, newest first. claimsFor read every run
      * of every milestone of the repo (up to 1000 rows each) to keep these few, for each milestone on the Team page.
      */
+    /**
+     * the runs still running that started at or after `since`, newest first: the sent-back cards' question. It read every run
+     * of two days (each with its whole brief) to keep these few, on every inbox poll.
+     */
+    listRunningRuns(since: string): Run[] {
+      return memoReadOn(raw, ["runs"], `running\0${tenant}`, () =>
+        (db
+          .prepare(`SELECT * FROM runs WHERE outcome = 'running' AND ${own()} ORDER BY started_at DESC, rowid DESC`)
+          .all({ t: tenant }) as Row[]).map(toRun),
+      ).filter((r) => r.startedAt >= since);
+    },
     listRunningChildRuns(milestoneId: string): Run[] {
-      return memoRead(raw, `running-children\0${tenant}\0${milestoneId}`, () =>
+      return memoReadOn(raw, ["runs"], `running-children\0${tenant}\0${milestoneId}`, () =>
         (db
           .prepare(`SELECT * FROM runs WHERE milestone_id = @m AND parent_run_id IS NOT NULL AND outcome = 'running' AND ${own()} ORDER BY started_at DESC, rowid DESC`)
           .all({ m: milestoneId, t: tenant }) as Row[]).map(toRun),

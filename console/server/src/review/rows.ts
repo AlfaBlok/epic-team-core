@@ -19,6 +19,7 @@ import { cardFor, goalSentenceOf, plainName, plainNamesOf, projectOf, repoCards,
 import { ownerName } from "../identity.js";
 import { cutUrgentLead, readyOf } from "./ready.js";
 import { aboutOf } from "../inbox/about.js";
+import { ticketIndex } from "../tickets/ticketIndex.js";
 
 /**
  * "Done, waiting for your review" is a view of the spines. A review card is a spine ledger
@@ -206,7 +207,17 @@ export interface LedgerLine {
   col: { status: number; title: number; evidence: number; verified: number; next: number; pr: number; owner: number };
 }
 
-/** Every ledger-section table row with its line, raw cells and the column of each field. */
+/** the column of each field a ledger table's headers name (-1: none). */
+export function colsOf(headers: string[]): LedgerLine["col"] {
+  const find = (re: RegExp) => headers.findIndex((x) => re.test(x.trim()));
+  return { status: find(STATUS_COL), title: find(TITLE_COL), evidence: find(EVIDENCE_COL), verified: find(VERIFIED_COL), next: find(NEXT_COL), pr: find(PR_COL), owner: find(OWNER_COL) };
+}
+
+/**
+ * Every ledger-section table row with its line, raw cells and the column of each field. The screens (Board, Key results,
+ * Inbox) read these rows from the ticket index (tickets/ticketIndex.ts), never from here: this parse is for the
+ * console's writers and its "as it reads now" checks of one row (rowIn, a claim before dispatch).
+ */
 export function ledgerLines(text: string): LedgerLine[] {
   const lines = proseLines(text);
   const out: LedgerLine[] = [];
@@ -222,8 +233,7 @@ export function ledgerLines(text: string): LedgerLine[] {
     }
     if (!inLedger || !lines[i].trim().startsWith("|") || !/^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? "")) continue;
     const headers = splitRow(lines[i]).map(stripInline);
-    const find = (re: RegExp) => headers.findIndex((x) => re.test(x.trim()));
-    const col = { status: find(STATUS_COL), title: find(TITLE_COL), evidence: find(EVIDENCE_COL), verified: find(VERIFIED_COL), next: find(NEXT_COL), pr: find(PR_COL), owner: find(OWNER_COL) };
+    const col = colsOf(headers);
     let j = i + 2;
     for (; j < lines.length && lines[j].trim().startsWith("|"); j++) {
       const cells = splitRow(lines[j]);
@@ -394,7 +404,8 @@ const TITLE_CODE = /^(?:\[[^\]]*\]\s*)?(?:EPIC:\s*)?(EPIC-\d+|M\d+)\b/;
 
 interface FileRead {
   stamp: string;
-  rows: LedgerLine[];
+  /** the file's ledger rows as written now, parsed on first ask: the writers' and one-row checks' read (rowIn, claims). */
+  fileRows: () => LedgerLine[];
   title?: string;
   parent?: string;
   openAsks: string[];
@@ -465,9 +476,11 @@ function readFile(abs: string): FileRead | undefined {
   const asks = all.filter((a) => a.state === "open");
   const project = projectOf(text);
   const goalSentence = goalSentenceOf(text);
+  let rows: LedgerLine[] | undefined;
   const r: FileRead = {
     stamp,
-    rows: ledgerLines(text),
+    // parsed only when a writer or a one-row check asks (rowIn, claims); the Inbox reads the index (screenDoc)
+    fileRows: () => (rows ??= ledgerLines(text)),
     title: firstH1(text),
     ...(parent ? { parent } : {}),
     openAsks: asks.map((a) => a.code ?? a.question.split(/\s+/).slice(0, 6).join(" ")),
@@ -486,6 +499,13 @@ function readFile(abs: string): FileRead | undefined {
   };
   files.set(abs, r);
   return r;
+}
+
+/** a spine as the Inbox reads it: the file's own facts, its ticket rows from the ticket index. */
+type ScreenDoc = FileRead & { rows: LedgerLine[] };
+function screenDoc(abs: string): ScreenDoc | undefined {
+  const doc = readFile(abs);
+  return doc ? { ...doc, rows: ticketIndex().lines(abs) } : undefined;
 }
 
 /** Card id: stable while the row keeps its code and file. */
@@ -632,7 +652,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
     for (const folder of [...g.folders].sort()) {
       const docs = mdIn(path.join(g.dir, folder)).map((f) => {
         const rel = path.posix.normalize(path.posix.join(folder, f));
-        return { rel, doc: readFile(path.join(g.dir, rel)) };
+        return { rel, doc: screenDoc(path.join(g.dir, rel)) };
       });
       // every row of the folder by code (a card's started follow-ups may sit in another spine beside it)
       const byCode = new Map<string, { title: string; status: string; dependsOn: string }>();
@@ -932,7 +952,7 @@ export function iterationOf(cells: string[]): number {
 }
 
 /** a goal's header, read from its spine. */
-function goalOf(doc: FileRead, base: Pick<ReviewGoal, "key" | "code" | "repo" | "path" | "milestoneId">): ReviewGoal {
+function goalOf(doc: ScreenDoc, base: Pick<ReviewGoal, "key" | "code" | "repo" | "path" | "milestoneId">): ReviewGoal {
   const title = stripInline(doc.title ?? base.code).replace(/^(?:EPIC:\s*)?(EPIC-\d+|M\d+)\s*[:·—-]?\s*/, "").trim() || base.code;
   const running: ReviewGoal["running"] = [];
   const parked: ReviewGoal["parked"] = [];
@@ -1027,7 +1047,7 @@ export function computeClaims(store: Pick<Store, "listMilestones">, reposRoot: s
       if (seen.has(`${repo.path}\0${rel}`)) continue;
       seen.add(`${repo.path}\0${rel}`);
       const doc = readFile(path.join(repo.path, rel));
-      for (const r of doc?.rows ?? []) {
+      for (const r of doc?.fileRows() ?? []) {
         if (r.col.owner < 0 || r.col.status < 0) continue;
         const c = claimOf(r.cells[r.col.owner] ?? "");
         const status = stripInline(r.cells[r.col.status] ?? "");
@@ -1048,7 +1068,7 @@ export function rowClaimIn(dir: string, ref: string): (ClaimedRow & { dir: strin
     for (const f of mdIn(path.join(dir, folder))) {
       const rel = path.posix.join(folder, f);
       const doc = readFile(path.join(dir, rel));
-      const r = doc?.rows.find((x) => x.id === ref);
+      const r = doc?.fileRows().find((x) => x.id === ref);
       if (!r || r.col.owner < 0) continue;
       const status = r.col.status >= 0 ? stripInline(r.cells[r.col.status] ?? "") : "";
       const c = claimOf(r.cells[r.col.owner] ?? "");
@@ -1064,7 +1084,7 @@ export function rowIn(dir: string, rel: string, ref: string): { status: string; 
   let r: LedgerLine | undefined;
   for (const f of withArchive(dir, rel)) {
     const abs = inside(dir, f);
-    r = abs ? readFile(abs)?.rows.find((x) => x.id === ref) : undefined;
+    r = abs ? readFile(abs)?.fileRows().find((x) => x.id === ref) : undefined;
     if (r) break;
   }
   if (!r) return undefined;

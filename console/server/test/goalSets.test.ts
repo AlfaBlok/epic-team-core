@@ -2,6 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { ledgerLines } from "../src/review/rows.js";
+/** an in-memory spine reader with its rows, as the ticket index would hold them. */
+const rowsToo = <F extends (repo: string, rel: string) => string | undefined>(f: F) => Object.assign(f, { rows: (repo: string, rel: string) => ledgerLines(f(repo, rel) ?? "") });
 import { applyGreenHistory, buildScorecards, createWorkFinder, workState, parseScorecardFile, queueStateOf, readSpineInfo, rowTitle, weekStart, type GreenHistory } from "../src/scorecards.js";
 
 /**
@@ -20,7 +23,7 @@ const SPINES: Record<string, string> = {
   "app:docs/spines/epic-2.md": `# EPIC-902: Testers\nParent spine: [EPIC-901](epic-1.md)\n\n## Done means\n\n- [ ] E902-1 Five testers\n\n${LEDGER(["| E902-S1 | worker | run | Call for testers | review | x |", "| E902-S2 | worker | run | Reddit post | ready | x |"])}`,
   "app:docs/spines/other.md": `# EPIC-909: Other\nParent spine: [EPIC-905](epic-5.md)\n`,
 };
-const read = (repo: string, rel: string) => SPINES[`${repo}:${rel}`];
+const read = rowsToo((repo: string, rel: string) => SPINES[`${repo}:${rel}`]);
 
 const pursuit = (o: Record<string, unknown> = {}) => ({
   id: "launch",
@@ -46,7 +49,7 @@ const pursuit = (o: Record<string, unknown> = {}) => ({
 
 describe("goal sets", () => {
   it("reads a spine's rows, asks, Done means and queue", () => {
-    const s = readSpineInfo("app", "docs/spines/epic-1.md", SPINES["app:docs/spines/epic-1.md"]);
+    const s = readSpineInfo("app", "docs/spines/epic-1.md", SPINES["app:docs/spines/epic-1.md"], ledgerLines(SPINES["app:docs/spines/epic-1.md"]));
     expect(s.code).toBe("EPIC-901");
     expect(s.codes).toEqual(expect.arrayContaining(["E901-S1", "E901-S2", "E901-S3", "E901-S4", "E901-A3"]));
     expect(s.queue.map((q) => [q.code, q.state])).toEqual([
@@ -159,7 +162,7 @@ describe("goal sets", () => {
 
   it("the work finder reads a ticket's title and status and an epic's Done means from the repo's spines", () => {
     const files: Record<string, string> = { "docs/spines/epic-1.md": SPINES["app:docs/spines/epic-1.md"], "docs/spines/epic-2.md": SPINES["app:docs/spines/epic-2.md"] };
-    const fsRead = (_repo: string, rel: string) => files[rel];
+    const fsRead = rowsToo((_repo: string, rel: string) => files[rel]);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gs-"));
     fs.mkdirSync(path.join(dir, "docs/spines"), { recursive: true });
     for (const k of Object.keys(files)) fs.writeFileSync(path.join(dir, k), files[k]);
@@ -192,7 +195,7 @@ describe("goal sets", () => {
 
   it("a set's file gives its objective sentence, proposed until agreed, under the pursuit's name; an epic's objective is its Goal sentence", () => {
     const file = JSON.stringify({ objective: "First customer pays", objectiveStatus: "proposed", objectiveWas: "A long line that reads like a problem.", rows: [] });
-    const withGoal = (repo: string, rel: string) => (rel === "docs/spines/epic-1.md" ? SPINES["app:docs/spines/epic-1.md"].replace("Parent spine: none", "Parent spine: none\nGoal sentence: Customers pay for the product.") : read(repo, rel));
+    const withGoal = rowsToo((repo: string, rel: string) => (rel === "docs/spines/epic-1.md" ? SPINES["app:docs/spines/epic-1.md"].replace("Parent spine: none", "Parent spine: none\nGoal sentence: Customers pay for the product.") : read(repo, rel)));
     const [set] = buildScorecards({ pursuits: [pursuit()], staleDays: 3 }, withGoal, { file: () => file }).nodes;
     expect(set).toMatchObject({ headline: "Launch", objectiveStatus: "proposed", objectiveWas: "A long line that reads like a problem.", objective: "First customer pays" });
     // no file rows: the pursuit's checks stand in
@@ -228,7 +231,7 @@ describe("goal sets", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gs-"));
     fs.mkdirSync(path.join(dir, "docs/spines"), { recursive: true });
     fs.writeFileSync(path.join(dir, "docs/spines/epic-1.md"), files["docs/spines/epic-1.md"]);
-    const find = createWorkFinder(() => dir, (_r, rel) => files[rel]);
+    const find = createWorkFinder(() => dir, rowsToo((_r: string, rel: string) => files[rel]));
     expect(find("app", "E901-2")).toMatchObject({ kind: "done-means", title: "First customer pays", status: "open", state: "amber", epicCode: "EPIC-901" });
     expect(find("app", "E901-S4")).toMatchObject({ kind: "ticket", state: "red" });
   });
@@ -243,7 +246,7 @@ describe("goal sets", () => {
       "desk/inbox/n.md": "---\nfrom: host1\nabout: Feedback key result is red\nstatus: answered\n---\nbody\n",
     };
     for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, rel), text);
-    const find = createWorkFinder(() => dir, (_r, rel) => files[rel]);
+    const find = createWorkFinder(() => dir, rowsToo((_r: string, rel: string) => files[rel]));
     expect(find("home", "H907-S43")).toMatchObject({ kind: "ticket", title: "Start over with a process", state: "green", path: "EPIC.md" });
     expect(find("ops", "C907-18")).toMatchObject({ kind: "ticket", status: "done", epicCode: "EPIC-907" });
     expect(find("ops", "EPIC-907-A5")).toMatchObject({ kind: "ticket", state: "red", status: "waiting on an answer" });
@@ -269,7 +272,7 @@ describe("goal sets", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kr-"));
     fs.mkdirSync(path.join(dir, "docs/spines"), { recursive: true });
     for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, rel), text);
-    const fsRead = (_repo: string, rel: string) => files[rel];
+    const fsRead = rowsToo((_repo: string, rel: string) => files[rel]);
     const work = createWorkFinder(() => dir, fsRead);
     const [set] = buildScorecards({ pursuits: [pursuit()], staleDays: 3 }, fsRead, { file: () => file, work }).nodes;
     expect(set.headline).toBe("Launch");

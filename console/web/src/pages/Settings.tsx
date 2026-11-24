@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/common";
 import { TeamPage } from "@/pages/Team";
 import { useOperatorPages } from "@/lib/settingsPath";
 import { TranscriptionSettings } from "@/components/transcriptionSettings";
+import { HOSTED_SETTINGS } from "@/lib/hostedPlug";
 
 /**
  * Settings: only what the owner changes (root L-80, the owner: "settings is about things where the
@@ -22,6 +23,10 @@ export function SettingsPage() {
           <>
           {/* the model his voice notes are written out with, its paid backup, and what it cost (his own console only). */}
           <TranscriptionSettings />
+          {/* the hosted layer's own inputs, when it has any. */}
+          {HOSTED_SETTINGS.map((Section, i) => (
+            <Section key={i} />
+          ))}
           {pages.length > 0 && (
             <section className="mt-6" data-testid="operator-pages">
               <h2 className="mb-3 text-[15px] font-semibold">What you can change</h2>

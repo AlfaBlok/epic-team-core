@@ -142,3 +142,34 @@ describe("back online", () => {
     off();
   });
 });
+
+describe("a list read only once", () => {
+  it("the first fresh answer reads every open list again, and older saved marks stop counting after the grace", async () => {
+    const { onFreshFromWorker, FRESH_GRACE_MS } = await import("@/lib/savedCopy");
+    vi.stubGlobal("navigator", { serviceWorker: new EventTarget() });
+    const refresh = vi.fn();
+    const off = onFreshFromWorker(refresh);
+    noteRead("/me", "2026-11-24T14:02:00Z", 1_000);
+    noteRead("/status", "2026-11-24T14:02:00Z", 1_000);
+    noteRead("/status", null, 5_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(savedCopy(5_000 + FRESH_GRACE_MS - 1)).toBeDefined();
+    expect(savedCopy(5_000 + FRESH_GRACE_MS + 1)).toBeUndefined();
+    // still slow after it: a newer saved read counts again
+    noteRead("/review-items", "2026-11-24T14:03:00Z", 20_000);
+    expect(savedCopy(21_000)).toBeDefined();
+    off();
+  });
+});
+
+it("fresh answers that keep coming never push the grace later", async () => {
+  const { onFreshFromWorker, FRESH_GRACE_MS } = await import("@/lib/savedCopy");
+  vi.stubGlobal("navigator", { serviceWorker: new EventTarget() });
+  const refresh = vi.fn();
+  const off = onFreshFromWorker(refresh);
+  noteRead("/me", "2026-11-24T14:02:00Z", 1_000);
+  for (let t = 2_000; t < 2_000 + FRESH_GRACE_MS + 5_000; t += 1_000) noteRead("/status", null, t);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(savedCopy(2_000 + FRESH_GRACE_MS + 1)).toBeUndefined();
+  off();
+});

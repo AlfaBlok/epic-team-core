@@ -52,6 +52,12 @@ export function setSecretSource(s: SecretSource | undefined): void {
   tally.storeNames.clear();
   tally.since = new Date().toISOString();
 }
+/** one journal line per read that fell back to the store's copy, the name only, never a value, so a "clean day" with no
+ * fallback can be read across restarts, where the /api/health counters start again at every deploy. */
+export const COPY_FALLBACK_LOG = "keys: copy fallback";
+function logCopyFallback(label: string): void {
+  if (!process.env.VITEST) console.warn(`${COPY_FALLBACK_LOG} ${label}`);
+}
 /** where the console's keys came from since it started: names only, never a value. */
 /** a linked workspace's keys at use (the hosted layer counts them): from the first source, or its stored copy. */
 const worldTally = { source: 0, store: 0, storeNames: new Set<string>() };
@@ -60,6 +66,7 @@ export function countWorldKeyRead(from: "source" | "copy", label: string): void 
   else {
     worldTally.store++;
     worldTally.storeNames.add(label);
+    logCopyFallback(label);
   }
 }
 /** stored copies per workspace store (the hosted layer counts them; names only). */
@@ -109,6 +116,7 @@ async function sourceThenCopy(file: string, copy: (file: string) => Promise<stri
   if (v && k) {
     tally.store++;
     tally.storeNames.add(`${k.app}/${k.name}`);
+    logCopyFallback(`${k.app}/${k.name}`);
   }
   return source && k ? { v, kept: true, holdMs: COPY_HOLD_MS } : { v, kept: true };
 }

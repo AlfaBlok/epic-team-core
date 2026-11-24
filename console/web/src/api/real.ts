@@ -591,7 +591,7 @@ export function createRealClient(): ApiClient {
     deckCardSeen: (ref) => call("POST", "/deck-cards/seen", ref),
     getCredits: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/credits`),
     getSeatUsage: () => call("GET", "/platform/seat-usage"),
-    startPlanCheckout: (tenantId, seats) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, seats === "own" ? { ai: "own" } : seats ? { seats } : {}),
+    startPlanCheckout: (tenantId, seats) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, seats === "own" ? { ai: "own" } : seats ? { seats } : {}, { timeoutMs: 120_000 }), // the payment page opens through Stripe: give a loaded console time
     getPlan: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/plan`),
     grantCredits: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/credits/grant`, input),
     setCreditsGate: (tenantId, on) => call("PUT", `/tenants/${encodeURIComponent(tenantId)}/credits/gate`, { on }),

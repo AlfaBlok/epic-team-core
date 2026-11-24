@@ -115,3 +115,22 @@ export function decideButtonsProblem(a: DecideAsk & { state?: string }): string 
     "question (no question mark), an either-or or a recommendation: list 2 to 4 options, or ask one yes or no question (E948-S69)"
   );
 }
+
+/** A question that lists its choices (", or …"): never a yes or no. */
+const CHOICES = /,\s*or\s+\S/i;
+/**
+ * E948-S200: the ask's own question is answered by a yes or a no: its first sentence (after any "You decide:" lead and a
+ * page link it opens with) ends with "?", and it is not a pick question (which, what, how …) or a list of choices.
+ * The page's lib/yesNo.ts is the same test.
+ */
+export function isYesNoQuestion(text: string | undefined): boolean {
+  const t = (text ?? "")
+    .replace(/^\s*\[[^\]]*\]\(https?:\/\/[^)\s]+\)\s*(?:[:—–-]\s+|:)?\s*/i, "")
+    .replace(/^\s*https?:\/\/\S+\s*(?:[:—–-]\s+|:\s+)/i, "")
+    .replace(/^\s*(?:\*\*)?you\s+(?:approve|decide|do|give|provide|check|answer)(?:\s*,\s*urgent)?\s*(?:\*\*)?\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const q = /^[^?]*?\?/.exec(t)?.[0]?.trim();
+  if (!q || q.length < 4 || /[.!]\s+\S/.test(q.slice(0, -1))) return false;
+  return !PICKS.test(q) && !CHOICES.test(q);
+}

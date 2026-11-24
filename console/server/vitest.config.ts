@@ -28,7 +28,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts", "../../../hosted/console/server/test/**/*.test.ts"],
     // no test writes or pushes a real checkout or its origin (a run pushed fixture ask, 674d6aeb).
     // a fork whose vitest parent died (a command timeout) is killed instead of spinning on alone (orphan guard).
-    setupFiles: ["../vitest-orphan-guard.ts", "./test/realCheckoutGuard.ts", "./test/hostedSetup.ts"], // the hosted layer, as the server entry loads it
+    setupFiles: ["../vitest-orphan-guard.ts", "./test/realCheckoutGuard.ts", "./test/hostedSetup.ts", "./test/ticketIndexSetup.ts"], // the hosted layer, as the server entry loads it
     pool: "forks",
     poolOptions: { forks: { minForks: 1, maxForks } },
     testTimeout: 60000,

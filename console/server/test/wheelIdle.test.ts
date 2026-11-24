@@ -1,3 +1,4 @@
+import { ledgerLines } from "../src/review/rows.js";
 import { describe, expect, it } from "vitest";
 import { createIdleWatch, objectivesSection, wheelVerdict } from "../src/cycle/wheelIdle.js";
 import { readSpineInfo, type ScorecardNode, type SpineInfo } from "../src/scorecards.js";
@@ -100,7 +101,7 @@ describe("owner", () => {
   });
   it("a spine row in review is read", () => {
     const text = "# EPIC-907: X\n\n## Issue Ledger\n\n| ID | Owner | Assignment | Task | Status | Next |\n|---|---|---|---|---|---|\n| E907-S1 | w | r | Build | review (card) | x |\n| E907-S2 | w | r | More | ready | x |\n";
-    expect(readSpineInfo("app", "docs/spines/e.md", text).review).toEqual(["E907-S1"]);
+    expect(readSpineInfo("app", "docs/spines/e.md", text, ledgerLines(text)).review).toEqual(["E907-S1"]);
   });
 });
 

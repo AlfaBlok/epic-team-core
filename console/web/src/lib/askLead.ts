@@ -136,6 +136,7 @@ const LEAD_MD = /^\s*\[[^\]]*\]\(https?:\/\/[^)\s]+\)\s*(?:[:—–-]\s+|:)?\s*/
 const LEAD_URL = /^\s*(?:mac page\s*:\s*)?https?:\/\/\S+(?:\s*\([^)]*\))?(?:\s+and\s+https?:\/\/\S+(?:\s*\([^)]*\))?)*?(?:\s+[:—–-]\s+|:\s+|\s*[—–]\s*)/i;
 
 /** the ask's text without the page link it opens with, its own "You do:" and its Why. */
+export const askWords = (item: { question?: string; title?: string }) => askText(item);
 function askText(item: { question?: string; title?: string }): string {
   let text = (item.question || item.title || "").replace(/\s+/g, " ").trim();
   // E948-S168: a leading "Urgent." is the card's label (its Urgent section says it), never its heading

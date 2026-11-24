@@ -35,6 +35,7 @@ import { ACTION, PRESS } from "@/components/cardActions";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { FoldSection, SkeletonCards, SortControl, sortSection, useSectionOpen, useSectionSort } from "@/components/homeSection";
 import { pendingAction, statusQuestion } from "@/lib/pending";
+import { isYesNo } from "@/lib/yesNo";
 import { blockedItems, openCards as stillOpen, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
@@ -1320,7 +1321,9 @@ function WaitingCardBody({
   const pickOf = pick ?? (options.includes(item.recommendation ?? "") ? item.recommendation! : options[0]);
   // a yes or no question (no options, ends with "?"): Yes or No, the note with it
   // E948-S69 (the owner on E946-A31: "decide cards with no decide options … only ask feedback"): a decide ask is never words only.
-  const yesNo = !approveCard && !options.length && item.ask !== "provide" && (/\?\s*$/.test(heading) || (item.ask === "decide" && /\?/.test(item.question)));
+  // E948-S200: the card's own question counts too, not only its heading (a long question's heading is cut before its "?",
+  // and the card fell back to a lone Answer).
+  const yesNo = !approveCard && !options.length && item.ask !== "provide" && (/\?\s*$/.test(heading) || isYesNo(item.question) || (item.ask === "decide" && /\?/.test(item.question)));
   // a question that needs words (give, a free question): the note box is the answer, always shown
   const wordsAnswer = !approveCard && !options.length && !yesNo;
   // the "your own number" kind of option takes his words in its own box when picked
@@ -2336,10 +2339,12 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
   const action = pendingAction(item);
   // E948-S198 (vn_c408c78f): the card leads with its one plain question, never the row's internal line.
   const asked = statusQuestion(item);
+  // E948-S200: an ask whose question is a yes or no (every approve ask is) answers it right here, Yes or No, never a lone Answer.
+  const yesNo = (item.kind === "ask" || item.kind === "needs_jordi") && item.ask !== "provide" && item.ask !== "do" && (item.ask === "approve" || isYesNo(asked.question));
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
     <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
-      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} about={item.kind === "ready_to_mark" ? undefined : aboutFrom(item.title)} since={item.since} sinceWhat="issued">
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : yesNo ? "Decision" : "Review"} about={item.kind === "ready_to_mark" ? undefined : aboutFrom(item.title)} since={item.since} sinceWhat="issued">
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
@@ -2367,6 +2372,8 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
               <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
             ) : item.kind === "ready_to_mark" ? (
               <FinishedButtons item={item} />
+            ) : yesNo ? (
+              <StatusYesNo item={item} question={asked.question} open={"to" in action ? action.to : undefined} />
             ) : (
               "to" in action && (
                 <CardButton asChild variant="outline" >
@@ -2378,6 +2385,49 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
         }
       />
     </CardShell>
+  );
+}
+
+/**
+ * E948-S200 (the owner, closing E948-S109 24 Nov: a yes-or-no card's buttons say Yes and No, not Answer): a status card for an
+ * ask that asks yes or no (a held ask like E907-A43, "Do you approve one private test notes repo …?") shows Yes and No, each
+ * saying what it does, through the ask's own answer route; its words box below stays for a free note, and the whole card
+ * is one link away. An approve ask's Yes approves and its No declines; any other ask gets "Yes" or "No" as its answer.
+ */
+function StatusYesNo({ item, question, open }: { item: PendingItem; question: string; open?: string }) {
+  const [busy, setBusy] = useState<"yes" | "no">();
+  const [error, setError] = useState<string>();
+  const approve = item.ask === "approve";
+  const press = async (yes: boolean) => {
+    setBusy(yes ? "yes" : "no");
+    setError(undefined);
+    try {
+      const kind = approve ? (yes ? "approve" : "deny") : "answer";
+      await mutate(() => api.respondToWaiting(item.id, { kind, text: approve ? "" : yes ? "Yes" : "No", milestoneId: item.milestoneId, wake: true }), "inbox");
+      markSent(`status:${item.id}`, { said: yes ? "Yes. The team goes ahead." : "No. The team drops it.", title: question });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  return (
+    <>
+      <CardButton onClick={() => void press(true)} disabled={!!busy} title={ACTION.approve.hint} data-testid="yes">
+        {busy === "yes" ? <Loader2 className="animate-spin" /> : <Check />} {YES_LABEL}
+      </CardButton>
+      <CardButton variant="outline" onClick={() => void press(false)} disabled={!!busy} title="No. Nothing goes ahead; the team drops it." data-testid="no">
+        {busy === "no" && <Loader2 className="animate-spin" />} {NO_LABEL}
+      </CardButton>
+      {open && (
+        <CardButton asChild variant="ghost">
+          <Link to={open} data-testid="status-open-card">
+            Open the whole card
+          </Link>
+        </CardButton>
+      )}
+      {error && <span className="text-xs text-destructive" data-testid="status-yes-no-error">{error}</span>}
+    </>
   );
 }
 

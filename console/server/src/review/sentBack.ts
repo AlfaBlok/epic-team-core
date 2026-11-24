@@ -203,7 +203,7 @@ export function sentBackCards(d: SentBackInput): SentBackCard[] {
 }
 
 export interface SentBackDeps {
-  store: Pick<Store, "listMilestones" | "listRuns" | "getPersona">;
+  store: Pick<Store, "listMilestones" | "listRunningRuns" | "getPersona">;
   reposRoot: string;
   goals: () => Promise<ReviewGoal[]>;
   rows: () => Promise<{ repo: string; ref: string }[]>;
@@ -234,7 +234,7 @@ export function createSentBack(d: SentBackDeps) {
           return dir ? rowIn(dir, p, ref) : undefined;
         },
         // a worker's run is at most hours old; two days covers a long one
-        runs: d.store.listRuns({ since: new Date(now.getTime() - 2 * 86_400_000).toISOString() }).filter((r) => r.outcome === "running"),
+        runs: d.store.listRunningRuns(new Date(now.getTime() - 2 * 86_400_000).toISOString()),
         personaName: (id) => d.store.getPersona(id)?.name,
         cardTitle: (repo, ref) => {
           const dir = /^[\w.-]+$/.test(ref) && mine.has(repo.split("/").pop()!) ? dirOf(repo) : undefined;

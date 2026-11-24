@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { turnerOf } from "./personaGaps.js";
 import path from "node:path";
-import { ledgerLines, splitRow } from "./review/rows.js";
+import { splitRow, type LedgerLine } from "./review/rows.js";
+import { ticketIndex } from "./tickets/ticketIndex.js";
 import { archiveEpicCode, isArchiveRel } from "./adapters/spineArchive.js";
 import { FOLDS_FILE, foldMap, parseFolds } from "./folds.js";
 import { doneMeansOf, epicHeading, type PursuitsBody } from "./pursuits.js";
@@ -259,14 +260,18 @@ export function rowTitle(cell: string): string {
   return out.length > 140 ? `${out.slice(0, 138)}…` : out;
 }
 
-/** One spine's facts and the spines that name it as their parent (relative to the repo). */
-export function readSpineInfo(repo: string, rel: string, text: string): SpineInfo & { links: string[]; parent?: string } {
+/** a spine reader: a file's text, and its ticket rows from the ticket index (the Board and Key results never parse them). */
+export type SpineRead = ((repo: string, rel: string) => string | undefined) & { rows?: (repo: string, rel: string) => LedgerLine[] };
+const rowsOf = (read: SpineRead, repo: string, rel: string): LedgerLine[] => read.rows?.(repo, rel) ?? [];
+
+/** One spine's facts and the spines that name it as their parent (relative to the repo); `rows` its ledger lines (the index's). */
+export function readSpineInfo(repo: string, rel: string, text: string, rows: LedgerLine[]): SpineInfo & { links: string[]; parent?: string } {
   const head = epicHeading(text);
   const dm = doneMeansOf(text, []);
   const codes = new Set<string>();
   const queue: QueueRow[] = [];
   const review: string[] = [];
-  for (const r of ledgerLines(text)) {
+  for (const r of rows) {
     if (!/^[A-Z][A-Z0-9]*-[A-Z]*\d+/.test(r.id)) continue;
     codes.add(r.id);
     const status = r.col.status >= 0 ? strip(r.cells[r.col.status] ?? "") : "";
@@ -344,7 +349,7 @@ export function parseScorecardFile(text: string): ScorecardFile | null {
 type PursuitIn = PursuitsBody["pursuits"][number] & { milestones?: { id: string; teams?: ScorecardTeam[] }[] };
 export function buildScorecards(
   body: Omit<PursuitsBody, "pursuits"> & { pursuits: PursuitIn[]; retiredMilestones?: string[] },
-  read: (repo: string, rel: string) => string | undefined,
+  read: SpineRead,
   o: { file?: (pursuitId: string) => string | undefined; work?: (repo: string, code: string) => WorkLink; homeRepo?: string } = {},
 ): ScorecardsBody {
   const spineInfo: Record<string, SpineInfo> = {};
@@ -362,7 +367,7 @@ export function buildScorecards(
     if (Object.keys(spineInfo).length >= MAX_SPINES) return undefined;
     const text = read(repo, rel);
     if (text === undefined) return undefined;
-    const { links, parent: _parent, ...facts } = readSpineInfo(repo, rel, text);
+    const { links, parent: _parent, ...facts } = readSpineInfo(repo, rel, text, rowsOf(read, repo, rel));
     spineInfo[key] = facts;
     // children: a linked spine whose Parent spine points back at this one.
     const children: string[] = [];
@@ -642,9 +647,14 @@ export function createSpineFileReader(repoDir: (name: string) => string | undefi
       return undefined;
     }
   };
-  /** every file read so far with its mtime now (a changed spine changes the line): the kept scorecards' change check. */
+  /** a spine's ticket rows, from the ticket index. */
+  const rows = (repo: string, rel: string): LedgerLine[] => {
+    const dir = repoDir(repo);
+    return dir && !rel.includes("..") && rel.endsWith(".md") ? ticketIndex().lines(path.join(dir, rel)) : [];
+  };
+  /** every file read so far with its mtime now (a changed spine changes the line), and the index's version: the kept scorecards' change check. */
   const signature = (): string => {
-    const out: string[] = [];
+    const out: string[] = [`index@${ticketIndex().version()}`];
     for (const abs of cache.keys()) {
       try {
         out.push(`${abs}@${fs.statSync(abs).mtimeMs}`);
@@ -654,7 +664,7 @@ export function createSpineFileReader(repoDir: (name: string) => string | undefi
     }
     return out.join("|");
   };
-  return Object.assign(read, { signature });
+  return Object.assign(read, { signature, rows });
 }
 
 /** a work item's colour: done (or finished, waiting for review) green, moving amber, stuck red, unknown grey. */
@@ -675,7 +685,7 @@ export function workState(kind: WorkLink["kind"], status = ""): RowState {
  * Finds a code's ticket or epic in a repo's spines (docs/spines/*.md and docs/*.md), for a row's `work` links: a row
  * row code gives its title and status, an epic code its title and Done-means count. Cached by mtime.
  */
-export function createWorkFinder(repoDir: (name: string) => string | undefined, read: (repo: string, rel: string) => string | undefined) {
+export function createWorkFinder(repoDir: (name: string) => string | undefined, read: SpineRead) {
   const list = (repo: string): string[] => {
     const dir = repoDir(repo);
     if (!dir) return [];
@@ -715,15 +725,16 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
    * Now one listing per repo per second, and an answer is kept while every file of that repo is the same text (the
    * reader keeps an unchanged file's text, so a same-object check is enough).
    */
-  const snaps = new Map<string, { at: number; files: string[]; texts: (string | undefined)[]; answers: Map<string, WorkLink> }>();
+  const snaps = new Map<string, { at: number; files: string[]; texts: (string | undefined)[]; ver: string; answers: Map<string, WorkLink> }>();
   const snapshot = (repo: string) => {
     const t = Date.now();
     let s = snaps.get(repo);
     if (s && t - s.at < 1_000) return s;
     const files = list(repo);
     const texts = files.map((rel) => read(repo, rel));
-    const same = !!s && s.files.length === files.length && s.files.every((f, i) => f === files[i] && s!.texts[i] === texts[i]);
-    s = { at: t, files, texts, answers: same ? s!.answers : new Map() };
+    const ver = ticketIndex().version(); // a rebuilt index can move a row while its file's text is the same
+    const same = !!s && s.ver === ver && s.files.length === files.length && s.files.every((f, i) => f === files[i] && s!.texts[i] === texts[i]);
+    s = { at: t, files, texts, ver, answers: same ? s!.answers : new Map() };
     snaps.set(repo, s);
     return s;
   };
@@ -771,14 +782,14 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
       }
       if (box && !archived) {
         if (!text.includes(code)) continue;
-        const b = readSpineInfo(repo, rel, text).boxes.find((x) => x.id === code);
+        const b = readSpineInfo(repo, rel, text, []).boxes.find((x) => x.id === code);
         if (b) {
           const h = epicHeading(text);
           return { code, repo, kind: "done-means", title: b.text, status: b.done ? "done" : "open", state: b.done ? "green" : "amber", path: rel, ...(h.code ? { epicCode: h.code } : {}) };
         }
       }
       if (!text.includes(code)) continue;
-      const row = ledgerLines(text).find((r) => r.id === code);
+      const row = rowsOf(read, repo, rel).find((r) => r.id === code);
       if (!row) {
         loose ??= tableRow(repo, rel, text, code);
         continue;

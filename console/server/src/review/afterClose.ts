@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
 import { z } from "zod";
-import { memoRead, type Store } from "../store.js";
+import { memoReadOn, type Store } from "../store.js";
 import { isDm } from "../inbox/waiting.js";
 import { resolveRepo } from "../adapters/repos.js";
 import type { SpineWriter } from "../inbox/spineWrite.js";
@@ -224,8 +224,9 @@ export function createAfterClose(o: AfterCloseOptions) {
    */
   function recent(o2: { days?: number; limit?: number; world?: string; /** only TEST repos' cards (proofs; never on a list) */ test?: boolean } = {}): ClosedCard[] {
     if (!o.db) return [];
-    // the deck polls this; it is kept until a write (store.ts memoRead) instead of re-read and re-parsed each poll
-    return memoRead(o.db, `closed-cards\0${JSON.stringify([o2.days, o2.limit, o2.world, o2.test])}`, () => readRecent(o.db!, o2));
+    // the deck and the inbox poll this; it is kept until a press or an answer changes (store.ts memoReadOn) instead of
+    // re-read and re-parsed each poll
+    return memoReadOn(o.db, ["presses", "jordi_responses"], `closed-cards\0${JSON.stringify([o2.days, o2.limit, o2.world, o2.test])}`, () => readRecent(o.db!, o2));
   }
   function readRecent(db: DB, o2: { days?: number; limit?: number; world?: string; test?: boolean }): ClosedCard[] {
     const since = new Date(Date.now() - Math.min(Math.max(o2.days ?? 30, 1), 90) * 86_400_000).toISOString();

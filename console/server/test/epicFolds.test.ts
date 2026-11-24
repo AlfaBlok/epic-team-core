@@ -4,6 +4,9 @@ import { applyFolds, foldMap, parseFolds } from "../src/folds.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ledgerLines } from "../src/review/rows.js";
+/** an in-memory spine reader with its rows, as the ticket index would hold them. */
+const rowsToo = <F extends (repo: string, rel: string) => string | undefined>(f: F) => Object.assign(f, { rows: (repo: string, rel: string) => ledgerLines(f(repo, rel) ?? "") });
 import { buildScorecards, createSpineFileReader } from "../src/scorecards.js";
 
 /**
@@ -61,7 +64,7 @@ describe("epic folds", () => {
       "docs/spines/video.md": "# EPIC-928: Video\nParent spine: none\n\n- [EPIC-926: TikTok](tiktok.md)\n",
       "docs/spines/tiktok.md": "# EPIC-926: TikTok\nParent spine: [EPIC-928](video.md)\n",
     };
-    const read = (_repo: string, rel: string) => files[rel];
+    const read = rowsToo((_repo: string, rel: string) => files[rel]);
     const p = {
       id: "channels",
       name: "Every channel",

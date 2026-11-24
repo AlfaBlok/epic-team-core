@@ -1,4 +1,5 @@
 import { ownerName } from "../identity.js";
+import { isYesNoQuestion } from "../inbox/decideChoices.js";
 
 /**
  * (his pick "Walk the inbox by voice"): the call knows his inbox. When a Team
@@ -70,9 +71,19 @@ export function reviewButtons(face: { decision?: string; options?: string[] } | 
   return [MARK_COMPLETE, CHANGES_WANTED];
 }
 
-/** an ask's buttons: Yes / No on an approve ask, and his answer in words on every ask. */
-export function askButtons(ask: string | undefined): string[] {
-  return ask === "approve" ? [ASK_YES, ASK_NO, ANSWER_IN_WORDS] : [ANSWER_IN_WORDS];
+/** E948-S200: Yes and No on an ask whose own question is a yes or no (not an approve ask): his answer is the word. */
+export const ANSWER_YES = "Yes";
+export const ANSWER_NO = "No";
+
+/**
+ * an ask's buttons: Yes / No on an approve ask, and his answer in words on every ask. E948-S200 (the owner, closing
+ * E948-S109: a yes-or-no card's buttons say Yes and No, not Answer): any other ask whose question is a yes or no gets Yes
+ * and No too, never only Answer in words.
+ */
+export function askButtons(ask: string | undefined, question?: string): string[] {
+  if (ask === "approve") return [ASK_YES, ASK_NO, ANSWER_IN_WORDS];
+  if (ask !== "provide" && ask !== "do" && isYesNoQuestion(question)) return [ANSWER_YES, ANSWER_NO, ANSWER_IN_WORDS];
+  return [ANSWER_IN_WORDS];
 }
 
 /** a goal option's label, as the page's teamCard makes it. */

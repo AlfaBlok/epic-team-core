@@ -137,7 +137,10 @@ export const ASK_NO = "No: drop it";
  */
 export async function pressAsk(p: { id: string; button: string; words?: string; milestoneId?: string }): Promise<string> {
   const kind = p.button === ASK_YES ? "approve" : p.button === ASK_NO ? "deny" : "answer";
-  const text = kind === "answer" ? (p.words ?? "").trim() : "";
+  // E948-S200: a yes-or-no ask's Yes and No are his answer, with any words he added
+  const word = p.button === "Yes" || p.button === "No" ? p.button : undefined;
+  const words = (p.words ?? "").trim();
+  const text = kind === "answer" ? (word ? (words ? `${word}. ${words}` : word) : words) : "";
   if (kind === "answer" && !text) return "not pressed: his answer needs his words";
   await mutate(() => api.respondToWaiting(p.id, { kind, text, ...(p.milestoneId ? { milestoneId: p.milestoneId } : {}), wake: true }), "inbox");
   return done(kind === "approve" ? "said yes" : kind === "deny" ? "said no" : "his answer was sent");

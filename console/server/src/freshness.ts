@@ -28,6 +28,31 @@ export const gitOut =
       });
     });
 
+/**
+ * `git log` read through a memo of (checkout, HEAD, arguments): its answer only changes when HEAD moves, yet the objectives'
+ * last moves (every scorecards build, every 20 s) and the claims' last commits (every lease check) ran one git spawn per
+ * objective and per claim each time, forking the console's whole process: 2.5 s of a 90 s live profile on the main server.
+ * Only `log` with no relative date is kept; anything else, or a checkout whose HEAD cannot be read, goes straight to git.
+ */
+export function headKeptLog(git: GitOut, o: { head?: (dir: string) => string | undefined; max?: number } = {}): GitOut {
+  const head = o.head ?? headSha;
+  const max = o.max ?? 2_000;
+  const kept = new Map<string, Promise<string>>();
+  return (dir, args) => {
+    const sha = args[0] === "log" && !args.some((a) => /^--(since|until|after|before)=.*(ago|now|today|yesterday)/i.test(a)) ? head(dir) : undefined;
+    if (!sha) return git(dir, args);
+    const key = `${dir}\0${sha}\0${args.join("\0")}`;
+    let p = kept.get(key);
+    if (!p) {
+      p = git(dir, args);
+      p.catch(() => kept.delete(key));
+      kept.set(key, p);
+      if (kept.size > max) kept.delete(kept.keys().next().value!);
+    }
+    return p;
+  };
+}
+
 export interface RepoFreshness {
   repo: string;
   /** Checkout HEAD (full sha; the web shows 7). */
