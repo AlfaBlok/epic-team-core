@@ -40,7 +40,7 @@ describe("T13-S4 lib/pending", () => {
   it("one action per kind", () => {
     expect(pendingAction(ITEMS[0])).toEqual({ label: "Rewrite as a coded ask", rewrite: { milestoneId: "ms_z", path: "docs/spines/root.md" } });
     expect(pendingAction(ITEMS[3])).toEqual({ label: "Answer", to: "/milestones/ms_p?tab=waiting&item=wj_a" });
-    expect(pendingAction(ITEMS[5])).toMatchObject({ label: "Review and mark" });
+    expect(pendingAction(ITEMS[5])).toMatchObject({ label: "Open the goal" });
     expect(pendingAction(ITEMS[6])).toMatchObject({ label: "Switch on", to: "/milestones/ms_v?tab=personas" });
     expect(pendingAction(ITEMS[7])).toMatchObject({ label: "Open run", to: "/milestones/ms_v?tab=activity" });
   });
@@ -70,7 +70,7 @@ describe("T13-S4 Pending selector", () => {
     // A coded ask: no amber badge, Answer opens its card.
     expect(within(rows[3]).queryByTestId("free-text-badge")).toBeNull();
     expect(within(rows[3]).getByRole("link", { name: "Answer" }).getAttribute("href")).toBe("/milestones/ms_p?tab=waiting&item=wj_a");
-    expect(within(screen.getByTestId("pending-group-ready_to_mark")).getByRole("link", { name: "Review and mark" })).toBeTruthy();
+    expect(within(screen.getByTestId("pending-group-ready_to_mark")).getByRole("link", { name: "Open the goal" })).toBeTruthy();
     expect(within(screen.getByTestId("pending-group-stalled")).getByRole("link", { name: "Switch on" })).toBeTruthy();
     expect(within(screen.getByTestId("pending-group-runs")).getByRole("link", { name: "Open run" })).toBeTruthy();
     expect(screen.queryByText("Answer received")).toBeNull();

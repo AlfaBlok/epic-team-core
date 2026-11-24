@@ -147,7 +147,7 @@ describe("T13-S2 pure edits", () => {
     const evidence = [{ doneMeans: "E3-1", links: ["x"] }];
     const s = milestoneStatus({ ...base, outcome: { verdict: null, sentence: "x", evidence, risk: null, closedAt: null, closedBy: null } });
     expect(s.outcome.word).toBe("ready_to_mark");
-    expect(s.items).toEqual([expect.objectContaining({ id: "ready_to_mark:m1", kind: "ready_to_mark", state: "open", title: expect.stringMatching(/^Review and mark/) })]);
+    expect(s.items).toEqual([expect.objectContaining({ id: "ready_to_mark:m1", kind: "ready_to_mark", state: "open", title: "Is this goal finished?" })]);
     expect(s.flow.word).toBe("needs_you");
     expect(s.needsYou).toBe(1);
     const marked = milestoneStatus({ ...base, outcome: { verdict: "accomplished", sentence: "x", evidence, risk: null, closedAt: "2026-10-25", closedBy: "Sam (console)" } });

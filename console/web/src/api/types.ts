@@ -1010,6 +1010,8 @@ export interface PendingItem {
   ownerPriority?: OwnerPriority;
   title: string;
   ask?: AskKind;
+  /** ask / needs_jordi: the ask's own words (its card leads with them as one plain question, never the row's title). */
+  question?: string;
   code?: string;
   repo?: string;
   nodeKey?: string;
@@ -1074,10 +1076,11 @@ export interface MilestoneStatusView {
 export type MarkVerdict = "accomplished" | "partially" | "not_accomplished" | "superseded";
 export interface MarkInput {
   verdict: MarkVerdict;
-  sentence: string;
+  /** left out: the spine's own Outcome sentence and evidence table are kept (the inbox card's Yes). */
+  sentence?: string;
   risk?: string;
   note?: string;
-  evidence: { doneMeans: string; evidence: string }[];
+  evidence?: { doneMeans: string; evidence: string }[];
 }
 export interface MarkResult {
   verdict: MarkVerdict;

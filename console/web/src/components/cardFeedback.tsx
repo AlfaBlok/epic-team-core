@@ -192,7 +192,8 @@ export async function sendFeedback(t: FeedbackTarget, words: string, files: stri
   }
   const world = knownWorld();
   const text = `Feedback on ${t.page}: ${words}`;
-  const id = `feedback:${t.page}:${Date.now()}`;
+  // the time first and the whole id under 120 characters (a long card title made the chat refuse his voice note)
+  const id = `feedback:${Date.now()}:${t.page}`.slice(0, 120);
   if (world && world !== homeWorld()) await api.sendWorldDeskMessage(world, text, t.page, id, files.length ? files : undefined);
   else await api.sendDeskMessage(text, t.page, id, files.length ? files : undefined);
 }

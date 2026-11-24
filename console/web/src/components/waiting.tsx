@@ -34,7 +34,7 @@ import { GrantWriteAction, waitingAnchor } from "@/components/unblock";
 import { ACTION, PRESS } from "@/components/cardActions";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { FoldSection, SkeletonCards, SortControl, sortSection, useSectionOpen, useSectionSort } from "@/components/homeSection";
-import { pendingAction } from "@/lib/pending";
+import { pendingAction, statusQuestion } from "@/lib/pending";
 import { blockedItems, openCards as stillOpen, useStatusFor } from "@/lib/inbox";
 import { DEFAULT_OWNER } from "@/lib/owner";
 import { keepPlace } from "@/lib/keepPlace";
@@ -2334,14 +2334,23 @@ export function StatusItemRow(props: { item: PendingItem; milestone?: string }) 
 function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: string }) {
   if (item.kind === "monitor_alert") return <MonitorAlertCard item={item} />;
   const action = pendingAction(item);
+  // E948-S198 (vn_c408c78f): the card leads with its one plain question, never the row's internal line.
+  const asked = statusQuestion(item);
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
     <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
-      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} about={aboutFrom(item.title)} since={item.since} sinceWhat="issued">
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : "Review"} about={item.kind === "ready_to_mark" ? undefined : aboutFrom(item.title)} since={item.since} sinceWhat="issued">
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
-      <div className={CARD_TITLE}>{item.title}</div>
+      <div className={CARD_TITLE} data-testid="status-item-question">
+        {asked.question}
+      </div>
+      {asked.why && (
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground" data-testid="status-item-why">
+          Why: {asked.why}
+        </p>
+      )}
       {/* every Blocked card gives its info (what waits on the owner), not only the ready stamp. */}
       {item.detail && <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="status-item-detail">{item.detail}</p>}
       {/* E948-S60: a status card takes feedback too, to the Team desk with the card named; E948-S131: its one action leads the row. */}
@@ -2356,6 +2365,8 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
             {/* the owner's ready stamp is the item's one action, right here (writes Status: ready, like the Tree's button). */}
             {item.kind === "mark_ready" ? (
               <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
+            ) : item.kind === "ready_to_mark" ? (
+              <FinishedButtons item={item} />
             ) : (
               "to" in action && (
                 <CardButton asChild variant="outline" >
@@ -2367,6 +2378,47 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
         }
       />
     </CardShell>
+  );
+}
+
+/**
+ * the Ready to mark card asks "Is <goal> finished?"; its buttons answer that question. Yes marks it finished
+ * (the team's own Outcome sentence and evidence, Status done, its team stops); the results page opens beside it; Not yet is
+ * his words by voice or text in the box below, which go to the team.
+ */
+function FinishedButtons({ item }: { item: PendingItem }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const yes = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await mutate(() => api.markMilestone(item.milestoneId, { verdict: "accomplished" }));
+      markSent(`status:${item.id}`, { said: "Marked finished. Its team stops.", title: item.title });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <CardButton onClick={() => void yes()} disabled={busy} data-testid="ready-to-mark-yes">
+        {busy ? <Loader2 className="animate-spin" /> : <Check />} Yes, it's finished
+      </CardButton>
+      {item.url ? (
+        <CardButton asChild variant="outline">
+          <a href={item.url} target="_blank" rel="noreferrer" data-testid="ready-to-mark-results">
+            <ExternalLink /> Open the results
+          </a>
+        </CardButton>
+      ) : (
+        <CardButton asChild variant="outline">
+          <Link to={`/milestones/${encodeURIComponent(item.milestoneId)}?tab=summary`}>Open the goal</Link>
+        </CardButton>
+      )}
+      {error && <span className="text-xs text-destructive" data-testid="ready-to-mark-error">{error}</span>}
+    </>
   );
 }
 

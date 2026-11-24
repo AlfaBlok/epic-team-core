@@ -25,14 +25,43 @@ export const VERDICT_TEXT: Record<MarkVerdict, string> = {
 export const SETTLE_OK: ReadonlySet<OutcomeWord> = new Set<OutcomeWord>(["accomplished", "partially", "superseded"]);
 export const SETTLE_REFUSED = "not accomplished yet: mark the outcome first (Accomplished, Partially or Superseded), then settle";
 
-/** The Ready to mark pending line (one action: Review and mark). */
-export const readyToMarkItem = (milestoneId: string, note?: string): PendingItem => ({
-  id: `ready_to_mark:${milestoneId}`,
-  kind: "ready_to_mark",
-  state: "open",
-  milestoneId,
-  title: `Review and mark the outcome${note ? `: ${note}` : ""}`,
-});
+/**
+ * The first plain sentence of an Outcome line, for a card: up to the first ":" or ";" or ". " (links and
+ * brackets dropped), cut at 200 characters on a word.
+ */
+export function plainFinding(sentence: string | null | undefined): string | undefined {
+  let t = (sentence ?? "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/\s*\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+  if (!t) return undefined;
+  const cut = t.search(/[:;]|\.\s/);
+  if (cut > 20) t = t.slice(0, cut);
+  t = t.replace(/[\s.,;:]+$/, "");
+  if (t.length > 200) t = t.slice(0, 200).replace(/\s+\S*$/, "") + "…";
+  return t;
+}
+
+/** The first link in an Outcome line (its results page), for the card's Open button. */
+export const findingLink = (sentence: string | null | undefined): string | undefined => /https?:\/\/[^\s)\]]+/.exec(sentence ?? "")?.[0]?.replace(/[.,;]+$/, "");
+
+/**
+ * The Ready to mark card(the owner several times: "I don't know exactly what it is to me and what I'm supposed
+ * to reply to"): one plain question naming the goal, what the team found in one line, and what Yes does. Its Yes button
+ * marks the goal finished; anything else he says by voice or text.
+ */
+export const readyToMarkItem = (milestoneId: string, _note?: string, about?: { name?: string; sentence?: string | null; done?: number; total?: number }): PendingItem => {
+  const name = about?.name?.trim();
+  const found = plainFinding(about?.sentence);
+  const link = findingLink(about?.sentence);
+  const checks = about?.total ? `${about.done === about.total ? "All" : about.done} ${about.total === 1 ? "check is" : `${about.total} checks are`} ticked. ` : "";
+  return {
+    id: `ready_to_mark:${milestoneId}`,
+    kind: "ready_to_mark",
+    state: "open",
+    milestoneId,
+    title: name ? `Is ${name} finished?` : "Is this goal finished?",
+    detail: `${found ? `The team says it is: ${found}. ` : ""}${checks}Yes closes it and its team stops. Not yet: say what is missing.`.replace(/\s+/g, " ").trim(),
+    ...(link ? { url: link } : {}),
+  };
+};
 
 export interface MarkInput {
   verdict: MarkVerdict;

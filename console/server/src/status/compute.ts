@@ -62,6 +62,7 @@ export interface PendingItem {
   /** free_text_ask: the spine line it was read from (repo-relative path, 0-based line) and its link. */
   path?: string;
   line?: number;
+  /** free_text_ask: its spine link; ready_to_mark: the results page its Outcome names. */
   url?: string;
   /** free_text_ask: the raw line (`Waiting on: …`, `Owner: the owner · Status: draft`). */
   detail?: string;
@@ -125,7 +126,7 @@ export interface WakeNote {
 }
 
 export interface StatusInput {
-  milestone: Pick<Milestone, "id" | "paused" | "settledAt">;
+  milestone: Pick<Milestone, "id" | "paused" | "settledAt"> & { title?: string };
   /** Spine Status word (derived milestone). */
   status?: string;
   monitoring?: MonitorItem[];
@@ -317,7 +318,7 @@ export function milestoneStatus(i: StatusInput): MilestoneStatus {
   // any other free-text item is no question the owner can answer: never counted, no card; a defect for the owner.
   const freeText = all.filter((x) => x.kind === "free_text_ask" && !marks.includes(x));
   const items = all.filter((x) => x.kind !== "free_text_ask");
-  if (outcome.word === "ready_to_mark") items.push(readyToMarkItem(i.milestone.id, outcome.note));
+  if (outcome.word === "ready_to_mark") items.push(readyToMarkItem(i.milestone.id, outcome.note, { name: i.milestone.title, sentence: i.outcome?.sentence, ...(i.doneMeans ?? {}) }));
   // a monitor item that names a stop or whose next check is a day overdue is an alert for the owner, not monitoring.
   const alerts = monitorAlerts(i.monitoring, now, (r) => i.monitorAsks?.get(refKey(r)));
   items.push(...alerts.map((a) => monitorAlertItem(i.milestone.id, a, now)));

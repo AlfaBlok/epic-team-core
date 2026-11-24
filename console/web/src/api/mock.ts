@@ -1157,9 +1157,9 @@ const mockMail = () => ({
       const text = { accomplished: "accomplished", partially: "partially accomplished", not_accomplished: "not accomplished", superseded: "superseded" }[input.verdict];
       m.outcome = {
         verdict: text,
-        sentence: input.sentence,
+        sentence: input.sentence ?? m.outcome?.sentence ?? null,
         risk: input.risk || "none",
-        evidence: input.evidence.map((e) => ({ doneMeans: e.doneMeans, links: e.evidence ? [e.evidence] : [] })),
+        evidence: input.evidence === undefined ? (m.outcome?.evidence ?? []) : input.evidence.map((e) => ({ doneMeans: e.doneMeans, links: e.evidence ? [e.evidence] : [] })),
         closedAt: stamp().slice(0, 10),
         closedBy: "Sam (console)",
       };

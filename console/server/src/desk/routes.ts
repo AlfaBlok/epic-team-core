@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { compress } from "hono/compress";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
@@ -11,14 +12,27 @@ import { AttachError, ATTACH_MAX_PER_MESSAGE } from "./attachLimits.js";
 import type { Attachments } from "./attachments.js";
 import { ownerName } from "../identity.js";
 
+/** an id up to 120 characters as it is; a longer one as its first 100 characters and a hash of the whole (same id, same result). */
+export const shortRequestId = (v: string) => (v.length <= 120 ? v : `${v.slice(0, 100)}#${createHash("sha256").update(v).digest("hex").slice(0, 16)}`);
+
 const sendIn = z.object({
   text: z.string(),
   /** The page the owner is looking at ("M5 · Milestone"), sent along as a hint. */
   page: z.string().max(PAGE_HINT_MAX * 2).optional(),
-  clientRequestId: z.string().trim().max(120).optional(),
+  /** a long id (a card's whole title in it) is shortened to a stable one, never a refused message. */
+  clientRequestId: z.string().trim().transform(shortRequestId).optional(),
   /** ids of files he uploaded first (POST /api/chat/attachments); the console adds their links to the text. */
   attachments: z.array(z.string().trim().max(40)).max(ATTACH_MAX_PER_MESSAGE).optional(),
 });
+
+/** the one plain reason a chat message was refused, naming the field (never "text is required" for another field). */
+export function sendInWhy(issues: { path: (string | number)[] }[]): string {
+  const f = String(issues[0]?.path[0] ?? "text");
+  if (f === "clientRequestId") return "the message id is too long (at most 120 characters)";
+  if (f === "page") return `the page hint is too long (at most ${PAGE_HINT_MAX * 2} characters)`;
+  if (f === "attachments") return `attachments must be up to ${ATTACH_MAX_PER_MESSAGE} file ids`;
+  return "text (string) is required; attachments (up to 8 ids) is optional";
+}
 
 /** The Team desk's console headers: the desk downloads an attachment with them. */
 export const TEAM_DESK_FETCH = "-H 'X-Console-Run: team-desk'";
@@ -63,7 +77,8 @@ export function mountDesk(
       const refused = notJordi((n) => c.req.header(n));
       if (refused) return c.json({ error: { code: "jordi_only", message: `only ${ownerName()} writes in ${where}, from the console page in his browser (no token, no run header)` } }, 403);
       const p = sendIn.safeParse(await c.req.json().catch(() => undefined));
-      if (!p.success) return c.json({ error: { code: "validation_error", message: "text (string) is required; attachments (up to 8 ids) is optional" } }, 400);
+      // say which field failed (a too-long clientRequestId once read "text (string) is required" and refused his voice note)
+      if (!p.success) return c.json({ error: { code: "validation_error", message: sendInWhy(p.error.issues) } }, 400);
       // his files go along as links in the text (a message may be files alone)
       const m = p.data.attachments?.length ? { ...p.data, text: withFiles(p.data.text, p.data.attachments, where) } : p.data;
       const r = await send(c, m);

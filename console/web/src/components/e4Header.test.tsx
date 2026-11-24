@@ -65,7 +65,7 @@ describe("T13-S10 E904 Waiting on you tab", () => {
     );
     const row = await screen.findByTestId("status-item");
     expect(row.dataset.kind).toBe("ready_to_mark");
-    expect(within(row).getByRole("link", { name: "Review and mark" })).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "Open the goal" })).toBeTruthy();
     expect(screen.getByTestId("waiting-on-you-count").textContent).toBe("1");
     // No open decision card, no guessed "question" card for the folded verify line.
     expect(screen.queryAllByTestId("waiting-card")).toHaveLength(0);

@@ -17,6 +17,7 @@ import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
 import { onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
+import { reviewQuestion } from "@/lib/pending";
 import { CARD_WORD, countsRed, DECIDE_QUESTION, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
 import { LeadLines } from "@/components/readyFirst";
 import { useMinuteClock } from "@/components/deadlineFirst";
@@ -1019,6 +1020,10 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}
       {/* a note he left inside the page itself shows on its card, so he sees it landed. */}
       {!!face.pageNotes?.length && <PageNotes notes={face.pageNotes} />}
+      {/* E948-S198 (vn_c408c78f, "you really need to see the question mark"): the card leads with the one question it asks. */}
+      <p className="mt-1.5 text-base font-semibold leading-snug text-foreground" data-testid="review-question">
+        {reviewQuestion(face)}
+      </p>
       <button
         type="button"
         className="mt-1.5 text-left text-[15px] font-medium leading-snug text-foreground hover:underline hover:decoration-foreground/30 hover:underline-offset-[3px]"

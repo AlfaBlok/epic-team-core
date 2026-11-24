@@ -108,8 +108,8 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
                 <div className="flex items-baseline gap-3">
                   <span className="w-6 shrink-0 text-right font-mono text-sm text-muted-foreground">{i + 1}</span>
                   <span className="min-w-0">
-                    <span className="flex items-baseline gap-2">
-                      <a href={`#prop-${t.id}`} className="font-semibold">
+                    <span className="flex items-center gap-2">
+                      <a href={`#prop-${t.id}`} className="inline-flex min-h-[44px] min-w-[44px] items-center font-semibold">
                         {t.label}
                       </a>
                       {t.kind === "data" && <span className="text-[11px] uppercase tracking-wider text-emerald-700">this product's own</span>}
