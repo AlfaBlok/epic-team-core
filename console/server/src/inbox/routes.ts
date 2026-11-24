@@ -1492,7 +1492,7 @@ export function mountInbox(
    * checks, the same answered line and approval mirror, the same `secret put`. The value is never returned.
    */
   type KeyResult =
-    | { ok: true; body: unknown; stored: { app: string; name: string; deployed: boolean; vault?: string; where?: string } }
+    | { ok: true; body: unknown; stored: { app: string; name: string; deployed: boolean; vault?: string; where?: string; open?: string; at?: string } }
     | { ok: false; status: 400 | 403 | 404 | 409 | 502; code: string; message: string; body?: unknown };
   async function storeKey(item: WaitingItem, value: string, wake: boolean, file = false): Promise<KeyResult> {
     const no = (status: 400 | 403 | 404 | 409 | 502, code: string, message: string): KeyResult => ({ ok: false, status, code, message });
@@ -1569,10 +1569,10 @@ export function mountInbox(
     const answered = await notifyAsker(getResponse(rid)!, {
       wake: p.wake,
       answer: put.vault
-        ? `key ${item.secret.app} ${item.secret.name} saved in ${put.vault} (${put.mirrorErr ? `the secret store's working copy was not written: ${put.mirrorErr}` : `working copy in the secret store${put.deployed ? `, set in ${deployerName()}` : ""}`})`
+        ? `key ${item.secret.app} ${item.secret.name} saved in ${put.vault} (${put.noCopy ? "no working copy kept" : put.mirrorErr ? `the secret store's working copy was not written: ${put.mirrorErr}` : `working copy in the secret store${put.deployed ? `, set in ${deployerName()}` : ""}`})`
         : `key ${item.secret.app} ${item.secret.name} saved in the console (${inWorldStore ? hooks.keys.worldStoredMessage(world) : put.deployed ? `stored with secret put, set in ${deployerName()}` : hooks.keys.storedNoDeploy(item.secret.app)})`,
     });
-    const stored = { app: item.secret.app, name: item.secret.name, deployed: put.deployed, ...(put.vault ? { vault: put.vault } : {}), ...(first?.ok && first.where ? { where: first.where } : {}) };
+    const stored = { app: item.secret.app, name: item.secret.name, deployed: put.deployed, ...(put.vault ? { vault: put.vault } : {}), ...(first?.ok && first.where ? { where: first.where } : {}), ...(first?.ok && first.open ? { open: first.open } : {}), ...(first?.ok ? { at: first.at || new Date().toISOString() } : {}) };
     return { ok: true, body: { ...answered, stored }, stored };
   }
 

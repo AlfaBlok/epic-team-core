@@ -3,7 +3,7 @@ import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, Com
 import type { BuildingList } from "./building-types";
 import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
-import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
+import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, PersonaLog, StepLabel, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
 import type { AskLogSummary, HomeTabBody, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
@@ -584,6 +584,10 @@ export interface ApiClient {
   getTotem(product: string, id: string): Promise<TotemView>;
   /** a wheel's tracker tables (shortlists) with their rows. */
   getTrackers(wheel: string): Promise<WheelTrackers>;
+  /** a wheel's persona log (an objective id, or `milestone:<id>` for a campaign): every step, what and why. */
+  getPersonaLog(wheel: string, days?: number): Promise<PersonaLog>;
+  /** his one-tap label on a step nobody asked for, committed to the home repo. */
+  labelStep(id: string, label: StepLabel | "clear"): Promise<{ id: string; label: string; sha?: string }>;
   /** the world's onboarding scorecard (six ticks read from live state). */
   getOnboarding(tenantId: string): Promise<Onboarding>;
   /** the owner's note on a Product tab slide, filed to the campaign's spine; returns that slide's notes. */

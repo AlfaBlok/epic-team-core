@@ -25,6 +25,8 @@ export interface SentEntry {
   title: string;
   /** one quiet line under it, when the press has more to say (where a saved key went) */
   detail?: string;
+  /** a link under the detail line that opens what was saved (a saved key's item in his own vault) */
+  link?: { href: string; text: string };
   /** the row or ask Add comment files to; absent = nowhere to file (a persona's request) */
   card?: ClosedCardRef;
   back?: () => Promise<BackResult>;

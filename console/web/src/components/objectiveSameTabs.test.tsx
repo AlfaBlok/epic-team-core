@@ -11,8 +11,9 @@ import { SCORECARD_PATH } from "@/lib/scorecards";
 // the owner, vn_e6655c98: "each objective is the same class of thing and it should have the same
 // class of tabs ... I have said this a trillion times, it's still not implemented." Every objective page shows these
 // nine tabs in this order, whatever its product carries; a launch board, a feature list or a product deck is content
-// inside one of them. This test refuses any other tab set.
-const NINE = ["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers"];
+// inside one of them. This test refuses any other tab set. (the owner 24 Nov 05:11Z, "One of these data totems should
+// be persona logs"): Log is the tenth, on every wheel.
+const NINE = ["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"];
 
 const obj = (id: string, name: string, rank: number): ScorecardNode => ({
   id,

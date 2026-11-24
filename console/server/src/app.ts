@@ -83,6 +83,8 @@ import { mapSection, productFor, readMaps, totemView } from "./totemMap.js";
 import { createHomeTabs, readHomeFile, readHomeWheels } from "./homeFiles.js";
 import { createPlacer } from "./homePlace.js";
 import { wheelTrackers } from "./trackers.js";
+import { isStepId, isStepLabel, labelEdit, PERSONA_LOG_LABELS, readPersonaLog } from "./personaLog.js";
+import { hasOwnerPower } from "./auth/owner.js";
 import { storePersonas, wheelReader } from "./wheel.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
@@ -2298,6 +2300,36 @@ export function createApp(
   api.get("/trackers/:wheel", (c) => {
     const v = wheelTrackers(totemHome(), c.req.param("wheel"));
     return v ? c.json(v) : c.json({ error: "not_found" }, 404);
+  });
+  // the wheel's persona log (every step an agent took on it, what and why, asked or chosen) and his label on
+  // a step nobody asked for, one tap, committed to the home repo (personaLog.ts); `milestone:<id>` reads a campaign's.
+  api.get("/persona-log/:wheel", (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found" } }, 404);
+    const days = Math.min(30, Math.max(1, Number(c.req.query("days")) || 7));
+    return c.json(readPersonaLog(totemHome(), c.req.param("wheel"), days));
+  });
+  api.post("/persona-log/labels", async (c) => {
+    // a person's login in the home world labels (the owner's, plain or not); an agent's token or a host's trust never does
+    const a = currentAuth();
+    const person = (a?.identity?.kind === "session" && !a.identity.door) || (a?.mode === "off" && hasOwnerPower(a?.identity, a?.mode));
+    if (!homeOnly() || !person) return c.json({ error: { code: "forbidden", message: "only the owner labels a step" } }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as { id?: unknown; label?: unknown };
+    if (!isStepId(body.id) || !isStepLabel(body.label)) return c.json({ error: { code: "validation_error", message: "id (a run id) and label (correct, incorrect or clear)" } }, 400);
+    const home = totemHome();
+    if (!home) return c.json({ error: { code: "conflict", message: "no checkout of the home repo: nothing written" } }, 409);
+    const id = body.id, label = body.label;
+    const w = await spine.edit({
+      repoDir: home,
+      path: PERSONA_LOG_LABELS,
+      label: `persona log label ${id}`,
+      edit: (text) => ({
+        text: labelEdit(text, id, label, ownerName()),
+        msg: `Persona log: ${ownerName()} labelled ${id.slice(0, 12)} ${label} (via console)`,
+        body: `${ownerName()} labelled one step of the persona log on a wheel's Log tab. Labels live in ${PERSONA_LOG_LABELS}, never in console.db.`,
+      }),
+    });
+    if (w.status !== "written") return c.json({ error: { code: w.status === "failed" ? "git_failed" : "conflict", message: `nothing written: ${w.reason ?? w.status}` } }, w.status === "failed" ? 502 : 409);
+    return c.json({ id, label, sha: w.sha }, 201);
   });
   api.get("/worker-rules", async (c) => {
     const line = (await ownerObjectivesNow?.().catch(() => undefined))?.line;

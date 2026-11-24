@@ -269,7 +269,7 @@ describe("goal sets: the screens", () => {
     // progress: rows turned green today and this week, for this set
     expect(screen.getByTestId("set-progress-today").textContent).toContain("1");
     expect(screen.getByTestId("set-progress-week").textContent).toContain("3");
-    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers"]);
+    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
   });
 
   it("the kanban shows ready, running, waiting and review for the set and the sets inside it", async () => {

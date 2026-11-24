@@ -24,10 +24,11 @@ export type SecretPutResult = { ok: true } | { ok: false; err: string };
 export type SecretPut = (o: SecretPutInput) => Promise<SecretPutResult>;
 
 /** `the app platform` = where the key went: false when the store-only fallback ran (or the app platform was not asked for). */
-export type SecretStoreResult = { ok: true; deployed: boolean; vault?: string; mirrorErr?: string } | { ok: false; err: string };
+export type SecretStoreResult = { ok: true; deployed: boolean; vault?: string; mirrorErr?: string; noCopy?: boolean } | { ok: false; err: string };
 /**
  * `vault`: the password manager the key went into first (identity `vault`); the secret store then holds only a working
- * copy. `mirrorErr`: that working copy could not be written (the key is saved in the vault all the same).
+ * copy. `mirrorErr`: that working copy could not be written (the key is saved in the vault all the same). `noCopy`: no
+ * working copy was written at all (a test key lives only in the vault).
  */
 
 export interface WorldKeys {
@@ -41,7 +42,7 @@ export interface WorldKeys {
    * that is not there. undefined: this world has no vault (the store is the only save); ok false: nothing saved, the
    * card stays open with why.
    */
-  saveFirst?(world: string, i: { app: string; name: string; value: string; source: string }): Promise<{ ok: true; vault: string; where?: string } | { ok: false; err: string } | undefined>;
+  saveFirst?(world: string, i: { app: string; name: string; value: string; source: string }): Promise<{ ok: true; vault: string; where?: string; open?: string; at?: string } | { ok: false; err: string } | undefined>;
 }
 
 /** Remove the value (and any line that still holds it) from tool output before it is shown or stored. */

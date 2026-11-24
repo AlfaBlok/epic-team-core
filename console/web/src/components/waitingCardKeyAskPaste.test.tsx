@@ -82,6 +82,20 @@ describe("WaitingCard: key ask paste box", () => {
     expect(document.body.textContent).not.toContain(VALUE);
   });
 
+  // (the owner 24 Nov 05:11Z: "I still haven't seen it"): saved, the item, the time and a link into his vault
+  it("a Bitwarden save says when, names the item and links straight to it in his own vault", async () => {
+    const open = "https://vault.example.com/#/vault?organizationId=o1&collectionId=c1&itemId=i1";
+    vi.spyOn(api, "saveKey").mockResolvedValue({ ...ok, stored: { app: "test", name: "PASTE_PROOF", vault: "Vault", where: "Team vault, collection Team keys, item test · PASTE_PROOF", open, at: "2026-11-24T06:00:00.000Z" } });
+    wrap(<WaitingCard item={item({ secret: { app: "test", name: "PASTE_PROOF" } })} />);
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: VALUE } });
+    fireEvent.submit(screen.getByTestId("secret-box"));
+    await waitFor(() => expect(screen.getByTestId("sent-row-detail").textContent).toMatch(/Saved at .+: test PASTE_PROOF is saved and checked in your Vault: Team vault, collection Team keys, item test · PASTE_PROOF/));
+    const a = screen.getByTestId("sent-row-link") as HTMLAnchorElement;
+    expect(a.href).toBe(open);
+    expect(a.textContent).toMatch(/Open it in your/);
+    expect(document.body.textContent).not.toContain(VALUE);
+  });
+
   it("T8-S21: an app with no Deployer app: the ack says stored in the secret store, not set in Deployer", async () => {
     vi.spyOn(api, "saveKey").mockResolvedValue({ ...ok, stored: { app: "social", name: "COMPOSIO_API_KEY", deployed: false } });
     wrap(<WaitingCard item={item({ secret: { app: "social", name: "COMPOSIO_API_KEY" } })} />);

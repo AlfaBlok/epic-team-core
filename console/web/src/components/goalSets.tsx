@@ -42,6 +42,7 @@ import { TotemTab, productOfObjective, useTotemMaps } from "@/components/totemTa
 import { wheelTabsOf } from "@/lib/wheelTabs";
 import type { Totem } from "@/api/totem-types";
 import { TrackersTab } from "@/components/trackersTab";
+import { PersonaLogTab } from "@/components/personaLogTab";
 import { homeFilesOf, pagesOfObjective } from "@/lib/wheelPages";
 import { FoldChevron } from "@/components/foldChevron";
 import { GOAL_INBOX_TAB, GoalPills, RING_ARC_ORDER, ringArcs, SetWheel, STATE_FILL, topObjectives, useGoalSets } from "@/components/goalRing";
@@ -1106,7 +1107,8 @@ export function SlimInbox({ rows, showSet = true, loading, sortKey }: { rows: In
  * is the same class of thing and it should have the same class of tabs ... these fixed points of knowledge corresponds
  * to tabs in this key results page"). The tabs come from the product's data graph (the owner: "these tabs depend on the
  * data graph of the product"), one tab per kind of node its personas need, read from the hosted layer (lib/wheelTabs.ts):
- * nine in his order (Key results, Plan, Inbox, Chat, Personas, Board, Context, Pages, Trackers), never a list written here.
+ * ten in his order (Key results, Plan, Inbox, Chat, Personas, Board, Context, Pages, Trackers, Log; Log on his 24 Nov
+ * word), never a list written here.
  * What one product has and another has not (a launch board, a feature list, a product deck, a social kit) is content
  * inside one of these tabs (TOTEM_HOME), never a tab of its own; an empty tab says what goes there.
  */
@@ -1660,6 +1662,7 @@ export function GoalSetPage() {
           {/* the wheel's plan and nothing else: a social kit or marketing material stays on its campaign. */}
           {tab === "plan" && <WheelPlanTab id={pursuit.id} keyResults={keyResultsOf(node)} />}
           {tab === "trackers" && <TrackersTab wheel={pursuit.id} />}
+          {tab === "log" && <PersonaLogTab wheel={pursuit.id} />}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} files={{ entries: myFiles, loading: homeFiles.loading }} />}
         </>
       )}

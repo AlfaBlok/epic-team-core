@@ -29,6 +29,7 @@ import { FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type
 import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
 import { BenefitsTab, ChatIntro, HistoryTab, ObservationsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignTrackersTab } from "@/components/trackersTab";
+import { PersonaLogTab } from "@/components/personaLogTab";
 import { worldId } from "@/lib/useSocial";
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
@@ -669,6 +670,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {tab === "pages" && <CampaignPagesTab m={m} repo={scope?.card.repo} />}
         {tab === "benefits" && <BenefitsTab m={m} />}
         {tab === "trackers" && <CampaignTrackersTab load={loadTrackers} />}
+        {tab === "log" && <PersonaLogTab wheel={`milestone:${m.id}`} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}
         {tab === "chat" && (
           <>

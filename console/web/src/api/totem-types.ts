@@ -65,6 +65,35 @@ export interface WheelTrackers {
   product?: string;
   tables: TrackerTable[];
 }
+/** GET /api/persona-log/:wheel: every step an agent took on the wheel, what it did and why, asked by him or
+ * chosen by the persona, with his label on the chosen ones. */
+export type StepLabel = "correct" | "incorrect";
+export interface PersonaStep {
+  id: string;
+  at: string;
+  persona: string;
+  worker: boolean;
+  objective: string | null;
+  objectiveName?: string | null;
+  milestone?: string | null;
+  kr: string | null;
+  row: string | null;
+  from: string | null;
+  did: string;
+  why: string;
+  asked: boolean;
+  outcome: string;
+  costUsd?: number | null;
+  label?: StepLabel;
+  labelledAt?: string;
+}
+export interface PersonaLog {
+  wheel: string;
+  days: number;
+  steps: PersonaStep[];
+  counts: { steps: number; unasked: number; correct: number; incorrect: number; unlabelled: number };
+  file: string;
+}
 /** GET /api/tenants/:id/campaigns/:mid/trackers: the tracker tables of the wheel a campaign serves (its objective, else
  * each live objective of its product); none for a campaign outside the home product's repos. */
 export interface CampaignTrackers {

@@ -122,7 +122,7 @@ describe("E964-S14 five fixed tabs", () => {
   it("opens on Key results; an objective's nine tabs in their order, then the product's own Product, Benefits, Pipeline, History; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Product", "Benefits", "Pipeline", "History"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log", "Product", "Benefits", "Pipeline", "History"]);
     expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Settings", "Social kit", "Lessons", "Tasks", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();

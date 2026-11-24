@@ -16,15 +16,13 @@ import { keyIndexFile } from "./identity.js";
  * A first source may be set (`setSecretSource`; the hosted layer sets the owner's vault). Every read asks it first; the root-only
  * copy is read only when it has no such key or does not answer in time, and each such read is counted by name
  * (`secretSourceHealth`, /api/health `keys`), so the copy can be deleted once nothing falls back to it.
+ *
+ * Fetch on use: with a first source set, its answers are never kept here (it fetches at each use and holds only what it
+ * lists by name), and a copy answer is kept at most COPY_HOLD_MS. Without one (a host with no vault), the copy is read once and kept as above.
  */
 const MISS_MS = 5 * 60_000;
-/**
- * A first source that is still cold (its one listing runs
- * about 30 s after every start) is waited for at most COLD_WAIT_MS; the copy answers meanwhile, kept only until the
- * source is warm, then the key is read from the source.
- */
-export const COLD_WAIT_MS = 1500;
-const cache = new Map<string, { v: string | undefined; at: number; provisional?: boolean }>();
+export const COPY_HOLD_MS = 5 * 60_000;
+const cache = new Map<string, { v: string | undefined; at: number; until?: number }>();
 const inflight = new Map<string, Promise<string | undefined>>();
 let indexStamp: string | undefined;
 
@@ -42,7 +40,7 @@ function storeStamp(): string {
 export const secretReads = { n: 0 };
 
 /** a first source for a store file's value (app = its folder, name = the file); undefined = it has none. */
-export type SecretSource = { name: string; read(app: string, name: string): Promise<string | undefined>; warm?(): boolean; stats?(): Record<string, number> };
+export type SecretSource = { name: string; read(app: string, name: string): Promise<string | undefined>; stats?(): Record<string, unknown> };
 let source: SecretSource | undefined;
 const SOURCE_WAIT_MS = 90_000;
 const tally = { source: 0, store: 0, storeNames: new Set<string>(), since: new Date().toISOString() };
@@ -75,7 +73,7 @@ export function secretSourceHealth(): {
   fromCopy: number;
   copyNames: string[];
   since: string;
-  memory?: Record<string, number>;
+  memory?: Record<string, unknown>;
   worlds: { fromSource: number; fromCopy: number; copyNames: string[]; stored?: Record<string, number> };
 } {
   return {
@@ -97,25 +95,22 @@ const within = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
     const t = setTimeout(() => resolve(undefined), ms);
     p.then((v) => resolve(v), () => resolve(undefined)).finally(() => clearTimeout(t));
   });
-/** the first source, then the copy; counted. */
-async function sourceThenCopy(file: string, copy: (file: string) => Promise<string | undefined>): Promise<{ v: string | undefined; provisional?: boolean }> {
+/** the first source, then the copy; counted. `kept: false` = the source answered: not kept here. */
+async function sourceThenCopy(file: string, copy: (file: string) => Promise<string | undefined>): Promise<{ v: string | undefined; kept: boolean; holdMs?: number }> {
   const k = source ? storeKey(file) : undefined;
-  let cold = false;
   if (source && k) {
-    cold = !!source.warm && !source.warm();
-    const v = await within(source.read(k.app, k.name), cold ? COLD_WAIT_MS : SOURCE_WAIT_MS);
+    const v = await within(source.read(k.app, k.name), SOURCE_WAIT_MS);
     if (v) {
       tally.source++;
-      return { v };
+      return { v, kept: false };
     }
-    cold = !!source.warm && !source.warm();
   }
   const v = await copy(file);
   if (v && k) {
     tally.store++;
     tally.storeNames.add(`${k.app}/${k.name}`);
   }
-  return cold ? { v, provisional: true } : { v };
+  return source && k ? { v, kept: true, holdMs: COPY_HOLD_MS } : { v, kept: true };
 }
 
 function sudoCat(file: string): Promise<string | undefined> {
@@ -137,16 +132,15 @@ export function cachedSudoRead(file: string, o: { read?: (file: string) => Promi
     indexStamp = stamp;
   }
   const hit = cache.get(file);
-  // a provisional answer (the source was cold) holds until the source is warm, then the key is read from it
-  const provisionalOver = !!hit?.provisional && !!source?.warm?.();
-  if (hit && !provisionalOver && (hit.v !== undefined || now() - hit.at < MISS_MS)) return Promise.resolve(hit.v);
+  if (hit && (hit.v !== undefined ? hit.until === undefined || now() < hit.until : now() - hit.at < MISS_MS)) return Promise.resolve(hit.v);
   const going = inflight.get(file);
   if (going) return going;
-  type Got = { v: string | undefined; provisional?: boolean };
-  const p = (o.read ? o.read(file).then((v): Got => ({ v })) : sourceThenCopy(file, o.copy ?? sudoCat))
-    .catch((): Got => ({ v: undefined }))
+  type Got = { v: string | undefined; kept: boolean; holdMs?: number };
+  const p = (o.read ? o.read(file).then((v): Got => ({ v, kept: true })) : sourceThenCopy(file, o.copy ?? sudoCat))
+    .catch((): Got => ({ v: undefined, kept: false }))
     .then((r) => {
-      cache.set(file, r.provisional ? { v: r.v, at: now(), provisional: true } : { v: r.v, at: now() });
+      if (r.kept) cache.set(file, r.holdMs !== undefined ? { v: r.v, at: now(), until: now() + r.holdMs } : { v: r.v, at: now() });
+      else cache.delete(file);
       return r.v;
     })
     .finally(() => inflight.delete(file));

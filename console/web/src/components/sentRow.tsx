@@ -169,6 +169,14 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
       {entry.detail && (
         <p className="pt-1 text-xs text-muted-foreground" data-testid="sent-row-detail">
           {entry.detail}
+          {entry.link && /^https:\/\//.test(entry.link.href) && (
+            <>
+              {" "}
+              <a href={entry.link.href} target="_blank" rel="noreferrer" className="font-medium underline" data-testid="sent-row-link">
+                {entry.link.text}
+              </a>
+            </>
+          )}
         </p>
       )}
       {commented && !open && (

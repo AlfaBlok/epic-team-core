@@ -608,7 +608,12 @@ export function foldSameKey(list: WaitingItem[]): { items: WaitingItem[]; folded
  * why a paste was not saved stays on the card even when the list redraws it (the note lived only in the box, so a
  * redraw dropped it and the owner saw the card come back empty).
  */
-const keyNotes = new Map<string, { ok: boolean; text: string }>();
+const keyNotes = new Map<string, { ok: boolean; text: string; open?: string }>();
+/** "24 Nov, 06:12" in the viewer's own time, from the vault item's save time */
+export const savedAtText = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+};
 /** a failed save in plain words: a restart the card could not wait out, a lost connection, or the console's own reason. */
 export function keyFailText(e: unknown): string {
   if (isTransient(e)) return "Not saved: the console was restarting and did not answer for a minute. Nothing was stored. Paste the key again and press Save key.";
@@ -620,8 +625,8 @@ export function keyFailText(e: unknown): string {
 export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem & { secret: { app: string; name: string } }; disabled?: boolean; wake?: boolean }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [note, setNoteState] = useState<{ ok: boolean; text: string } | undefined>(() => keyNotes.get(item.id));
-  const setNote = (n: { ok: boolean; text: string } | undefined) => {
+  const [note, setNoteState] = useState<{ ok: boolean; text: string; open?: string } | undefined>(() => keyNotes.get(item.id));
+  const setNote = (n: { ok: boolean; text: string; open?: string } | undefined) => {
     if (n && !n.ok) keyNotes.set(item.id, n);
     else keyNotes.delete(item.id);
     setNoteState(n);
@@ -640,12 +645,15 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
       const where = res.stored.vault
         ? `saved and checked in your ${res.stored.vault}${res.stored.where ? `: ${res.stored.where}` : ", in Team keys"}`
         : res.stored.deployed === false ? `stored in the secret store (no ${deployerName()} app for ${res.stored.app}, so not set in an env)` : `stored and set in ${deployerName()}`;
-      const saved = `Saved: ${res.stored.app} ${res.stored.name} is ${where}.${res.wake ? ` ${wakeLine(res.wake, undefined, { unit })}` : ""}`;
-      setNote({ ok: true, text: saved });
+      // (the owner, 24 Nov: "I still haven't seen it"): when it was saved, and a link that opens it in his own vault
+      const at = res.stored.at ? savedAtText(res.stored.at) : "";
+      const saved = `Saved${at ? ` at ${at}` : ""}: ${res.stored.app} ${res.stored.name} is ${where}.${res.wake ? ` ${wakeLine(res.wake, undefined, { unit })}` : ""}`;
+      setNote({ ok: true, text: saved, ...(res.stored.open ? { open: res.stored.open } : {}) });
       // (the owner, vn_e00f1134: "I pasted a key ... then the card disappeared"): the card becomes its green Sent row in place
       markSent(`ask:${item.id}`, {
         said: "Key saved",
         detail: saved,
+        ...(res.stored.open ? { link: { href: res.stored.open, text: `Open it in your ${vault || "Bitwarden"}` } } : {}),
         title: item.question || item.title,
         ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
       });
@@ -700,6 +708,14 @@ export function SecretBox({ item, disabled, wake = true }: { item: WaitingItem &
       {note && (
         <div className={cn("text-xs", note.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400")} data-testid="secret-note">
           {note.text}
+          {note.open && (
+            <>
+              {" "}
+              <a href={note.open} target="_blank" rel="noreferrer" className="font-medium underline" data-testid="secret-open-vault">
+                Open it in your {vault || "Bitwarden"}
+              </a>
+            </>
+          )}
         </div>
       )}
     </form>

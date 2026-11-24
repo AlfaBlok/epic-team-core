@@ -521,6 +521,8 @@ export function createRealClient(): ApiClient {
     getTotems: () => call("GET", "/totems"),
     getTotem: (product, id) => call("GET", `/totems/${encodeURIComponent(product)}/${encodeURIComponent(id)}`),
     getTrackers: (wheel) => call("GET", `/trackers/${encodeURIComponent(wheel)}`),
+    getPersonaLog: (wheel, days) => call("GET", `/persona-log/${encodeURIComponent(wheel)}${days ? `?days=${days}` : ""}`),
+    labelStep: (id, label) => call("POST", "/persona-log/labels", { id, label }),
     getOnboarding: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/onboarding`),
     fileProductNote: (tenantId, id, note) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/product-note`, note),
     keepSlide: (tenantId, id, slide) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/slide/keep`, slide),

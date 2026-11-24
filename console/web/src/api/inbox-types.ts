@@ -162,7 +162,7 @@ export interface Asker {
 /** Save key result: the (value-free) answer and where the key went (`wake` says what reached the asker). */
 export interface SaveKeyResult extends OwnerResponse {
   /** deployed false = the app has no app on the app platform, so the key is in the secret store only (not set in an env). */
-  stored: { app: string; name: string; deployed?: boolean; vault?: string; where?: string };
+  stored: { app: string; name: string; deployed?: boolean; vault?: string; where?: string; open?: string; at?: string };
 }
 
 /** the monitor alert an ask's buttons go through: the alert's milestone and the ask's code. */

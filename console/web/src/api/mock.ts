@@ -1571,6 +1571,16 @@ const mockMail = () => ({
     async getTrackers(wheel: string) {
       return ok({ wheel, name: wheel, tables: [{ id: "influencers", name: "Influencers", for: "people to invite as testers", columns: ["Name", "Proposed for first message", "Where", "Status", "Reply"], statuses: ["candidate", "contacted", "replied"], from: "frame" as const, open: true, first: "Proposed for first message", rows: [], counts: [], file: `docs/trackers/${wheel}/influencers.csv` }] });
     },
+    async getPersonaLog(wheel: string, days?: number) {
+      const steps = [
+        { id: "run_mock0001-0000-0000-0000-000000000001", at: "2026-11-24T04:25:00Z", persona: "Delivery Manager", worker: false, objective: wheel, kr: "No card of mine was lost", row: "E907-S3", from: "Cards that wait over 2 h reach his inbox", did: "plan written and worker started for key result 1", why: "moves 'No card of mine was lost'", asked: false, outcome: "progressed" },
+        { id: "run_mock0001-0000-0000-0000-000000000002", at: "2026-11-24T03:10:00Z", persona: "Ticket worker", worker: true, objective: wheel, kr: null, row: "E907-S4", from: "His phone inbox opens fast", did: "inbox opens in under a second on his phone", why: "serves the objective", asked: true, outcome: "progressed" },
+      ];
+      return ok({ wheel, days: days ?? 7, steps, counts: { steps: 2, unasked: 1, correct: 0, incorrect: 0, unlabelled: 1 }, file: "docs/persona-log" });
+    },
+    async labelStep(id: string, label: string) {
+      return ok({ id, label });
+    },
     async getCampaignPlan() {
       return ok(unwrittenPlan());
     },

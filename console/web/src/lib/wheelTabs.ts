@@ -10,7 +10,7 @@ export type WheelKind = "objective" | "campaign";
 
 const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
 
-/** a build without a product graph: the objective's nine; a campaign opens with the same nine, then its own. */
+/** a build without a product graph: the objective's ten; a campaign opens with the same ten, then its own. */
 const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
   objective: [
     { id: "table", label: "Key results", shows: ["key-results"] },
@@ -22,6 +22,7 @@ const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
     { id: "context", label: "Context", shows: ["product-deck"] },
     { id: "pages", label: "Pages", shows: ["pages"] },
     { id: "trackers", label: "Trackers", shows: ["trackers"] },
+    { id: "log", label: "Log", shows: ["persona-log"] },
   ],
   campaign: [
     { id: "table", label: "Key results", shows: ["key-results"] },
@@ -33,6 +34,7 @@ const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
     { id: "context", label: "Context", shows: ["where-we-are", "Ideas and insights"] },
     { id: "pages", label: "Pages", shows: ["pages"] },
     { id: "trackers", label: "Trackers", shows: ["trackers"] },
+    { id: "log", label: "Log", shows: ["persona-log"] },
     { id: "product", label: "Product", shows: ["product-deck"] },
     { id: "pipeline", label: "Pipeline", shows: ["Posts"] },
     { id: "history", label: "History", shows: ["Outcomes"] },
