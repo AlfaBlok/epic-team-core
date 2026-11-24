@@ -120,6 +120,26 @@ describe("run_usage.py transcript scan", () => {
     expect(out).not.toContain("Console protocol");
   });
 
+  it("a sandboxed world job's transcript (worlds/.logs/<world>/<run>.jsonl) is that run's, whole, seat sandbox", async () => {
+    const { dirs } = fixtures();
+    const worlds = path.join(tmp!, "worlds");
+    // the job's stub never says `this run`: the file name is the run
+    writeJsonl(path.join(worlds, ".logs", "world-a", `${rid(90)}.jsonl`), [
+      user(`${SECRET} wake for world-a`, "2026-11-24T16:18:00Z"),
+      asst("msg_z1", "claude-opus-5-5", { i: 4, cw: 100, cr: 1000, o: 40 }, "2026-11-24T16:18:01Z"),
+      asst("msg_z1", "claude-opus-5-5", { i: 4, cw: 100, cr: 1000, o: 60 }, "2026-11-24T16:18:02Z"),
+      asst("msg_z2", "claude-opus-5-5", { i: 1, o: 10 }, "2026-11-24T16:18:03Z"),
+    ]);
+    const { execFileSync } = await import("node:child_process");
+    const run = (ids: string[]) =>
+      JSON.parse(execFileSync("python3", ["-I", SCRIPT, JSON.stringify({ runs: ids.map((id) => ({ id, since: 0 })), dirs, worldLogs: worlds })], { encoding: "utf8" }));
+    const r = run([rid(90), rid(91)]);
+    expect(r[rid(90)]).toEqual({ models: { "claude-opus-5-5": { input: 5, cacheWrite: 100, cacheRead: 1000, output: 70, turns: 2 } }, files: 1, seat: "sandbox" });
+    expect(r[rid(91)]).toBeNull();
+    expect(r._meta.scan).toBe(3);
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+  });
+
   it("skips files older than the run (mtime filter)", async () => {
     const { dirs } = fixtures();
     const r = await realScanner({ script: SCRIPT, dirs }).scan("main", [{ id: rid(1), since: Date.now() / 1000 + 3600 }]);

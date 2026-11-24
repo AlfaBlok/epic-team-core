@@ -214,7 +214,7 @@ const whereOf = (t: Totem): string =>
     ? `${t.lives.repo} ${t.lives.path}${t.lives.section ? ` § ${t.lives.section}` : ""}${t.lives.plan ? " (its objective's plan entry in docs/pursuits.json)" : ""}`
     : t.lives.note ?? "not placed yet";
 
-export const MAP_HEAD = "## The map: read these totems first, write back into them last (root L-77)";
+export const MAP_HEAD = "## The map: read these chapters first, write back into them last (root L-77)";
 
 /**
  * the wake prompt's map section for one product: its hardwired totems and where each lives, what to read, what to write,
@@ -222,15 +222,15 @@ export const MAP_HEAD = "## The map: read these totems first, write back into th
  */
 export function mapSection(maps: TotemMaps, p: ProductMap | undefined): string {
   if (!p) return "";
-  const line = (t: Totem) => `- ${t.name} (${t.shape}, tab ${t.tab}): ${whereOf(t)}${t.read ? `. Read: ${t.read}` : ""}${t.write ? `. Write back: ${t.write}` : ""}.`;
+  const line = (t: Totem) => `- ${t.name} (${t.shape}, chapter ${t.tab}): ${whereOf(t)}${t.read ? `. Read: ${t.read}` : ""}${t.write ? `. Write back: ${t.write}` : ""}.`;
   return [
     MAP_HEAD,
     maps.statement || "Each product's data graph is the known map its personas read from at the start and write back to at the end.",
-    `This milestone is ${p.name}'s. Start: read every totem below that touches your step (an empty one is a gap: name it). ` +
-      "End: write what you learned or changed back into the totem it belongs to (a section, a row, a line), in the same commit as your work; another world's totem gets a desk note, never an edit.",
-    `${p.name}'s totems (hardwired: they always exist, each is a tab on its objective's screen):`,
+    `This milestone is ${p.name}'s. Start: read every chapter below that touches your step (an empty one is a gap: name it). ` +
+      "End: write what you learned or changed back into the chapter it belongs to (a section, a row, a line), in the same commit as your work; another app's chapter gets a desk note, never an edit.",
+    `${p.name}'s chapters (hardwired: they always exist, each shows in a chapter tab on its objective's screen):`,
     ...p.totems.map(line),
-    "Every product's totems:",
+    "Every product's chapters:",
     ...maps.every.totems.map(line),
     `What grows from his words: ${[...maps.every.grows, ...p.grows].map((g) => `${g.name} (${g.lives})`).join("; ")}.`,
   ].join("\n");
@@ -240,9 +240,9 @@ export function mapSection(maps: TotemMaps, p: ProductMap | undefined): string {
 export const MAP_RULE =
   `First and last, your objective's where-we-are (its Context tab): \`python3 ~/github/${homeRepo()}/scripts/where_we_are.py for <your row> --repo <your checkout>\` prints it; ` +
   "read it before anything else, and make rewriting it your run's last step (the `where_we_are.py write` command it prints: the answer now, the open questions, one line of what you changed). " +
-  `Read the map before you plan, write back into it when you finish (root L-77): \`python3 ~/github/${homeRepo()}/scripts/totems.py for <your row's repo>\` prints your product's totems ` +
-  "(the hardwired nodes of its data graph: the plan, pricing, launch board and the others, each with where it lives and its tab). Read the ones your step touches first; " +
-  "at the end write what you learned or changed back into the totem it belongs to, in the same commit (another world's totem: a desk note, never an edit). A totem that is empty is a gap: say so on your row.";
+  `Read the map before you plan, write back into it when you finish (root L-77): \`python3 ~/github/${homeRepo()}/scripts/totems.py for <your row's repo>\` prints your product's chapters ` +
+  "(the hardwired nodes of its data graph: the plan, pricing, launch board and the others, each with where it lives and its tab; Chapter is his word for one). Read the ones your step touches first; " +
+  "at the end write what you learned or changed back into the chapter it belongs to, in the same commit (another app's chapter: a desk note, never an edit). A chapter that is empty is a gap: say so on your row.";
 
 // ---------- a totem's content, for its tab ----------
 

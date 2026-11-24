@@ -233,13 +233,23 @@ export function createRequestRows(o: { reposRoot: () => string | undefined; want
   let index = new Map<string, RequestRow[]>();
   let at = 0;
   let scanning: Promise<void> | undefined;
+  /**
+   * What each epic file gave the last scan, kept by its stamp (mtime and size) and his words' signature. The
+   * scan ran every 2 min over every spine of every repo on the console's one thread (10.8 s of a 90 s live profile, the
+   * biggest single blocker); now only a changed file, or a change in his recent words, is read and matched again.
+   */
+  type FileGot = { stamp: string; wantedKey: string; req?: Map<string, { rows: RequestRow[]; onRow: boolean }>; shRows: Map<string, Set<string>>; byWords: Map<string, Map<string, { row: RequestRow; sh: Set<string> }>> };
+  const perFile = new Map<string, FileGot>();
   const scan = async () => {
     const root = o.reposRoot();
     if (!root) return;
     const next = new Map<string, { rows: RequestRow[]; onRow: boolean }>();
     // his recent requests by runs of 8 of his words, matched against every ticket line (a small index: his words, not the files)
     const bySh = new Map<string, Set<string>>();
-    for (const w of o.wanted?.() ?? []) for (const sh of shinglesOf(hisWordsOf(w.words))) (bySh.get(sh) ?? bySh.set(sh, new Set()).get(sh)!).add(w.id);
+    const wanted = o.wanted?.() ?? [];
+    for (const w of wanted) for (const sh of shinglesOf(hisWordsOf(w.words))) (bySh.get(sh) ?? bySh.set(sh, new Set()).get(sh)!).add(w.id);
+    const wantedKey = createHash("sha1").update(wanted.map((w) => `${w.id}\0${w.words}`).join("\u0001")).digest("hex");
+    const seenFiles = new Set<string>();
     const shRows = new Map<string, Set<string>>(); // a run of his words -> the rows it sits on, anywhere
     const byWords = new Map<string, Map<string, { row: RequestRow; sh: Set<string> }>>(); // request -> row key -> the row and its runs
     let dirs: fs.Dirent[] = [];
@@ -264,19 +274,46 @@ export function createRequestRows(o: { reposRoot: () => string | undefined; want
         continue;
       }
       for (const f of spineFiles(repoDir)) {
-        let text: string;
+        const key = `${d.name}\0${f}`;
+        seenFiles.add(key);
+        let stamp: string;
         try {
-          text = await fs.promises.readFile(f, "utf8");
+          const st = await fs.promises.stat(f);
+          stamp = `${st.mtimeMs}:${st.size}`;
         } catch {
           continue;
         }
-        const rel = path.relative(repoDir, f);
-        if (bySh.size) wordsIn(text, d.name, rel, bySh, shRows, byWords);
-        if (!/\b(?:vn_[0-9a-f]{8}|ch_[0-9a-f]{8}|e-[0-9a-f]{6})\b/.test(text)) continue;
-        for (const [id, got] of requestRowsIn(text, d.name, rel)) {
+        let got = perFile.get(key);
+        if (!got || got.stamp !== stamp || got.wantedKey !== wantedKey) {
+          let text: string;
+          try {
+            text = await fs.promises.readFile(f, "utf8");
+          } catch {
+            continue;
+          }
+          const rel = path.relative(repoDir, f);
+          const fresh: FileGot = { stamp, wantedKey, shRows: new Map(), byWords: new Map() };
+          if (bySh.size) wordsIn(text, d.name, rel, bySh, fresh.shRows, fresh.byWords);
+          if (/\b(?:vn_[0-9a-f]{8}|ch_[0-9a-f]{8}|e-[0-9a-f]{6})\b/.test(text)) fresh.req = requestRowsIn(text, d.name, rel);
+          perFile.set(key, (got = fresh));
+          await new Promise<void>((r) => setImmediate(r)); // one file's matching at a time: requests answer between two
+        }
+        for (const [sh, keys] of got.shRows) {
+          const into = shRows.get(sh) ?? shRows.set(sh, new Set()).get(sh)!;
+          for (const k of keys) into.add(k);
+        }
+        for (const [id, rows] of got.byWords) {
+          const m = byWords.get(id) ?? byWords.set(id, new Map()).get(id)!;
+          for (const [k, x] of rows) {
+            const had = m.get(k);
+            if (!had) m.set(k, { row: { ...x.row }, sh: new Set(x.sh) });
+            else for (const sh of x.sh) had.sh.add(sh);
+          }
+        }
+        for (const [id, g] of got.req ?? []) {
           const cur = next.get(id);
-          if (!cur || (got.onRow && !cur.onRow)) next.set(id, { rows: [...got.rows], onRow: got.onRow });
-          else if (got.onRow === cur.onRow) for (const r of got.rows) if (!cur.rows.some((x) => x.code === r.code && x.repo === r.repo)) cur.rows.push(r);
+          if (!cur || (g.onRow && !cur.onRow)) next.set(id, { rows: g.rows.map((r) => ({ ...r })), onRow: g.onRow });
+          else if (g.onRow === cur.onRow) for (const r of g.rows) if (!cur.rows.some((x) => x.code === r.code && x.repo === r.repo)) cur.rows.push({ ...r });
         }
       }
     }
@@ -302,6 +339,7 @@ export function createRequestRows(o: { reposRoot: () => string | undefined; want
         const named = cards.get(k);
         if (named) r.title = named;
       }
+    for (const k of perFile.keys()) if (!seenFiles.has(k)) perFile.delete(k);
     index = new Map([...next].map(([k, v]) => [k, v.rows]));
     at = now();
   };

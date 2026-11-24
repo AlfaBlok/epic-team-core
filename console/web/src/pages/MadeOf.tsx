@@ -25,7 +25,7 @@ export const madeOfHref = (kind: WheelKind, tab?: string) => `/${MADE_OF_PATH}?c
 export function MadeOfLink({ kind, className }: { kind: WheelKind; className?: string }) {
   return (
     <Link to={madeOfHref(kind)} className={cn("text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline", className)} data-testid="made-of-link">
-      What are these tabs?
+      What are these chapters?
     </Link>
   );
 }
@@ -61,8 +61,6 @@ function Lives({ text }: { text?: string }) {
     </span>
   );
 }
-
-type NameOption = { word: string; why: string; collides: string; recommended?: boolean };
 
 function useObjects(kind: WheelKind): { name: string; to?: string }[] {
   const { data } = useGoalSets();
@@ -123,7 +121,7 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
         </div>
       </div>
       <figcaption className="text-sm text-muted-foreground">
-        Every {cls.name.toLowerCase()} has the same {tabs.length}, in the same order. Only what is written in them differs.
+        Every {cls.name.toLowerCase()} has the same {tabs.length} chapters, in the same order, one tab each. Only what is written in them differs.
         {rest.length > 0 && (
           <span className="mt-2 flex flex-wrap gap-1.5" data-testid="made-of-objects">
             {rest.map((o) => (
@@ -138,32 +136,7 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
   );
 }
 
-/** the words he can pick from for one of these parts; nothing is renamed until he picks on the review card. */
-function Names({ names }: { names: readonly NameOption[] }) {
-  if (!names.length) return null;
-  return (
-    <section className="grid gap-3" data-testid="made-of-names" id="names">
-      <h2 className="text-lg font-semibold">What to call one part: your pick</h2>
-      <ul className="grid gap-2">
-        {names.map((n) => (
-          <li key={n.word} className={cn("grid gap-1 rounded-lg border bg-card px-4 py-3 sm:grid-cols-[8rem_1fr]", n.recommended && "border-emerald-700")} data-testid="made-of-name">
-            <div className="flex items-baseline gap-2 sm:block">
-              <div className="text-base font-semibold" data-testid="made-of-word">{n.word}</div>
-              {n.recommended && <div className="text-[11px] uppercase tracking-wider text-emerald-700">recommended</div>}
-            </div>
-            <div className="grid gap-0.5 text-sm">
-              <span>{n.why}</span>
-              <span className="text-muted-foreground">Clashes with: {n.collides}</span>
-            </div>
-          </li>
-        ))}
-      </ul>
-      <p className="text-xs text-muted-foreground">Nothing is renamed until you pick on the review card.</p>
-    </section>
-  );
-}
-
-function PropertyBox({ t, n }: { t: WheelTab; n: number }) {
+function ChapterBox({ t, n }: { t: WheelTab; n: number }) {
   return (
     <section id={`prop-${t.id}`} className="scroll-mt-20 rounded-xl border bg-card p-4 target:ring-2 target:ring-emerald-700" data-testid="made-of-property">
       <header className="flex items-baseline justify-between gap-3">
@@ -225,18 +198,17 @@ export function MadeOfPage() {
         </p>
       </header>
       <Book kind={kind} tabs={tabs} />
-      <Names names={WHEEL_CLASS.objective.names ?? []} />
       <div className="grid gap-3">
-        <h2 className="text-lg font-semibold">Where each one lives, who reads and writes it</h2>
+        <h2 className="text-lg font-semibold">Where each chapter lives, who reads and writes it</h2>
         <div className="grid gap-3 md:grid-cols-2">
           {tabs.map((t, i) => (
-            <PropertyBox key={t.id} t={t} n={i + 1} />
+            <ChapterBox key={t.id} t={t} n={i + 1} />
           ))}
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Drawn from the same map the tabs are built from, so this page and the tabs always agree. The agents read it too: an
-        agent writes only into one of these {tabs.length}.
+        Drawn from the same map the chapter tabs are built from, so this page and the tabs always agree. The agents read it too: an
+        agent writes only into one of these {tabs.length} chapters.
       </p>
     </div>
   );

@@ -239,7 +239,7 @@ export function createUsageCollector(db: DB, o: UsageOptions = {}) {
             out.collected.push(r.id);
             finals.push(r.id);
           } else if (!r.thread_id || neverRan(r)) {
-            setUsage.run({ id: r.id, at, usage: JSON.stringify(toRunUsage(null, r.thread_id ? "no-turn" : "no-thread", at, prices, { dirs })) });
+            setUsage.run({ id: r.id, at, usage: JSON.stringify(toRunUsage(null, r.thread_id ? "no-turn" : "no-thread", at, prices, { dirs, scan })) });
             out.collected.push(r.id);
             finals.push(r.id);
           } else {
@@ -348,6 +348,8 @@ export interface RealScannerOptions {
   worker?: { ssh: string; sshKey?: string; knownHosts: string };
   python?: string;
   timeoutMs?: number;
+  /** the sandboxed worlds' root on the host (its `.logs/<world>/<run>.jsonl` are job transcripts); unset = not read. */
+  worldLogs?: string;
 }
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -357,7 +359,7 @@ export function realScanner(o: RealScannerOptions): Scanner {
   return {
     scan(host, runs) {
       // no dirs = every ~/.claude and ~/.claude_seat* dir on that host (run_usage.py discovers them).
-      const req = JSON.stringify({ runs, dirs: o.dirs });
+      const req = JSON.stringify({ runs, dirs: o.dirs, ...(o.worldLogs ? { worldLogs: o.worldLogs } : {}) });
       return new Promise<ScanResult>((resolve, reject) => {
         const done = (err: ExecFileException | null, stdout: string, stderr: string) => {
           if (err) {

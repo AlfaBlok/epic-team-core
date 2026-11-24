@@ -87,6 +87,8 @@ const usage =
           // unset = every ~/.claude and ~/.claude_seat* dir on each host (discovered there); set = exactly these.
           dirs: (process.env.CONSOLE_USAGE_DIRS || "").split(",").map((d) => d.trim()).filter(Boolean),
           worker: vps3Ssh,
+          // the sandboxed worlds' root on the worker host: their job transcripts count as those runs' usage
+          worldLogs: process.env.CONSOLE_USAGE_WORLD_LOGS || undefined,
         }),
         prices: pricesFromEnv(),
         sweepMs: 5 * 60_000,

@@ -2,7 +2,8 @@ import { copyPasteInText } from "../steps/copyPaste.js";
 import { untappableProblem } from "../inbox/untappable.js";
 import { stripInline } from "../adapters/markdown.js";
 import { hostOf, ownerName, sites } from "../identity.js";
-import { hasPlaceLink } from "../inbox/askGate.js";
+import { hasPlaceLink, hisWordsAlreadyAsk } from "../inbox/askGate.js";
+import { repeatOf, type PriorAnswer } from "../inbox/askRepeat.js";
 import { aboutProblem } from "../inbox/about.js";
 
 /**
@@ -486,6 +487,39 @@ export interface GateInput {
   screenshotFound?: boolean;
   /** E948-S180 the hosts whose pages take a deep link (the page hub's, the console's): a bare link there is held. */
   ownHosts?: string[];
+  /** E907-S76 the asks he already answered (the spine's `[answered …]` lines and the asks log): a card asking one again is held. */
+  answered?: PriorAnswer[];
+}
+
+/** A decision that asks his leave to do something (`Do we add …?`, `Add … as a key result?`), not his judgment of a result. */
+const ASKS_LEAVE = /^\s*(?:do we|shall we|should we|can we|may we|ok(?:ay)? to|add|make|approve|start|build|turn)\b|\b(?:becomes?|as) (?:a|an|the|one) (?:new )?(?:key result|objective)\b/i;
+const RECOMMEND = /\b(?:we|the team) recommends?\b.*$/i;
+
+/**
+ * E907-S76 (his E907-A2 feedback, 24 Nov: "I think it's the third time I get this question and answer it", diagnosis
+ * E907-S65, "Yes: that is the cause"). The ask gate's rules 2b and 9 (inbox/askGate.ts, inbox/askRepeat.ts) held only
+ * inbox asks; a review card's decision went to him unchecked. Two holds, as "card needs rewriting":
+ *  a. its decision asks his leave to do what his own words in its source already ask for (a key result he named);
+ *  b. its decision repeats, in most of the same words, an ask he already answered on another row (the same row's next
+ *     iteration may ask again: he sent it back).
+ */
+export function cardRepeatProblem(c: Pick<CardFields, "row" | "decision" | "source" | "options">, answered: PriorAnswer[] = []): string | undefined {
+  const d = c.decision?.trim();
+  if (!d) return undefined;
+  const question = d.replace(RECOMMEND, "").trim();
+  if (ASKS_LEAVE.test(question) && c.source?.trim()) {
+    const quote = hisWordsAlreadyAsk({ ask: "approve", question, contextText: c.source, options: c.options ?? [] });
+    if (quote)
+      return `its decision asks ${ownerName()} to approve what his own words in its source already ask for ("${quote.slice(0, 100)}${quote.length > 100 ? "…" : ""}"): do it from his words, show it done, and ask only what is still open (E907-S76)`;
+  }
+  const others = answered.filter((p) => !(c.row && p.row && p.row.trim().toUpperCase() === c.row.trim().toUpperCase()));
+  const hit = repeatOf({ question, ...(c.source ? { contextText: c.source } : {}) }, others);
+  if (hit && hit.how === "words") {
+    const p = hit.prior;
+    const said = (p.answer ?? "").replace(/\s+/g, " ").trim();
+    return `its decision repeats one ${ownerName()} already answered on ${p.on}${said ? `: "${said.slice(0, 100)}"` : ""} (${p.code ?? (p.row ? `row ${p.row}` : "an earlier ask")}): act on that answer, never ask it again (E907-S76)`;
+  }
+  return undefined;
 }
 
 /**
@@ -532,6 +566,8 @@ export function gateProblems(g: GateInput): string[] {
     add(decisionLinkProblem(c.decision));
     // E948-S102: the card says plainly what it asks, one question he can answer
     add(decisionAskProblem(c.decision));
+    // E907-S76: never ask him again what he already said or answered
+    add(cardRepeatProblem(c, g.answered));
   }
   // E948-S69: a decision card's buttons each name what happens next, `<label>: <next step>`
   if (c.options) {

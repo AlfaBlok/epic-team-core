@@ -11,8 +11,8 @@ export type WheelTab = { id: string; label: string; shows: string[]; kind?: stri
 /** (the owner, vn_cdef45cd: "you have a class which is objective ... these properties are ... what showing me on
  * the tabs"): the class a kind of wheel is, named in the product's graph file beside its tabs. */
 /** The owner (24 Nov): `understood` says back his picture (an objective's knowledge in chapters, each what agents need
- * to roll it toward green); `names` are the words he picks from for one part, nothing renamed until he picks. */
-export type WheelClass = { name: string; plural: string; one: string; his?: string; understood?: string; names?: readonly { word: string; why: string; collides: string; recommended?: boolean }[] };
+ * to roll it toward green); `word` is his pick for one part, Chapter, what every screen calls a tab's part. */
+export type WheelClass = { name: string; plural: string; one: string; his?: string; understood?: string; word?: string };
 export type WheelKind = "objective" | "campaign";
 
 const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>>; HOSTED_WHEEL_CLASS?: Partial<Record<WheelKind, WheelClass>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
@@ -57,8 +57,8 @@ export const WHEEL_TABS: Record<WheelKind, readonly WheelTab[]> = {
 const hostedClass: Partial<Record<WheelKind, WheelClass>> = Object.assign({}, ...Object.values(plugs).map((m) => m.HOSTED_WHEEL_CLASS ?? {}));
 /** the class each kind of wheel is an object of: from the product's graph file, else a plain default. */
 export const WHEEL_CLASS: Record<WheelKind, WheelClass> = {
-  objective: hostedClass.objective ?? { name: "Objective", plural: "objectives", one: "Every objective is an object of one class: the same shape every time, and each tab is one of its properties." },
-  campaign: hostedClass.campaign ?? { name: "Campaign", plural: "campaigns", one: "Every campaign is an object of one class: the same shape every time, and each tab is one of its properties." },
+  objective: hostedClass.objective ?? { name: "Objective", plural: "objectives", one: "Every objective is an object of one class: the same shape every time, and each tab is one of its chapters." },
+  campaign: hostedClass.campaign ?? { name: "Campaign", plural: "campaigns", one: "Every campaign is an object of one class: the same shape every time, and each tab is one of its chapters." },
 };
 /** the made-of screen's path: what an objective (or a campaign) is made of, one box per tab. */
 export const MADE_OF_PATH = "made-of";

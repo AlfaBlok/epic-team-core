@@ -22,6 +22,8 @@ describe("T6-S7 toggle log", () => {
     expect(a.neverOn).toBe(true);
     expect((await t.call("GET", `/api/assignments/${a.id}`)).json.neverOn).toBe(true);
     expect(await runs(a.id)).toEqual([]);
+    // the list reads a kept set of ever-on assignments: it must turn when the toggle line is added
+    expect((await t.call("GET", "/api/assignments")).json[0].neverOn).toBe(true);
 
     const before = Date.now();
     const on = await t.call("PATCH", `/api/assignments/${a.id}`, { enabled: true });

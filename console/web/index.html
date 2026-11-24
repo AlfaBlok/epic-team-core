@@ -59,7 +59,9 @@
         var paths = at === "/inbox" || (at === "/" && social) ? inbox : at === "/" ? ["/scorecards", "/status", "/laptop"] : at === "/chat" && !social ? ["/desk/messages?limit=20"] : [];
         var early = (window.__earlyGets = {});
         paths.forEach(function (p) {
-          early[p] = { at: Date.now(), p: fetch("/api" + p).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }) };
+          // a saved copy from the service worker is noted (x-saved-copy), so the Inbox says so
+          var e = (early[p] = { at: Date.now() });
+          e.p = fetch("/api" + p).then(function (r) { e.saved = r.headers.get("x-saved-copy") || undefined; return r.ok ? r.json() : null; }).catch(function () { return null; });
         });
       } catch (e) {}
     </script>

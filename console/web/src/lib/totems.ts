@@ -9,7 +9,7 @@ import { wheelTabsOf } from "@/lib/wheelTabs";
  * personas need this totem in their graph. And then this totem in the graph gets exposed to the UX via these tabs"). The
  * one list is the product's graph file, read through lib/wheelTabs.ts, never one written here. The owner asked for
  * "the same tabs" on every wheel, then (24 Nov): "it's the same console is what I'm saying. with slightly different data
- * tabs". So it opens on Key results, then the social product's own data tabs (Pillars, the benefits as the anchor, with the product inside it;
+ * tabs". So it opens on Key results, then the social product's own data tabs (Benefits, the anchor and the product's messages, with the product inside it;
  * Plan; Pipeline; History), then the console's engine tabs, the same names and order as an objective's (Inbox, Chat,
  * Personas, Board, Context, Pages, Trackers, Log). The social kit sits under the Plan and the lessons in the Context, as
  * on an objective. Settings sit behind one header button. Old links land on the tab that now holds what they showed.

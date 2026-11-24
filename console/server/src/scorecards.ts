@@ -709,11 +709,37 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
     const closed = /^(answered|done|closed|placed)\b/i.test(status);
     return { code, repo, kind: "ticket", title: `Desk note: ${(field("about") ?? path.basename(rel, ".md")).slice(0, 120)}`, status, state: closed ? "green" : "amber", path: rel };
   };
-  return (repo: string, code: string): WorkLink => {
+  /**
+   * Each objective's rows were looked up one by one, every lookup listing the repo's folders and reading and
+   * searching every spine file again (5.5 s of a 90 s live profile, on the console's one thread, rebuilt every 20 s).
+   * Now one listing per repo per second, and an answer is kept while every file of that repo is the same text (the
+   * reader keeps an unchanged file's text, so a same-object check is enough).
+   */
+  const snaps = new Map<string, { at: number; files: string[]; texts: (string | undefined)[]; answers: Map<string, WorkLink> }>();
+  const snapshot = (repo: string) => {
+    const t = Date.now();
+    let s = snaps.get(repo);
+    if (s && t - s.at < 1_000) return s;
+    const files = list(repo);
+    const texts = files.map((rel) => read(repo, rel));
+    const same = !!s && s.files.length === files.length && s.files.every((f, i) => f === files[i] && s!.texts[i] === texts[i]);
+    s = { at: t, files, texts, answers: same ? s!.answers : new Map() };
+    snaps.set(repo, s);
+    return s;
+  };
+  const find = (repo: string, code: string): WorkLink => {
     if (repo === "note") {
       const m = /^([\w.-]+):(.+)$/.exec(code);
       if (m) return note(m[1], m[2]);
     }
+    const snap = snapshot(repo);
+    const kept = snap.answers.get(code);
+    if (kept) return { ...kept };
+    const got = lookup(repo, code, snap.files, snap.texts);
+    snap.answers.set(code, got);
+    return { ...got };
+  };
+  const lookup = (repo: string, code: string, files: string[], texts: (string | undefined)[]): WorkLink => {
     const epic = /^EPIC-\w+$/.test(code);
     // a Done-means id (letters, a dash, a number, no S/A/G): its box in the spine that holds it; a row with such an id
     // (C907-18) when no box has it.
@@ -722,8 +748,9 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
     const ask = /^[A-Z][A-Z0-9]*(?:-\d+)?-A\d+$/.test(code);
     // a row that sits in a table outside the ledger section (rows left under Waiting on): the last resort.
     let loose: WorkLink | undefined;
-    for (const rel of list(repo)) {
-      const text = read(repo, rel);
+    for (let i = 0; i < files.length; i++) {
+      const rel = files[i];
+      const text = texts[i];
       if (!text) continue;
       // an archive holds only finished ledger rows, never an epic, a Done-means box or an open ask
       const archived = isArchiveRel(rel);
@@ -763,6 +790,7 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
     }
     return loose ?? { code, repo, kind: "unknown" };
   };
+  return find;
 }
 
 /** the epic a row's file belongs to: its own heading, or for an archive the epic its `Archive of:` line names. */

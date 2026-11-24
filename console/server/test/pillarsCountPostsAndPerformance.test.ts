@@ -45,7 +45,7 @@ describe("pillars: posts counted per benefit, and how they did", () => {
 
   it("gives the Writer each pillar's numbers and the least used one", () => {
     const out = pillarBriefLines(pillarStats(lines, [{ id: "P-1", kind: "post", status: "scheduled", benefit: "1" }, { id: "P-2", kind: "post", status: "scheduled", benefit: "2" }]));
-    expect(out[0]).toMatch(/^Pillars so far/);
+    expect(out[0]).toMatch(/^Benefits so far/);
     expect(out.some((l) => /^- 3\. 0 posts/.test(l))).toBe(true);
     expect(out.at(-1)).toMatch(/Least used pillar: 3\./);
     expect(pillarBriefLines(pillarStats([], []))).toEqual([]);

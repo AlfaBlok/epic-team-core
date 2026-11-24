@@ -167,13 +167,29 @@ const stems = (t: string) =>
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
       .filter((w) => w.length >= 3 && !STOP.has(w))
-      .map((w) => w.slice(0, 5)),
+      // E907-S76: one car or two cars, one bot or the chatbots' bots: the plural is the same thing
+      .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w).slice(0, 5)),
   );
+
+/**
+ * The asking part of the question, before its `Why:` (E907-S76: E901-A8 (the deals world) put his quote after "Why: you said",
+ * inside the question, and it was taken for the asked thing's own words, so the card passed).
+ */
+const askingPart = (question: string) => question.split(/\bwhy\s*:/i)[0];
+/** A label in front of the asked thing ("a new objective, Cars: …", "a key result: …"): the thing is after it. */
+const KIND_LABEL = /^(?:an?\s+)?(?:new\s+)?(?:objective|key\s+result|goal|wheel)s?\s*[,:]\s*/i;
 
 /** The thing the ask asks him to approve: the words it quotes in its question (their headline before a colon), else the question's first clause. */
 function askedThing(question: string): string {
-  const q = [...question.matchAll(QUOTED)].map((m) => m[1]);
-  const thing = q[0] ?? question.replace(/^\W*you\s+(?:approve|decide)\s*:\s*/i, "").split(/[?.]|\s—\s|\bwhy\s*:/i)[0];
+  const q = [...askingPart(question).matchAll(QUOTED)].map((m) => m[1]);
+  const thing =
+    q[0] ??
+    question
+      .replace(/^\W*you\s+(?:approve|decide)\s*:\s*/i, "")
+      .replace(KIND_LABEL, "")
+      .split(/[?]|\.\s|\s—\s|\bwhy\s*:/i)[0]
+      // how the card says it is measured is the team's wording, not the thing ("…, measured by 4 key results")
+      .replace(/,?\s*measured by\b.*$/i, "");
   const head = thing.split(":")[0];
   return stems(head).size >= 2 ? head : thing;
 }
@@ -185,7 +201,7 @@ export function hisWordsAlreadyAsk(a: GateAsk): string | undefined {
   const thing = stems(askedThing(a.question));
   if (thing.size < 2) return undefined;
   // the asked thing's own quote and the buttons' quotes are the team's words, never his
-  const asked = [...a.question.matchAll(QUOTED)][0]?.[1].trim();
+  const asked = [...askingPart(a.question).matchAll(QUOTED)][0]?.[1].trim();
   const inQuestion = new Set([...(asked ? [asked] : []), ...[...text(...(a.options ?? [])).matchAll(QUOTED)].map((m) => m[1].trim())]);
   const rest = text(a.question, a.contextText, a.context, ...(a.whyAll ?? [a.why]), a.impact, a.steps);
   for (const m of rest.matchAll(QUOTED)) {

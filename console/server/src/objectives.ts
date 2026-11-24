@@ -60,8 +60,8 @@ export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
 /** Root L-100 in one line (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
  * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again. */
 export const OBJECT_SHAPE_RULE =
-  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its properties, a data element enforced to exist (key results, plan, context, trackers, board, pages; a campaign's benefits), both a UX and a data thing. " +
-  "Write only into those properties: the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it.";
+  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its chapters, a part of its knowledge enforced to exist (key results, plan, context, trackers, board, pages; a campaign's benefits), both a UX and a data thing; Chapter is his word for one, never property, totem or facet on what he reads. " +
+  "Write only into those chapters: the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it.";
 /** the block rides on every wake: kept short. */
 export const OBJECTIVES_MAX_CHARS = 3_600; // room for each objective's tickets line
 

@@ -119,12 +119,12 @@ const page = (path: string, skin: Skin = SKINS.social) =>
 
 describe("E964-S14 five fixed tabs", () => {
   // the owner: the same tabs on every wheel, a campaign's as an objective's.
-  it("opens on Key results; then the social product's data tabs Pillars, Plan, Pipeline, History; then the console's engine tabs as on an objective; one Settings button", async () => {
+  it("opens on Key results; then the social product's data tabs Benefits, Plan, Pipeline, History; then the console's engine tabs as on an objective; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Pillars", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Benefits", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
     // "the same console ... with slightly different data tabs": the data tabs are marked, the rest is the console's.
-    expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Pillars", "Plan", "Pipeline", "History"]);
+    expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Benefits", "Plan", "Pipeline", "History"]);
     expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Settings", "Social kit", "Lessons", "Tasks", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
@@ -173,7 +173,7 @@ describe("E964-S14 five fixed tabs", () => {
 
   // the owner 22 Nov: "benefits is like an extreme thing"; 24 Nov: "what are the pillars of our communication? ...
   // so many posts on this, so many posts on that ... And how are these posts performing".
-  it("the Pillars tab shows each benefit as a pillar, the posts that touch it, how the live ones did, and the posts on none", async () => {
+  it("the Benefits chapter shows each benefit as a message, the posts that touch it, how the live ones did, and the posts on none", async () => {
     totems = { ...totems, benefits: { source: "data/brief.md · Benefits", asked: [{ id: "L-3", text: "Finds the threads where people have your problem." }], lines: [
       { id: "1", does: "Writes posts from your ideas.", benefit: "You show up every day.", status: "works today", soon: false, screen: { label: "Ideas", path: "data/assets/benefits/s1.webp", url: "/s1.webp" } },
       { id: "2", does: "Checks what worked.", benefit: "Posts get better.", status: "half built", soon: true },
@@ -190,7 +190,7 @@ describe("E964-S14 five fixed tabs", () => {
     vi.spyOn(api, "getSocial").mockResolvedValue({ tenantId: "social", repo: "social", data: { ...base, posts } });
     page("/milestones/ms-memo?tab=benefits");
     const tab = await screen.findByTestId("pillars-tab");
-    expect(screen.getByTestId("tab-benefits").textContent).toBe("Pillars");
+    expect(screen.getByTestId("tab-benefits").textContent).toBe("Benefits");
     const lines = within(tab).getAllByTestId("pillar-line");
     expect(lines.map((l) => within(l).getByText(/^You show|^Posts get/).textContent)).toEqual(["You show up every day.", "Posts get better."]);
     expect(within(tab).getAllByTestId("benefit-status").map((s) => s.textContent)).toEqual(["works today", "half built, coming soon"]);
@@ -198,13 +198,13 @@ describe("E964-S14 five fixed tabs", () => {
     await waitFor(() => expect(within(tab).getAllByTestId("pillar-posts").map((x) => x.textContent)).toEqual(["2 posts", "1 post"]));
     expect(within(lines[0]).getByTestId("pillar-perf").textContent).toMatch(/1live.*1planned.*8views.*2likes.*1replies.*8views a post/);
     expect(within(lines[0]).getByTestId("pillar-best").textContent).toMatch(/Voice to posts, 8 views/);
-    expect(within(tab).getByTestId("pillar-none").textContent).toMatch(/1 post names no pillar.*P-3/);
-    expect(within(tab).getByTestId("pillars-answer").textContent).toMatch(/^3 of .* posts, 2 on a pillar, 1 on none/);
-    expect(within(tab).getByTestId("pillars-loop").textContent).toMatch(/A pillar.*Counted here/);
+    expect(within(tab).getByTestId("pillar-none").textContent).toMatch(/1 post names no benefit.*P-3/);
+    expect(within(tab).getByTestId("pillars-answer").textContent).toMatch(/^3 of .* posts, 2 name a benefit, 1 on none/);
+    expect(within(tab).getByTestId("pillars-loop").textContent).toMatch(/A benefit.*Counted here/);
     expect(within(screen.getByTestId("benefits-asked")).getByText(/Finds the threads/)).toBeTruthy();
   });
 
-  it("the Pillars tab says so when the product has none written", async () => {
+  it("the Benefits chapter says so when the product has none written", async () => {
     totems = { ...totems, benefits: { source: null, lines: [], asked: [] } };
     page("/milestones/ms-memo?tab=benefits");
     expect(await screen.findByTestId("benefits-none")).toBeTruthy();

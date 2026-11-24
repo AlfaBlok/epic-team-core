@@ -1996,6 +1996,10 @@ export interface PlanState {
   bundles?: { seats: number; eurPerMonth: number }[];
   /** the seats the world's plan includes now */
   seats?: number;
+  /** own AI, the team on the customer's own AI key, no seats (Stripe test mode until real payments are proven) */
+  ownAi?: { eurPerMonth: number; testMode: boolean };
+  /** how the world's AI is paid now */
+  ai?: "own" | "included";
   subscription?: { status: string; since: string; testMode: boolean };
 }
 

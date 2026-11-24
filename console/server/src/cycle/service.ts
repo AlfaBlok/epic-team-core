@@ -58,6 +58,7 @@ import { milestoneWorld } from "../tenancy/world.js";
 import { hooks, openForJobs, WORLD_WAKE_HOLD_CODE, type JobEnd, type JobRoute, type WorldWakeHold } from "../plug/hooks.js";
 import { seatHeldElsewhere, threadRefusal, worldOfRun } from "./threadBinding.js";
 import { headSha } from "../gitRefs.js";
+import { createLastCommits } from "./lastCommits.js";
 import { openGate, type StartGate } from "./startGate.js";
 import { checkoutName } from "../adapters/repoNames.js";
 import { type HostId, mainHost, ownerName, workerHost, hostReposRoot } from "../identity.js";
@@ -1404,26 +1405,10 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     return { dir, tree, nodes, files };
   }
   // one `git log -1` per parent spine on every poll of every assignment was a large share of the console's git
-  // spawns; the answer only changes when HEAD moves, so it is kept per (checkout, HEAD, paths).
-  const lastCommits = new Map<string, string | undefined>();
-  const lastCommitAt: LastCommitAt =
-    o.lastCommitAt ??
-    ((dir, paths) => {
-      const sha = headSha(dir);
-      const key = sha ? `${dir}\0${sha}\0${paths.join("\0")}` : undefined;
-      if (key && lastCommits.has(key)) return Promise.resolve(lastCommits.get(key));
-      return gitOut(10_000)(dir, ["log", "-1", "--format=%cI", "--", ...paths]).then(
-        (s) => {
-          const at = s.trim() || undefined;
-          if (key) {
-            if (lastCommits.size > 5000) lastCommits.clear();
-            lastCommits.set(key, at);
-          }
-          return at;
-        },
-        () => undefined,
-      );
-    });
+  // spawns; the answer only changes when HEAD moves, so it is kept per (checkout, paths) with the HEAD it holds for.
+  // When HEAD moves, one `git log --name-only <old>..<new>` per checkout moves every kept answer forward (the main server
+  // commits every few minutes, and each move re-ran one spawn per parent spine: 2.5 s of a 90 s live profile).
+  const lastCommitAt: LastCommitAt = o.lastCommitAt ?? createLastCommits(gitOut(10_000), headSha);
   /** the spines of the milestone's tree whose Current State lags their children (root first). */
   const lagsOf = (t: { dir: string; tree: Tree; files: Map<string, string | undefined> }): Promise<SpineLag[]> =>
     spineLags(t.tree.root, t.files, (paths) => lastCommitAt(t.dir, paths), Date.now(), o.rollupLagMs ?? rollupLagMsFromEnv()).catch(() => []);

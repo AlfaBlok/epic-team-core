@@ -5,6 +5,7 @@ import type { OwnerResponse } from "./inbox-types";
 import { answerJoined, joinedFor } from "@/lib/sameTopic";
 import { landed, UNDO_MS } from "@/lib/press";
 import { workerHost } from "../lib/identity";
+import { noteRead, SAVED_HEADER } from "../lib/savedCopy";
 
 export class ApiError extends Error {
   constructor(
@@ -68,7 +69,9 @@ export function takeEarly(path: string): Promise<unknown> | undefined {
   const e = all?.[path];
   if (!e) return undefined;
   delete all![path];
-  return Date.now() - e.at < EARLY_FRESH_MS ? e.p : undefined;
+  if (Date.now() - e.at >= EARLY_FRESH_MS) return undefined;
+  // index.html notes when the service worker answered it with a saved copy
+  return e.p.then((d) => (d != null && noteRead(path, (e as { saved?: string }).saved), d));
 }
 
 /**
@@ -200,6 +203,8 @@ async function send<T>(method: string, path: string, body: unknown, form: boolea
       window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     throw new ApiError(res.status, msg, code, issues, TRANSIENT_STATUS.has(res.status) && !fromConsole);
   }
+  // a read the service worker answered with its saved copy marks the screen until a fresh one lands
+  if (method === "GET") noteRead(path, res.headers?.get?.(SAVED_HEADER));
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
@@ -586,7 +591,7 @@ export function createRealClient(): ApiClient {
     deckCardSeen: (ref) => call("POST", "/deck-cards/seen", ref),
     getCredits: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/credits`),
     getSeatUsage: () => call("GET", "/platform/seat-usage"),
-    startPlanCheckout: (tenantId, seats) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, seats ? { seats } : {}),
+    startPlanCheckout: (tenantId, seats) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/plan/checkout`, seats === "own" ? { ai: "own" } : seats ? { seats } : {}),
     getPlan: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/plan`),
     grantCredits: (tenantId, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/credits/grant`, input),
     setCreditsGate: (tenantId, on) => call("PUT", `/tenants/${encodeURIComponent(tenantId)}/credits/gate`, { on }),

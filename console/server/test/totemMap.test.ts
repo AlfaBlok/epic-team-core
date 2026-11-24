@@ -62,10 +62,10 @@ describe("the product map", () => {
   it("the wake section names each totem, where it lives, read first and write back last", () => {
     const s = mapSection(maps, productFor(maps, { objective: "alpha-live" }));
     expect(s.startsWith(MAP_HEAD)).toBe(true);
-    expect(s).toContain("- Marketing plan (page, tab plan): w docs/spines/r.md § Plan. Read: the offer. Write back: a section a test changed.");
-    expect(s).toContain("Launch board (table, tab launch)");
-    expect(s).toContain("- Inbox (table, tab inbox)");
-    expect(s).toMatch(/Start: read every totem/);
+    expect(s).toContain("- Marketing plan (page, chapter plan): w docs/spines/r.md § Plan. Read: the offer. Write back: a section a test changed.");
+    expect(s).toContain("Launch board (table, chapter launch)");
+    expect(s).toContain("- Inbox (table, chapter inbox)");
+    expect(s).toMatch(/Start: read every chapter/);
     expect(s).toMatch(/End: write what you learned or changed back/);
     expect(mapSection(maps, undefined)).toBe("");
   });

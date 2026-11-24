@@ -3,6 +3,7 @@ import { api, apiMode, type ReviewItem } from "@/api";
 import { foldAsks, rememberJoined } from "@/lib/sameTopic";
 import { inboxHeld, onInboxRelease } from "@/lib/inboxHold";
 import { forgetParked, gateAnswer, type Source } from "@/lib/inboxNew";
+import { onFreshFromWorker } from "@/lib/savedCopy";
 
 // Tiny fetch-and-refresh layer: every mutation bumps a global version, all queries refetch.
 /** a query may carry a tag; `invalidate(tag)` refreshes only those (a snooze refetches the inbox, not ~15 lists). */
@@ -13,6 +14,8 @@ const listeners = new Set<{ refresh: (source?: Source) => void; tag?: QueryTag }
 export const invalidate = (tag?: QueryTag, source: Source = "own") =>
   listeners.forEach((l) => (!tag || l.tag === tag || (tag === "inbox" && l.tag === "counts")) && l.refresh(source));
 api.subscribe?.(() => invalidate(undefined, "background"));
+// the service worker's fresh answer arrived after it drew a saved copy: read again now, not at the next poll
+onFreshFromWorker(() => invalidate(undefined, "background"));
 
 /** inbox lists and counts hold still while a card box is in use (lib/inboxHold); others always update. */
 const holds = (tag?: QueryTag) => (tag === "inbox" || tag === "counts") && inboxHeld();

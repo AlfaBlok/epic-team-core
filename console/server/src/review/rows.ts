@@ -9,6 +9,7 @@ import { parseAsks, SNOOZE_ON_LINE, SNOOZE_UNTIL } from "../inbox/asks.js";
 import type { Milestone, Store } from "../store.js";
 import { parseFollowups, stepState, type StepState, type Suggestion } from "./followups.js";
 import { evidenceLabelOf, evidenceProblem, gateProblems } from "./card.js";
+import { createAskLogReader, type PriorAnswer } from "../inbox/askRepeat.js";
 import { qcFace, qcPicture, qcRequired, qcVerdict, readQc } from "./qc.js";
 import { createPagesReader, pageParentProblem } from "../pagesIndex.js";
 import { splitCardFiles } from "../desk/attachLimits.js";
@@ -407,6 +408,8 @@ interface FileRead {
   plainNames: Map<string, string>;
   /** Every coded ask of the spine and whether it is still open (a row that fed an answered ask closes itself). */
   askOpen: Map<string, boolean>;
+  /** E907-S76: the asks of this spine he answered, so a card never asks one again (card.ts cardRepeatProblem). */
+  answered: PriorAnswer[];
   /** the repo-relative `.md` files it links to (its child spines are among them). */
   links: string[];
   /** the voice-note marks of its `## Decisions` table (noteMarks.ts). */
@@ -474,6 +477,9 @@ function readFile(abs: string): FileRead | undefined {
     ...(goalSentence ? { goalSentence } : {}),
     plainNames: plainNamesOf(text),
     askOpen: new Map(all.filter((a) => a.code).map((a) => [a.code!, a.state === "open"])),
+    answered: all
+      .filter((a) => a.state === "answered" && !a.feedback && !a.supersededBy && a.since)
+      .map((a) => ({ code: a.code ?? null, row: a.row ?? null, question: a.question, answer: a.answer ?? null, on: a.since! })),
     links: [...new Set([...text.matchAll(MD_FILE_LINK)].map((m) => m[1]).filter((t) => !/^[a-z]+:/i.test(t)))],
     noteMarks: noteMarksOf(text),
     pageNotes: pageNotesOf(text),
@@ -553,6 +559,13 @@ function ownHosts(reg: { hosts: string[] } | undefined): string[] {
     }
   })();
   return [...(reg?.hosts ?? []), ...pub];
+}
+
+/** E907-S76: the home repo's asks log folded to what he answered, read again when it changes. */
+const askLogReaders = new Map<string, ReturnType<typeof createAskLogReader>>();
+function askLogOf(reposRoot: string): PriorAnswer[] {
+  if (!askLogReaders.has(reposRoot)) askLogReaders.set(reposRoot, createAskLogReader({ reposRoot }));
+  return askLogReaders.get(reposRoot)!();
 }
 
 export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoot: string, only: { repoDir?: string } = {}): ReviewPayload {
@@ -773,7 +786,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
             // a one-off page with no parent (no entry in the page list) is an island: never his card.
             const ev = card ? (evidenceProblem(card, stripInline(status)) ?? pageParentProblem(card.evidenceUrl, pageList)) : undefined;
             if (ev) return { kind: "needs-evidence", reason: ev };
-            const problems = gateProblems({ ...(card ? { card } : {}), ...(project ? { project: project.name } : {}), ...(doc.goalSentence ? { goalSentence: doc.goalSentence } : {}), screenshotFound: !!shot, ownHosts: ownHosts(pageList) });
+            const problems = gateProblems({ ...(card ? { card } : {}), ...(project ? { project: project.name } : {}), ...(doc.goalSentence ? { goalSentence: doc.goalSentence } : {}), screenshotFound: !!shot, ownHosts: ownHosts(pageList), answered: [...doc.answered, ...askLogOf(reposRoot)] });
             // E948-S53: a card that says it completes the goal while other parts are still worked on
             // never reaches him; it would offer a close and then warn him against it.
             if (completes === "goal" && working.length)

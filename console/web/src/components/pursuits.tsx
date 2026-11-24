@@ -188,7 +188,7 @@ export function PursuitPanel({ p, linkName = false }: { p: Pursuit; linkName?: b
       </ul>
       {p.totems.length > 0 && (
         <div className="mt-3 border-t pt-3" data-testid="pursuit-totems">
-          <div className="mb-1.5 text-xs text-muted-foreground">Totems</div>
+          <div className="mb-1.5 text-xs text-muted-foreground">Chapters</div>
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             {p.totems.map((t) => (
               <Totem key={t.label} t={t} />

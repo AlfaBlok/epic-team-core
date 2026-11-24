@@ -26,7 +26,26 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 async function keep(name, key, res) {
   if (!res || !res.ok || res.type === "opaque" || res.redirected) return;
   const c = await caches.open(name);
-  await c.put(key, res);
+  await c.put(key, stamped(res));
+}
+// a kept read carries when it was kept; answered from here it says it is a saved copy and from when, so the
+// app shows "Saved copy from 14:02, refreshing" until a fresh answer lands. A copy kept before this has the console's Date.
+const KEPT_AT = "x-kept-at";
+const SAVED = "x-saved-copy";
+function stamped(res) {
+  const h = new Headers(res.headers);
+  h.set(KEPT_AT, new Date().toISOString());
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+function asSaved(kept) {
+  const h = new Headers(kept.headers);
+  h.set(SAVED, kept.headers.get(KEPT_AT) || kept.headers.get("date") || "unknown");
+  return new Response(kept.body, { status: kept.status, statusText: kept.statusText, headers: h });
+}
+// the console's fresh answer arrived after a saved copy was drawn: the open pages read again and drop their note.
+async function freshAfterSaved() {
+  const wins = await self.clients.matchAll({ type: "window" });
+  for (const w of wins) w.postMessage({ type: "saved-copy-fresh" });
 }
 async function trim(name, max) {
   const c = await caches.open(name);
@@ -76,10 +95,12 @@ async function asset(q) {
 async function read(q) {
   const c = await caches.open(READS);
   const kept = await c.match(q);
+  let drewSaved = false;
   const live = fetch(q).then(async (res) => {
     if (res.ok && isJson(res)) {
-      await c.put(q, res.clone());
+      await c.put(q, stamped(res.clone()));
       trim(READS, READS_KEPT).catch(() => undefined);
+      if (drewSaved) freshAfterSaved().catch(() => undefined);
     }
     return res;
   });
@@ -89,9 +110,10 @@ async function read(q) {
     const first = await Promise.race([live, slow]);
     if (first !== "slow") return first;
     live.catch(() => undefined);
-    return kept.clone();
+    drewSaved = true;
+    return asSaved(kept);
   } catch {
-    return kept.clone();
+    return asSaved(kept);
   }
 }
 

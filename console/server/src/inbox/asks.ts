@@ -242,7 +242,7 @@ export const REPO_IS_SOURCE_RULE =
 export const ASK_WHEN_UNSURE_RULE =
   `Unsure what ${ownerName()} meant? Ask at once, never saved for later or a weekly card: first read root L-100 and \`python3 ~/github/${homeRepo()}/scripts/both_ways.py gather <objective id|desk>\`; ` +
   `if the words are still truly unclear, put one open question on the inbox with \`both_ways.py ask <objective id|desk> --by <you> --quote "<the exact unclear words>" --unclear "<one open question>" --row <row>\`. ` +
-  `It refuses a question a root learning or an earlier answer already covers (never ask again what a tab, a totem or "the same engine" means); meanwhile carry on with what is clear.`;
+  `It refuses a question a root learning or an earlier answer already covers (never ask again what a tab, a chapter or "the same engine" means); meanwhile carry on with what is clear.`;
 
 export const FINISH_THE_JOB_RULE =
   "Finish the job (root L-16): never end a turn offering follow-ups (\"want me to do X?\"). Do them now when they move the goal toward green, " +

@@ -594,7 +594,7 @@ function MilestoneScreen() {
  * a campaign's fixed tabs in the social skin: one per kind of node of the product's data graph, listed once in its
  * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. The owner 24 Nov: "it's
  * the same console is what I'm saying. with slightly different data tabs". Key results first, then the product's data
- * tabs, set apart by a thin rule (Pillars, the benefits as the anchor, with the product inside it; Plan; Pipeline; History), then the
+ * tabs, set apart by a thin rule (Benefits, the anchor and the product's messages, with the product inside it; Plan; Pipeline; History), then the
  * console's engine tabs, the same as an objective's (Inbox, Chat, Personas, Board, Context, Pages, Trackers, Log). The
  * social kit sits under the Plan, the lessons in the Context, as on an objective; an old ?tab=kit, ?tab=observations or
  * ?tab=product link opens the tab that holds it and scrolls to its part. Settings sit behind the header's Settings button.

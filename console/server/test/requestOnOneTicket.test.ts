@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chatCopyMessages, createRequestRows, plainTitle, requestIdOf, requestRowsIn } from "../src/desk/requests.js";
 import { hisWordsIn, saidRequest } from "../src/desk/said.js";
 import { readyDecision } from "../src/status/add.js";
@@ -68,6 +68,44 @@ describe("where a request landed, read from the epic file", () => {
     expect(idx.rowsOf("ch_caedab95")?.[0].title).toBe("Inbox counts fixed");
     expect(idx.rowsOf("vn_69ef802c")?.[0].title).toBe("Data ingestion objective");
     fs.rmSync(root, { recursive: true, force: true });
+  });
+  it("a scan again reads only the epic files that changed, and his new words match every file again", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "req-rows-"));
+    fs.mkdirSync(path.join(root, "acme", "docs", "spines"), { recursive: true });
+    const a = path.join(root, "acme", "docs", "spines", "epic-40.md");
+    const b = path.join(root, "acme", "docs", "spines", "epic-41.md");
+    fs.writeFileSync(a, SPINE);
+    fs.writeFileSync(b, SPINE.replace(/E940/g, "E941").replace("vn_69ef802c", "vn_11111111").replace("ch_caedab95", "ch_22222222"));
+    let t = 1_000;
+    let wanted = [{ id: "ch_33333333", words: "please move the slow scan off the main thread today" }];
+    const idx = createRequestRows({ reposRoot: () => root, ttlMs: 10, now: () => t, wanted: () => wanted });
+    const spy = vi.spyOn(fs.promises, "readFile");
+    const reads = { get length() { return 0; }, set length(_: number) { spy.mockClear(); }, filter: (f: (x: string) => boolean) => spy.mock.calls.map((c) => String(c[0])).filter(f) };
+    try {
+      await idx.ready();
+      expect(reads.filter((f) => f.endsWith(".md") && f.includes("spines"))).toHaveLength(2);
+      reads.length = 0;
+      t += 100;
+      fs.writeFileSync(b, fs.readFileSync(b, "utf8").replace("Something else", "Something else, ch_44444444 on it"));
+      await idx.ready();
+      expect(reads.filter((f) => f.includes("spines"))).toEqual([b]);
+      expect(idx.rowsOf("ch_44444444")?.map((r) => r.code)).toEqual(["E941-S99"]);
+      expect(idx.rowsOf("vn_69ef802c")?.map((r) => r.code)).toEqual(["E940-S98"]);
+      reads.length = 0;
+      t += 100;
+      fs.writeFileSync(a, fs.readFileSync(a, "utf8").replace("Something else", "please move the slow scan off the main thread today"));
+      wanted = [...wanted];
+      await idx.ready();
+      expect(idx.rowsOf("ch_33333333")?.map((r) => r.code)).toEqual(["E940-S99"]);
+      reads.length = 0;
+      t += 100;
+      wanted = [...wanted, { id: "ch_55555555", words: "Something else, ch_44444444 on it and more words here" }];
+      await idx.ready();
+      expect(reads.filter((f) => f.includes("spines")).sort()).toEqual([a, b].sort());
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
   it("reads an epic kept outside docs/spines: at the repo top, in docs/, or a spine one folder under docs/", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "req-rows-"));

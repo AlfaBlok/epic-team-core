@@ -24,6 +24,7 @@ import { ClosedGoalsFold, InboxDecisions, InboxDoneForReview, InboxSnoozedReview
 import { FoldSection, InboxPlace, LandFolded, useSectionOpen } from "@/components/homeSection";
 import { useInboxPlace } from "@/lib/inboxPlace";
 import { InboxNewLine } from "@/components/InboxNewLine";
+import { SavedCopyLine } from "@/components/SavedCopyLine";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
 import { SCORECARDS_PATH } from "@/lib/scorecards";
@@ -372,6 +373,8 @@ export function TeamPage({
           actions={!inboxPage && campaigns && only !== "goals" ? actions : undefined}
         />
       )}
+      {/* drawn from the app's saved copy, the Inbox says so and from when, until fresh data lands */}
+      {(campaigns ? only !== "goals" : !settings) && <SavedCopyLine />}
       {campaigns ? (
         <>
           {/* the social home opens on every project's campaigns,

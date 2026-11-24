@@ -78,3 +78,11 @@ export function logToggle(
 export const EVER_ON_SQL = `(assignments.enabled = 1 OR assignments.parked_at IS NOT NULL OR EXISTS (
   SELECT 1 FROM runs r WHERE r.assignment_id = assignments.id AND r.parent_run_id IS NULL
     AND (r.kind = '${TOGGLE_KIND}' OR r.summary LIKE 'Woke on cadence%' OR r.summary LIKE 'parked: %' OR r.summary LIKE 're-armed: %')))`;
+
+/**
+ * The assignments that ever produced such a run line, in one pass over the runs, for the assignments list. The
+ * per-row EXISTS above scanned every root run of each assignment that is off (121 of 214 live), 62 ms a list on the main
+ * server, re-run after nearly every write; the list now reads this set, kept until a run is added (store.ts).
+ */
+export const EVER_ON_IDS_SQL = `SELECT DISTINCT assignment_id FROM runs WHERE parent_run_id IS NULL AND assignment_id IS NOT NULL
+  AND (kind = '${TOGGLE_KIND}' OR summary LIKE 'Woke on cadence%' OR summary LIKE 'parked: %' OR summary LIKE 're-armed: %')`;

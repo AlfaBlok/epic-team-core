@@ -133,7 +133,7 @@ export function pillarBriefLines(s: PillarStats): string[] {
   if (!s.pillars.length) return [];
   const fewest = [...s.pillars].sort((a, b) => a.posts - b.posts)[0];
   return [
-    "Pillars so far (the Pillars tab; each post names the pillar numbers it touches in its Benefit cell, never none):",
+    "Benefits so far (the Benefits chapter; each post names the benefit numbers it touches in its Benefit cell, never none):",
     ...s.pillars.map((p) => `- ${p.id}. ${p.posts} posts (${p.live} live, ${p.measured} measured): ${p.views} views, ${p.likes} likes, ${p.replies} replies${p.viewsPerPost !== null ? `, ${p.viewsPerPost} views a post` : ""}`),
     ...(s.offPillar.count ? [`- No pillar named: ${s.offPillar.count} posts (${s.offPillar.ids.slice(0, 8).join(", ")}); name one when you next touch them.`] : []),
     `Least used pillar: ${fewest.id}. Weigh the next post toward it unless another pillar clearly does better per post.`,

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { DEFAULT_TENANT, type DB } from "./db.js";
 import type Database from "better-sqlite3";
 import type { Cadence } from "./schemas.js";
-import { EVER_ON_SQL, TOGGLE_KIND } from "./assignmentToggle.js";
+import { EVER_ON_IDS_SQL, EVER_ON_SQL, TOGGLE_KIND } from "./assignmentToggle.js";
 import { parseWakeParts, type WakeParts } from "./cycle/wakeWhy.js";
 import type { HostRunRow } from "./runHostRow.js";
 import { guardMilestoneRepo, repoScopeOf, worldClaims } from "./tenancy/repoScope.js";
@@ -482,6 +482,26 @@ const foreignMs = () => {
   const v = Number(process.env.CONSOLE_MEMO_FOREIGN_MS);
   return Number.isFinite(v) && v >= 0 && process.env.CONSOLE_MEMO_FOREIGN_MS !== "" ? v : 2_000;
 };
+/**
+ * The ids of assignments that ever ran a line only an on assignment makes (EVER_ON_IDS_SQL), kept until the runs
+ * table gains a row (its newest rowid and count). Being ever on only ever turns true, and those lines are written when a run
+ * is added, so a new run is the only moment the set can grow.
+ */
+const everOnMemo = new WeakMap<DB, { key: string; ids: Set<string>; stamp: Database.Statement; all: Database.Statement }>();
+export function everOnIds(db: DB): Set<string> {
+  let m = everOnMemo.get(db);
+  if (!m) {
+    m = { key: "", ids: new Set(), stamp: db.prepare("SELECT max(rowid) || ':' || count(*) FROM runs").pluck(), all: db.prepare(EVER_ON_IDS_SQL).pluck() };
+    everOnMemo.set(db, m);
+  }
+  const key = String(m.stamp.get());
+  if (key !== m.key) {
+    m.ids = new Set(m.all.all() as string[]);
+    m.key = key;
+  }
+  return m.ids;
+}
+
 export function memoRead<T extends object>(db: DB, key: string, read: () => T[], now: () => number = Date.now): T[] {
   let m = readMemos.get(db);
   if (!m) {
@@ -685,12 +705,13 @@ export function createStore(raw: DB, opts: { tenant?: string } = {}) {
       return memoRead(raw, `assignments\0${tenant}\0${f.milestoneId ?? ""}\0${f.personaId ?? ""}`, () => {
         const rows = db
           .prepare(
-            `SELECT *, ${EVER_ON_SQL} AS ever_on FROM assignments
+            `SELECT * FROM assignments
              WHERE (@m IS NULL OR milestone_id = @m) AND (@p IS NULL OR persona_id = @p) AND ${viaMilestone()}
              ORDER BY created_at, id`,
           )
           .all({ m: f.milestoneId ?? null, p: f.personaId ?? null, t: tenant }) as Row[];
-        return rows.map(toAssignment);
+        const ever = everOnIds(raw);
+        return rows.map((r) => toAssignment({ ...r, ever_on: r.enabled === 1 || r.parked_at != null || ever.has(r.id as string) ? 1 : 0 }));
       });
     },
     getAssignment,

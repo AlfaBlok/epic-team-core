@@ -17,6 +17,10 @@ export const BUY_LABEL = (p: Pick<PlanState, "price">) => `Buy ${p.price.name}, 
 export const BUNDLE_LABEL = (b: { seats: number; eurPerMonth: number }) => `${b.seats} seats, €${b.eurPerMonth.toLocaleString("en-GB")} a month`;
 /** what a seat is, in one line, wherever the bundles show. */
 export const SEAT_WORDS = "A seat is one AI teammate working for you. We run the AI and the servers, so there is nothing to set up.";
+/** the own-AI button's words, like "Own AI, €49 a month". */
+export const OWN_AI_LABEL = (o: { eurPerMonth: number }) => `Own AI, €${o.eurPerMonth} a month`;
+/** what own AI is, in one line. */
+export const OWN_AI_WORDS = "Or bring your own AI: your team runs on your own Anthropic key, kept in your own Bitwarden.";
 
 /**
  * the bundle a visitor picked on the product site (`?bundle=5` on the way in, kept through sign-up in this browser), so
@@ -41,9 +45,9 @@ export function usePlan(world: string | undefined, tick = 0) {
 
 /** opens Stripe's checkout for one world (and one bundle); busy and error kept per button group. */
 function useCheckout(world: string | undefined) {
-  const [busy, setBusy] = useState<number | "plan">();
+  const [busy, setBusy] = useState<number | "plan" | "own">();
   const [error, setError] = useState<string>();
-  const start = async (seats?: number) => {
+  const start = async (seats?: number | "own") => {
     if (!world || !api.startPlanCheckout) return;
     setBusy(seats ?? "plan");
     setError(undefined);
@@ -82,6 +86,20 @@ export function BundleButtons({ plan, size, testid = "buy-bundle" }: { plan: Pla
             {BUNDLE_LABEL(b)}
           </Button>
         ))}
+        {plan.ownAi && (
+          <Button
+            size={size}
+            variant="outline"
+            onClick={() => start("own")}
+            disabled={busy !== undefined}
+            pending={busy === "own"}
+            pendingLabel="Opening checkout…"
+            data-testid={`${testid}-own`}
+            title={OWN_AI_WORDS}
+          >
+            {OWN_AI_LABEL(plan.ownAi)}
+          </Button>
+        )}
       </span>
       {error && <span className="text-xs text-red-700 dark:text-red-400">{error}</span>}
     </span>
@@ -123,7 +141,14 @@ export function PlanCard({ world }: { world: string | undefined }) {
         <div data-testid="plan-paid">
           <h2 className="text-base font-semibold">You're on {plan.price.name}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {plan.seats ? `${plan.seats} seats, ` : ""}€{plan.price.eurPerMonth.toLocaleString("en-GB")} a month{plan.subscription ? `, since ${since(plan.subscription.since)}` : ""}. Your team's AI is included in your seats, so credits never pause your team.
+            {plan.seats ? `${plan.seats} seats, ` : plan.ai === "own" ? "Own AI, " : ""}€{plan.price.eurPerMonth.toLocaleString("en-GB")} a month{plan.subscription ? `, since ${since(plan.subscription.since)}` : ""}.{" "}
+            {plan.ai === "own" && !plan.seats ? (
+              <>
+                Your team runs on your own AI key. <Link to="/your-ai" className="underline underline-offset-2">Add your key</Link>
+              </>
+            ) : (
+              "Your team's AI is included in your seats, so credits never pause your team."
+            )}
             {plan.subscription?.testMode && " Paid in Stripe's test mode: no real money moved."}
           </p>
         </div>
@@ -140,7 +165,7 @@ export function PlanCard({ world }: { world: string | undefined }) {
             <h2 className="text-base font-semibold">{plan.price.name}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {plan.bundles?.length
-                ? `Pick how many seats. ${SEAT_WORDS} Monthly, cancel any time.`
+                ? `Pick how many seats. ${SEAT_WORDS}${plan.ownAi ? ` ${OWN_AI_WORDS}${plan.ownAi.testMode ? " Own AI is in test mode for now: no real money moves." : ""}` : ""} Monthly, cancel any time.`
                 : `One plan, €${plan.price.eurPerMonth} a month. Your team plans, builds and reports on your projects. Cancel any time.`}
             </p>
             {back === "cancelled" && <p className="mt-1 text-sm text-muted-foreground" data-testid="plan-cancelled">The payment was cancelled. Nothing was charged.</p>}

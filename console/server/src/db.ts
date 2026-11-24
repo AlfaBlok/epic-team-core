@@ -356,7 +356,7 @@ function ensureColumns(db: DB) {
 }
 
 /** run_usage.py's SCAN_VERSION; usage read by an older scan is re-read (keep the two equal). */
-export const USAGE_SCAN_VERSION = 2;
+export const USAGE_SCAN_VERSION = 3;
 
 /**
  * backfill, at every start (idempotent): the last 7 days' runs still without usage are due now, and usage read by
@@ -372,6 +372,13 @@ export function usageBackfill(db: DB) {
     `UPDATE runs SET usage = json_set(usage, '$.final', json('false'))
       WHERE usage IS NOT NULL AND kind = 'wake' AND ended_at >= ? AND json_extract(usage, '$.source') LIKE 'claude-code:%'
         AND COALESCE(json_extract(usage, '$.scan'), 1) < ? AND COALESCE(json_extract(usage, '$.final'), 1) != 0`,
+  ).run(since, USAGE_SCAN_VERSION);
+  // a sandboxed world job without a thread got zeros (`no-thread`) before its transcript was read (<worlds root>/.logs/
+  // <world>/<run>.jsonl, run_usage.py scan 3): read it again (zeros were never debited)
+  db.prepare(
+    `UPDATE runs SET usage = NULL, usage_checked_at = NULL
+      WHERE usage IS NOT NULL AND kind = 'wake' AND ended_at >= ? AND route LIKE 'sandbox:%'
+        AND json_extract(usage, '$.source') = 'no-thread' AND COALESCE(json_extract(usage, '$.scan'), 1) < ?`,
   ).run(since, USAGE_SCAN_VERSION);
 }
 

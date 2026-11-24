@@ -29,6 +29,9 @@ Which transcript lines belong to run X (a JSONL file is one Claude Code session;
 A file that merely mentions X elsewhere (a manager quoting it, a runs listing) is never counted for X.
 Seat dirs: `dirs` empty or ["auto"] = every `~/.claude` and `~/.claude_seat*` directory on the host. Each run
 also gets `seat`: the config dir most of its tokens came from (`seatN` for `.claude_seatN`, `default` for `.claude`).
+A sandboxed world job keeps its whole session in `<worlds root>/.logs/<world>/<run>.jsonl` (the root: `worldLogs` in the
+request, else $WORLDS_ROOT; neither = not read): that file is the run's, all of it, and its `seat` is `sandbox` (no seat
+dir holds that transcript, so without this such runs had no usage and their world's credit meter never moved).
 Assistant lines are counted once per API message id (Claude Code writes one line per content block, each repeating the
 same usage), across files too (a resumed session copies earlier lines into its new file). `<synthetic>` lines are skipped.
 """
@@ -50,7 +53,7 @@ CLIENT_REQ = re.compile(r'clientRequestId\\*"\s*:\s*\\*"' + _ID)
 OWN = re.compile(r"\b(?:[Yy]our|[Cc]hild|Console) run(?: id)?[:*\s]*(?:is\s+)?`?" + _ID)
 PARENT = re.compile(r"\b[Pp]arent(?:RunId|_run_id| DM run| run)?(?: id)?[:*=\s]*(?:is\s+)?[`\"]?" + _ID)
 # Bumped when the matching rules change: the console re-reads the last 7 days' usage read by an older scan.
-SCAN_VERSION = 2
+SCAN_VERSION = 3  # 3: sandbox job transcripts
 STUB = "Agent-team console wake for assignment"
 STUB_AS = re.compile(r"Agent-team console wake for assignment (as_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 # Lines Claude Code writes as user text that no one typed: never "the first message".
@@ -296,6 +299,36 @@ def add_usage(o, run, seen, out, seat="unknown"):
     return True
 
 
+def sandbox_files(runs, root=None):
+    """Each run's sandbox job transcript, `<root>/.logs/<world>/<run>.jsonl` (left out when there is none)."""
+    root = root or os.environ.get("WORLDS_ROOT") or ""
+    out = {}
+    if not root:
+        return out
+    logs = os.path.join(os.path.expanduser(root), ".logs")
+    for run in runs:
+        found = sorted(glob.glob(os.path.join(logs, "*", run + ".jsonl")))
+        if found and not os.path.islink(found[0]):
+            out[run] = found[0]
+    return out
+
+
+def scan_sandbox(path, run, seen, out):
+    """The whole sandbox transcript is `run`'s (one job, one session): every assistant line counts for it."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [json.loads(l) for l in fh if l.strip().startswith("{")]
+    except (OSError, ValueError):
+        return False
+    hit = False
+    for o in lines:
+        if add_usage(o, run, seen, out, "sandbox"):
+            hit = True
+    if hit:
+        out[run]["files"] += 1
+    return hit
+
+
 def main():
     req = json.loads(sys.argv[1])
     valid = [r for r in req.get("runs", []) if RUN_ID.fullmatch(r.get("id", ""))]
@@ -324,6 +357,9 @@ def main():
     wanted = set(runs)
     files.sort()
     same_as = {}
+    # a sandboxed world job's own transcript first (the whole file is that run's)
+    for run, f in sandbox_files(wanted, req.get("worldLogs")).items():
+        scan_sandbox(f, run, seen, out)
     # Forced files first: a worker's own session wins its API messages over any file that copied them.
     for _, f in files:
         sid = os.path.basename(f)[: -len(".jsonl")]

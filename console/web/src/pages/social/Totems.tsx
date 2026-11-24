@@ -272,7 +272,8 @@ const BENEFIT_TONE: Record<string, string> = {
 /**
  * The owner 24 Nov: "I need to understand the pillars of our communication and when we
  * communicate ... we need to be measuring what pillars are we touching on ... so many posts on this, so many posts on
- * that ... And how are these posts performing ... What's the feedback loop?". The Pillars tab (it was Benefits):
+ * that ... And how are these posts performing ... What's the feedback loop?". The Benefits chapter (named Pillars for a day, back to
+ * Benefits on his "Clarify how this fits with chapters simplify": each benefit line is one of the product's messages):
  * the benefits are the pillars, one source, the brief's Benefits table (only he edits it). Each post names the pillar
  * numbers it touches in its Benefit cell; this counts the posts per pillar, how the live ones did, and the posts that name
  * none. The loop under the head: a pillar, a post that names it, the Reporter's reading, these counts, the Writer's next post.
@@ -294,7 +295,7 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
   return (
     <div data-testid="pillars-tab" data-lines={b.lines.length}>
       <TabHead
-        title="Pillars"
+        title="Benefits"
         actions={
           campaign ? (
             <Pills
@@ -311,14 +312,14 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
       >
         {counted ? (
           <span data-testid="pillars-answer">
-            {stats.total} of {where} posts, {stats.total - stats.offPillar.count} on a pillar{stats.offPillar.count ? `, ${stats.offPillar.count} on none` : ""}. Every post is about one of these benefits.
+            {stats.total} of {where} posts, {stats.total - stats.offPillar.count} name a benefit{stats.offPillar.count ? `, ${stats.offPillar.count} on none` : ""}. Each benefit is one of the product's messages, and every post is about one.
           </span>
         ) : (
           "What every post is about: the benefits the product gives the people who use it."
         )}
       </TabHead>
-      <ol className="mb-5 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-xs text-muted-foreground" data-testid="pillars-loop" aria-label="How a pillar learns">
-        {["A pillar", "A post names it", "Measured after 48 hours", "Counted here", "The next post leans on what works"].map((x, i, all) => (
+      <ol className="mb-5 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-xs text-muted-foreground" data-testid="pillars-loop" aria-label="How a benefit learns">
+        {["A benefit", "A post names it", "Measured after 48 hours", "Counted here", "The next post leans on what works"].map((x, i, all) => (
           <li key={x} className="flex items-center gap-1.5">
             <span className="rounded-md border bg-card px-2 py-1 text-foreground">{x}</span>
             {i < all.length - 1 && <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -396,13 +397,13 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
         </ol>
       ) : (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="benefits-none">
-          No pillars written for this product yet. They go in the brief's Benefits table, one line each: what it does, what you get, and whether it works today.
+          No benefits written for this product yet. They go in the brief's Benefits table, one line each: what it does, what you get, and whether it works today.
         </p>
       )}
       {counted && stats.offPillar.count > 0 && (
         <section id="pillar-none" className="mt-3 rounded-xl border border-amber-300 p-4 dark:border-amber-800" data-testid="pillar-none">
           <p className="text-sm font-medium">
-            {stats.offPillar.count} {stats.offPillar.count === 1 ? "post names" : "posts name"} no pillar
+            {stats.offPillar.count} {stats.offPillar.count === 1 ? "post names" : "posts name"} no benefit
           </p>
           <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{stats.offPillar.ids.join(", ")}. The Writer names one the next time it touches each.</p>
         </section>
@@ -417,7 +418,7 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
           </ul>
         </section>
       )}
-      {b.source && <p className="mt-4 text-xs text-muted-foreground">Pillars read from {b.source}, posts from data/posts-ledger.md</p>}
+      {b.source && <p className="mt-4 text-xs text-muted-foreground">Benefits read from {b.source}, posts from data/posts-ledger.md</p>}
     </div>
   );
 }
