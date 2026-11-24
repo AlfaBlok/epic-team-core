@@ -124,7 +124,7 @@ describe("T48-S26 the card, as the approved mockup", () => {
     expect(within(lines[0] as HTMLElement).getByText("memo.example.com/connect").getAttribute("href")).toBe("https://memo.example.com/connect");
     // two buttons, the main one's sub-line is its title; the green evidence link its own line above them
     const buttons = within(c).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Park", "Snooze"]); // E948-S83 iteration 2: Park on every card; E948-S131: Voice and Text close the same row
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent)).toEqual(["Mark complete", "Duplicate or already answered", "Park", "Snooze"]); // E948-S139 Duplicate or already answered; E948-S83 iteration 2: Park on every card; E948-S131: Voice and Text close the same row
     expect(within(buttons).getByTestId("review-complete").getAttribute("title")).toBe("The goal stays open. Next the team lists Memo in the official MCP registry, once you say yes to publishing.");
     const go = within(c).getByTestId("review-go");
     expect(buttons.contains(go)).toBe(false);

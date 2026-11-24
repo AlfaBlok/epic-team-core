@@ -1,5 +1,6 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
 import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
+import { sameOpenProblem, sameQuestion } from "./duplicate.js";
 import { createAskLogReader, repeatProblem, sizeProblem, topicsIn, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "../spawnHost.js";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
@@ -734,6 +735,18 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         ),
         ...askLogReader(d.reposRoot)(),
       ];
+      // E948-S139: every open ask of his in this tree, for one question, one card (a newer ask in nearly the same words waits).
+      const openOfHis = Object.entries(tree.asks ?? {}).flatMap(([rel, asks]) =>
+        asks.filter((x) => x.state === "open" && x.doneAt === undefined && isJordis(x, who)).map((x) => ({ a: x, rel })),
+      );
+      const olderSame = (a: (typeof openOfHis)[number]["a"], rel: string) =>
+        openOfHis.find(
+          (o) =>
+            o.a !== a &&
+            !!o.a.code &&
+            ((o.a.since ?? "") < (a.since ?? "") || ((o.a.since ?? "") === (a.since ?? "") && `${o.rel}:${o.a.line ?? 0}` < `${rel}:${a.line ?? 0}`)) &&
+            sameQuestion(o.a.question, a.question),
+        )?.a;
       for (const [rel, asks] of Object.entries(tree.asks ?? {})) {
         const v = nodeByPath.get(rel);
         if (!v || isClosed(v.node)) continue;
@@ -750,7 +763,13 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
           // E996-S43: and one a fresh agent could not do from the card alone (or a new one not yet dry-run) waits too.
           const gated = !fyi && a.state === "open" && a.doneAt === undefined;
           let gate = gated
-            ? (askGateProblem(a) ?? repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ?? sizeProblem(a))
+            ? (askGateProblem(a) ??
+              repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ??
+              (() => {
+                const o = olderSame(a, rel);
+                return o ? sameOpenProblem(o.code!, o.since) : undefined;
+              })() ??
+              sizeProblem(a))
             : undefined;
           // E948-S154: a dry-run hold lasts 2 hours at most: then the ask reaches him, its card marked by one line.
           let overdueNote: string | undefined;

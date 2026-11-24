@@ -60,8 +60,58 @@ export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
 /** Root L-100 in one line (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
  * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again. */
 export const OBJECT_SHAPE_RULE =
-  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its chapters, a part of its knowledge enforced to exist (key results, plan, context, trackers, board, pages; a campaign's benefits), both a UX and a data thing; Chapter is his word for one, never property, totem or facet on what he reads. " +
+  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its chapters, a part of its knowledge enforced to exist, both a UX and a data thing; Chapter is his word for one, never property, totem or facet on what he reads. " +
+  "Each product has its own count of chapters (never a fixed nine or ten), some shared by every product and some its own, listed below as read from docs/totems/<product>.json `wheel.tabs`. " +
   "Write only into those chapters: the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it.";
+
+/**(the owner, 24 Nov 20:37Z: "When you are born as an agent, you are told about these chapters"): each
+ * product's chapters, read from its graph file in the home checkout, in one line every wake prompt and worker brief carries. */
+export interface ChapterList {
+  product: string;
+  kind: string;
+  tabs: string[];
+}
+export interface Chapters {
+  lists: ChapterList[];
+  shared: string[];
+  inTwo?: string;
+  kept?: string;
+}
+export function readChapters(home: string | undefined): Chapters | undefined {
+  if (!home) return undefined;
+  const dir = path.join(home, "docs", "totems");
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith(".json")).sort();
+  } catch {
+    return undefined;
+  }
+  const lists: ChapterList[] = [];
+  let rules: { shared?: unknown; inTwo?: unknown; kept?: unknown } = {};
+  for (const n of names) {
+    try {
+      const o = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")) as { name?: string; product?: string; chapters?: typeof rules; wheel?: { class?: { name?: string }; tabs?: { label?: string }[] } };
+      if (o.chapters) rules = o.chapters;
+      const tabs = (o.wheel?.tabs ?? []).map((t) => t.label).filter((l): l is string => typeof l === "string" && !!l);
+      if (tabs.length) lists.push({ product: o.name ?? o.product ?? n.replace(/\.json$/, ""), kind: o.wheel?.class?.name ?? "Wheel", tabs });
+    } catch {
+      /* a broken map file: scripts/totems.py check names it */
+    }
+  }
+  if (!lists.length) return undefined;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  return { lists, shared: Array.isArray(rules.shared) ? rules.shared.filter((x): x is string => typeof x === "string") : [], inTwo: str(rules.inTwo), kept: str(rules.kept) };
+}
+export function chaptersLine(c: Chapters | undefined): string {
+  if (!c?.lists.length) return "";
+  const shared = new Set(c.shared);
+  const each = c.lists.map((l) => {
+    const own = l.tabs.filter((t) => !shared.has(t));
+    return `${l.product} ${l.kind.toLowerCase()}, ${l.tabs.length}: ${l.tabs.join(", ")}${own.length ? ` (its own: ${own.join(", ")})` : ""}`;
+  });
+  const rules = [c.inTwo && "An item may sit in two chapters.", c.kept && "A campaign's or objective's chapters are kept after it ends."].filter(Boolean).join(" ");
+  return `Your chapters, told at birth (docs/totems/<product>.json \`wheel.tabs\`): ${each.join(" ; ")}.${c.shared.length ? ` Shared by every product: ${c.shared.join(", ")}.` : ""}${rules ? ` ${rules}` : ""}`;
+}
 /** the block rides on every wake: kept short. */
 export const OBJECTIVES_MAX_CHARS = 3_600; // room for each objective's tickets line
 
@@ -236,7 +286,7 @@ function redLineWords(red: RedLine[] | undefined, lines: Line[]): string {
 }
 
 /** the block every wake prompt opens with (after its header). Empty: no objectives read. */
-export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWordsFile, red?: RedLine[]): string {
+export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWordsFile, red?: RedLine[], chapters?: string): string {
   const lines = objectiveLines(input, plot);
   if (!lines.length) return "";
   const head = [
@@ -247,6 +297,7 @@ export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWo
     OBJECTIVE_NAME_RULE,
     TICKETS_RULE,
     OBJECT_SHAPE_RULE,
+    ...(chapters ? [chapters] : []),
   ];
   const body = lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${l.name}`, l.krs, l.today, l.tickets, l.words].filter(Boolean).join(" · "));
   const also = alsoHis(plot);
@@ -266,8 +317,8 @@ export function objectivesOneLine(input: ObjectivesInput | undefined, plot?: His
 }
 
 /** the worker rule with the live list in it (the console serves it first at /api/worker-rules). */
-export function objectivesRule(oneLine?: string): string {
-  return (oneLine ? `${OBJECTIVES_RULE} His objectives now: ${oneLine}.` : `${OBJECTIVES_RULE} Read them at GET /api/objectives on the console.`) + ` ${OBJECT_SHAPE_RULE}`;
+export function objectivesRule(oneLine?: string, chapters?: string): string {
+  return (oneLine ? `${OBJECTIVES_RULE} His objectives now: ${oneLine}.` : `${OBJECTIVES_RULE} Read them at GET /api/objectives on the console.`) + ` ${OBJECT_SHAPE_RULE}` + (chapters ? ` ${chapters}` : "");
 }
 
 /** a checkout's Red lines, from the one objectives file (docs/pursuits.json; else docs/priorities.json); [] when missing or broken. */

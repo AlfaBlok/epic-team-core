@@ -30,6 +30,8 @@ import { targetGoals } from "./face.js";
 import { AttachError, ATTACH_MAX_PER_MESSAGE } from "../desk/attachLimits.js";
 import type { Attachments } from "../desk/attachments.js";
 import { hostOf, ownerName, ownerPattern, sites } from "../identity.js";
+import { createAskLogReader } from "../inbox/askRepeat.js";
+import { DUPLICATE_LABEL, duplicateWords, traceDuplicate, traceLine, type DupCandidate } from "../inbox/duplicate.js";
 
 /**
  * "Done, waiting for your review" on the Team home, rebuilt by (root L-45: the repo is the only
@@ -392,6 +394,8 @@ export interface ReviewOptions {
   posts?: () => PostReview | undefined;
   /** a card he approved (row done): one answer closes many looks for open asks his approval settles (late-bound). */
   onApproved?: () => ((r: { ref: string; repo: string; path: string; title: string; by: string; sha?: string }) => void) | undefined;
+  /** E948-S139: a card he closed as Duplicate or already answered goes into the ask gate's repeat memory (the asks log, late-bound). */
+  onDuplicate?: () => ((r: { ref: string; repo: string; row: string; what: string; words: string; at: string }) => Promise<unknown> | void) | undefined;
 }
 
 /** a press write skips `git fetch` when its checkout fetched or pushed this recently (as an ask's Snooze). */
@@ -974,8 +978,9 @@ export function createReview(db: DB, o: ReviewOptions) {
    * Deny: the third outcome next to Approve and Feedback. The row closes as `superseded (denied by the owner <date>: <why>)`
    * (closed, never done); a held post is not posted (Don't post). Nobody is woken: there is no next round.
    */
-  async function deny(id: string, reason: string): Promise<ActionResult> {
+  async function deny(id: string, reason: string, opts: { duplicate?: boolean } = {}): Promise<ActionResult> {
     if (parsePostCardId(id)) return postAction(o.posts?.(), (p) => p.deny(id));
+    if (opts.duplicate) return duplicate(id, reason);
     const r = fresh(id);
     if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
     const gate = notACard(r);
@@ -991,6 +996,79 @@ export function createReview(db: DB, o: ReviewOptions) {
     if (!w.ok) return w.result;
     o.readModel?.patch({ kind: "review", id, op: "closed" });
     return { item: { ...item, state: "denied", status: `superseded (denied by ${by} ${new Date().toISOString().slice(0, 10)})`, ...(w.write.sha ? { sha: w.write.sha } : {}) } };
+  }
+
+  /** E948-S139: what a review card closed as a duplicate may repeat: every ask he answered, and the other cards in review. */
+  const dupLog = createAskLogReader({ reposRoot: o.reposRoot });
+  function dupCandidates(r: ReviewRow): DupCandidate[] {
+    const k = { kind: "review" as const, world: o.world?.() ?? store.tenant ?? "" };
+    const dir = resolveRepo(o.reposRoot, r.repo)?.path;
+    const rows = (o.readModel?.peek(k)?.payload as ReviewPayload | undefined)?.rows ?? (dir ? computeReviewRows(store, o.reposRoot, { repoDir: dir }).rows : []);
+    return [
+      ...dupLog().map((a) => ({ ref: a.code ?? a.row ?? "an earlier ask", question: a.question, repo: a.repo, row: a.row, on: a.on, answer: a.answer })),
+      ...rows.filter((x) => x.id !== r.id).map((x) => ({ ref: x.ref, question: [x.face?.title ?? x.title, x.face?.decision].filter(Boolean).join(" "), repo: x.repo, row: x.ref, open: true })),
+    ];
+  }
+
+  /**
+   * E948-S139 Duplicate or already answered on a review card: the row closes as his no with those words
+   * (`superseded (denied by <owner> <date>: duplicate or already answered …)`, so Bring it back still works), a Decisions
+   * line names the earlier card it repeats, the milestone's Delivery manager is woken to fold the two and keep his words
+   * from both, and the card goes into the ask gate's repeat memory (one asks-log entry).
+   */
+  async function duplicate(id: string, note: string): Promise<ActionResult> {
+    const r = fresh(id);
+    if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
+    const gate = notACard(r);
+    if (gate) return gate;
+    const item = toItem(r);
+    const by = who();
+    const what = [r.face?.title ?? r.title, r.face?.decision].filter(Boolean).join(" ");
+    const trace = traceLine(traceDuplicate({ question: what, ref: r.ref, repo: r.repo, row: r.ref }, dupCandidates(r)));
+    const words = duplicateWords(note);
+    const w = await writeRow(
+      r,
+      (date) => denyCell(r.ref, date, `${words} — ${trace}`, by),
+      `Review ${r.ref}: duplicate or already answered (${by}, via console)`,
+      `${by} closed "${r.title}" as ${DUPLICATE_LABEL} from his inbox: row ${r.ref} in ${r.path} is closed, not done.\n\n${trace}${note.trim() ? `\n\nHis words: ${note.trim()}` : ""}`,
+      true,
+      (text, date) =>
+        addDecisionRow(text, {
+          date,
+          outcome: "superseded",
+          decision: `${r.ref} closed by ${by}: ${DUPLICATE_LABEL}${note.trim() ? `: "${note.trim()}"` : ""}`,
+          summary: `${trace}. The owner folds the two and keeps his words from both (E948-S139).`,
+          evidence: "console inbox button",
+          revisit: "when its owner acts",
+        }) ?? text,
+    );
+    if (!w.ok) return w.result;
+    o.readModel?.patch({ kind: "review", id, op: "closed" });
+    const date = new Date().toISOString();
+    try {
+      await o.onDuplicate?.()?.({ ref: r.ref, repo: r.repo, row: r.ref, what, words: `${words} — ${trace}`, at: date });
+    } catch {
+      /* the asks log sweep is the record's second chance; the row is closed in the spine already */
+    }
+    const target = r.test ? undefined : relaunchTarget(r);
+    if (target && o.cycle) {
+      try {
+        await wakeSoon(
+          o.cycle.runNowRequest(
+            target,
+            {
+              instructions: `${by} closed ${r.ref} ("${r.title}") in ${r.path} as ${DUPLICATE_LABEL} (commit ${w.write.sha ?? "written"}). ${trace}. Fold the two: keep his words from both on the one that stays, tell its owner, and never send him this card again.${note.trim() ? ` His words: ${note.trim()}` : ""}`.slice(0, RELAUNCH_MAX),
+              instructionsBy: by,
+            },
+            `review-duplicate:${id}:${w.write.sha ?? ""}`,
+          ),
+          `duplicate ${r.ref}`,
+        );
+      } catch {
+        /* the row is closed with its Decisions line; the next Delivery manager wake reads it */
+      }
+    }
+    return { item: { ...item, state: "denied", status: `superseded (denied by ${by} ${date.slice(0, 10)}: ${words})`, ...(w.write.sha ? { sha: w.write.sha } : {}) } };
   }
 
   /** a post card's Schedule or New iteration, through the social writer; the card leaves the list at once. */
@@ -1177,7 +1255,7 @@ const completeIn = z
 /** `attachments` = ids of files he uploaded first (POST /api/chat/attachments); their links follow his words. */
 const cardFiles = z.array(z.string().trim().max(40)).max(ATTACH_MAX_PER_MESSAGE).optional();
 const relaunchIn = z.object({ feedback: z.string().trim().max(RELAUNCH_MAX).default(""), attachments: cardFiles }).strict().refine((b) => !!b.feedback || !!b.attachments?.length);
-const denyIn = z.object({ reason: z.string().trim().max(RELAUNCH_MAX).default(""), attachments: cardFiles }).strict();
+const denyIn = z.object({ reason: z.string().trim().max(RELAUNCH_MAX).default(""), attachments: cardFiles, /** E948-S139 Duplicate or already answered */ duplicate: z.boolean().optional() }).strict();
 
 export const HINT_MESSAGE =
   "nothing is stored here any more: the review list is read from the spine. Set the row's Status to `review` and put the live link in its Latest Evidence cell; the console re-read the spines.";
@@ -1296,7 +1374,7 @@ export function mountReview(
       if (!f) throw e;
       return c.json({ error: f.error }, f.status);
     }
-    const r = await review.deny(c.req.param("id"), reason);
+    const r = await review.deny(c.req.param("id"), reason, { duplicate: p.data.duplicate === true });
     if ("error" in r) return c.json(fail(r), r.error);
     return c.json(r.item);
   });

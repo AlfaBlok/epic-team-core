@@ -15,9 +15,12 @@ export type WheelTab = { id: string; label: string; shows: string[]; kind?: stri
 export type WheelClass = { name: string; plural: string; one: string; his?: string; understood?: string; word?: string };
 export type WheelKind = "objective" | "campaign";
 
-const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>>; HOSTED_WHEEL_CLASS?: Partial<Record<WheelKind, WheelClass>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
+/**(the owner, 24 Nov 20:37Z: "Some of these chapters, this is a modular design. And some of the chapters are
+ * shared"): the rules every product's chapters keep, from docs/totems/every-product.json `chapters`. */
+export type ChapterRules = { shared: readonly string[]; inTwo?: string; kept?: string; products?: Partial<Record<WheelKind, string>> };
+const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>>; HOSTED_WHEEL_CLASS?: Partial<Record<WheelKind, WheelClass>>; HOSTED_CHAPTERS?: ChapterRules }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
 
-/** a build without a product graph: the objective's ten; a campaign has the same engine tabs, with its own data tabs after Key results. */
+/** a build without a product graph: the objective's own; a campaign has the same engine tabs, with its own data tabs after Key results. */
 const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
   objective: [
     { id: "table", label: "Key results", shows: ["key-results"] },
@@ -33,7 +36,8 @@ const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
   ],
   campaign: [
     { id: "table", label: "Key results", shows: ["key-results"], kind: "engine" },
-    { id: "benefits", label: "Benefits", shows: ["benefits", "product-deck"], kind: "data" },
+    { id: "product", label: "Product", shows: ["product-deck", "pricing", "feature-list"], kind: "data" },
+    { id: "benefits", label: "Benefits", shows: ["benefits", "feature-list"], kind: "data" },
     { id: "plan", label: "Plan", shows: ["marketing-plan", "social-kit"], kind: "data" },
     { id: "pipeline", label: "Pipeline", shows: ["Posts"], kind: "data" },
     { id: "history", label: "History", shows: ["Outcomes"], kind: "data" },
@@ -60,6 +64,13 @@ export const WHEEL_CLASS: Record<WheelKind, WheelClass> = {
   objective: hostedClass.objective ?? { name: "Objective", plural: "objectives", one: "Every objective is an object of one class: the same shape every time, and each tab is one of its chapters." },
   campaign: hostedClass.campaign ?? { name: "Campaign", plural: "campaigns", one: "Every campaign is an object of one class: the same shape every time, and each tab is one of its chapters." },
 };
+/** the chapters every product shares (the console's own) and the two rules: an item may sit in two, chapters are kept. */
+export const CHAPTER_RULES: ChapterRules = Object.values(plugs).map((m) => m.HOSTED_CHAPTERS).find(Boolean) ?? {
+  shared: ["Key results", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"],
+};
+/** the other chapters of the same wheel that show a node this one shows too (an item may sit in two). */
+export const alsoIn = (kind: WheelKind, tab: WheelTab): string[] =>
+  WHEEL_TABS[kind].filter((o) => o.id !== tab.id && o.shows.some((n) => tab.shows.includes(n))).map((o) => o.label);
 /** the made-of screen's path: what an objective (or a campaign) is made of, one box per tab. */
 export const MADE_OF_PATH = "made-of";
 

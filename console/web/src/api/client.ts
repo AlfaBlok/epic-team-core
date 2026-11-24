@@ -694,6 +694,8 @@ export interface ApiClient {
   relaunchReviewItem(id: string, feedback: string, attachments?: string[]): Promise<ReviewItem>;
   /** Deny, the third outcome: the row closes as denied (a held post is not posted). */
   denyReviewItem(id: string, reason: string, attachments?: string[]): Promise<ReviewItem>;
+  /** E948-S139 Duplicate or already answered: the row closes with those words (and his note), its owner is told which card it repeats. */
+  duplicateReviewItem(id: string, note: string): Promise<ReviewItem>;
 
   /** who is calling and their world (`tenant.skin`); optional so older fakes still type-check. */
   getMe?(): Promise<Me>;

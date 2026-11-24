@@ -25,7 +25,8 @@ import { EpicDeckLink } from "@/components/epicDeckLink";
 import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
-import { MadeOfLink } from "@/pages/MadeOf";
+import { MadeOfLink, madeOfHref } from "@/pages/MadeOf";
+import { WHEEL_TABS } from "@/lib/wheelTabs";
 import { DATA_TABS, FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
 import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
 import { ChatIntro, HistoryTab, ObservationsTab, PillarsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
@@ -594,11 +595,31 @@ function MilestoneScreen() {
  * a campaign's fixed tabs in the social skin: one per kind of node of the product's data graph, listed once in its
  * graph file (lib/wheelTabs.ts, lib/totems FIVE_TABS); each id below is how that node is drawn. The owner 24 Nov: "it's
  * the same console is what I'm saying. with slightly different data tabs". Key results first, then the product's data
- * tabs, set apart by a thin rule (Benefits, the anchor and the product's messages, with the product inside it; Plan; Pipeline; History), then the
+ * tabs, set apart by a thin rule (Product, the thing we talk about; Benefits, the anchor and the product's messages; Plan; Pipeline; History), then the
  * console's engine tabs, the same as an objective's (Inbox, Chat, Personas, Board, Context, Pages, Trackers, Log). The
  * social kit sits under the Plan, the lessons in the Context, as on an objective; an old ?tab=kit, ?tab=observations or
  * ?tab=product link opens the tab that holds it and scrolls to its part. Settings sit behind the header's Settings button.
  */
+/** the chapters this page draws itself; any other chapter in the graph file shows through ChapterFromGraph. */
+const DRAWN = new Set(["table", "plan", "waiting", "personas", "pipeline", "work", "context", "pages", "product", "benefits", "trackers", "log", "history", "chat"]);
+const ENDED = /^(done|superseded|paused|retired|closed|ended)$/i;
+
+/** a chapter with no screen of its own yet: what it holds, where it lives, who reads and writes it, from the graph file. */
+function ChapterFromGraph({ id }: { id: string }) {
+  const t = WHEEL_TABS.campaign.find((x) => x.id === id);
+  if (!t) return null;
+  return (
+    <section className="grid gap-2 rounded-xl border bg-card p-4" data-testid="chapter-from-graph" data-chapter={t.id}>
+      <h2 className="text-lg font-semibold">{t.label}</h2>
+      <p className="text-sm">{t.holds}</p>
+      {t.lives && <p className="text-sm text-muted-foreground">Lives in {t.lives}</p>}
+      <Link to={madeOfHref("campaign", t.id)} className="text-sm underline underline-offset-4">
+        What this chapter is for
+      </Link>
+    </section>
+  );
+}
+
 function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone; tab: FiveTab; scope: Parameters<typeof CampaignProvider>[0]["scope"]; waitingCount: number; onTab: (t: FiveTab) => void }) {
   // the campaign's Trackers tab reads the tables of the wheel it serves.
   const loadTrackers = useCallback(async () => api.getCampaignTrackers(await worldId(), m.id), [m.id]);
@@ -649,7 +670,13 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         ))}
       </TabsList>
       {/* each tab is a property of the campaign; the made-of screen says what each holds and where it lives. */}
-      <div className="mt-1 flex justify-end">
+      <div className="mt-1 flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
+        {/*: a campaign that ended keeps every chapter (the owner: kept after the campaign). */}
+        {ENDED.test(m.status ?? "") && (
+          <span className="text-xs text-muted-foreground" data-testid="chapters-kept">
+            This campaign has ended. Its chapters are kept.
+          </span>
+        )}
         <MadeOfLink kind="campaign" />
       </div>
       <div className="mt-4 min-w-0">
@@ -689,19 +716,17 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {tab === "work" && <WorkTab m={m} />}
         {tab === "context" && <CampaignContextTab m={m} lessons={<ObservationsTab m={m} />} />}
         {tab === "pages" && <CampaignPagesTab m={m} repo={scope?.card.repo} />}
-        {tab === "benefits" && (
-          <div className="grid gap-10">
-            <PillarsTab m={m} repo={scope?.card.repo} campaign={scope?.card.campaign?.code} />
-            {/* the owner: "The benefits and then the product and everything is kind of embedded": the product deck, price and feature list under the benefits. */}
-            {scope && (
-              <section id="campaign-product" className="grid scroll-mt-4 gap-3 border-t pt-6" data-testid="benefits-product">
-                <h2 className="text-lg font-semibold">Product</h2>
-                <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />
-              </section>
-            )}
-          </div>
+        {/*the owner 24 Nov 20:37Z: "You want to have one chapter for the thing, for the product": the product
+            deck, price and feature list are their own chapter again, no longer folded under the benefits. */}
+        {tab === "product" && scope && (
+          <section id="campaign-product" className="grid scroll-mt-4 gap-3" data-testid="campaign-product-chapter">
+            <CampaignProductTab repo={scope.card.repo} code={scope.card.campaign?.code} m={m} product={scope.card.product} />
+          </section>
         )}
+        {tab === "benefits" && <PillarsTab m={m} repo={scope?.card.repo} campaign={scope?.card.campaign?.code} />}
         {tab === "trackers" && <CampaignTrackersTab load={loadTrackers} />}
+        {/* a chapter added to the product's graph file with no screen of its own yet: what it holds and where, from the same file. */}
+        {!DRAWN.has(tab) && tab !== "settings" && <ChapterFromGraph id={tab} />}
         {tab === "log" && <PersonaLogTab wheel={`milestone:${m.id}`} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}
         {tab === "chat" && (

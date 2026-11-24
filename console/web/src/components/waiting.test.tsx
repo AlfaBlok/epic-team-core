@@ -191,7 +191,7 @@ describe("WaitingCard", () => {
     const spy = vi.spyOn(api, "respondToWaiting").mockResolvedValue({ id: "jr_7", itemId: "wj_1", kind: "approve", text: "simpler", delivery: "sent", createdAt: new Date().toISOString() });
     wrap(<WaitingCard item={item({ ask: "approve", options: undefined, recommendation: "yes" })} />);
     const set = screen.getByTestId("answer-buttons");
-    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Yes: go ahead", "No: drop it", "Park", "Snooze"]);
+    expect([...set.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Yes: go ahead", "No: drop it", "Duplicate or already answered", "Park", "Snooze"]); // E948-S139
     expect(set.textContent).not.toContain("Yes. The team goes ahead.");
     expect(set.textContent).not.toContain("It closes as a no. A reason is optional.");
     expect(screen.queryByRole("button", { name: /^\s*Answer$/ })).toBeNull();
@@ -226,7 +226,7 @@ describe("WaitingCard", () => {
 
   it("T72-S7, E948-S52: a do step has Done and Stuck, in that order, no hint line", () => {
     wrap(<WaitingCard item={item({ ask: "do", options: undefined, question: "Scan the QR code" })} />);
-    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck", "Park", "Snooze"]);
+    expect([...screen.getByTestId("answer-buttons").querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Done", "Stuck", "Duplicate or already answered", "Park", "Snooze"]); // E948-S139
     expect(screen.queryByTestId("hint-yes")).toBeNull();
   });
 

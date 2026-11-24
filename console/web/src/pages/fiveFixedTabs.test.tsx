@@ -122,13 +122,25 @@ describe("E964-S14 five fixed tabs", () => {
   it("opens on Key results; then the social product's data tabs Benefits, Plan, Pipeline, History; then the console's engine tabs as on an objective; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Benefits", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Product", "Benefits", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
     // "the same console ... with slightly different data tabs": the data tabs are marked, the rest is the console's.
-    expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Benefits", "Plan", "Pipeline", "History"]);
+    expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Product", "Benefits", "Plan", "Pipeline", "History"]);
     expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
     expect(screen.queryByTestId("brief-tab")).toBeNull();
     for (const gone of ["Summary", "Tree", "Activity", "Settings", "Social kit", "Lessons", "Tasks", "more"]) expect(within(tabs).queryByRole("tab", { name: new RegExp(`^${gone}`) })).toBeNull();
     expect(screen.getByTestId("campaign-settings").getAttribute("href")).toBe("/milestones/ms-memo?tab=settings");
+  });
+
+  //his 24 Nov 20:37Z: chapters are data (any count), Product is its own chapter, and a campaign's chapters are kept after it ends.
+  it("Product is its own chapter; a campaign that ended keeps every chapter and says so", async () => {
+    const real = api.getMilestone.bind(api);
+    vi.spyOn(api, "getMilestone").mockImplementation(async (id: string) => ({ ...(await real(id)), status: "done" }) as never);
+    page("/milestones/ms-memo?tab=product");
+    const tabs = await screen.findByTestId("five-tabs");
+    expect(within(tabs).getAllByRole("tab")).toHaveLength(14);
+    expect(screen.getByTestId("tab-product").getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByTestId("campaign-product-chapter")).toBeTruthy();
+    expect(screen.getByTestId("chapters-kept").textContent).toBe("This campaign has ended. Its chapters are kept.");
   });
 
   it("Key results: the objective it serves, each key result with its light, now against target", async () => {
@@ -256,7 +268,7 @@ describe("E964-S14 five fixed tabs", () => {
     expect([t(""), t("tab=brief"), t("tab=summary"), t("tab=pipeline"), t("tab=work&view=posts"), t("tab=waiting"), t("tab=approvals"), t("tab=tree"), t("tab=activity"), t("tab=personas"), t("tab=history"), t("node=x")]).toEqual(["table", "plan", "table", "pipeline", "pipeline", "waiting", "waiting", "work", "history", "personas", "history", "work"]);
     expect(t("tab=deck")).toBe("plan");
     // an objective's own ids open the same tabs, and the parts folded in open their holder.
-    expect([t("tab=inbox"), t("tab=kanban"), t("tab=board"), t("tab=kit"), t("tab=observations"), t("tab=product"), t("tab=settings")]).toEqual(["waiting", "work", "work", "plan", "context", "benefits", "settings"]);
+    expect([t("tab=inbox"), t("tab=kanban"), t("tab=board"), t("tab=kit"), t("tab=observations"), t("tab=product"), t("tab=settings")]).toEqual(["waiting", "work", "work", "plan", "context", "product", "settings"]);
   });
 
   it("the console skin keeps its tabs on the same campaign", async () => {

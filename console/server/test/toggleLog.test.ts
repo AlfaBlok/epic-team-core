@@ -69,4 +69,16 @@ describe("T6-S7 toggle log", () => {
     ins.run("run_cad", a.id, a.milestoneId, "2026-10-22T12:00:00Z", "2026-10-22T12:05:00Z", "Woke on cadence");
     expect((await t.call("GET", `/api/assignments/${a.id}`)).json.neverOn).toBe(false);
   });
+
+  it("the ever-on set follows a deleted run too (its stamp counts deletes, not every row)", async () => {
+    const { a } = await seed(false);
+    const ins = t.db.prepare(
+      "INSERT INTO runs (id, assignment_id, milestone_id, started_at, ended_at, outcome, summary, kind) VALUES (?, ?, ?, ?, ?, 'idle', ?, 'wake')",
+    );
+    ins.run("run_cad", a.id, a.milestoneId, "2026-10-22T12:00:00Z", "2026-10-22T12:05:00Z", "Woke on cadence");
+    ins.run("run_later", a.id, a.milestoneId, "2026-10-22T13:00:00Z", "2026-10-22T13:05:00Z", "Run now: woke");
+    expect((await t.call("GET", `/api/assignments/${a.id}`)).json.neverOn).toBe(false);
+    t.db.prepare("DELETE FROM runs WHERE id = 'run_cad'").run();
+    expect((await t.call("GET", `/api/assignments/${a.id}`)).json.neverOn).toBe(true);
+  });
 });

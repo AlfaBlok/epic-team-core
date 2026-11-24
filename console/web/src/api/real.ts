@@ -579,6 +579,7 @@ export function createRealClient(): ApiClient {
     // a held post's slot press posts on time (no undo window); every other close waits out Bring it back
     completeReviewItem: (id, pick) => press("POST", `/review-items/${encodeURIComponent(id)}/complete`, pick, { undo: !id.startsWith("post~") }),
     relaunchReviewItem: (id, feedback, attachments) => press("POST", `/review-items/${encodeURIComponent(id)}/relaunch`, { feedback, ...(attachments?.length ? { attachments } : {}) }, { undo: !id.startsWith("post~") }),
+    duplicateReviewItem: (id, note) => press("POST", `/review-items/${encodeURIComponent(id)}/deny`, { reason: note, duplicate: true }, { undo: !id.startsWith("post~") }),
     denyReviewItem: (id, reason, attachments) => press("POST", `/review-items/${encodeURIComponent(id)}/deny`, { reason, ...(attachments?.length ? { attachments } : {}) }, { undo: !id.startsWith("post~") }),
     undoPress: (id) => call("POST", `/presses/${encodeURIComponent(id)}/undo`),
     listAnsweredPresses: () => call("GET", "/presses/answered"),

@@ -47,4 +47,14 @@ describe("the owner's objectives in his own worlds", () => {
     expect(judge(d, session("own-social"), "POST", "/api/pursuits/order")).toMatchObject({ allow: false, status: 403 });
     expect(judge(d, session("own-social"), "GET", "/api/spine-tree-nope")).toMatchObject({ allow: false, status: 403 });
   });
+  // a campaign's Product chapter: the agents of his own worlds read the product it talks about (read only).
+  it("an agent token of his own internal world reads the products; a customer's world, a path-limited token and writes stay refused", () => {
+    const agent = (tenant: string, paths?: string[]): Identity => ({ kind: "token", tenant, tokenId: "t", label: "x", ...(paths ? { paths } : {}) }) as Identity;
+    expect(judge(d, agent("own-social"), "GET", "/api/products")).toEqual({ allow: true });
+    expect(judge(d, agent("own-social"), "GET", "/api/products/live")).toEqual({ allow: true });
+    expect(judge(d, agent("customer"), "GET", "/api/products/live")).toMatchObject({ allow: false, status: 403 });
+    expect(judge(d, agent("own-social", ["/api/gmail"]), "GET", "/api/products/live")).toMatchObject({ allow: false, status: 403 });
+    expect(judge(d, agent("own-social"), "PUT", "/api/products/live")).toMatchObject({ allow: false, status: 403 });
+    expect(judge(d, agent("own-social"), "GET", "/api/scorecards")).toMatchObject({ allow: false, status: 403 });
+  });
 });

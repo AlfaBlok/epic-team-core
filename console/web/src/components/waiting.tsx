@@ -1228,7 +1228,7 @@ function WaitingCardBody({
         ...(reached ? { slot: `ask:${item.id}` } : {}),
         said: res.alreadyAnswered
           ? alreadyAnsweredLine(res)
-          : kind === "approve" ? "Approved" : kind === "deny" ? "Declined" : kind === "feedback" ? "Changes sent to the team" : "Answered",
+          : action === "duplicate" ? ACTION.duplicate.said : kind === "approve" ? "Approved" : kind === "deny" ? "Declined" : kind === "feedback" ? "Changes sent to the team" : "Answered",
         title: item.question || item.title,
         ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
         back: async () => {
@@ -1635,6 +1635,8 @@ function WaitingCardBody({
                         {second("no", NO_LABEL, () => void respond("no", "answer", withNote("No")), "no", current("answer", "No"))}
                       </>
                     ) : null}
+                    {/* E948-S139: one tap closes any ask as a duplicate or already answered; the note box goes with it. */}
+                    {!editing && item.state === "open" && !item.secret && second("duplicate", ACTION.duplicate.label, () => void respond("duplicate", "answer", withNote(ACTION.duplicate.words)), "card-duplicate")}
                     {/* E948-S83 iteration 2: Park beside the card's own buttons (a month on its spine line, nothing decided). */}
                     {canSnooze && (
                       <RowPair>
@@ -2381,6 +2383,7 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
                 </CardButton>
               )
             )}
+            {(item.kind === "ask" || item.kind === "needs_jordi") && <StatusDuplicate item={item} question={asked.question} />}
           </>
         }
       />
@@ -2427,6 +2430,36 @@ function StatusYesNo({ item, question, open }: { item: PendingItem; question: st
         </CardButton>
       )}
       {error && <span className="text-xs text-destructive" data-testid="status-yes-no-error">{error}</span>}
+    </>
+  );
+}
+
+/**
+ * E948-S139 (the owner, 24 Nov 20:37Z: "Give me a button. That's it Duplicate or already answered"): a status card for an ask
+ * closes in one tap as a duplicate or already answered, through the ask's own answer route; the console names the card it
+ * repeats on the answer line and tells the asker.
+ */
+function StatusDuplicate({ item, question }: { item: PendingItem; question: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const press = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await mutate(() => api.respondToWaiting(item.id, { kind: "answer", text: ACTION.duplicate.words, milestoneId: item.milestoneId, wake: true }), "inbox");
+      markSent(`status:${item.id}`, { said: ACTION.duplicate.said, title: question });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <CardButton variant="outline" onClick={() => void press()} disabled={busy} title={ACTION.duplicate.hint} data-testid="card-duplicate">
+        {busy && <Loader2 className="animate-spin" />} {ACTION.duplicate.label}
+      </CardButton>
+      {error && <span className="text-xs text-destructive">{error}</span>}
     </>
   );
 }

@@ -98,7 +98,7 @@ import { personaRows, standingRow, standingRowSection } from "./status/personaRo
 import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as parseTeamCards, TEAM_CARDS_FILE } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { chatSection, inForceWords, readHisWords } from "./desk/hisObjectives.js";
-import { keyResultLines, objectiveCards, objectivesBlock, objectivesOneLine, readRedLines, type ObjectivesInput } from "./objectives.js";
+import { chaptersLine, keyResultLines, objectiveCards, objectivesBlock, objectivesOneLine, readChapters, readRedLines, type ObjectivesInput } from "./objectives.js";
 import { inboxWarmHealth } from "./warmInbox.js";
 import { keptJson, sendPrepared } from "./keptJson.js";
 import { ticketIndex } from "./tickets/ticketIndex.js";
@@ -749,7 +749,7 @@ export function createApp(
   // set once the objectives watch exists (below): the Delivery Manager wake reads its milestone's objectives.
   let objectivesOf: ((m: Milestone) => Promise<{ section?: string; idle: string[] }>) | undefined;
   // the owner's objectives block (objectives.ts), set below once the scorecards exist; every home-world wake opens with it.
-  let ownerObjectivesNow: (() => Promise<{ block: string; line: string }>) | undefined;
+  let ownerObjectivesNow: (() => Promise<{ block: string; line: string; chapters?: string }>) | undefined;
   // the same live objectives as nodes, for the Team desk's [his objectives] block (it follows the one list).
   let ownerObjectivesInput: (() => Promise<ObjectivesInput>) | undefined;
   // set below, once the WhatsApp alert path exists.
@@ -1876,10 +1876,14 @@ export function createApp(
   let postReview: PostReview | undefined;
   // a card the owner approved closes the open asks it clearly settles (bound once the inbox is mounted, below)
   let settleApproved: ((r: { ref: string; repo: string; path: string; title: string; by: string; sha?: string }) => void) | undefined;
+  // the asks log, bound once it is made (below): a duplicate tap on a review card writes into it
+  let askLogRef: { duplicate: (d: { ref: string; repo: string; row: string; what: string; words: string; at?: string }) => Promise<unknown> } | undefined;
   const review = createReview(db, {
     store,
     posts: () => postReview,
     onApproved: () => settleApproved,
+    // E948-S139: a card closed as Duplicate or already answered goes into the ask gate's repeat memory (the asks log)
+    onDuplicate: () => (d) => askLogRef?.duplicate(d),
     reposRoot: read.reposRoot,
     writer: spine,
     ...(readModel ? { readModel } : {}),
@@ -2007,6 +2011,7 @@ export function createApp(
     },
   });
   mountAskLog(api, () => askLog);
+  askLogRef = askLog;
   if (!opts.passive && teamWrites && !process.env.VITEST) askLog.start(Number(process.env.CONSOLE_ASK_LOG_MS ?? 600_000));
   // a workspace connected to a repo that holds a workspace reads that repo's own objectives and key results
   // (its checkout's docs/pursuits.json and scorecards), never the home world's (routeScope: connected worlds only).
@@ -2158,7 +2163,7 @@ export function createApp(
   });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.
-  let objectivesMemo: { at: number; v: { block: string; line: string } } | undefined;
+  let objectivesMemo: { at: number; v: { block: string; line: string; chapters?: string } } | undefined;
   let objectivesInputMemo: { at: number; v: Promise<ObjectivesInput> } | undefined;
   // the last finished build: a reader after the minute gets it at once while one rebuild runs (a rebuild took up to
   // 68 s on a busy main server and every reader waited on it, his chat sends too).
@@ -2176,7 +2181,9 @@ export function createApp(
     const body = await ownerObjectivesInput!();
     const home = pursuits.homeDir();
     const plot = home ? readHisWords(path.dirname(home), path.basename(home)) : undefined;
-    const v = { block: objectivesBlock(body, plot, readRedLines(home)), line: objectivesOneLine(body, plot) };
+    //: every wake and worker is told its chapters at birth, read from each product's graph file.
+    const chapters = chaptersLine(readChapters(home));
+    const v = { block: objectivesBlock(body, plot, readRedLines(home), chapters), line: objectivesOneLine(body, plot), chapters };
     objectivesMemo = { at: Date.now(), v };
     return v;
   };
@@ -2354,7 +2361,8 @@ export function createApp(
     return c.json({ id, label, sha: w.sha }, 201);
   });
   api.get("/worker-rules", async (c) => {
-    const line = (await ownerObjectivesNow?.().catch(() => undefined))?.line;
+    const owned = await ownerObjectivesNow?.().catch(() => undefined);
+    const line = owned?.line;
     const repo = c.req.query("repo"), title = c.req.query("title");
     let views: HisView[] = [];
     if (repo || title) {
@@ -2363,7 +2371,7 @@ export function createApp(
         views = hisViewsFor({ repo, title }, JSON.parse(fs.readFileSync(`${home}/docs/his-views.json`, "utf8")).views ?? []);
       } catch { views = []; }
     }
-    return c.text(workerBriefRules(line || undefined, views).map((r) => `"${r}"`).join("\n") + "\n");
+    return c.text(workerBriefRules(line || undefined, views, owned?.chapters || undefined).map((r) => `"${r}"`).join("\n") + "\n");
   });
   // the row's "Context to read first" (docs/context/<row>.md in its repo), the section every worker brief opens with.
   // It ends with the key result the row hangs under (or that it hangs under none and how to place it).

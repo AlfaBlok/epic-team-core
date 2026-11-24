@@ -196,7 +196,7 @@ describe("E948-S60 every card type ends with the feedback block", () => {
     const review = CARD_TYPES.find((c) => c.id === "review")!;
     const { container } = render(<MemoryRouter>{review.render()}</MemoryRouter>);
     const buttons = within(container).getByTestId("review-buttons");
-    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Park", "Snooze"]);
+    expect(within(buttons).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Mark complete", "Duplicate or already answered", "Park", "Snooze"]); // E948-S139
     const row = buttons.closest("[data-feedback-row]")!;
     expect([...row.querySelectorAll("button")].map((b) => b.textContent?.trim()).slice(-2)).toEqual(["Voice", "Text"]);
     fireEvent.click(within(container).getByTestId("card-feedback-text"));
@@ -287,7 +287,7 @@ describe("E948-S69 a decision card's buttons are its options, each naming its ne
     const { container } = render(<MemoryRouter>{car.render()}</MemoryRouter>);
     const row = within(container).getByTestId("review-buttons");
     expect(row.getAttribute("data-card-buttons")).toBe("decision");
-    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Park", "Snooze"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Yes: plan it", "No: park it", "Duplicate or already answered", "Park", "Snooze"]); // E948-S139
     const [yes, no] = within(row).getAllByTestId("review-choice");
     expect(yes.dataset.start).toBe("yes");
     expect(no.dataset.start).toBe("no");

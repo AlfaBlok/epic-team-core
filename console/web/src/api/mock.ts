@@ -1711,6 +1711,13 @@ const mockMail = () => ({
       emit();
       return ok(i);
     },
+    async duplicateReviewItem(id: string, note: string) {
+      const i = reviewItems.find((x) => x.id === id && x.state === "review");
+      if (!i) throw new Error("not in review");
+      Object.assign(i, { state: "denied", feedback: note.trim() ? `duplicate or already answered. ${note.trim()}` : "duplicate or already answered", decidedAt: new Date().toISOString() });
+      emit();
+      return ok(i);
+    },
     async denyReviewItem(id: string, reason: string, attachments?: string[]) {
       const i = reviewItems.find((x) => x.id === id && x.state === "review");
       if (!i) throw new Error("not in review");

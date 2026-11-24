@@ -15,6 +15,9 @@ export const ACTION = {
   approve: { label: "Approve", hint: "Yes. The team goes ahead." },
   done: { label: "Done", hint: "You did this step. The team carries on." },
   changes: { label: "Changes wanted", hint: "Say what should change. The work comes back to you.", send: "Send what should change", placeholder: "What should change? Your words go to the team." },
+  // E948-S139 (the owner, 24 Nov 20:37Z): "Give me a button. That's it Duplicate or already answered". One tap closes the
+  // card as answered with these words (and the note box, when he wrote in it); the team traces which card it repeats.
+  duplicate: { label: "Duplicate or already answered", hint: "It closes. The team finds the card it repeats and stops asking.", said: "Closed as a duplicate", words: "duplicate or already answered" },
   decline: { label: "Decline", hint: "It closes as a no. A reason is optional.", placeholder: "Why not? (optional) Your words are kept with it." },
 } as const;
 

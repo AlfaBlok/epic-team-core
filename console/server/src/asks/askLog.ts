@@ -26,7 +26,8 @@ export const ASK_PAGE_FILE = "docs/asks/page.json";
 /** the first day the log covers: Monday of the week the owner asked for it, so that week's count is whole. */
 export const ASK_LOG_FROM = "2026-11-09";
 
-export type AskEntryKind = "ask" | "mac" | "steps";
+/** `card`: a review card he closed as Duplicate or already answered (E948-S139): repeat memory only, never counted as an ask. */
+export type AskEntryKind = "ask" | "mac" | "steps" | "card";
 export type AskVerdict = "clear" | "confusing";
 
 export interface AskEvent {
@@ -363,7 +364,7 @@ export function fold(events: AskEvent[], now = new Date().toISOString(), from = 
   const rows = new Map<string, AskRow>();
   const sorted = events.slice().sort((a, b) => a.at.localeCompare(b.at));
   for (const e of sorted) {
-    if (e.ev !== "open" || rows.has(e.id) || isTestAsk(e.what, e.repo)) continue;
+    if (e.ev !== "open" || rows.has(e.id) || isTestAsk(e.what, e.repo) || e.kind === "card") continue;
     rows.set(e.id, { id: e.id, kind: e.kind ?? "ask", ...(e.ask ? { ask: e.ask } : {}), what: e.what ?? e.id, ...(e.why ? { why: e.why } : {}), ...(e.row ? { row: e.row } : {}), ...(e.repo ? { repo: e.repo } : {}), ...(e.link ? { link: e.link } : {}), ...(e.tickets ? { tickets: e.tickets } : {}), askedAt: e.at, state: "open", tries: 0, stuck: 0, presses: [] });
   }
   for (const e of sorted) {
@@ -514,6 +515,22 @@ export function createAskLog(d: AskLogDeps) {
     const r = await write([{ ev: "verdict", id, at: now(), verdict: v, by: "tap", ...(words ? { words: short(words, 300) } : {}) }], `asks log verdict ${id}`);
     return { status: 200 as const, ...r };
   }
+  /**
+   * E948-S139: a review card he closed as Duplicate or already answered: open, his tap and close in one write, so the
+   * ask gate's repeat memory (askRepeat.ts parseAskLog) holds the next card that asks the same thing.
+   */
+  async function duplicate(c: { ref: string; repo: string; row: string; what: string; words: string; at?: string }) {
+    const at = c.at ?? now();
+    const id = `card:${c.repo}:${c.ref}`;
+    return write(
+      [
+        { ev: "open", id, at, kind: "card", what: short(c.what, 300), row: c.row, repo: c.repo, src: "console" },
+        { ev: "try", id, at, how: "answer", words: short(c.words, 300), src: "console" },
+        { ev: "close", id, at, how: "answered", src: "console" },
+      ],
+      `asks log duplicate ${c.ref}`,
+    );
+  }
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   const tick = () => {
@@ -532,6 +549,7 @@ export function createAskLog(d: AskLogDeps) {
     },
     sweep,
     verdict,
+    duplicate,
     start(everyMs: number) {
       if (timer || everyMs <= 0) return;
       setTimeout(tick, 60_000).unref();

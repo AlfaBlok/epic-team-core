@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sameOpenProblem, sameQuestion } from "../inbox/duplicate.js";
 import fs from "node:fs";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
@@ -882,6 +883,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
   for (const r of rows) ids.set(r.id, (ids.get(r.id) ?? 0) + 1);
   for (const r of rows) if ((ids.get(r.id) ?? 0) > 1) r.id = reviewLegacyId(r.repo, r.path, r.ref);
   onePageOneCard(rows, branchOf);
+  oneQuestionOneCard(rows);
   return { rows, goals, closedGoals };
 }
 
@@ -914,6 +916,21 @@ export function onePageOneCard(rows: ReviewRow[], branchOf: Map<ReviewRow, strin
         ],
       };
     }
+  }
+}
+
+/**
+ * E948-S139 (the owner, 24 Nov: "you were asking me for the same thing several times"): two cards of one repo whose title
+ * and decision, and whose rows' own titles, are nearly the same words are one question: the first to reach him stays a card (the older Last Verified,
+ * then row order), the newer goes back to its agents as "card needs rewriting" to fold into it, so he never sees it twice.
+ */
+export function oneQuestionOneCard(rows: ReviewRow[]): void {
+  const text = (x: ReviewRow) => [x.face?.title ?? x.title, x.face?.decision].filter(Boolean).join(" ");
+  const live = rows.filter((x) => x.verdict.kind === "card" && !x.test);
+  for (const x of live) {
+    if (x.verdict.kind !== "card") continue;
+    const older = live.find((y) => y !== x && y.repo === x.repo && y.verdict.kind === "card" && ((y.verifiedAt ?? "") < (x.verifiedAt ?? "") || ((y.verifiedAt ?? "") === (x.verifiedAt ?? "") && rows.indexOf(y) < rows.indexOf(x))) && sameQuestion(text(x), text(y)) && sameQuestion(x.title, y.title));
+    if (older) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameOpenProblem(`${older.ref}'s card`)] };
   }
 }
 

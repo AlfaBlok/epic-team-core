@@ -115,8 +115,8 @@ export const WORKER_TIER_RULE =
  * helper kept a copy a day old and missed the visual-first rule in every brief after). The first is the owner's
  * objectives with their live list ("which objective does this move?" opens every plan and report).
  */
-export function workerBriefRules(objectivesLine?: string, matchingViews: HisView[] = []): string[] {
-  const rules = [objectivesRule(objectivesLine), MAP_RULE, `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, HIS_NOTES_RULE, ASK_WHEN_UNSURE_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
+export function workerBriefRules(objectivesLine?: string, matchingViews: HisView[] = [], chapters?: string): string[] {
+  const rules = [objectivesRule(objectivesLine, chapters), MAP_RULE, `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, HIS_NOTES_RULE, ASK_WHEN_UNSURE_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
   // the owner's view rides only in the brief of a row on its topic (hisViewsFor), never in every brief
   return matchingViews.length ? [...rules.slice(0, -1), hisViewRecipe(matchingViews), X_LINKS_RULE] : rules;
 }

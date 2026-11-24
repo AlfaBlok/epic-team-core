@@ -45,6 +45,8 @@ import type { Attachments } from "../desk/attachments.js";
 import { addAcceptedAskRow } from "../review/followups.js";
 import { withAbout } from "./about.js";
 import { deployerName, opsRepo, ownerName } from "../identity.js";
+import { createAskLogReader } from "./askRepeat.js";
+import { isDuplicate, traceDuplicate, withTrace, type DupCandidate } from "./duplicate.js";
 
 /**
  * E996-S29: the other open asks that store the same key (same `secret: <app> <NAME>`) as `item`: one card and one box in
@@ -325,8 +327,9 @@ export const answerWord = (kind: JordiResponse["kind"], text: string) =>
  * free text is never read as an approval. On an approve ask the outcomes are Approve, Feedback and Deny, so words
  * sent as a plain answer (a click, the Team desk, a chat) are his feedback: the work reopens and comes back as a new round.
  */
-export const outcomeKind = (item: Partial<WaitingItem>, kind: JordiResponse["kind"]): JordiResponse["kind"] =>
-  kind === "answer" && item.source === "ask" && item.ask === "approve" && !item.decidedBy ? "feedback" : kind;
+export const outcomeKind = (item: Partial<WaitingItem>, kind: JordiResponse["kind"], text?: string): JordiResponse["kind"] =>
+  // E948-S139: "Duplicate or already answered" closes any card as answered, an approve ask too (never a new round).
+  kind === "answer" && item.source === "ask" && item.ask === "approve" && !item.decidedBy && !isDuplicate(text) ? "feedback" : kind;
 
 /**
  * What a Needs the owner answer sends the owner: the item, the owner's answer and the skill's write-back steps
@@ -598,6 +601,14 @@ export function mountInbox(
       }
     return undefined;
   };
+  /** E948-S139: what a duplicate tap may repeat: every ask he answered (the asks log) and the other open asks in the inbox. */
+  const dupLog = createAskLogReader({ reposRoot: o.deps.reposRoot });
+  const dupCandidates = (item: WaitingItem, milestoneId?: string): DupCandidate[] => [
+    ...dupLog().map((a) => ({ ref: a.code ?? a.row ?? "an earlier ask", question: a.question, repo: a.repo, row: a.row, on: a.on, answer: a.answer })),
+    ...(storedItems(milestoneId) ?? [])
+      .filter((i) => i.id !== item.id && i.state === "open")
+      .map((i) => ({ ref: i.code ?? i.row ?? i.id, question: i.question || i.title || "", repo: i.repo, row: i.row, open: true })),
+  ];
   const findStored = (id: string, milestoneId?: string): { item: WaitingItem; asker?: Asker | null } | undefined => {
     const rm = o.readModel;
     if (!rm) return undefined;
@@ -1177,7 +1188,7 @@ export function mountInbox(
       const item = (await waitingOnJordi(o.deps, { ...(r.milestoneId ? { milestoneId: r.milestoneId } : {}), includeSuperseded: true })).find((i) => i.id === r!.itemId);
       if (!item) return { state: "failed", error: `the ask ${r.itemId} is not in the spine any more (answered already, or the spine changed)` };
       // the click did not know the ask yet: a plain answer on an approve ask is his feedback.
-      const kind = outcomeKind(item, r.kind);
+      const kind = outcomeKind(item, r.kind, r.text);
       const bad = answerRefusal(item, kind, r.text);
       if (bad) return { state: "failed", error: bad.message };
       if (kind !== r.kind) db.prepare("UPDATE jordi_responses SET kind = ? WHERE id = ?").run(kind, id);
@@ -1315,7 +1326,10 @@ export function mountInbox(
       const done = answeredByCode(writtenByCode(), item, uniqueCodes(storedItems(p.data.milestoneId) ?? [item]));
       if (done) return c.json({ ...done, alreadyAnswered: true }, 200);
     }
-    const kind = outcomeKind(item, p.data.kind);
+    const kind = outcomeKind(item, p.data.kind, p.data.text);
+    // E948-S139: a Duplicate or already answered tap names the earlier card it repeats (the ask gate's repeat memory and
+    // the open inbox, by its words), so the asker is told which one and the next card like it is held.
+    if (kind === "answer" && isDuplicate(p.data.text) && !unresolved) p.data.text = withTrace(p.data.text, traceDuplicate({ question: item.question || item.title || "", ref: item.code, repo: item.repo, row: item.row }, dupCandidates(item, p.data.milestoneId)));
     if (!unresolved) {
       const bad = answerRefusal(item, kind, p.data.text);
       if (bad) return err(c, bad.status, bad.code, bad.message);
@@ -1673,7 +1687,7 @@ export function mountInbox(
     // his words on an approve ask are
     // feedback, so the change goes through as feedback. The answered line becomes his `[feedback …]` line and the row it
     // names reopens for a new round, written by the answer job like a feedback press (the click answers at once, L-1).
-    if (outcomeKind(item, p.data.kind) === "feedback") {
+    if (outcomeKind(item, p.data.kind, p.data.text) === "feedback") {
       if (item.source !== "ask" || item.decidedBy) return err(c, 400, "validation_error", "changes wanted is only for an approve ask; send an answer instead");
       if (!p.data.text.trim()) return err(c, 400, "validation_error", "feedback needs your words: say what should change");
       const rid = `jr_${randomUUID()}`;

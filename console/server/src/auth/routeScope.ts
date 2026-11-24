@@ -497,6 +497,15 @@ const OWNER_WORLD_READS: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/products/${ID}(/kit(/(previews|fonts)/[\\w.-]+)?)?$`)],
 ];
 /**
+ * a campaign's Product chapter: the product it talks about, read by the agents of the owner's own worlds (its Writer,
+ * Video Maker, Strategist) and by the card check that opens it as them, read only. Only the owner's internal worlds,
+ * never a customer's or a tester's.
+ */
+const OWNER_WORLD_AGENT_READS: [string, RegExp][] = [
+  ["GET", /^\/api\/products$/],
+  ["GET", new RegExp(`^/api/products/${ID}(/kit(/(previews|fonts)/[\\w.-]+)?)?$`)],
+];
+/**
  * a workspace connected to a repo that holds a workspace reads that repo's own objectives and key results
  * (app.ts serves them from the workspace's checkout, never the home world's).
  */
@@ -505,6 +514,14 @@ const isConnectedWorld = (db: DB, identity: Identity): boolean => {
   if ((identity.kind !== "session" && identity.kind !== "token") || identity.tenant === DEFAULT_TENANT || (identity.kind === "session" && identity.door)) return false;
   try {
     return !!db.prepare("SELECT 1 FROM world_repos WHERE world = ?").get(identity.tenant);
+  } catch {
+    return false;
+  }
+};
+const isInternalWorldAgent = (db: DB, identity: Identity): boolean => {
+  if (identity.kind !== "token" || identity.paths || identity.tenant === DEFAULT_TENANT) return false;
+  try {
+    return (db.prepare("SELECT plan FROM tenants WHERE id = ?").get(identity.tenant) as { plan?: string } | undefined)?.plan === "internal";
   } catch {
     return false;
   }
@@ -581,6 +598,7 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
     path.startsWith("/api/") &&
     !isTenantSafe(method, path) &&
     !(matches(OWNER_WORLD_READS, method === "HEAD" ? "GET" : method, path) && isOwnersOwnWorld(db, identity)) &&
+    !(matches(OWNER_WORLD_AGENT_READS, method === "HEAD" ? "GET" : method, path) && isInternalWorldAgent(db, identity)) &&
     !(matches(CONNECTED_READS, method === "HEAD" ? "GET" : method, path) && isConnectedWorld(db, identity))
   )
     return { allow: false, status: 403, reason: "world_scope", message: "this part of the console is not available in this world yet" };

@@ -485,14 +485,31 @@ const foreignMs = () => {
 };
 /**
  * The ids of assignments that ever ran a line only an on assignment makes (EVER_ON_IDS_SQL), kept until the runs
- * table gains a row (its newest rowid and count). Being ever on only ever turns true, and those lines are written when a run
+ * table gains a row or loses one (its newest rowid and its deletes). Being ever on only ever turns true, and those lines are written when a run
  * is added, so a new run is the only moment the set can grow.
  */
 const everOnMemo = new WeakMap<DB, { key: string; ids: Set<string>; stamp: Database.Statement; all: Database.Statement }>();
+/**
+ * the runs table's newest rowid and how many runs were ever deleted (a trigger counts them): both one indexed read.
+ * Was `count(*)` of runs, a scan of the whole table on every assignments list: 4.6 s of the first 90 s after a
+ * restart on the main server, while the inbox warmed. A database this console may not write keeps the count.
+ */
+function everOnStamp(db: DB): Database.Statement {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS table_versions (name TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0);
+      INSERT OR IGNORE INTO table_versions (name, n) VALUES ('runs_deleted', 0);
+      CREATE TRIGGER IF NOT EXISTS runs_deleted_count AFTER DELETE ON runs BEGIN UPDATE table_versions SET n = n + 1 WHERE name = 'runs_deleted'; END;
+    `);
+    return db.prepare("SELECT (SELECT max(rowid) FROM runs) || ':' || (SELECT n FROM table_versions WHERE name = 'runs_deleted')").pluck();
+  } catch {
+    return db.prepare("SELECT max(rowid) || ':' || count(*) FROM runs").pluck();
+  }
+}
 export function everOnIds(db: DB): Set<string> {
   let m = everOnMemo.get(db);
   if (!m) {
-    m = { key: "", ids: new Set(), stamp: db.prepare("SELECT max(rowid) || ':' || count(*) FROM runs").pluck(), all: db.prepare(EVER_ON_IDS_SQL).pluck() };
+    m = { key: "", ids: new Set(), stamp: everOnStamp(db), all: db.prepare(EVER_ON_IDS_SQL).pluck() };
     everOnMemo.set(db, m);
   }
   const key = String(m.stamp.get());

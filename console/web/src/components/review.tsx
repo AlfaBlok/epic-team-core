@@ -797,7 +797,7 @@ function PressProgress({ lines }: { lines: Progress[] }) {
 type CardProps = { item: Listed; onDone?: () => void; onFailed?: (why: string) => void; failed?: string; /** Bring it back put the card back in the list */ onBack?: () => void };
 
 /** what the floating note says a review card's press did. */
-const SAID: Record<string, string> = { close: "Closed", decline: "Declined", changes: "Changes sent to the team" };
+const SAID: Record<string, string> = { close: "Closed", decline: "Declined", changes: "Changes sent to the team", duplicate: ACTION.duplicate.said };
 /** the row a review card is on (its spine), for Add a last thought and Bring it back; undefined when unknown. */
 const cardOf = (item: ReviewItem): ClosedCardRef | undefined =>
   item.repo && item.path && item.ref ? { kind: "review", repo: item.repo, path: item.path, ref: item.ref, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } : undefined;
@@ -1278,6 +1278,12 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
         ) : (
           <CardButton {...props(`complete:${mainHow}`)} onClick={() => complete(mainHow)} title={buttons[0].sub} data-testid={mainHow === "park" && next.length ? "review-complete-park" : "review-complete"}>
             {mainLabel}
+          </CardButton>
+        )}
+        {/* E948-S139: one tap closes it as a duplicate or already answered; words in the note box go with it. */}
+        {item.state === "review" && (
+          <CardButton variant="outline" {...props("duplicate")} onClick={() => void act("duplicate", () => api.duplicateReviewItem(item.id, feedback.trim())).then((ok) => ok && setFeedback(""))} title={ACTION.duplicate.hint} data-testid="card-duplicate">
+            {ACTION.duplicate.label}
           </CardButton>
         )}
         {/* E948-S83 iteration 2: Park on every card, beside its own buttons (a month, nothing decided, brought back any time). */}

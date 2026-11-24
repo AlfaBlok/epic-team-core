@@ -4,7 +4,7 @@ import { useQuery } from "@/lib/data";
 import { useSkin } from "@/lib/skin";
 import { cn } from "@/lib/utils";
 import { topObjectives, useGoalSets } from "@/components/goalRing";
-import { MADE_OF_PATH, WHEEL_CLASS, WHEEL_TABS, type WheelKind, type WheelTab } from "@/lib/wheelTabs";
+import { CHAPTER_RULES, MADE_OF_PATH, WHEEL_CLASS, WHEEL_TABS, alsoIn, type WheelKind, type WheelTab } from "@/lib/wheelTabs";
 
 /**
  * "What an objective is made of" (the owner, vn_cdef45cd, 24 Nov: "it's almost as if you have a class which is
@@ -110,7 +110,11 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
                       <a href={`#prop-${t.id}`} className="inline-flex min-h-[44px] min-w-[44px] items-center font-semibold">
                         {t.label}
                       </a>
-                      {t.kind === "data" && <span className="text-[11px] uppercase tracking-wider text-emerald-700">this product's own</span>}
+                      {CHAPTER_RULES.shared.includes(t.label) ? (
+                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="chapter-shared">shared</span>
+                      ) : (
+                        <span className="text-[11px] uppercase tracking-wider text-emerald-700" data-testid="chapter-own">this product's own</span>
+                      )}
                     </span>
                     <span className="block text-sm text-muted-foreground">{t.knows ?? t.holds}</span>
                   </span>
@@ -121,7 +125,7 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
         </div>
       </div>
       <figcaption className="text-sm text-muted-foreground">
-        Every {cls.name.toLowerCase()} has the same {tabs.length} chapters, in the same order, one tab each. Only what is written in them differs.
+        Every {cls.name.toLowerCase()} of this product has the same {tabs.length} chapters, in the same order, one tab each. Only what is written in them differs.
         {rest.length > 0 && (
           <span className="mt-2 flex flex-wrap gap-1.5" data-testid="made-of-objects">
             {rest.map((o) => (
@@ -136,7 +140,8 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
   );
 }
 
-function ChapterBox({ t, n }: { t: WheelTab; n: number }) {
+function ChapterBox({ t, n, kind }: { t: WheelTab; n: number; kind: WheelKind }) {
+  const also = alsoIn(kind, t);
   return (
     <section id={`prop-${t.id}`} className="scroll-mt-20 rounded-xl border bg-card p-4 target:ring-2 target:ring-emerald-700" data-testid="made-of-property">
       <header className="flex items-baseline justify-between gap-3">
@@ -147,6 +152,11 @@ function ChapterBox({ t, n }: { t: WheelTab; n: number }) {
         <span className={cn("shrink-0 text-[11px] uppercase tracking-wider", t.kind === "data" ? "text-emerald-700" : "text-muted-foreground")}>{t.kind === "data" ? "product data" : "console"}</span>
       </header>
       <p className="mt-1 text-sm">{t.holds}</p>
+      {also.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="chapter-also-in">
+          Shares items with {also.join(" and ")}
+        </p>
+      )}
       <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-[7rem_1fr]">
         <dt className="text-xs text-muted-foreground sm:pt-0.5">Lives in</dt>
         <dd className="min-w-0">
@@ -161,6 +171,44 @@ function ChapterBox({ t, n }: { t: WheelTab; n: number }) {
           <Chips items={t.writes} />
         </dd>
       </dl>
+    </section>
+  );
+}
+
+/**
+ *the owner 24 Nov 20:37Z: "if that makes this engine have 11 chapters and the other one has 10, it's not the
+ * end of the world ... some of the chapters are shared": each product's count side by side, the shared chapters once, the
+ * ones that are each product's own, and the two rules (an item in two chapters, kept after it ends).
+ */
+function Products() {
+  const own = (k: WheelKind) => WHEEL_TABS[k].filter((t) => !CHAPTER_RULES.shared.includes(t.label)).map((t) => t.label);
+  const kinds: { kind: WheelKind; product: string }[] = (["objective", "campaign"] as const).map((kind) => ({ kind, product: CHAPTER_RULES.products?.[kind] ?? "" }));
+  return (
+    <section className="grid gap-3" data-testid="made-of-products">
+      <h2 className="text-lg font-semibold">Each product its own count</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {kinds.map(({ kind, product }) => (
+          <div key={kind} className="rounded-xl border bg-card p-4" data-testid={`made-of-count-${kind}`}>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              {product ? `${product} · ` : ""}{WHEEL_CLASS[kind].name}
+            </div>
+            <div className="mt-1 text-3xl font-semibold tabular-nums">{WHEEL_TABS[kind].length} chapters</div>
+            <div className="mt-2 text-sm">
+              <span className="text-emerald-700">Its own: </span>
+              {own(kind).join(", ") || "none"}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border p-4 text-sm" data-testid="made-of-shared">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Shared by every product</div>
+        <div className="mt-1">{CHAPTER_RULES.shared.join(", ")}</div>
+      </div>
+      <ul className="grid gap-1 text-sm text-muted-foreground" data-testid="made-of-rules">
+        {CHAPTER_RULES.inTwo && <li>{CHAPTER_RULES.inTwo.replace(/:.*$/, ".")}</li>}
+        {CHAPTER_RULES.kept && <li>{CHAPTER_RULES.kept.replace(/:.*$/, ".")}</li>}
+        <li>Every agent is told these chapters when it starts.</li>
+      </ul>
     </section>
   );
 }
@@ -198,11 +246,12 @@ export function MadeOfPage() {
         </p>
       </header>
       <Book kind={kind} tabs={tabs} />
+      <Products />
       <div className="grid gap-3">
         <h2 className="text-lg font-semibold">Where each chapter lives, who reads and writes it</h2>
         <div className="grid gap-3 md:grid-cols-2">
           {tabs.map((t, i) => (
-            <ChapterBox key={t.id} t={t} n={i + 1} />
+            <ChapterBox key={t.id} t={t} n={i + 1} kind={kind} />
           ))}
         </div>
       </div>
