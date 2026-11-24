@@ -57,6 +57,16 @@ describe("sentBackCards: what he sent back and is not back in review", () => {
     expect(by["A-4"]).toBeUndefined();
   });
 
+  it("a live run named in the owner cell counts as its worker, even when its request id names another row", () => {
+    const goals = [goal([{ ref: "E907-S42", title: "paste", iteration: 5, since: "2026-11-22" }])];
+    const owner = "run_02c2824c-4a4d-4931-9993-d99eccf72b68 (with E907-S75, one card for both rows)";
+    const runs = [{ id: "run_02c2824c-4a4d-4931-9993-d99eccf72b68", outcome: "running", clientRequestId: "E907-S75-run_parent", summary: "E907-S75 from his note" }];
+    const live = sentBackCards(input({ goals, runs, row: () => row("waiting (iteration 5 is built by the other row's worker)", owner) }));
+    expect(live[0]).toMatchObject({ state: "in_progress", worker: { run: runs[0].id, live: true } });
+    const ended = sentBackCards(input({ goals, runs: [{ ...runs[0], outcome: "progressed" }], row: () => row("waiting (iteration 5)", owner) }));
+    expect(ended[0]).toMatchObject({ state: "waiting" });
+  });
+
   it("his press gives the card its own title and minute; a row whose status lost the marker is still listed from the press", () => {
     const out = sentBackCards(
       input({

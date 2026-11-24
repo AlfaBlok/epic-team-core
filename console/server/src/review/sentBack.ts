@@ -105,11 +105,19 @@ export function liveRunFor(runs: SentBackRun[], ref: string, milestoneId?: strin
   );
 }
 
+/** A running run the row's owner cell names by id (`run_<uuid>`), whatever row its request id opens with. */
+export function namedRun(runs: SentBackRun[], owner: string): SentBackRun | undefined {
+  const ids = new Set(owner.match(/\brun_[0-9a-f-]{8,}/gi) ?? []);
+  if (!ids.size) return undefined;
+  return runs.find((r) => r.outcome === "running" && [...ids].some((id) => r.id === id || r.id.startsWith(id)));
+}
+
 export function sentBackCards(d: SentBackInput): SentBackCard[] {
   const key = (repo: string, ref: string) => `${repo}:${ref}`;
   const out = new Map<string, SentBackCard>();
   const place = (c: Omit<SentBackCard, "state" | "worker" | "id">, owner: string, status = "", runRef?: string): SentBackCard => {
-    const run = liveRunFor(d.runs, runRef ?? c.ref, c.milestoneId);
+    // a worker named in the row's owner cell counts too: one run can carry two rows, and its request id names only one
+    const run = liveRunFor(d.runs, runRef ?? c.ref, c.milestoneId) ?? namedRun(d.runs, owner);
     const claim = run ? undefined : claimOf(owner);
     const held = claim && Date.parse(claim.until.replace(/Z$/, ":00Z")) > d.now.getTime() ? claim : undefined;
     // a child run is a worker a persona started: only a persona's own run carries the persona's name
