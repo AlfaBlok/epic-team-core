@@ -3,13 +3,20 @@
 // results with no connection). Read only, network first: online every page and every read
 // comes fresh from the console exactly as before and its copy is kept; with no connection the last copy answers, so the
 // Objectives page opens with the numbers it last showed, and the next load online resyncs it. Writes are never touched.
-const PAGES = "offline-pages-v1";
+// v2 drops the app shell an older release kept (activate deletes every cache not named here).
+const PAGES = "offline-pages-v2";
 const ASSETS = "offline-assets-v1";
 const READS = "offline-reads-v1";
 const ASSETS_KEPT = 400;
 const READS_KEPT = 300;
 // on a slow plane or café connection a read that has a kept copy waits this long before the copy answers.
 const SLOW_MS = 6000;
+// a page open (the app started on his phone) waits this long for the network before the last app shell answers,
+// so a stalled connection right after a release never leaves the app hanging on a blank screen.
+const PAGE_SLOW_MS = 8000;
+// a chat transcript is never drawn from a saved copy while the network still might answer: his phone showed the chat from
+// two hours before. The saved copy answers only when the network fails (no connection).
+const LIVE_ONLY = [/^\/api\/(tenants\/[^/]+\/)?desk\/messages/, /^\/api\/milestones\/[^/]+\/chat\/messages/];
 
 self.addEventListener("install", (e) =>
   e.waitUntil(
@@ -21,7 +28,15 @@ self.addEventListener("install", (e) =>
     })().catch(() => self.skipWaiting()),
   ),
 );
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (e) =>
+  e.waitUntil(
+    (async () => {
+      const mine = new Set([PAGES, ASSETS, READS]);
+      for (const k of await caches.keys()) if (!mine.has(k)) await caches.delete(k);
+      await self.clients.claim();
+    })(),
+  ),
+);
 
 async function keep(name, key, res) {
   if (!res || !res.ok || res.type === "opaque" || res.redirected) return;
@@ -61,21 +76,27 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== self.location.origin) return;
   if (q.mode === "navigate") return e.respondWith(page(q));
   if (url.pathname.startsWith("/assets/")) return e.respondWith(asset(q));
-  if (url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/push")) return e.respondWith(read(q));
+  if (url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/push")) return e.respondWith(read(q, LIVE_ONLY.some((r) => r.test(url.pathname))));
 });
 
-// a page: always the network when there is one (a release shows at once); offline, the last app shell (one SPA shell).
+// a page: the network when it answers (a release shows at once); offline, or no answer in PAGE_SLOW_MS, the last app shell
+// (one SPA shell). The late answer is kept, and the open app's build watch (components/NewBuild) moves it onto a newer release.
 async function page(q) {
-  try {
-    const res = await fetch(q);
+  const live = fetch(q).then(async (res) => {
     if (res.ok && (res.headers.get("content-type") || "").includes("text/html")) await keep(PAGES, "/", res.clone());
     return res;
-  } catch (err) {
-    const c = await caches.open(PAGES);
-    const kept = await c.match("/");
-    if (kept) return kept;
-    throw err;
+  });
+  const kept = await caches.open(PAGES).then((c) => c.match("/"));
+  if (!kept) return live;
+  const slow = new Promise((ok) => setTimeout(() => ok("slow"), PAGE_SLOW_MS));
+  try {
+    const first = await Promise.race([live, slow]);
+    if (first !== "slow") return first;
+  } catch {
+    /* no connection: the kept shell */
   }
+  live.catch(() => undefined);
+  return kept;
 }
 
 // a built file: its name holds its hash, so a kept copy is always the right one.
@@ -92,7 +113,7 @@ async function asset(q) {
 }
 
 // a read: the console's answer when it comes, kept; the kept copy when the network fails or is too slow.
-async function read(q) {
+async function read(q, liveOnly = false) {
   const c = await caches.open(READS);
   const kept = await c.match(q);
   let drewSaved = false;
@@ -105,6 +126,7 @@ async function read(q) {
     return res;
   });
   if (!kept) return live;
+  if (liveOnly) return live.catch(() => asSaved(kept));
   const slow = new Promise((ok) => setTimeout(() => ok("slow"), SLOW_MS));
   try {
     const first = await Promise.race([live, slow]);

@@ -30,23 +30,35 @@ const pageDoc = (): VisibilityDoc | undefined => (typeof document === "undefined
  * `refresh` every `ms` while the tab is in view only.
  * the owner's Mac kept ~8 console tabs open, each polling ~25 lists every 30 s hidden or not (~330 requests a minute through
  * Traefik), and after a restart all of them hit the cold console at once. A hidden tab now skips its ticks and refreshes
- * once when it is shown again (only when a tick was skipped). Returns the stop function; `ms` 0 = no polling.
+ * once when it is shown again (when a tick was skipped or a whole period passed). Returns the stop function; `ms` 0 = no polling.
  */
-export function pollWhileVisible(refresh: () => void, ms: number, doc: VisibilityDoc | undefined = pageDoc()): () => void {
+export function pollWhileVisible(refresh: () => void, ms: number, doc: VisibilityDoc | undefined = pageDoc(), win: ShownWin | undefined = pageWin(doc)): () => void {
   if (!ms) return () => undefined;
   let missed = false;
-  const timer = setInterval(() => (doc?.visibilityState === "hidden" ? (missed = true) : refresh()), ms);
+  let last = Date.now();
+  const run = () => ((last = Date.now()), (missed = false), refresh());
+  const timer = setInterval(() => (doc?.visibilityState === "hidden" ? (missed = true) : run()), ms);
+  // the installed app on his phone is frozen in the background (iOS stops its timers, so no tick is ever
+  // "missed"); back on screen it showed the chat from two hours before. Shown again after a full period, it reads at once.
   const seen = () => {
-    if (doc?.visibilityState === "hidden" || !missed) return;
-    missed = false;
-    refresh();
+    if (doc?.visibilityState === "hidden") return;
+    if (missed || Date.now() - last >= ms) run();
   };
   doc?.addEventListener("visibilitychange", seen);
+  // the app brought back from the app switcher or the back-forward cache: iOS may send pageshow or focus, not visibilitychange
+  win?.addEventListener("pageshow", seen);
+  win?.addEventListener("focus", seen);
   return () => {
     clearInterval(timer);
     doc?.removeEventListener("visibilitychange", seen);
+    win?.removeEventListener("pageshow", seen);
+    win?.removeEventListener("focus", seen);
   };
 }
+type ShownWin = Pick<Window, "addEventListener" | "removeEventListener">;
+/** the real window only alongside the real document (a test's fake document brings its own window or none). */
+const pageWin = (doc: VisibilityDoc | undefined): ShownWin | undefined =>
+  typeof window !== "undefined" && typeof document !== "undefined" && doc === document ? window : undefined;
 
 export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { tag?: QueryTag } = {}) {
   const [data, setData] = useState<T | undefined>(undefined);

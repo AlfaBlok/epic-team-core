@@ -256,14 +256,16 @@ describe("T18-S17 act", () => {
     expect(screen.queryByTestId("new-build")).toBeNull();
   });
 
-  it("the service worker never serves a stale page online (the offline copy only when the network fails)", () => {
+  it("the service worker never serves a stale page online (the offline copy only when the network fails or stalls 8 s)", () => {
     const sw = fs.readFileSync(path.resolve(__dirname, "../../public/sw.js"), "utf8");
-    // only a navigation gets the kept shell, and only in the catch of the network fetch: this build check's fetch of the
-    // page (not a navigation) always reaches the console.
+    // only a navigation gets the kept shell: first the network, the kept shell only after it fails or gives no answer in
+    // PAGE_SLOW_MS (his phone's app hung on a blank screen on restart); this build check's fetch of the page
+    // (not a navigation) always reaches the console, so a kept shell from an older build is moved onto the new one.
     const page = sw.slice(sw.indexOf("async function page("), sw.indexOf("async function asset("));
-    expect(page.indexOf("await fetch(q)")).toBeGreaterThan(-1);
-    expect(page.indexOf("await fetch(q)")).toBeLessThan(page.indexOf("catch"));
-    expect(page.indexOf("c.match(")).toBeGreaterThan(page.indexOf("catch"));
+    expect(page.indexOf("fetch(q)")).toBeGreaterThan(-1);
+    expect(page).toMatch(/Promise\.race\(\[live, slow\]\)/);
+    expect(page).toMatch(/if \(first !== "slow"\) return first;/);
+    expect(sw).toMatch(/const PAGE_SLOW_MS = 8000;/);
     expect(sw).toMatch(/q\.mode === "navigate"/);
     expect(sw).toMatch(/q\.method !== "GET"/);
   });

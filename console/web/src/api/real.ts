@@ -71,8 +71,14 @@ export function takeEarly(path: string): Promise<unknown> | undefined {
   delete all![path];
   if (Date.now() - e.at >= EARLY_FRESH_MS) return undefined;
   // index.html notes when the service worker answered it with a saved copy
-  return e.p.then((d) => (d != null && noteRead(path, (e as { saved?: string }).saved), d));
+  const answer = e.p.then((d) => (d != null && noteRead(path, (e as { saved?: string }).saved), d));
+  // the early read has no clock of its own. Hung (his phone's app opened right after a release, or frozen in the
+  // background), it sat in inFlight and every later read of the chat got the same hung promise: the chat stayed on the
+  // copy kept hours before. Not answered in EARLY_WAIT_MS, it counts as failed and the path is read again the normal way.
+  return Promise.race([answer, new Promise<null>((ok) => setTimeout(() => ok(null), EARLY_WAIT_MS))]);
 }
+/** an early read not answered in this long is given up (the normal read, with its own 30 s clock, takes over). */
+export const EARLY_WAIT_MS = 8_000;
 
 /**
  * `retryTransient`: a write that is safe to send again only when the console never answered it (a proxy 502/503/504

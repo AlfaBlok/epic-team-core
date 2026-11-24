@@ -10,6 +10,7 @@ import { Empty, ErrorBox, Loading, PHONE_TAP, RelTime, ThreadLink, threadHref } 
 import { INBOX_PATH } from "@/components/inboxLine";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { invalidate, pollWhileVisible, useQuery } from "@/lib/data";
+import { SavedCopyLine } from "@/components/SavedCopyLine";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { useCallDock } from "@/voice/CallPanel";
 import { clockOf, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
@@ -102,6 +103,39 @@ export function forgetChats() {
   } catch {
     /* none */
   }
+}
+
+/** reads closer together than this on coming back (focus, pageshow and visibilitychange often fire together) are one. */
+export const SHOWN_AGAIN_GAP_MS = 2_000;
+/**
+ * `fn` each time the page is on screen again: shown after hidden, the window focused, restored from the back-forward
+ * cache, back online, or the service worker's fresh answer after it drew a saved copy. Returns the stop function.
+ */
+export function onShownAgain(fn: () => void, win: Window | undefined = typeof window === "undefined" ? undefined : window): () => void {
+  if (!win) return () => undefined;
+  const doc = win.document;
+  let last = 0;
+  const go = () => {
+    if (doc?.visibilityState === "hidden") return;
+    const now = Date.now();
+    if (now - last < SHOWN_AGAIN_GAP_MS) return;
+    last = now;
+    fn();
+  };
+  const fromWorker = (e: MessageEvent) => e.data?.type === "saved-copy-fresh" && go();
+  const sw = (win.navigator as Navigator | undefined)?.serviceWorker;
+  doc?.addEventListener("visibilitychange", go);
+  win.addEventListener("pageshow", go);
+  win.addEventListener("focus", go);
+  win.addEventListener("online", go);
+  sw?.addEventListener?.("message", fromWorker);
+  return () => {
+    doc?.removeEventListener("visibilitychange", go);
+    win.removeEventListener("pageshow", go);
+    win.removeEventListener("focus", go);
+    win.removeEventListener("online", go);
+    sw?.removeEventListener?.("message", fromWorker);
+  };
 }
 
 /** within this many px of the page bottom counts as "at the latest line" (sticks to new lines). */
@@ -644,6 +678,9 @@ export function ChatView({
     if (!chat?.available) return;
     return pollWhileVisible(() => void load(), busy ? CHAT_POLL_FAST_MS : CHAT_POLL_IDLE_MS); // not while the tab is hidden
   }, [busy, chat?.available, load]);
+  // the chat reads its newest lines the moment it is on screen again (the app back from the background, the
+  // phone unlocked, back online), never at the next poll: his phone showed the chat from two hours before.
+  useEffect(() => onShownAgain(() => void load()), [load]);
   // the first read failed (no chat to show yet): keep trying, the page says so meanwhile
   useEffect(() => {
     if (chat || !error) return;
@@ -914,6 +951,8 @@ export function ChatView({
       {chat?.available && (
         <>
           {error && <div className="mb-2"><ErrorBox error={error} muted /></div>}
+          {/* a transcript the app drew from its saved copy (the console out of reach) says so, with its age */}
+          <SavedCopyLine />
           {chat.unreachable && (
             // the desk's host (the worker server over the tunnel) cannot be reached: the last good transcript stays, one quiet line
             <div role="status" className="mb-2 shrink-0 text-xs text-muted-foreground" data-testid="chat-unreachable">

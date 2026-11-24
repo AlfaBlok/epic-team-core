@@ -61,7 +61,9 @@
         paths.forEach(function (p) {
           // a saved copy from the service worker is noted (x-saved-copy), so the Inbox says so
           var e = (early[p] = { at: Date.now() });
-          e.p = fetch("/api" + p).then(function (r) { e.saved = r.headers.get("x-saved-copy") || undefined; return r.ok ? r.json() : null; }).catch(function () { return null; });
+          // never left hanging (a hung early read froze his phone's chat): given up after 8 s, the app reads it again
+          var o = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(8000) } : undefined;
+          e.p = fetch("/api" + p, o).then(function (r) { e.saved = r.headers.get("x-saved-copy") || undefined; return r.ok ? r.json() : null; }).catch(function () { return null; });
         });
       } catch (e) {}
     </script>
