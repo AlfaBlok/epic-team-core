@@ -2029,6 +2029,8 @@ export interface Credits {
   ledger: CreditLedgerEntry[];
   /** the newest grant or top-up and what the runs since used of it, at the last 7 days' pace. */
   meter?: { credited: number; creditedAt: string; note: string; used: number; left: number; perDay: number; runsOutAt?: string };
+  /** whose AI this workspace runs on (the home repo's AI route setting): the owner's own seats as a one-off, else our API account. */
+  aiRoute?: { on: "seats" | "api"; line: string; oneOff: boolean };
 }
 /** GET /api/platform/seat-usage (platform only): the 16 seats' week by app. */
 export interface SeatUsageApp {

@@ -55,6 +55,10 @@ const MAX_PAGES = 40;
  * held his phone's Send on three T3 calls over the worker server's tunnel (0.2 to 2.2 s each, measured 2026-11-12).
  */
 export const SEND_WAIT_MS = 1_200;
+/** how long a send stored behind earlier ones waits for its prefix before it is stored without it. */
+export const PREFIX_QUEUE_WAIT_MS = 300;
+/** console context before his words: ready text, or a build that runs after the reply. */
+export type Prefix = string | (() => Promise<string | undefined>);
 /**
  * right after a send the next view waits for T3 at most this long (so his message shows from the thread), then the last good
  * view answers (`stale: true`) and his own bubble stays on the page until a later read shows it. Was unbounded: on
@@ -1175,26 +1179,29 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
      * `prefix` (hook): console context put before his words, e.g. what changed since his last message.
      * T3 down (or earlier sends still queued) = the message is stored and sent once T3 is back (`queued: true`).
      */
-    async send(text: string, page?: string, clientRequestId?: string, prefix?: string): Promise<{ threadId: string; pending: boolean; queued?: boolean }> {
+    async send(text: string, page?: string, clientRequestId?: string, prefix?: Prefix): Promise<{ threadId: string; pending: boolean; queued?: boolean }> {
       const body = text.trim();
       if (!body) throw new DeskError(400, "empty_message", "message is required");
       const crid = clientRequestId ?? `${p.key}-send-${randomUUID()}`;
-      const message = frame(prefix ? `${prefix}\n${body}` : body, page);
-      const queue = () => {
-        enqueue(crid, body, page, message);
-        return { threadId: current()?.threadId ?? "", pending: true, queued: true };
+      // the prefix (his objectives block, what changed since) is built after the reply, inside the send below: it once
+      // held his message for its whole build, up to 34 s on a busy host, and his browser gave up at 30 s.
+      const prefixed = typeof prefix === "function" ? prefix().catch(() => undefined) : Promise.resolve(prefix);
+      const framed = async (wait?: number) => {
+        const pre = wait === undefined ? await prefixed : await Promise.race([prefixed, new Promise<undefined>((r) => setTimeout(r, wait))]);
+        return frame(pre ? `${pre}\n${body}` : body, page);
       };
       if (unsent().length) {
-        // keep the owner's order: behind what already waits
-        const out = queue();
+        // keep the owner's order: behind what already waits (stored at once, with the prefix only if it is ready in time)
+        enqueue(crid, body, page, await framed(PREFIX_QUEUE_WAIT_MS));
         void flushQueued().catch(() => undefined);
-        return out;
+        return { threadId: current()?.threadId ?? "", pending: true, queued: true };
       }
       // the thread check and the send run after the reply (never longer than sendWaitMs), behind his earlier sends.
       let threadId = current()?.threadId ?? "";
       mustWait = true; // the next view waits for T3, so his message shows (not the view from before it)
       sending++;
       const run = async (): Promise<"done" | "queued"> => {
+        const message = await framed();
         let s: DeskSession;
         try {
           s = await moveIfBlocked(await ensureSession()); // off a limited seat first

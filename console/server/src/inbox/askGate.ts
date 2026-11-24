@@ -136,9 +136,13 @@ const TIER_REASONS: [string, RegExp][] = [
 const RESTATES = new RegExp(
   [
     `\\b(?:you|${ownerName()}|he)\\s+(?:already\\s+)?(?:decided|approved|chose|agreed|answered)\\b`,
-    `\\byour\\s+(?:earlier\\s+|own\\s+|(?:\\d{1,2}\\s+)?${MONTH}(?:\\s+\\d{1,2})?\\s+)?(?:decision|answer|approval)\\b`,
+    `\\byour\\s+(?:earlier\\s+|own\\s+|(?:\\d{1,2}\\s+)?${MONTH}(?:\\s+\\d{1,2})?\\s+)(?:decision|answer|approval)\\b`,
+    // a bare "your answer" cites an earlier one, except the answer this ask waits for (two desk asks said
+    // "File the task from your answer" and were held as re-stating him, so his open question never reached his inbox)
+    `(?<!\\b(?:from|with|after|once|until|for|awaiting|await|get|need|want)\\s+)\\byour\\s+(?:decision|answer|approval)\\b(?!\\s+(?:here|below|on this card|by voice))`,
     "\\balready\\s+(?:decided|approved|answered|agreed)\\b",
-    "\\byou said (?:it|so|yes|this)\\b",
+    // "where you said it" asks where he said it; it cites nothing
+    "(?<!\\b(?:where|when|how|to whom|who)\\s+)\\byou said (?:it|so|yes|this)\\b",
     "\\bas you (?:said|decided|asked)\\b",
   ].join("|"),
   "i",

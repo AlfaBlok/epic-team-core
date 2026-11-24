@@ -486,7 +486,8 @@ export function createDesk(d: DeskDeps) {
     replyTimes: chat.replyTimes,
     /** his message, with his objectives block before it: the desk reads every message against his pursuits first. */
     send: async (text: string, page?: string, clientRequestId?: string) =>
-      chat.send(text, page, clientRequestId, objectivesContext(readHisWords(d.reposRoot, repo), await d.objectives?.().catch(() => undefined), now(), text) || undefined),
+      // built after the reply (session.ts send): the objectives build took up to 34 s on a busy host and held his message
+      chat.send(text, page, clientRequestId, async () => objectivesContext(readHisWords(d.reposRoot, repo), await d.objectives?.().catch(() => undefined), now(), text) || undefined),
     placements,
     links,
 

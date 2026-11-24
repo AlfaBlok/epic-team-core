@@ -2159,13 +2159,16 @@ export function createApp(
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.
   let objectivesMemo: { at: number; v: { block: string; line: string } } | undefined;
   let objectivesInputMemo: { at: number; v: Promise<ObjectivesInput> } | undefined;
+  // the last finished build: a reader after the minute gets it at once while one rebuild runs (a rebuild took up to
+  // 68 s on a busy main server and every reader waited on it, his chat sends too).
+  let objectivesInputLast: ObjectivesInput | undefined;
   ownerObjectivesInput = () => {
     if (!objectivesInputMemo || Date.now() - objectivesInputMemo.at >= 60_000) {
       const v = (async () => greenHistory(await idleWatch.decorate(await scorecardsNow())) as ObjectivesInput)();
       objectivesInputMemo = { at: Date.now(), v };
-      v.catch(() => (objectivesInputMemo = undefined));
+      v.then((x) => (objectivesInputLast = x)).catch(() => (objectivesInputMemo = undefined));
     }
-    return objectivesInputMemo.v;
+    return objectivesInputLast ? Promise.resolve(objectivesInputLast) : objectivesInputMemo.v;
   };
   ownerObjectivesNow = async () => {
     if (objectivesMemo && Date.now() - objectivesMemo.at < 60_000) return objectivesMemo.v;

@@ -276,7 +276,7 @@ export function createMilestoneChats(d: MilestoneChatDeps) {
       if (hooks.worldWakeGate()(milestoneWorld(d.db, id)))
         throw new DeskError(409, "world_needs_box", "Your team's chat starts when it runs on your workspace's own servers. Your projects and your team's jobs keep working.");
       const chat = get(id);
-      return chat.send(text, page, clientRequestId, await sinceFor(id, chat));
+      return chat.send(text, page, clientRequestId, () => sinceFor(id, chat)); // built after the reply
     },
 
     /**
