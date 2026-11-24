@@ -40,6 +40,7 @@ import { useHomeTab, useWheelPages, WheelPagesTab } from "@/components/wheelPage
 import { WheelPlanTab } from "@/components/wheelPlan";
 import { TotemTab, productOfObjective, useTotemMaps } from "@/components/totemTabs";
 import { wheelTabsOf } from "@/lib/wheelTabs";
+import { MadeOfLink } from "@/pages/MadeOf";
 import type { Totem } from "@/api/totem-types";
 import { TrackersTab } from "@/components/trackersTab";
 import { PersonaLogTab } from "@/components/personaLogTab";
@@ -1608,6 +1609,10 @@ export function GoalSetPage() {
             </span>
           </GoalHeader>
           <TabStrip tabs={OBJECTIVE_TABS} tab={tab} pills={{ inbox: counts }} counts={{ kanban: boardOf(data, node).length + counts.review, ...(pagesList.data ? { pages: myPages.length + myFiles.length } : {}) }} />
+          {/* each tab is a property of the objective; the made-of screen says what each holds and where it lives. */}
+          <div className="-mt-2 flex justify-end">
+            <MadeOfLink kind="objective" />
+          </div>
           {tab === "table" && (
             <div className="grid gap-4">
               {/* a ticket found by Search opens here with ?row=<code>: its line is marked and brought into view. */}

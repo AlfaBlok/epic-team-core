@@ -7,10 +7,13 @@
  */
 /** `kind`: "engine" for the console's own tabs, the same names in the same order on every app; "data" for a tab of the
  * product's own data graph (the owner, 24 Nov: "it's the same console is what I'm saying. with slightly different data tabs"). */
-export type WheelTab = { id: string; label: string; shows: string[]; kind?: string };
+export type WheelTab = { id: string; label: string; shows: string[]; kind?: string; holds?: string; lives?: string; reads?: readonly string[]; writes?: readonly string[] };
+/** (the owner, vn_cdef45cd: "you have a class which is objective ... these properties are ... what showing me on
+ * the tabs"): the class a kind of wheel is, named in the product's graph file beside its tabs. */
+export type WheelClass = { name: string; plural: string; one: string; his?: string };
 export type WheelKind = "objective" | "campaign";
 
-const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
+const plugs = import.meta.glob<{ HOSTED_WHEEL_TABS?: Partial<Record<WheelKind, readonly WheelTab[]>>; HOSTED_WHEEL_CLASS?: Partial<Record<WheelKind, WheelClass>> }>("../../../../../hosted/console/web/src/hosted/wheelTabs.ts", { eager: true });
 
 /** a build without a product graph: the objective's ten; a campaign has the same engine tabs, with its own data tabs after Key results. */
 const DEFAULTS: Record<WheelKind, readonly WheelTab[]> = {
@@ -48,6 +51,15 @@ export const WHEEL_TABS: Record<WheelKind, readonly WheelTab[]> = {
   objective: hosted.objective ?? DEFAULTS.objective,
   campaign: hosted.campaign ?? DEFAULTS.campaign,
 };
+
+const hostedClass: Partial<Record<WheelKind, WheelClass>> = Object.assign({}, ...Object.values(plugs).map((m) => m.HOSTED_WHEEL_CLASS ?? {}));
+/** the class each kind of wheel is an object of: from the product's graph file, else a plain default. */
+export const WHEEL_CLASS: Record<WheelKind, WheelClass> = {
+  objective: hostedClass.objective ?? { name: "Objective", plural: "objectives", one: "Every objective is an object of one class: the same shape every time, and each tab is one of its properties." },
+  campaign: hostedClass.campaign ?? { name: "Campaign", plural: "campaigns", one: "Every campaign is an object of one class: the same shape every time, and each tab is one of its properties." },
+};
+/** the made-of screen's path: what an objective (or a campaign) is made of, one box per tab. */
+export const MADE_OF_PATH = "made-of";
 
 /** the wheel's tabs as the tab strip takes them: id and label, in the graph file's order. */
 export const wheelTabsOf = (kind: WheelKind): { id: string; label: string; data: boolean }[] => WHEEL_TABS[kind].map(({ id, label, kind: k }) => ({ id, label, data: k === "data" }));

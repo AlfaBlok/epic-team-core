@@ -56,7 +56,7 @@ describe("diagrams by default, one design", () => {
   });
   it("the worker rules list holds the visual rule, and the dispatch step points a helper at /api/worker-rules", async () => {
     const { workerBriefRules } = await import("../src/cycle/prompts.js");
-    expect(workerBriefRules()).toHaveLength(13);
+    expect(workerBriefRules()).toHaveLength(14);
     expect(workerBriefRules()).toContain(VISUAL_FIRST_RULE);
     const text = wakeProtocol({ base: "http://c", run: { id: "run_1" }, assignment: { id: "asg_1", writeEnabled: true, writeScope: "spine" }, milestone: { id: "ms_1" }, persona: { id: "p_1", name: "archivist" } } as never);
     expect(text).toContain("http://c/api/worker-rules");

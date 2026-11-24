@@ -1,6 +1,6 @@
 import { REVIEW_RULE } from "./review/review.js";
 import { effectiveWrite, type Assignment, type Milestone, type Persona } from "./store.js";
-import { FINISH_THE_JOB_RULE, NO_COPY_PASTE_RULE, VISUAL_FIRST_RULE, isDeliveryManager } from "./inbox/asks.js";
+import { ASK_WHEN_UNSURE_RULE, FINISH_THE_JOB_RULE, NO_COPY_PASTE_RULE, VISUAL_FIRST_RULE, isDeliveryManager } from "./inbox/asks.js";
 import { LEFT_READY_RULE } from "./cycle/followUp.js";
 import { childVerdict, type ChildEpic } from "./cycle/children.js";
 import { BLOCKER_RULE, READY_ACCOUNT_RULE } from "./cycle/movement.js";
@@ -428,9 +428,8 @@ export function objectiveSection(id: string, o?: { name: string; epics: string[]
     // the owner, 23 Nov 11:21Z: "The wheel is not turning by itself. Why not? ... Do what you need to do. Ask what you need to ask. Get it done."
     `- A red key result with no ready, running or waiting ticket under it is yours to move this wake, never left: run \`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py --objective ${id}\` and take each ORPHAN line. Its \`next plan step\` is read from the Plan tab; do what its \`do now\` says: \`write\` (\`python3 ~/github/${homeRepo()}/scripts/kr_orphans.py write ${id} <n> --by <your run id>\` writes one ready ticket under that key result for that plan step, then start its worker in this wake), \`restart\` (set that row ready and start it), \`ask\` (the step is the owner's own: money, publishing, his accounts, a choice of direction: one coded ask), \`plan\` (write the next step on the Plan tab first, then \`write\`). Never write a ticket the plan does not hold. Your report counts them: red with nothing moving it, at the start and at the end of the wake (target 0).`,
     "- Ask the owner only what only he can answer (a decision, a login, his taste); everything else you settle yourself and do.",
-    // the owner, 24 Nov 06:11Z: "what things are less clear for you and then how could you ask me. Just ask me open
-    // question ... how do they communicate back to me in terms of helping me help them do a better job"
-    `- Once a week you tell the owner what is unclear: run \`python3 ~/github/${homeRepo()}/scripts/both_ways.py due ${id}\`; when it says due, read \`both_ways.py gather ${id}\` and send one card with \`both_ways.py send ${id} --by "<your name> for ${o?.name ?? id}" --run <your run id>\` (one to three open questions on what is unclear in his notes, one line of feedback on them from its facts, one line on what would help you). His answer comes back on that card: write what became clear with \`understood.py write --objective ${id}\`.`,
+    // the owner, 24 Nov 11:45Z: "I don't think it should be a weekly thing. It should be as soon as you haven't [understood]"
+    `- ${ASK_WHEN_UNSURE_RULE} His answer comes back on that card: write what became clear with \`understood.py write --objective ${id}\`.`,
     "- Your report opens with each key result: green, or red and what you started on it, or red and the ask it waits on.",
   ].join("\n");
 }

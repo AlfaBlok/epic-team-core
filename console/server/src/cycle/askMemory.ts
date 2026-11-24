@@ -8,6 +8,7 @@ import type { OpenAsk, Run, RunCheck } from "../store.js";
 import type { Grant } from "./grants.js";
 import { SKIP_PREFIX, checkDue, textHash } from "./skipUnchanged.js";
 import { ownerName } from "../identity.js";
+import { OWNER_ONLY_RUN, ownerOnlyWords } from "./ownerOnly.js";
 
 /**
  * the Unblocker remembers each ask. The console keeps one row per (milestone, ask code): a fingerprint of what
@@ -220,16 +221,44 @@ export interface AskStatus {
   memory?: AskMemory;
 }
 
-/** Each open ask against the memory. Unchanged = same fingerprint and last verdict `left`. */
+/** the memory an owner-only ask is carried with (never assessed by a run). */
+export function ownerOnlyMemory(a: OpenAsk, grants: Grant[], milestoneId = ""): AskMemory {
+  const parts = askParts(a, grantsHash(grants));
+  const why = a.ownerOnly!.why;
+  return {
+    milestoneId,
+    code: bareCode(a.code),
+    print: askPrint(parts),
+    parts,
+    runId: OWNER_ONLY_RUN,
+    verdict: "left",
+    why,
+    check: { code: a.code, decision: "left", why, floor: [a.ownerOnly!.floor] } as RunCheck,
+    assessedAt: a.since ?? "",
+  };
+}
+
+/** Parts whose change alone never re-opens an ask left on the hard floor (its wording or linked files; a grant or his comment does). */
+const FLOOR_QUIET: AskPart[] = ["text", "evidence"];
+
+/**
+ * Each open ask against the memory. Unchanged = same fingerprint and last verdict `left`. An ask only the
+ * owner can do (`ownerOnly`) is always unchanged (carried as left with its floor), and an ask already left on the hard
+ * floor stays unchanged when only its wording or linked files changed.
+ */
 export function classifyAsks(asks: OpenAsk[], grants: Grant[], memory: AskMemory[]): AskStatus[] {
   const g = grantsHash(grants);
   const byCode = new Map(memory.map((m) => [bareCode(m.code), m]));
   return asks.map((a) => {
     const mem = byCode.get(bareCode(a.code));
+    if (a.ownerOnly) return { code: a.code, status: "unchanged", memory: mem?.verdict === "left" ? mem : ownerOnlyMemory(a, grants, mem?.milestoneId) };
     if (!mem) return { code: a.code, status: "new" };
     const parts = askParts(a, g);
     if (askPrint(parts) === mem.print && mem.verdict === "left") return { code: a.code, status: "unchanged", memory: mem };
-    return { code: a.code, status: "changed", changed: ASK_PARTS.filter((k) => mem.parts[k] !== parts[k]), memory: mem };
+    const changed = ASK_PARTS.filter((k) => mem.parts[k] !== parts[k]);
+    const onFloor = mem.verdict === "left" && (mem.check?.floor?.length ?? 0) > 0;
+    if (onFloor && changed.length && changed.every((k) => FLOOR_QUIET.includes(k))) return { code: a.code, status: "unchanged", memory: mem };
+    return { code: a.code, status: "changed", changed, memory: mem };
   });
 }
 
@@ -252,7 +281,7 @@ export const carriedCheck = (m: AskMemory, spine?: string): RunCheck => {
 };
 
 /** How Activity and summaries name a carried verdict. */
-export const carriedLabel = (runId: string) => `left (unchanged since ${runId})`;
+export const carriedLabel = (runId: string) => (runId === OWNER_ONLY_RUN ? `left (${ownerOnlyWords()})` : `left (unchanged since ${runId})`);
 
 const spineOf = (a?: OpenAsk) => (a?.path ? `${a.path}${a.line ? `:${a.line}` : ""}` : undefined);
 
@@ -276,7 +305,7 @@ export function withCarriedChecks(openAsks: OpenAsk[], checks: RunCheck[] | null
   const carried: RunCheck[] = [];
   for (const a of openAsks) {
     if (!a.carriedFrom || seen.has(bareCode(a.code))) continue;
-    const m = mem.get(bareCode(a.code));
+    const m = mem.get(bareCode(a.code)) ?? (a.ownerOnly ? ownerOnlyMemory(a, []) : undefined);
     carried.push(m ? carriedCheck(m, spineOf(a)) : { code: a.code, decision: "left", why: "no reason given", carriedFrom: a.carriedFrom, ...(spineOf(a) ? { spine: spineOf(a) } : {}) });
   }
   return [...own, ...carried];

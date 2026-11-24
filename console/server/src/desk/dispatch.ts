@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Assignment, Milestone, Persona, Run, Store } from "../store.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { ticketId } from "../adapters/outcome.js";
-import { FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE } from "../inbox/asks.js";
+import { ASK_WHEN_UNSURE_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE } from "../inbox/asks.js";
 import { CONTEXT_BRIEF_STEP, START_FAIL_RULE, WORKER_FINISH_RULE, WORKER_TIER_RULE } from "../cycle/prompts.js";
 import type { ChatScope } from "./scope.js";
 import { chatCaller } from "./milestoneChat.js";
@@ -291,7 +291,7 @@ export function mountChatDispatch(api: Hono, d: ChatDispatchDeps): ChatDispatch 
           seat: r.seat ?? null,
           providerInstanceId: r.providerInstanceId ?? null,
           dryRun: r.dryRun,
-          briefRules: [WORKER_FINISH_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE],
+          briefRules: [WORKER_FINISH_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, ASK_WHEN_UNSURE_RULE],
           steps: r.steps,
         },
         201,

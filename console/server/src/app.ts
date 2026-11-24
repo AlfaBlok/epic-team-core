@@ -49,6 +49,7 @@ import { listTemplates } from "./personaTemplates.js";
 import { templateForWorkspace, workspaceOwner } from "./tenancy/workspaceText.js";
 import { mountUnblockerStats } from "./cycle/unblockerStats.js";
 import { mountWakeStats } from "./cycle/wakeStats.js";
+import { ownerOnly as ownerOnlyAsk } from "./cycle/ownerOnly.js";
 import { commentHash, evidenceHash, mountAskMemory, readAskMemory, rememberChecks, withCarriedChecks } from "./cycle/askMemory.js";
 import { bindRubricRepo, mountRubric, rubricOfRun, rubricProblem, stampRubric } from "./cycle/rubric.js";
 import { spinesRoutes, trackedIn } from "./routes/spines.js";
@@ -1032,6 +1033,8 @@ export function createApp(
         ...nonEmpty("evidenceHash", i.path ? evidenceHash(askLineText(m, i.path, i.line), i.path, resolveRepo(read.reposRoot, m.repo)?.path) : ""),
         // when the line was written, so the Unblocker numbers can time ask → verdict from the run log.
         ...(i.since ? { since: i.since } : {}),
+        // an ask only the owner can do is carried as left, never woken for.
+        ...(ownerOnlyAsk(i.ask, i.whyYou) ? { ownerOnly: ownerOnlyAsk(i.ask, i.whyYou)! } : {}),
       }));
   // the pack export (hosted/social.ts), handed to the other plugs untouched.
   const social = socialArea?.source;

@@ -25,6 +25,7 @@ import { EpicDeckLink } from "@/components/epicDeckLink";
 import { EpicDeckView } from "@/pages/EpicDeck";
 import { deckCodeOf } from "@/lib/deck";
 import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
+import { MadeOfLink } from "@/pages/MadeOf";
 import { DATA_TABS, FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
 import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
 import { ChatIntro, HistoryTab, ObservationsTab, PillarsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
@@ -647,6 +648,10 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
           </TabsTrigger>
         ))}
       </TabsList>
+      {/* each tab is a property of the campaign; the made-of screen says what each holds and where it lives. */}
+      <div className="mt-1 flex justify-end">
+        <MadeOfLink kind="campaign" />
+      </div>
       <div className="mt-4 min-w-0">
         {tab === "table" && <CampaignKeyResultsTab m={m} />}
         {tab === "plan" && (

@@ -1,7 +1,7 @@
 import { outcomeDefLine, TICKET_WORKER } from "../outcomeDefs.js";
 import { objectivesRule } from "../objectives.js";
 import { MAP_RULE } from "../totemMap.js";
-import { ASK_LINE_FORMAT, ASK_TIER_ITEMS, FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, ASK_TYPE_RULES, ASK_WRITING_RULE, NO_COMMANDS_RULE, isDeliveryManager, isUnblocker, managerTriageRules, unblockerRules } from "../inbox/asks.js";
+import { ASK_LINE_FORMAT, ASK_TIER_ITEMS, ASK_WHEN_UNSURE_RULE, FINISH_THE_JOB_RULE, REPO_IS_SOURCE_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, ASK_TYPE_RULES, ASK_WRITING_RULE, NO_COMMANDS_RULE, isDeliveryManager, isUnblocker, managerTriageRules, unblockerRules } from "../inbox/asks.js";
 import { WAKE_ENDING_RULE } from "./wakeEnding.js";
 import { CONTEXT_HEAD } from "./ticketContext.js";
 import { CARD_FIELDS_RULE, FEATURE_LIST_RULE } from "../review/cardRule.js";
@@ -116,7 +116,7 @@ export const WORKER_TIER_RULE =
  * objectives with their live list ("which objective does this move?" opens every plan and report).
  */
 export function workerBriefRules(objectivesLine?: string, matchingViews: HisView[] = []): string[] {
-  const rules = [objectivesRule(objectivesLine), MAP_RULE, `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, HIS_NOTES_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
+  const rules = [objectivesRule(objectivesLine), MAP_RULE, `${WORKER_FINISH_RULE} ${outcomeDefLine(TICKET_WORKER)}`, REPO_IS_SOURCE_RULE, WORKER_TIER_RULE, FINISH_THE_JOB_RULE, STEPS_PAGE_RULE, VISUAL_FIRST_RULE, VOICE_SPILL_RULE, HIS_NOTES_RULE, ASK_WHEN_UNSURE_RULE, LOGIN_RULE, RELEASE_RULE, X_LINKS_RULE];
   // the owner's view rides only in the brief of a row on its topic (hisViewsFor), never in every brief
   return matchingViews.length ? [...rules.slice(0, -1), hisViewRecipe(matchingViews), X_LINKS_RULE] : rules;
 }

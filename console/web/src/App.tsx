@@ -13,6 +13,7 @@ import { INBOX_PATH } from "@/components/inboxLine";
 import { PURSUIT_KIT_PATH, PURSUIT_PATH, PURSUIT_TAB_PATH, PURSUITS_PATH, OldPursuitRoute, PursuitKitRedirect } from "@/lib/pursuitRoutes";
 import { PRODUCT_DEF_PATH, PRODUCTS_PATH, SCORECARD_PATH, SCORECARDS_PATH } from "@/lib/scorecards";
 import { OBJECTIVE_SEARCH_PATH } from "@/lib/objectiveSearch";
+import { MADE_OF_PATH } from "@/lib/wheelTabs";
 import { Empty } from "@/components/common";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { type ScreenId, type Skin, SkinProvider, skinFromFlag, useRoutes, useSkin, useWords } from "@/lib/skin";
@@ -50,6 +51,7 @@ const VoiceFeedbackPage = lazyPage(() => import("@/pages/VoiceFeedback"), "Voice
 const TeamSkillsPage = lazyPage(() => import("@/pages/TeamSkills"), "TeamSkillsPage");
 const RunsPage = lazyPage(() => import("@/pages/Runs"), "RunsPage");
 const SearchPage = lazyPage(() => import("@/pages/Search"), "SearchPage");
+const MadeOfPage = lazyPage(() => import("@/pages/MadeOf"), "MadeOfPage");
 const PriorityModePage = lazyPage(() => import("@/components/priorityShortcut"), "PriorityModePage");
 const ChatPage = lazyPage(() => import("@/pages/Chat"), "ChatPage");
 const ReportPage = lazyPage(() => import("@/pages/Report"), "ReportPage");
@@ -161,6 +163,8 @@ const CORE_ROUTES: ScreenRoute[] = [
   { screen: "goalSets", path: SCORECARD_PATH, element: <GoalSetPage /> },
   // one search across his objectives, key results and tickets (the sidebar's Search).
   { screen: "goalSets", path: OBJECTIVE_SEARCH_PATH, element: <SearchPage /> },
+  // what an objective (or a campaign) is made of: the class, its objects, one box per tab (his vn_cdef45cd).
+  { screen: "goalSets", path: MADE_OF_PATH, element: <MadeOfPage /> },
   // the Products section: each product defined once (its deck and its kit), the objectives on it name it.
   { screen: "goalSets", path: PRODUCTS_PATH, element: <ProductsPage /> },
   { screen: "goalSets", path: PRODUCT_DEF_PATH, element: <ProductDefPage /> },

@@ -201,7 +201,7 @@ describe.skipIf(!skillDir)("T19-S5 dispatch from a milestone chat through the AP
     const one = await dispatch(x, x.lower.m.id, { ticket: "T2-S1", summary: "first thing" }, L);
     expect(one.status, one.text).toBe(201);
     expect(one.json).toMatchObject({ seat: "seat1", providerInstanceId: "claudeAgent_seat1", dryRun: false });
-    expect(one.json.briefRules).toHaveLength(5);
+    expect(one.json.briefRules).toHaveLength(6);  // + ask when unsure
     expect(one.json.steps.join("\n")).toContain(`Run: ${one.json.childRunId}`);
     const parent = (await x.call("GET", `/api/runs/${one.json.parentRunId}`)).json;
     const child = (await x.call("GET", `/api/runs/${one.json.childRunId}`)).json;

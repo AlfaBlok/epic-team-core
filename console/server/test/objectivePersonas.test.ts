@@ -106,7 +106,8 @@ describe("an assignment names its objective", () => {
     expect(s).toContain("App: Finish the vault move (`vault` in docs/pursuits.json): you work this objective only");
     expect(s).toContain("its key results green, not tickets closed");
     expect(s).toContain("/scripts/kr_orphans.py --objective vault");
-    expect(s).toContain("/scripts/both_ways.py due vault");  // once a week, what is unclear goes back to the owner  // red with nothing moving it gets its plan step's ticket
+    expect(s).toContain("both_ways.py ask <objective id|desk>");  // ask the moment something is unclear, never weekly
+    expect(s).not.toContain("Once a week you tell the owner");
     expect(s).toContain("kr_orphans.py write vault <n>");
     expect(s).toContain("Your report opens with each key result");
     expect(s).toContain("app: docs/spines/accounts.md");

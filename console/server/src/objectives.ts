@@ -57,6 +57,11 @@ export interface RedLine {
 }
 
 export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
+/** Root L-100 in one line (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
+ * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again. */
+export const OBJECT_SHAPE_RULE =
+  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its properties, a data element enforced to exist (key results, plan, context, trackers, board, pages; a campaign's benefits), both a UX and a data thing. " +
+  "Write only into those properties: the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it.";
 /** the block rides on every wake: kept short. */
 export const OBJECTIVES_MAX_CHARS = 3_600; // room for each objective's tickets line
 
@@ -239,6 +244,7 @@ export function objectivesBlock(input: ObjectivesInput | undefined, plot?: HisWo
     `Before you plan, ask which objective it moves: the first line of your plan, of each worker brief you write and of your report is ${OBJECTIVE_LINE} (none: \`Objective: none, <why>\`, and it waits behind work that moves one). Remove fluff rather than add it.`,
     OBJECTIVE_NAME_RULE,
     TICKETS_RULE,
+    OBJECT_SHAPE_RULE,
   ];
   const body = lines.map((l) => [`${l.rank}. ${DOT[l.light] ?? "⚪"} ${l.name}`, l.krs, l.today, l.tickets, l.words].filter(Boolean).join(" · "));
   const also = alsoHis(plot);
@@ -259,7 +265,7 @@ export function objectivesOneLine(input: ObjectivesInput | undefined, plot?: His
 
 /** the worker rule with the live list in it (the console serves it first at /api/worker-rules). */
 export function objectivesRule(oneLine?: string): string {
-  return oneLine ? `${OBJECTIVES_RULE} His objectives now: ${oneLine}.` : `${OBJECTIVES_RULE} Read them at GET /api/objectives on the console.`;
+  return (oneLine ? `${OBJECTIVES_RULE} His objectives now: ${oneLine}.` : `${OBJECTIVES_RULE} Read them at GET /api/objectives on the console.`) + ` ${OBJECT_SHAPE_RULE}`;
 }
 
 /** a checkout's Red lines, from the one objectives file (docs/pursuits.json; else docs/priorities.json); [] when missing or broken. */

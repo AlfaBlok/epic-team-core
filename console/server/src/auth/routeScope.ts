@@ -164,6 +164,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/plan$`)], // may the world buy the paid plan, has it paid (the Buy button)
   ["GET", new RegExp(`^/api/tenants/${ID}/capacity$`)], // its plan's included AI: seats and tokens used (hosted cycle/capacity.ts; the PUT is the platform's)
   ["GET|PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // the workspace's own AI (hosted cycle/worldAi.ts; the PUT is the owner's login only, below)
+  ["GET|PUT", new RegExp(`^/api/tenants/${ID}/ai/own$`)], // All included or its own key in its own Bitwarden (hosted cycle/ownKey.ts; PUT owner only, below)
   // the world's own lists by path (app.ts: a store for the path's tenant in every auth mode, rule 3 404s another
   // world) and its provider default (one tenants row, the path's; the PUT stays the platform's). routeList4.test.ts
   ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs|provider)$`)],
@@ -461,6 +462,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/plan/checkout$`)], // money: an owner login, never an agent token
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)], // New workspace: an owner login makes one in their own name
   ["PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // a key into (or out of) the workspace's vault: the owner's login, never an agent token
+  ["PUT", new RegExp(`^/api/tenants/${ID}/ai/own$`)], // how the team pays for its AI, the owner's login only
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only
   ["POST", new RegExp(`^/api/tenants/${ID}/socials/start$`)], // the owner's Bitwarden email makes the team's helper, owner login only
   ["GET", new RegExp(`^/api/tenants/${ID}/github/(start|repos|check)$`)], // the owner's own GitHub: never an agent token

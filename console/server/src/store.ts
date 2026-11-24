@@ -193,6 +193,8 @@ export interface OpenAsk {
   carriedFrom?: string;
   /** when the ask's spine line was written (git blame, as the inbox's `since`): the start of its ask → verdict time. */
   since?: string;
+  /** the ask is the owner's alone (label `do`, or its why-you names the owner's identity, money, phone or computer, a public send): never assessed. */
+  ownerOnly?: { floor: "jordi_hands" | "new_money" | "new_public_exposure"; why: string };
 }
 /** one ask an Unblocker run checked: answered (with answer, confidence, source), left (why) or split. */
 export interface RunCheck {

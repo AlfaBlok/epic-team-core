@@ -1,4 +1,5 @@
 import { copyPasteInText } from "../steps/copyPaste.js";
+import { OWNER_ONLY_RUN, ownerOnlyWords } from "../cycle/ownerOnly.js";
 import { ownBoxProblem } from "./phantomRefs.js";
 import { ASK_GATE_RULE } from "./askGate.js";
 import fs from "node:fs";
@@ -208,7 +209,7 @@ function unblockerAskList(openAsks: { code: string; kind: string; path?: string;
       : "      No ask is new or changed at this wake: assess none; finish `idle` with `checks: []`.",
     ...(carried.length
       ? [
-          `      Unchanged since they were assessed (do not assess again; the console carries each as \`left (unchanged since <run>)\`): ${carried.map((x) => `${x.code} (since ${x.carriedFrom})`).join("; ")}.`,
+          `      Unchanged since they were assessed (do not assess again; the console carries each as \`left (unchanged since <run>)\`): ${carried.map((x) => `${x.code} (${x.carriedFrom === OWNER_ONLY_RUN ? ownerOnlyWords() : `since ${x.carriedFrom}`})`).join("; ")}.`,
           `      The console remembers each ask and re-opens it only when its line, a grant, ${ownerName()}'s comment or its linked evidence changes;`,
           "      assess a carried one only if your instructions name it (your own check entry then replaces the carried one).",
         ]
@@ -232,6 +233,16 @@ function unblockerAskList(openAsks: { code: string; kind: string; path?: string;
  */
 export const REPO_IS_SOURCE_RULE =
   "Decisions and state go into the spine, never only into the console's API or DB: the console's database is only a cache of the repo (root L-45).";
+
+/**
+ * (the owner on the first "what is unclear" card: "when we're unsure, you can just ask me. Be at the inbox ... I don't think it
+ * should be a weekly thing. It should be as soon as you haven't [understood]"): any agent asks the moment the owner's words are
+ * truly unclear; `scripts/both_ways.py ask` refuses a question a root learning or an earlier answer already covers.
+ */
+export const ASK_WHEN_UNSURE_RULE =
+  `Unsure what ${ownerName()} meant? Ask at once, never saved for later or a weekly card: first read root L-100 and \`python3 ~/github/${homeRepo()}/scripts/both_ways.py gather <objective id|desk>\`; ` +
+  `if the words are still truly unclear, put one open question on the inbox with \`both_ways.py ask <objective id|desk> --by <you> --quote "<the exact unclear words>" --unclear "<one open question>" --row <row>\`. ` +
+  `It refuses a question a root learning or an earlier answer already covers (never ask again what a tab, a totem or "the same engine" means); meanwhile carry on with what is clear.`;
 
 export const FINISH_THE_JOB_RULE =
   "Finish the job (root L-16): never end a turn offering follow-ups (\"want me to do X?\"). Do them now when they move the goal toward green, " +
