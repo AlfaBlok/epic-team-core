@@ -234,4 +234,24 @@ describe("dataHash keeps the event loop free", () => {
       fs.rmSync(repo, { recursive: true, force: true });
     }
   });
+  it("the worker thread makes the same hash as the console's own thread, missing files and big ones too", async () => {
+    const mk = () => {
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), "console-data-hash-w-"));
+      fs.mkdirSync(path.join(repo, "data/a"), { recursive: true });
+      fs.writeFileSync(path.join(repo, "data/a/x.json"), "{\"k\":\"\u00e9\"}");
+      fs.writeFileSync(path.join(repo, "data/big.bin"), Buffer.alloc(9 << 20, 3));
+      return repo;
+    };
+    const a = mk();
+    const b = mk();
+    try {
+      const reads = vi.spyOn(fs.promises, "readFile");
+      const off = await dataHashAsync(b); // a new tree: hashed in the worker, not read here
+      expect(reads).not.toHaveBeenCalled();
+      reads.mockRestore();
+      expect(off).toBe(dataHash(a));
+    } finally {
+      for (const r of [a, b]) fs.rmSync(r, { recursive: true, force: true });
+    }
+  });
 });

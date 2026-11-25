@@ -96,6 +96,24 @@ describe.skipIf(!fs.existsSync(SCRIPT))("the ticket index, mounted read-only", (
     expect(index.version()).toMatch(/:/);
   });
 
+  it("names each file's own blob, which moves only when that file changed in a build", async () => {
+    const f = fixture();
+    f.build();
+    const index = createTicketIndex({ file: f.db, script: SCRIPT, freshMs: 0 });
+    const spine = path.join(f.repo, "docs/spines/epic-907.md");
+    const root = path.join(f.repo, "EPIC.md");
+    const blobOf = (abs: string) => git(f.repo, "hash-object", abs).trim();
+    expect(index.blob!(spine)).toBe(blobOf(spine));
+    const rootBlob = index.blob!(root);
+    expect(rootBlob).toBe(blobOf(root));
+    fs.writeFileSync(spine, SPINE.replace("| Done one |", "| Done once |"));
+    git(f.repo, "commit", "-qam", "two");
+    await index.refresh(f.repo);
+    expect(index.blob!(spine)).toBe(blobOf(spine));
+    expect(index.blob!(root)).toBe(rootBlob);
+    expect(index.blob!(path.join(f.repo, "docs/none.md"))).toBe("");
+  });
+
   it("reads the commit a ref names from the files under .git, loose or packed", () => {
     const f = fixture();
     const head = git(f.repo, "rev-parse", "HEAD").trim();

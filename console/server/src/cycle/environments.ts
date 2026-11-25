@@ -84,8 +84,11 @@ export function createEnvironments(d: EnvironmentsDeps) {
 
   /** The trigger rules over every run still unknown (e.g. written before its host's environment id was read). Returns how many got one. */
   function stamp(): number {
-    const known = () => (db.prepare("SELECT COUNT(*) AS n FROM runs WHERE environment_id IS NOT NULL").get() as { n: number }).n;
+    // counted as the runs still unknown (the partial index runs_env_unknown), not every known run: a full scan per tick
+    const unknown = () => (db.prepare("SELECT COUNT(*) AS n FROM runs WHERE environment_id IS NULL AND thread_id IS NOT NULL").get() as { n: number }).n;
+    const known = () => -unknown();
     const start = known();
+    if (start === 0) return 0;
     let k = start;
     // Repeat so a child whose parent was stamped in this pass follows (bounded: parent chains are short).
     for (let pass = 0; pass < 10; pass++) {

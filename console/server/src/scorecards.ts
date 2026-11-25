@@ -728,16 +728,45 @@ export function createWorkFinder(repoDir: (name: string) => string | undefined, 
    * Now one listing per repo per second, and an answer is kept while every file of that repo is the same text (the
    * reader keeps an unchanged file's text, so a same-object check is enough).
    */
-  const snaps = new Map<string, { at: number; files: string[]; texts: (string | undefined)[]; ver: string; answers: Map<string, WorkLink> }>();
+  /**
+   * A lookup reads only the files whose text holds the code (in list order) and their rows in the ticket index, so a
+   * changed file drops only the kept answers whose code its old or new text holds; the code repo changes every minute,
+   * and dropping every answer then rebuilt all of them on the console's thread (1.5 to 1.9 s every 20 s). A file's index
+   * rows move with its blob in the index; with no per-file blob (an index that has none) any index change drops all.
+   */
+  const snaps = new Map<string, { at: number; files: string[]; texts: (string | undefined)[]; blobs: (string | undefined)[]; ver: string; answers: Map<string, WorkLink> }>();
   const snapshot = (repo: string) => {
     const t = Date.now();
     let s = snaps.get(repo);
     if (s && t - s.at < 1_000) return s;
     const files = list(repo);
     const texts = files.map((rel) => read(repo, rel));
-    const ver = ticketIndex().version(); // a rebuilt index can move a row while its file's text is the same
-    const same = !!s && s.ver === ver && s.files.length === files.length && s.files.every((f, i) => f === files[i] && s!.texts[i] === texts[i]);
-    s = { at: t, files, texts, ver, answers: same ? s!.answers : new Map() };
+    const index = ticketIndex();
+    const dir = repoDir(repo);
+    const blobs = files.map((rel) => (dir && index.blob ? index.blob(path.join(dir, rel)) : undefined));
+    const perFile = !!index.blob && blobs.every((b) => b !== undefined);
+    const ver = perFile ? "" : index.version(); // a rebuilt index can move a row while its file's text is the same
+    let answers = new Map<string, WorkLink>();
+    if (s && s.ver === ver) {
+      const prev = new Map(s.files.map((f, i) => [f, i] as const));
+      const common = files.filter((f) => prev.has(f));
+      const order = common.every((f, i) => i === 0 || prev.get(common[i - 1])! < prev.get(f)!);
+      if (order) {
+        const changed: string[] = [];
+        files.forEach((f, i) => {
+          const j = prev.get(f);
+          if (j === undefined) changed.push(texts[i] ?? "");
+          else if (s!.texts[j] !== texts[i] || s!.blobs[j] !== blobs[i]) changed.push(s!.texts[j] ?? "", texts[i] ?? "");
+        });
+        const now = new Set(files);
+        s.files.forEach((f, j) => {
+          if (!now.has(f)) changed.push(s!.texts[j] ?? "");
+        });
+        answers = s.answers;
+        if (changed.length) for (const code of [...answers.keys()]) if (changed.some((x) => x.includes(code))) answers.delete(code);
+      }
+    }
+    s = { at: t, files, texts, blobs, ver, answers };
     snaps.set(repo, s);
     return s;
   };

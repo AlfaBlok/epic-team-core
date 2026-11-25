@@ -34,10 +34,10 @@ export const MEANING_TOP = 6;
  * the judge, asked "the one thing each card is about", called them different anyway (a tracker, a prep: 92 to 97 sure).
  * Cards of ONE epic waiting together are judged as a group on a sharper question, no word gate: does what one asks him
  * to judge overlap the other (his answer on one would change or outdate the other)? Their own prompt, cache key and bar,
- * set on this pair and the open cards of the day (docs/inbox/same-subject-eval.json): overlap at EPIC_SURE or more holds
+ * set on this pair and the open cards of the day, then raised from 60 after its first hour live (docs/inbox/same-subject-eval.json): overlap at EPIC_SURE or more holds
  * the older card for its owner to fold into the newer one, so he only ever sees the latest.
  */
-export const EPIC_SURE = 60;
+export const EPIC_SURE = 70;
 
 export interface MeaningVerdict {
   /** `epic`: judged on the one-epic overlap question (EPIC_JUDGE_SYSTEM, bar EPIC_SURE). */

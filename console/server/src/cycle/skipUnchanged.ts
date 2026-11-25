@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import type { OpenAsk, Run } from "../store.js";
 import type { Grant } from "./grants.js";
 import { newsPart } from "./wakeNews.js";
@@ -179,7 +180,70 @@ export function dataHash(repoDir: string, cap = DATA_FILE_CAP): string {
   return memoSet(repoDir, t.sig, h.digest("hex").slice(0, 32));
 }
 
-/** dataHash without blocking the event loop: the same hash, async reads, a yield every ~8 MB hashed. */
+/**
+ * the same hash as dataHash, made in a worker thread: sha256 over a changed social data tree (hundreds of MB) was the
+ * console's biggest thread user left (4.2 s of a 90 s production profile, all `Hash.update`). Same bytes in the same
+ * order, so the hash is the one dataHash makes. One worker, one hash at a time; undefined when it cannot run.
+ */
+const HASH_WORKER = `
+const { parentPort } = require("node:worker_threads");
+const { createHash } = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+parentPort.on("message", ({ id, repoDir, files, total }) => {
+  try {
+    const h = createHash("sha256");
+    for (const p of files) {
+      let body;
+      try { body = fs.readFileSync(path.join(repoDir, p)); } catch { body = "\\u0001missing"; }
+      h.update(p + "\\0").update(body).update("\\0");
+    }
+    h.update("#" + total);
+    parentPort.postMessage({ id, hash: h.digest("hex").slice(0, 32) });
+  } catch (e) {
+    parentPort.postMessage({ id, error: String(e && e.message || e) });
+  }
+});
+`;
+let hashWorker: Worker | undefined;
+let hashWorkerOff = process.env.CONSOLE_DATA_HASH_WORKER === "off";
+let hashSeq = 0;
+const hashWaits = new Map<number, (hash: string | undefined) => void>();
+function hashOff(repoDir: string, files: string[], total: number): Promise<string | undefined> {
+  if (hashWorkerOff) return Promise.resolve(undefined);
+  try {
+    if (!hashWorker) {
+      const w = new Worker(HASH_WORKER, { eval: true });
+      w.unref();
+      w.on("message", (m: { id: number; hash?: string }) => {
+        hashWaits.get(m.id)?.(m.hash);
+        hashWaits.delete(m.id);
+      });
+      const down = () => {
+        if (hashWorker === w) hashWorker = undefined;
+        for (const r of hashWaits.values()) r(undefined);
+        hashWaits.clear();
+      };
+      w.on("error", (e) => {
+        console.warn(`data hash worker: ${e.message}`);
+        down();
+      });
+      w.on("exit", down);
+      hashWorker = w;
+    }
+    const id = ++hashSeq;
+    return new Promise((resolve) => {
+      hashWaits.set(id, resolve);
+      hashWorker!.postMessage({ id, repoDir, files, total });
+    });
+  } catch (e) {
+    console.warn(`data hash worker: ${(e as Error).message}; hashing on this thread`);
+    hashWorkerOff = true;
+    return Promise.resolve(undefined);
+  }
+}
+
+/** dataHash without blocking the event loop: the same hash, made in a worker thread (else async reads with yields). */
 export async function dataHashAsync(repoDir: string, cap = DATA_FILE_CAP): Promise<string> {
   const t = dataTree(repoDir, cap);
   if (!t) return "";
@@ -188,6 +252,8 @@ export async function dataHashAsync(repoDir: string, cap = DATA_FILE_CAP): Promi
   const inFlight = hashing.get(repoDir);
   if (inFlight && inFlight.sig === t.sig) return inFlight.p;
   const p = (async () => {
+    const off = await hashOff(repoDir, t.files, t.total);
+    if (off) return memoSet(repoDir, t.sig, off);
     const h = createHash("sha256");
     const CHUNK = 8 << 20;
     for (const rel of t.files) {

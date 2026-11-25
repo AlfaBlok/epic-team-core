@@ -308,11 +308,15 @@ export function readDoc(abs: string): DocInfo | undefined {
   const db = ticketIndexPath();
   noteFile(db);
   noteFile(`${db}-wal`);
-  const ver = index.version();
+  // the file's own blob in the index when it has one: a build that changed other files keeps this parse (a rebuild
+  // of the index after every spine write re-parsed every file on the console's thread, about 4 s a minute)
+  const held = index.holds(abs);
+  const blob = held ? index.blob?.(abs) : undefined;
+  const ver = blob !== undefined ? `blob:${blob}` : index.version();
   const hit = cache.get(abs);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.ver === ver) return hit.info;
   const text = fs.readFileSync(abs, "utf8");
-  const info = parseDoc(text, index.holds(abs) ? index.lines(abs) : ledgerLines(text));
+  const info = parseDoc(text, held ? index.lines(abs) : ledgerLines(text));
   cache.set(abs, { mtimeMs: st.mtimeMs, size: st.size, ver, info });
   return info;
 }

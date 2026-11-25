@@ -1320,11 +1320,14 @@ export function selfCloseWhy(reason: string | undefined): string {
 }
 export type Review = ReturnType<typeof createReview>;
 
-/** The cards of one store's world as WhatsApp notices see them (in review, not snoozed). */
-export function reviewItemsOf(db: DB, store: Store, reposRoot: string): ReviewItem[] {
+/**
+ * The cards of one store's world as WhatsApp notices see them (in review, not snoozed). `rows`: the read model's
+ * stored review rows (the ones the inbox shows), so a notifier tick does not read every spine on the console's thread.
+ */
+export function reviewItemsOf(db: DB, store: Store, reposRoot: string, rows?: ReviewRow[]): ReviewItem[] {
   const r = createReview(db, { store, reposRoot });
-  return computeReviewRows(store, reposRoot)
-    .rows.map(r.toItem)
+  return (rows ?? computeReviewRows(store, reposRoot).rows)
+    .map(r.toItem)
     .filter((i) => i.verdict.kind === "card" && i.state === "review" && !i.snoozedUntil);
 }
 

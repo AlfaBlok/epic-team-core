@@ -50,6 +50,11 @@ export interface TicketIndex {
   refresh(dir: string): Promise<void>;
   /** changes whenever the index file changes (a kept answer built from it is stale). */
   version(): string;
+  /**
+   * the git blob of one spine file as the index last read it (its lines change only with it); "" when the index holds
+   * no such file. A reader keys its kept parse on this instead of version(), so a build re-parses only changed files.
+   */
+  blob?(abs: string): string | undefined;
   /** the tickets, filtered. */
   tickets(q?: { repo?: string; state?: string; world?: string; id?: string; open?: boolean }): Ticket[];
   /** when the index was last built, and how many tickets and ledger lines it holds. */
@@ -124,6 +129,7 @@ export function createTicketIndex(o: { file?: string; script?: string; python?: 
   let dataVersion = -1;
   let fileStamp = "";
   const kept = new Map<string, LedgerLine[]>();
+  const keptBlobs = new Map<string, string>();
   const open = (): Database.Database | undefined => {
     if (db) return db;
     try {
@@ -150,6 +156,7 @@ export function createTicketIndex(o: { file?: string; script?: string; python?: 
         dataVersion = v;
         fileStamp = stamp;
         kept.clear();
+        keptBlobs.clear();
       }
       return db ?? open();
     } catch {
@@ -239,6 +246,25 @@ export function createTicketIndex(o: { file?: string; script?: string; python?: 
       } catch {
         return false;
       }
+    },
+    blob(abs) {
+      const root = rootOf(abs);
+      if (!root) return undefined;
+      const dir = real(root);
+      const d = current();
+      if (!d) return undefined;
+      const rel = path.relative(root, abs).split(path.sep).join("/");
+      const key = `${dir}\0${rel}`;
+      const hit = keptBlobs.get(key);
+      if (hit !== undefined) return hit;
+      let out = "";
+      try {
+        out = (d.prepare("SELECT blob FROM ledger_files WHERE dir = ? AND path = ?").get(dir, rel) as { blob: string } | undefined)?.blob ?? "";
+      } catch {
+        return undefined;
+      }
+      keptBlobs.set(key, out);
+      return out;
     },
     refresh(dir) {
       return run(real(dir));

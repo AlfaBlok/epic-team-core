@@ -157,7 +157,7 @@ import { heldCard, heldRowBrief } from "./press/heldRow.js";
 import { createSentBack, mountSentBack } from "./review/sentBack.js";
 import { createPickup, PICKUP_TICK_MS, type Pickup } from "./review/pickup.js";
 import type { WorkerLaunchInput } from "./cycle/workerLaunch.js";
-import { computeReviewRows, rowClaimIn, TEST_REPO, TEST_ROW } from "./review/rows.js";
+import { computeReviewRows, rowClaimIn, TEST_REPO, TEST_ROW, type ReviewPayload } from "./review/rows.js";
 import { createPressTest, PRESS_TEST_RUN, pressTestHome, type PressTest, type ListLeak } from "./press/dailyTest.js";
 import { mountApprovals, wakeDeliveryManager } from "./approvals.js";
 import { createSteps, keyInIndex, mountSteps } from "./steps/steps.js";
@@ -2938,6 +2938,13 @@ export function createApp(
   });
   mountWebPush(api, webPush);
   if (opts.webPush?.deskTickMs) setInterval(() => void outsideRequest(() => webPush.deskTick()), opts.webPush.deskTickMs).unref();
+  // the home world's review rows as the inbox reads them (the read model's stored view, the review route's key), so the
+  // notifier's ticks do not rebuild every row on this thread (about 2 s each in a production profile)
+  const homeReviewItems = async () => {
+    const k = { kind: "review" as const, world: homeStore.tenant ?? "" };
+    const rows = readModel ? ((await readModel.view(k, async () => computeReviewRows(homeStore, read.reposRoot))).payload as ReviewPayload).rows : undefined;
+    return reviewItemsOf(db, homeStore, read.reposRoot, rows);
+  };
   // WhatsApp to the owner and the skill's sends (hosted/services.ts); the one-team core sends none.
   const whatsapp: Notifier = services?.whatsapp({
     api,
@@ -2948,7 +2955,7 @@ export function createApp(
       const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
       return [
         ...asksFrom(all.items, (id) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT, (id) => store.getMilestone(id)?.title, (id) => store.getMilestone(id)?.repo),
-        ...reviewNotices(reviewItemsOf(db, homeStore, read.reposRoot)),
+        ...reviewNotices(await homeReviewItems()),
       ];
     },
     options: opts.whatsapp,
@@ -3332,7 +3339,7 @@ export function createApp(
       const k = { kind: "status" as const, world: viewWorld(), includeSettled: false };
       const all = readModel ? (await readModel.view(k, () => computeStatus(status, store, k) as ReturnType<typeof status.all>)).payload : await status.all();
       const title = (id: string) => store.getMilestone(id)?.title;
-      const waiting = [...asksFrom(all.items, (id) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT, title), ...reviewNotices(reviewItemsOf(db, homeStore, read.reposRoot)).map((r) => ({ ...r, title: `review: ${r.title}` }))];
+      const waiting = [...asksFrom(all.items, (id) => store.worldOfMilestone?.(id) ?? DEFAULT_TENANT, title), ...reviewNotices(await homeReviewItems()).map((r) => ({ ...r, title: `review: ${r.title}` }))];
       const stuck = [
         ...all.milestones.filter((m) => m.flow.word === "stalled").map((m) => ({ title: "no one is moving it", milestone: title(m.milestoneId), why: m.flow.reason })),
         ...all.items.filter((i) => i.kind === "stalled" || i.kind === "failed_run").map((i) => ({ title: i.title, milestone: title(i.milestoneId) })),

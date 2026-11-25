@@ -491,6 +491,8 @@ export function openDb(file: string = defaultDbPath()): DB {
   db.exec("CREATE INDEX IF NOT EXISTS runs_running ON runs(outcome) WHERE outcome = 'running'");
   // the runs list (newest 500, every status poll) walked and sorted every run (80-200 ms on the worker server, ~10x on the main server)
   db.exec("CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at)");
+  // the environment stamp looks only at runs still without one (2 of ~20k): no full scan of runs per reconcile tick
+  db.exec("CREATE INDEX IF NOT EXISTS runs_env_unknown ON runs(thread_id) WHERE environment_id IS NULL AND thread_id IS NOT NULL");
   // the owner's name is the home world's tenant row's (a hosted layer's set value or CONSOLE_OWNER_NAME wins)
   try {
     ownerFromRow((db.prepare("SELECT owner_name FROM tenants WHERE id = ?").get(DEFAULT_TENANT) as { owner_name?: string } | undefined)?.owner_name);
