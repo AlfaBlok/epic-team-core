@@ -384,7 +384,7 @@ export function modelId(model: string): string {
   const m = model.trim().toLowerCase();
   if (m.startsWith("claude-")) return model.trim();
   for (const k of ["opus", "sonnet", "haiku"]) if (m.includes(k)) return `claude-${k}-5-5`;
-  if (m.includes("fable")) return "claude-fable-5-1";
+  if (m.includes("fable")) return "claude-fable-5-2"; // never the retired 5.1
   return "claude-sonnet-5-5";
 }
 

@@ -154,6 +154,7 @@ describe("pure mapping", () => {
     expect(modelId("claude-opus-5-5")).toBe("claude-opus-5-5");
     expect(modelId("Haiku")).toBe("claude-haiku-5-5");
     expect(modelId("")).toBe("claude-sonnet-5-5");
+    expect(modelId("Fable")).toBe("claude-fable-5-2"); // never the retired 5.1
   });
   it("finds the T3 project for path, owner/name and bare name", () => {
     expect(matchProject(PROJECTS, "/srv/agent/github/ops/")?.id).toBe("mcp:infra");

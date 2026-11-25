@@ -416,7 +416,7 @@ export const remitHint = (unit: string = DEFAULT_SKIN.words.milestone) =>
 export const remitPlaceholder = (unit: string = DEFAULT_SKIN.words.milestone) =>
   `Read the ${unit}'s spine and backlog. If something is unblocked and unowned, launch an agent to do it; if blocked, say who it waits on.`;
 
-export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"];
 
 /**
  * the persona's team skills, picked from the team library only (Team skills screen; never free text). A skill the
