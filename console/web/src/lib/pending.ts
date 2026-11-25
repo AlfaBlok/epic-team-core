@@ -61,6 +61,9 @@ export function statusQuestion(item: Pick<PendingItem, "kind" | "title" | "ask" 
     const lead = askLead({ ask: item.ask ?? "unknown", question: item.question });
     return { question: asQuestion(lead.kind, plainMarkdown(lead.what)), ...(lead.why ? { why: plainMarkdown(lead.why) } : {}) };
   }
+  // E948-S204 (the owner, closing E948-S200 24 Nov: "a stalled-team card asks Should a team member work on it? and offers
+  // Switch on, not Yes and No"): his question, word for word; the goal is named on the card's about line.
+  if (item.kind === "stalled") return { question: STALLED_QUESTION };
   const title = plainMarkdown(item.title ?? "").trim();
   // a status line that already asks in plain words ("3 open items to work, nobody on. Switch on Delivery Manager?",
   // "Is <goal> finished?") keeps its own words; one carrying a row code is a ticket line, never shown as the question
@@ -72,12 +75,13 @@ export function statusQuestion(item: Pick<PendingItem, "kind" | "title" | "ask" 
       return { question: `Is ${thing} ready for the team to start?` };
     case "failed_run":
       return { question: `Should the team run ${thing} again?` };
-    case "stalled":
-      return { question: `Should a team member work on ${thing}?` };
     default:
       return { question: `What should the team do about ${thing}?` };
   }
 }
+
+/** the stalled-team card's question, in the owner's own words (E948-S204). */
+export const STALLED_QUESTION = "Should a team member work on it?";
 
 /** words a sentence may start with that read lower-case inside a question ("Do you approve one private repo?"). */
 const DETERMINER = /^(?:a|an|the|one|two|three|our|your|its|this|that|these|those|each|every|some|any|no|all|more|less|new|both)\b/i;

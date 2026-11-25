@@ -38,7 +38,7 @@ const asg = (over: Partial<Assignment> = {}) =>
   ({ id: "as_d", milestoneId: "ms_15", personaId: "p_d", cadence: { type: "interval", everyMinutes: 180 }, enabled: false, createdAt: "2026-10-20T00:00:00Z", ...over }) as Assignment;
 
 describe("Stalled item", () => {
-  it("renders orange with Switch on <persona> and Pause; switching on is confirmed, then toggles the assignment", async () => {
+  it("the goal page's stalled line is the inbox card: his question, Switch on in one tap, Leave it off (E948-S204)", async () => {
     const update = vi.spyOn(api, "updateAssignment").mockResolvedValue(asg({ enabled: true }));
     render(
       <MemoryRouter>
@@ -48,11 +48,10 @@ describe("Stalled item", () => {
     const strip = screen.getByTestId("state-strip");
     expect(strip.className).not.toContain("orange"); // one grey frame
     expect(strip.className).not.toContain("red");
-    expect(screen.getByTestId("stalled-item").textContent).toContain("2 steps ready, nobody on. Switch on Diagnostician?");
-    expect(screen.getByRole("button", { name: "Pause the project" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Switch on Diagnostician" }));
-    expect(update).not.toHaveBeenCalled(); // confirm first: it starts write-capable agents
-    fireEvent.click(await screen.findByRole("button", { name: "Switch on" }));
+    expect(screen.getByTestId("status-item-question").textContent).toBe("Should a team member work on it?");
+    expect(screen.getByTestId("stalled-leave-off").textContent).toContain("Leave it off");
+    expect(screen.queryByRole("button", { name: /^(?:Yes|No|Answer)\b/ })).toBeNull();
+    fireEvent.click(screen.getByTestId("stalled-switch-on"));
     await vi.waitFor(() => expect(update).toHaveBeenCalledWith("as_d", { enabled: true }));
   });
 });

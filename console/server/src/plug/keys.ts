@@ -15,7 +15,7 @@ export interface SecretPutInput {
   deployed?: boolean;
   /** a whole key file (several lines, e.g. a JSON service-account key): `--multiline`, never with `--the app platform`. */
   multiline?: boolean;
-  /** the vault save already ran and was read back (`saveFirst`): the store writes only its working copy. */
+  /** the vault save already ran and was read back (`saveFirst`): only the app platform's env is set after it, never a store copy. */
   vaultSaved?: string;
 }
 
@@ -26,9 +26,9 @@ export type SecretPut = (o: SecretPutInput) => Promise<SecretPutResult>;
 /** `the app platform` = where the key went: false when the store-only fallback ran (or the app platform was not asked for). */
 export type SecretStoreResult = { ok: true; deployed: boolean; vault?: string; mirrorErr?: string; noCopy?: boolean } | { ok: false; err: string };
 /**
- * `vault`: the password manager the key went into first (identity `vault`); the secret store then holds only a working
- * copy. `mirrorErr`: that working copy could not be written (the key is saved in the vault all the same). `noCopy`: no
- * working copy was written at all (a test key lives only in the vault).
+ * `vault`: the password manager the key went into (identity `vault`); nothing else holds a copy beyond the app
+ * platform's env. `mirrorErr`: the app platform's env could not be set (the key is saved in the vault all the same). `noCopy`:
+ * nothing was written beyond the vault (no app platform deployment, a key file or a test key).
  */
 
 export interface WorldKeys {

@@ -1026,6 +1026,8 @@ export interface PendingItem {
   detail?: string;
   /** stalled: switched-off personas that could take the ready steps, first = suggested. */
   switchOn?: { assignmentId: string; persona: string }[];
+  /** stalled: the goal's own title, the card's "about" line (E948-S204). */
+  goal?: string;
   /** monitor_alert: a `Monitoring:` item naming a stop / outage or a day overdue; the asks it names; what happens next. */
   monitor?: { why: ("stop" | "overdue")[]; since?: string; nextCheckAt?: string; nextCheck?: string; overdueMs?: number; asks: MonitorAlertAsk[]; next: string };
 }

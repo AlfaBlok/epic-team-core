@@ -72,6 +72,8 @@ export interface PendingItem {
   question?: string;
   /** stalled: the switched-off personas that could take the ready steps, first = the suggested one. */
   switchOn?: { assignmentId: string; persona: string }[];
+  /** stalled: the goal's own title, the card's "about" line (E948-S204). */
+  goal?: string;
   /** monitor_alert: the stopped / overdue `Monitoring:` item, the asks it names and what happens next. */
   monitor?: Omit<MonitorAlert, "what"> & { next: string };
 }
@@ -391,7 +393,7 @@ export function milestoneStatus(i: StatusInput): MilestoneStatus {
   const st = done({ word: "stalled", reason: `${what}; ${off}: nobody will wake` });
   // Stalled is an alarm only for a goal not met yet (deck D3): a marked outcome (accomplished / partially / superseded) adds none.
   if (["accomplished", "partially", "superseded"].includes(outcome.word)) return st;
-  return { ...st, items: [...items, stalledItem(i.milestone.id, what, mine, i.personaName)] };
+  return { ...st, items: [...items, stalledItem(i.milestone.id, what, mine, i.personaName, i.milestone.title)] };
 }
 
 /**
@@ -424,13 +426,16 @@ export function wakeNotes(i: Pick<StatusInput, "runs" | "personaName">, mine: As
  * the Stalled pending line. Its action switches a persona on (the one that woke last first) or pauses the
  * milestone; with no persona assigned only Pause is offered. `alarm`: orange, not counted in needsYou.
  */
-export function stalledItem(milestoneId: string, what: string, mine: Assignment[], personaName?: (id: string) => string | undefined): PendingItem {
+export function stalledItem(milestoneId: string, what: string, mine: Assignment[], personaName?: (id: string) => string | undefined, goal?: string): PendingItem {
   const switchOn = mine
     .filter((a) => !a.enabled || a.parkedAt)
     .sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? "") || a.createdAt.localeCompare(b.createdAt))
     .map((a) => ({ assignmentId: a.id, persona: personaName?.(a.personaId) ?? a.personaId }));
   const title = switchOn.length ? `${what}, nobody on. Switch on ${switchOn[0].persona}?` : `${what}, ${mine.length ? "no persona scheduled" : "no persona assigned"}`;
-  return { id: `stalled:${milestoneId}`, kind: "stalled", state: "alarm", milestoneId, title, ...(switchOn.length ? { switchOn } : {}) };
+  // E948-S204: the inbox card asks "Should a team member work on it?"; its detail says plainly what waits and who is off.
+  const who = switchOn.length ? `${switchOn[0].persona} is switched off, so nobody wakes on it.` : mine.length ? "No team member is scheduled on it." : "No team member is on it yet.";
+  const detail = `${what[0]!.toUpperCase()}${what.slice(1)}${goal ? ` on ${goal}` : ""}. ${who}`;
+  return { id: `stalled:${milestoneId}`, kind: "stalled", state: "alarm", milestoneId, title, detail, ...(goal ? { goal } : {}), ...(switchOn.length ? { switchOn } : {}) };
 }
 
 /** Planning / Parked from the root's spines.py run_state, else the spine Status word (draft / deferred). */

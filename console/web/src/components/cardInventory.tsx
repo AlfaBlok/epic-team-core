@@ -144,7 +144,10 @@ const samplePost = (kind?: string): ReviewItem =>
   } as Partial<ReviewItem>);
 
 const sampleStatus = (kind: "mark_ready" | "stalled"): PendingItem =>
-  ({ id: `sample_${kind}`, kind, state: "open", milestoneId: "ms_sample", title: kind === "mark_ready" ? "Start the sign-up page" : "The sign-up page has not moved in two days", detail: "It waits for your ready stamp.", since: SINCE, path: "docs/spines/sample.md" }) as PendingItem;
+  kind === "stalled"
+    ? // E948-S204: a goal whose team is off asks "Should a team member work on it?"
+      ({ id: "sample_stalled", kind, state: "alarm", milestoneId: "ms_sample", title: "3 steps ready, nobody on. Switch on Delivery Manager?", detail: "3 steps ready on Get 5 testers. Delivery Manager is switched off, so nobody wakes on it.", goal: "Get 5 testers", switchOn: [{ assignmentId: "as_sample", persona: "Delivery Manager" }], since: SINCE } as PendingItem)
+    : ({ id: `sample_${kind}`, kind, state: "open", milestoneId: "ms_sample", title: "Start the sign-up page", detail: "It waits for your ready stamp.", since: SINCE, path: "docs/spines/sample.md" }) as PendingItem;
 
 /** E948-S200: a held ask drawn as a status card, its question a yes or no (the E907-S32 card). */
 const sampleStatusAsk = (): PendingItem =>
@@ -217,7 +220,7 @@ export const CARD_TYPES: CardType[] = [
   { id: "do-browser", kind: "do", buttons: "Copy the prompt · Done · Stuck. Park. Snooze. Voice · Text.", name: "Do: a step in your own browser, with a prompt for Claude in Chrome", where: "Inbox, Waiting on you", component: "WaitingCard", render: () => <WaitingCard item={sampleAsk({ id: "sample_do_browser", ask: "do", question: "Download one GoDaddy receipt as a PDF.", steps: "1. Open https://account.godaddy.com/receipts and sign in · 2. Save the receipt as a PDF", browserPrompt: "Open https://account.godaddy.com/receipts/view/4176093069 in this browser, where I am signed in. Save the receipt as a PDF and email it to me with the subject Alpha GoDaddy receipt 4176093069." } as Partial<WaitingItem>)} /> },
   { id: "status-ready", kind: "do", buttons: "Mark ready for delivery. Voice · Text.", name: "Do: stamp a task ready", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("mark_ready")} /> },
   { id: "status-ask-yes-no", kind: "decision", buttons: "Yes: go ahead · No: drop it · Open the whole card. Voice · Text.", name: "Decision: an ask shown as a short card, a yes or no question (E948-S200)", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatusAsk()} /> },
-  { id: "status-review", kind: "news", buttons: "None: the line opens its task. Voice · Text.", name: "Review: a status line that needs a look", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("stalled")} /> },
+  { id: "status-stalled", kind: "decision", buttons: "Switch on · Leave it off. Voice · Text.", name: "Decision: a goal whose team is off, should a team member work on it (E948-S204)", where: "Inbox, Waiting on you", component: "StatusItemRow", render: () => <StatusItemRow item={sampleStatus("stalled")} /> },
   { id: "monitor-alert", kind: "news", buttons: "None: it opens the check. Voice · Text.", name: "Alert: a check stopped or is late", where: "Inbox, top", component: "MonitorAlertCard", render: () => <MonitorAlertCard item={sampleAlert()} /> },
   {
     id: "ask-set",
@@ -398,6 +401,7 @@ export const NO_PARK: Record<string, string> = {
   "persona-request": "a persona's request is not written in a spine yet, so there is no line to park it on: follow-up",
   "status-ready": "a draft task: leaving it unstamped already keeps it parked",
   "status-ask-yes-no": "the short form of an ask: Park sits on its whole card, one tap away",
+  "status-stalled": "Leave it off is its park: the goal is paused until you switch it on",
   "held-post": "a held post never goes out without your Schedule: it already waits",
   "held-reply": "a held reply never goes out without your Schedule: it already waits",
   "mac-ticket": "a Mac ticket waits on the Mac list until you run it",

@@ -228,7 +228,7 @@ describe("E948-S60 every card type ends with the feedback block", () => {
 /** the buttons that answer a decision with yes or no: each says what happens next, `Yes: plan it`. */
 const ANSWER_IDS = ["review-choice", "yes", "no", "approve", "decline", "ask-set-accept", "ask-set-no", "accept-all", "advisor-accept", "advisor-decline", "advisor-accept-all"];
 /** an ask's own options: its own words, never one bare word. */
-const OPTION_IDS = ["ask-option", "goal-option"];
+const OPTION_IDS = ["ask-option", "goal-option", "stalled-switch-on", "stalled-leave-off"]; // E948-S204: Switch on, Leave it off
 const BARE = /^(?:yes|no|ok|okay|approve|accept|decline|send|send my pick|pick|confirm|submit)$/i;
 const NAMES_NEXT = /^[^:]{1,30}:\s*\S/;
 /** the feedback block's own presses (Voice, Text and the box Text opens), apart from the card's answers that lead its row. */

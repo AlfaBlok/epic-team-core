@@ -64,10 +64,9 @@ describe("every card leads with its question (E948-S198)", () => {
       expect(question.endsWith("?"), `${kind}: ${question}`).toBe(true);
       expect(question, kind).not.toMatch(/E907-S32|Core:|vn_/);
     }
+    // the stalled-team card asks his own words (E948-S204, replacing its old "… Switch on Delivery Manager?" line)
+    expect(statusQuestion({ kind: "stalled", title: "3 open items to work, nobody on. Switch on Delivery Manager?" }).question).toBe("Should a team member work on it?");
     // a line that already asks in plain words keeps them
-    expect(statusQuestion({ kind: "stalled", title: "3 open items to work, nobody on. Switch on Delivery Manager?" }).question).toBe(
-      "3 open items to work, nobody on. Switch on Delivery Manager?",
-    );
     expect(statusQuestion({ kind: "ready_to_mark", title: "Is Market entry signals finished?" }).question).toBe("Is Market entry signals finished?");
     // an ask that already asks keeps its own question
     expect(

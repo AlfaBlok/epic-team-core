@@ -2346,7 +2346,7 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
   // a status line is a card of the one family: meta, heading, body, its one button.
   return (
     <CardShell kind={item.kind} data-testid="status-item" data-kind={item.kind} data-pending-id={item.id} data-row={item.nodeKey} id={waitingAnchor(item.id)}>
-      <CardMeta kind={item.kind === "mark_ready" ? "Do" : yesNo ? "Decision" : "Review"} about={item.kind === "ready_to_mark" ? undefined : aboutFrom(item.title)} since={item.since} sinceWhat="issued">
+      <CardMeta kind={item.kind === "mark_ready" ? "Do" : yesNo || item.kind === "stalled" ? "Decision" : "Review"} about={item.kind === "ready_to_mark" ? undefined : item.kind === "stalled" ? (item.goal ?? milestone ?? aboutFrom(item.title)) : aboutFrom(item.title)} since={item.since} sinceWhat="issued">
         {milestone && <span data-testid="status-item-milestone">{milestone}</span>}
         <OwnerPriorityTag p={item.ownerPriority} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />
       </CardMeta>
@@ -2374,6 +2374,8 @@ function StatusItemBody({ item, milestone }: { item: PendingItem; milestone?: st
               <StampButton milestoneId={item.milestoneId} to="ready" {...(item.path ? { path: item.path } : {})} />
             ) : item.kind === "ready_to_mark" ? (
               <FinishedButtons item={item} />
+            ) : item.kind === "stalled" ? (
+              <StalledButtons item={item} question={asked.question} open={"to" in action ? action.to : undefined} />
             ) : yesNo ? (
               <StatusYesNo item={item} question={asked.question} open={"to" in action ? action.to : undefined} />
             ) : (
@@ -2430,6 +2432,60 @@ function StatusYesNo({ item, question, open }: { item: PendingItem; question: st
         </CardButton>
       )}
       {error && <span className="text-xs text-destructive" data-testid="status-yes-no-error">{error}</span>}
+    </>
+  );
+}
+
+/**
+ * E948-S204 (the owner, closing E948-S200 24 Nov: "a stalled-team card asks Should a team member work on it? and offers
+ * Switch on, not Yes and No"): the card for a goal whose team is off answers its question right here.
+ *
+ *   Should a team member work on it?
+ *   [ Switch on ]  ── the goal's switched-off persona starts waking: the Personas tab's own switch, written to the repo
+ *   [ Leave it off ] ── quiet: the goal is paused (written to the repo too), so the card does not come back
+ *   words box below ── a free note to the team, as on every card
+ *
+ * With no persona to switch on, Switch on opens the goal's Personas tab to pick one.
+ */
+function StalledButtons({ item, question, open }: { item: PendingItem; question: string; open?: string }) {
+  const target = item.switchOn?.[0];
+  const [busy, setBusy] = useState<"on" | "off">();
+  const [error, setError] = useState<string>();
+  const press = async (on: boolean) => {
+    setBusy(on ? "on" : "off");
+    setError(undefined);
+    try {
+      if (on && target) await mutate(() => api.updateAssignment(target.assignmentId, { enabled: true }), "inbox");
+      else await mutate(() => api.updateMilestone(item.milestoneId, { paused: true }), "inbox");
+      markSent(`status:${item.id}`, {
+        said: on ? `Switched on. ${target!.persona} starts working on it.` : "Left off. The goal is paused until you switch it on.",
+        title: item.goal ?? question,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+  return (
+    <>
+      {target ? (
+        <CardButton onClick={() => void press(true)} disabled={!!busy} title={`${target.persona} starts waking on its cadence and works the ready steps.`} data-testid="stalled-switch-on">
+          {busy === "on" ? <Loader2 className="animate-spin" /> : <Check />} Switch on
+        </CardButton>
+      ) : (
+        open && (
+          <CardButton asChild>
+            <Link to={open} data-testid="stalled-switch-on">
+              Switch on
+            </Link>
+          </CardButton>
+        )
+      )}
+      <CardButton variant="ghost" onClick={() => void press(false)} disabled={!!busy} title="Nobody works on it. The goal is paused until you switch it on." data-testid="stalled-leave-off">
+        {busy === "off" && <Loader2 className="animate-spin" />} Leave it off
+      </CardButton>
+      {error && <span className="text-xs text-destructive" data-testid="stalled-error">{error}</span>}
     </>
   );
 }
