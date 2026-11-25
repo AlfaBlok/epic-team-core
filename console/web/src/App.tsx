@@ -7,7 +7,7 @@ import { InPlaceLinks } from "@/components/InPlaceLinks";
 import { OurPage } from "@/components/OurPage";
 import { OUR_PAGE_PATH } from "@/lib/inPlaceLinks";
 import { DASHBOARD_PATH, SETTINGS_PATH } from "@/lib/settingsPath";
-import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, ON_DEVICE_PATH, X_STATS_PATH, COACH_PATH, BRIEFING_PATH, MARKETING_PATH } from "@/lib/routePaths";
+import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, ON_DEVICE_PATH, X_STATS_PATH, COACH_PATH, BRIEFING_PATH, MARKETING_PATH, STRATEGY_PATH } from "@/lib/routePaths";
 import { BookIndexRedirect, BookToDeck } from "@/pages/BookRedirect";
 import { DECK_ALL_PATH } from "@/lib/deck";
 import { ALL_PIPELINE_PATH, PRODUCT_PATH, socialPath } from "@/pages/social/nav";
@@ -32,6 +32,7 @@ const OnDevicePage = lazyPage(() => import("@/voice/OnDevice"), "OnDevicePage");
 const CoachPage = lazyPage(() => import("@/voice/Coach"), "CoachPage");
 const BriefingPage = lazyPage(() => import("@/voice/Briefing"), "BriefingPage");
 const MarketingPage = lazyPage(() => import("@/voice/Marketing"), "MarketingPage");
+const StrategyPage = lazyPage(() => import("@/voice/Strategy"), "StrategyPage");
 const CardInventoryPage = lazyPage(() => import("@/components/cardInventory"), "CardInventoryPage");
 // Home too (its goals view and the goal-sets code under it): the Inbox opens without them.
 const HomePage = lazyPage(() => import("@/components/homeView"), "HomePage");
@@ -105,6 +106,8 @@ const CORE_ROUTES: ScreenRoute[] = [
   { screen: "chat", path: BRIEFING_PATH, element: <BriefingPage /> },
   // the senior marketing call: the social product's strategy, campaign by campaign, his words to the social desk.
   { screen: "chat", path: MARKETING_PATH, element: <MarketingPage /> },
+  // the team product's strategy call: its launch strategy question by question, his words to the Team desk.
+  { screen: "chat", path: STRATEGY_PATH, element: <StrategyPage /> },
   // readiness, red lines and What you build, then every operator page (docs/design/console.md).
   { screen: "settings", path: SETTINGS_PATH, element: <SettingsPage /> },
   // the read-only dashboard panels that left Settings (root L-80), one page in the menu's tools.

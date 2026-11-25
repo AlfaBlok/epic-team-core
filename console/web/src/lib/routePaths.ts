@@ -35,4 +35,6 @@ export const COACH_PATH = "coach";
 export const BRIEFING_PATH = "briefing";
 /** the senior marketing call: the social product's strategy, the number one blocker and each campaign's plan. */
 export const MARKETING_PATH = "marketing";
+/** the team product's strategy call: who buys first, the message, the waitlist, the launch timeline. */
+export const STRATEGY_PATH = "strategy";
 export const X_STATS_PATH = "x-stats";

@@ -231,6 +231,7 @@ import { mountReplyVoice } from "./voice/speak.js";
 import { mountReplyNote } from "./voice/replyNote.js";
 import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince } from "./voice/briefing.js";
 import { marketingAgentName, marketingBrief, MARKETING_GREETING, MARKETING_PAGE, MARKETING_TOOLS, marketingInstructions, marketingKnows, marketingNoteText, marketingRelayIn } from "./voice/marketing.js";
+import { strategyAgentName, strategyBrief, STRATEGY_GREETING, STRATEGY_PAGE, STRATEGY_TOOLS, strategyInstructions, strategyKnows, strategyNoteText, teamProduct } from "./voice/teamStrategy.js";
 import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
@@ -568,7 +569,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -3707,6 +3708,69 @@ export function createApp(
     },
   });
   mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm() }, "The senior marketing call");
+  // the team product's strategy call (/strategy): its own ElevenLabs agent sets the team product's launch
+  // strategy with him from the strategy brief (the launch timeline, what ready waits on, the questions) and its
+  // objectives; his words go to the Team desk or the social desk. The marketing call's tools and relay, reused.
+  const strategyEleven: ElevenCalls | undefined =
+    opts.voice?.strategyEleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          name: strategyAgentName(),
+          tags: [teamProduct().toLowerCase(), "strategy-call"],
+          key: elevenKey,
+          prompt: strategyInstructions,
+          firstMessage: STRATEGY_GREETING,
+          tools: () => STRATEGY_TOOLS as any,
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_strategy_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_strategy_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
+  let strategyNotes = 0;
+  const strategyVoice = createVoice({
+    ...voiceBase,
+    eleven: strategyEleven,
+    mint: async () => {
+      throw new VoiceError(409, "strategy_eleven_only", "The strategy call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+    },
+    scope: { world: DEFAULT_TENANT },
+    instructions: strategyInstructions,
+    tools: () => STRATEGY_TOOLS as any,
+    desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    quickStatus: noStatus,
+    context: async () => {
+      const home = resolveRepo(read.reposRoot, homeRepo())?.path;
+      let brief: string | undefined;
+      try {
+        if (home) brief = fs.readFileSync(path.join(home, strategyBrief()), "utf8");
+      } catch {
+        /* no brief on this console: the call still has the objectives */
+      }
+      return strategyKnows({ brief, objectives: await voiceObjectiveCards() });
+    },
+    walkRule: () => "",
+    relay: async (callId, args) => {
+      let r: ReturnType<typeof marketingRelayIn>;
+      try {
+        r = marketingRelayIn(args);
+      } catch (e) {
+        throw new VoiceError(400, "bad_relay", (e as Error).message);
+      }
+      const n = ++strategyNotes;
+      if (r.desk === "social") {
+        const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: STRATEGY_PAGE, requestId: `strategy-${callId}-${n}` });
+        if (p) {
+          console.log(`[voice] ${callId} strategy note ${n} passed to the social desk (${p.state})`);
+          return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+        }
+      }
+      await desk.send(strategyNoteText(callId, r, r.desk === "social"), STRATEGY_PAGE, `strategy-${callId}-${n}`);
+      console.log(`[voice] ${callId} strategy note ${n} sent to the Team desk`);
+      return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
+    },
+  });
+  mountOwnCall(api, "/voice/strategy", strategyVoice, { world: () => store.tenant }, "The strategy call");
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";
