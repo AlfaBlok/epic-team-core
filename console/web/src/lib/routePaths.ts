@@ -33,7 +33,7 @@ export const ON_DEVICE_PATH = "voice-on-device";
 export const COACH_PATH = "coach";
 /** the briefing call: what happened since his last briefing, then his notes to the Team desk. */
 export const BRIEFING_PATH = "briefing";
-/** the senior marketing call: the social product's strategy, the number one blocker and each campaign's plan. */
+/** the social product's briefer call (served on its console; the team console forwards there): its numbers, then the strategy. */
 export const MARKETING_PATH = "marketing";
 /** the team product's strategy call: who buys first, the message, the waitlist, the launch timeline. */
 export const STRATEGY_PATH = "strategy";

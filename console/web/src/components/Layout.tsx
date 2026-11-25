@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type FormEvent, type Re
 import { BundleButtons, PLAN_WORDS, usePlan } from "./buyPlan";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, BarChart3, Building2, Presentation, Bot, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, ListChecks, Crosshair, Pin, Armchair, Server, KeyRound, Sparkles, Coins, Globe, Search as SearchIcon } from "lucide-react";
+import { Activity, BarChart3, Building2, Presentation, Bot, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, ListChecks, Crosshair, Pin, Armchair, Server, KeyRound, Sparkles, Coins, Globe, Phone, Search as SearchIcon } from "lucide-react";
 import { PRIORITY_PATH, PriorityLongPress, PriorityModeChip } from "@/components/priorityShortcut";
 import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type ReviewItem, type WorldCounts } from "@/api";
@@ -28,7 +28,7 @@ import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
 import { COMPANY_PATH } from "@/lib/company";
-import { GAP_FINDER_PATH, NEW_CAMPAIGN_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
+import { GAP_FINDER_PATH, MARKETING_PATH, NEW_CAMPAIGN_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
 import { SETTINGS_PATH, useOperatorPages, useToolPages } from "@/lib/settingsPath";
 import { useCompanyView } from "@/lib/companyView";
 import { useGapFinder } from "@/lib/gapFinder";
@@ -44,7 +44,7 @@ import { AfterCloseNote } from "@/components/afterClose";
 import { TopBarVoice } from "@/voice/TopBarVoice";
 import { knownWorld } from "@/lib/useSocial";
 import { deskVoiceBase } from "@/voice/deskBase";
-import { homeWorld } from "@/lib/identity";
+import { homeWorld, socialProduct } from "@/lib/identity";
 import { FoldChevron } from "@/components/foldChevron";
 
 // The New milestone dialog loads its script the first time it opens, not with the first screen.
@@ -483,6 +483,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             <MessageCircle className="h-4 w-4" />
             Chat
             <Pills chat={counts?.chat} ids={{ chat: "chat-unread" }} />
+          </NavLink>
+        )}
+        {/* the social product's briefer call, in its own menu (the owner, 25 Nov: it belongs in the social product). */}
+        {campaigns && shows("chat") && (
+          <NavLink to={`/${MARKETING_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-briefer">
+            <Phone className="h-4 w-4" />
+            {socialProduct()} briefer
           </NavLink>
         )}
         {/* Runs high (the owner, 22 Nov: "Runs I would make much higher. That's the one I actually use the most"). */}

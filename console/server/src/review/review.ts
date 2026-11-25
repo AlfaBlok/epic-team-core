@@ -19,7 +19,7 @@ import type { SpineWrite, SpineWriter } from "../inbox/spineWrite.js";
 import { serverTimingOf, timeWrites } from "../inbox/spineWrite.js";
 import type { ReadModelHost } from "../readModel/host.js";
 import { hooks } from "../plug/hooks.js";
-import { approveCell, computeReviewRows, denyCell, editRowStatus, relaunchCell, snoozeCell, TEST_REPO, type DoneMeansLine, type ReviewCloses, type ClosedGoal, type ReviewGoal, type ReviewPayload, type ReviewRow, type ReviewStarted, type ReviewTag, type ReviewVerdict } from "./rows.js";
+import { approveCell, CLOSED_BY_PRESS, computeReviewRows, denyCell, editRowStatus, heldAsRepeat, ledgerLines, movedInto, MOVED_ON, relaunchCell, snoozeCell, TEST_REPO, type DoneMeansLine, type ReviewCloses, type ClosedGoal, type ReviewGoal, type ReviewPayload, type ReviewRow, type ReviewStarted, type ReviewTag, type ReviewVerdict } from "./rows.js";
 import type { CardFace } from "./face.js";
 import type { NoteMark } from "./noteMarks.js";
 import { CARD_FIELDS_RULE, FEATURE_LIST_RULE } from "./cardRule.js";
@@ -30,6 +30,7 @@ import { targetGoals } from "./face.js";
 import { AttachError, ATTACH_MAX_PER_MESSAGE } from "../desk/attachLimits.js";
 import type { Attachments } from "../desk/attachments.js";
 import { hostOf, ownerName, ownerPattern, sites } from "../identity.js";
+import { stripInline } from "../adapters/markdown.js";
 import { createAskLogReader } from "../inbox/askRepeat.js";
 import { DUPLICATE_LABEL, duplicateWords, traceDuplicate, traceLine, type DupCandidate } from "../inbox/duplicate.js";
 
@@ -128,6 +129,8 @@ export interface ReviewItem {
   sha?: string;
   /** After Complete: the follow-up rows written (ready = started, draft = parked). */
   followupRows?: FollowupRow[];
+  /** E948-S206: his press reached a card whose row had moved on (folded into a sibling): where it went, in plain words. */
+  movedOn?: { ref: string; title?: string; line: string };
   /** after Complete of a card with switches, what was switched on (rows in their goals) and off (dismissed). */
   switched?: { on: { ref: string; goal: string; title: string }[]; off: { title: string; goal: string; why: string }[] };
   /**
@@ -467,9 +470,12 @@ export function createReview(db: DB, o: ReviewOptions) {
     const hit = repoDir ? computeReviewRows(store, o.reposRoot, { repoDir }).rows.find((r) => r.id === id) : undefined;
     return hit ?? computeReviewRows(store, o.reposRoot).rows.find((r) => r.id === id);
   };
+  /** E948-S206: every card this console has listed, by id, so a press on a card whose row has since moved on still finds its row. */
+  const shownCards = new Map<string, ReviewRow>();
   /** no gate bypass: a button acts only on a row that passes the gate (a card), whatever calls it. */
+  // E948-S206 round 3: a card held as a repeat after it reached his screen still takes his press (its owner folds it after)
   const notACard = (r: ReviewRow): ActionResult | undefined =>
-    r.verdict.kind === "card" ? undefined : { error: 409, code: "not_a_card", message: `${r.ref} is not a card for ${ownerName()} (${r.verdict.reason ?? r.verdict.kind}${r.verdict.problems?.length ? `: ${r.verdict.problems.join("; ")}` : ""}); nothing changed` };
+    r.verdict.kind === "card" || heldAsRepeat(r.verdict) ? undefined : { error: 409, code: "not_a_card", message: `${r.ref} is not a card for ${ownerName()} (${r.verdict.reason ?? r.verdict.kind}${r.verdict.problems?.length ? `: ${r.verdict.problems.join("; ")}` : ""}); nothing changed` };
 
   const liveRead = db.prepare("SELECT ok, status, error, checked_at, plan FROM review_live WHERE url = ? AND commit_sha = ?"); // prepared once
   const liveRow = (url: string, commit?: string) => liveRead.get(url, commit ?? "") as LiveRow | undefined;
@@ -478,6 +484,8 @@ export function createReview(db: DB, o: ReviewOptions) {
   const isPlanRow = (r: ReviewRow) => isPlan(r.face?.title, r.face?.taskGoal, r.face?.tree?.find((t) => t.mark === "this")?.text);
 
   function toItem(r: ReviewRow): ReviewItem {
+    shownCards.set(r.id, r);
+    if (shownCards.size > 5000) shownCards.delete(shownCards.keys().next().value!);
     // only a card's link is checked (list, L-47), so only a card reads the check cache: a row the gate stops
     // never shows what another row's check of the same URL left there (it differed after a rebuild of the cache)
     const liveOf = (url: string, commit?: string) => (r.verdict.kind === "card" ? liveRow(url, commit) : undefined);
@@ -708,7 +716,8 @@ export function createReview(db: DB, o: ReviewOptions) {
   }
   async function completeRow(id: string, pick: { start?: number[]; park?: number[]; why?: string[]; slot?: string; feedback?: string; now?: boolean; release?: boolean; choice?: string; plan?: string } = {}): Promise<ActionResult> {
     const r = fresh(id);
-    if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
+    const pressed = { what: pick.choice ? `"${decisionWords(pick.choice)}"` : "Mark complete", ...(pick.feedback ? { words: pick.feedback } : {}) };
+    if (!r) return landMoved(id, undefined, { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" }, pressed);
     const gate = notACard(r);
     if (gate) return gate;
     const item = toItem(r);
@@ -755,7 +764,7 @@ export function createReview(db: DB, o: ReviewOptions) {
         return t;
       },
     );
-    if (!w.ok) return w.result;
+    if (!w.ok) return landMoved(id, r, w.result, pressed);
     o.readModel?.patch({ kind: "review", id, op: "closed" });
     const done: ReviewItem = { ...item, state: "approved", status: `done (approved by ${by} ${new Date().toISOString().slice(0, 10)})`, ...(w.write.sha ? { sha: w.write.sha } : {}), followupRows: made };
     const started = made.filter((m) => m.status === "ready");
@@ -932,6 +941,98 @@ export function createReview(db: DB, o: ReviewOptions) {
     return { item: done };
   }
 
+  /**
+   * E948-S206 round 3 (the owner, 25 Nov 18:13Z, vn_e4dbcbce): a press on a card whose row moved on before the press was
+   * written (folded into its sibling, merged, superseded, or any other status) is never refused. It lands as his words
+   * on the row it went to: one Decisions row in the spine (`<target>: <his press> on <row>'s card landed here`), the
+   * commit body carries "His words:" (card_notes.py reads it as his note), and that row's owner is woken with it. The
+   * press answers where it went, in plain words. A row his own earlier press closed (a second tap) stays as it was.
+   */
+  /** the plain title on a row's card file (docs/cards/<row>.md `title:`), for the line he reads; undefined without one. */
+  const cardTitleOf = (dir: string, ref: string): string | undefined => {
+    try {
+      const m = /^title:\s*["']?(.+?)["']?\s*$/m.exec(fs.readFileSync(path.join(dir, "docs", "cards", `${ref}.md`), "utf8"));
+      return m?.[1]?.slice(0, 140);
+    } catch {
+      return undefined;
+    }
+  };
+  async function landMoved(id: string, r: ReviewRow | undefined, res: ActionResult, press: { what: string; words?: string }): Promise<ActionResult> {
+    if (!("error" in res) || !(res.error === 409 || res.error === 404) || !MOVED_ON.test(res.message)) return res;
+    const c = r ?? shownCards.get(id) ?? (() => {
+      const k = cardFresh(id);
+      return k ? ({ ...k, id, verdict: { kind: "card" } } as unknown as ReviewRow) : undefined;
+    })();
+    if (!c || !o.writer) return res;
+    const dir = repoDir(c);
+    if (!dir) return res;
+    const by = who();
+    let target = c.ref;
+    let targetTitle: string | undefined;
+    let was = "";
+    const w = await o.writer.edit({
+      repoDir: dir,
+      path: c.path,
+      label: c.ref,
+      verify: true,
+      group: true,
+      fetchFreshMs: FRESH_MS,
+      edit: (text, date) => {
+        const lines = ledgerLines(text).filter((x) => x.col.status >= 0);
+        const row = lines.find((x) => x.id === c.ref);
+        const status = stripInline(row?.cells[row.col.status] ?? "");
+        if (row && CLOSED_BY_PRESS.test(status)) return { skip: `${c.ref} was already closed by ${by}'s own press (${status.slice(0, 80)})` };
+        was = status;
+        target = (row && movedInto(status)) || c.ref;
+        const t = lines.find((x) => x.id === target);
+        targetTitle = t ? cardTitleOf(dir, target) : undefined;
+        const onto = target === c.ref ? `${c.ref}'s own row (it had moved on to "${status.slice(0, 100)}")` : `${target}, the row ${c.ref} was folded into before the press`;
+        const next = addDecisionRow(text, {
+          date,
+          outcome: "accepted",
+          decision: `${target}: ${by}'s press ${press.what} on ${c.ref}'s card landed on ${onto} (E948-S206: a press on a card that moved on is never refused)`,
+          summary: `${by} answered the card he had in front of him; his press is his word on ${target} and its owner was woken with it`,
+          evidence: `the press log, card ${c.ref}`,
+          revisit: `${target} next round`,
+        });
+        if (next === undefined) return { skip: `no Decisions table in ${c.path} to land the press on` };
+        return {
+          text: next,
+          msg: `Review ${target}: ${by}'s press on ${c.ref}'s card landed here, the card had moved on (${by}, via console)`,
+          body: `${by} pressed ${press.what} on the card "${c.title}" (${c.ref}). Before the press was written, ${c.ref} had moved on: "${status.slice(0, 200)}". The press is not refused: it lands on ${target} as his words, and its owner is woken.\n\nHis words: ${press.what}${press.words ? `: ${press.words}` : ""}`,
+        };
+      },
+    });
+    if (w.status !== "written") return res;
+    o.wrote?.(dir);
+    o.readModel?.patch({ kind: "review", id, op: "closed" });
+    const line =
+      target === c.ref
+        ? `This card had moved on before your press. Your answer was added to it, and its owner has it.`
+        : `This card had been merged into ${targetTitle ? `"${targetTitle.replace(/\.$/, "")}"` : "another card"} before your press. Your answer went there, and its owner has it.`;
+    const base: ReviewItem = "item" in res && res.item ? res.item : Array.isArray(c.links) ? toItem(c) : ({ id, title: c.title, ref: c.ref, repo: c.repo, path: c.path, liveUrl: "", links: [] } as unknown as ReviewItem);
+    const item: ReviewItem = { ...base, state: "relaunched", status: was, ...(w.sha ? { sha: w.sha } : {}), movedOn: { ref: target, ...(targetTitle ? { title: targetTitle } : {}), line } };
+    const persona = c.test ? undefined : relaunchTarget(c);
+    if (persona && o.cycle) {
+      try {
+        await wakeSoon(
+          o.cycle.runNowRequest(
+            persona,
+            {
+              instructions: `${by} pressed ${press.what} on ${c.ref}'s card ("${c.title}"), but ${c.ref} had moved on ("${was.slice(0, 160)}"). The console landed the press on ${target} as his words (Decisions row, commit ${w.sha ?? "written"}). Act on it in ${target}'s round: quote it, answer it on ${target}'s card.${press.words ? ` His words: ${press.words}` : ""}`.slice(0, RELAUNCH_MAX),
+              instructionsBy: by,
+            },
+            `review-moved:${id}:${w.sha ?? ""}`,
+          ),
+          `moved ${c.ref}`,
+        );
+      } catch {
+        /* the press landed; the Delivery manager's next wake reads the Decisions row */
+      }
+    }
+    return { item };
+  }
+
   /** The persona that gets the owner's words: the milestone's Delivery manager, else its first assignment. */
   function relaunchTarget(r: ReviewRow): string | undefined {
     if (!r.milestoneId) return undefined;
@@ -942,7 +1043,8 @@ export function createReview(db: DB, o: ReviewOptions) {
   async function relaunch(id: string, feedback: string): Promise<ActionResult> {
     if (parsePostCardId(id)) return postAction(o.posts?.(), (p) => p.relaunch(id, feedback));
     const r = fresh(id);
-    if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
+    const pressed = { what: "Changes", words: feedback };
+    if (!r) return landMoved(id, undefined, { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" }, pressed);
     const gate = notACard(r);
     if (gate) return gate;
     const item = toItem(r);
@@ -970,7 +1072,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       `Review ${r.ref}: relaunched (${by}, via console)`,
       `${by} relaunched "${r.title}" from the console's review list: row ${r.ref} in ${r.path} is active again.\n\nHis words: ${feedback}`,
     );
-    if (!w.ok) return w.result;
+    if (!w.ok) return landMoved(id, r, w.result, pressed);
     o.readModel?.patch({ kind: "review", id, op: "closed" });
     const done: ReviewItem = { ...item, state: "relaunched", ...(w.write.sha ? { sha: w.write.sha } : {}) };
     try {
@@ -990,7 +1092,8 @@ export function createReview(db: DB, o: ReviewOptions) {
     if (parsePostCardId(id)) return postAction(o.posts?.(), (p) => p.deny(id));
     if (opts.duplicate) return duplicate(id, reason);
     const r = fresh(id);
-    if (!r) return { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" };
+    const pressed = { what: "Decline", ...(reason.trim() ? { words: reason.trim() } : {}) };
+    if (!r) return landMoved(id, undefined, { error: 404, code: "not_found", message: "no row in review with that id (the spine moved on)" }, pressed);
     const gate = notACard(r);
     if (gate) return gate;
     const item = toItem(r);
@@ -1001,7 +1104,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       `Review ${r.ref}: denied (${by}, via console)`,
       `${by} denied "${r.title}" from the console's review list: row ${r.ref} in ${r.path} is closed as superseded, not done.${reason.trim() ? `\n\nHis words: ${reason.trim()}` : ""}`,
     );
-    if (!w.ok) return w.result;
+    if (!w.ok) return landMoved(id, r, w.result, pressed);
     o.readModel?.patch({ kind: "review", id, op: "closed" });
     return { item: { ...item, state: "denied", status: `superseded (denied by ${by} ${new Date().toISOString().slice(0, 10)})`, ...(w.write.sha ? { sha: w.write.sha } : {}) } };
   }

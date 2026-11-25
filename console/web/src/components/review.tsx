@@ -720,8 +720,10 @@ function FromBand({ from }: { from: NonNullable<CardFace["from"]> }) {
 /** what a card says once its press is saved, and once it is in the repo (L-48: plain words). */
 export const SAVED_LINE = "Saved ✓ It is being written to the project now.";
 export const LANDED_LINE = "Done ✓ It is in the project.";
+/** a refusal because the row left review before the press (the console lands those now; an older console still refused). */
+export const MOVED_ON_WHY = /is not in review any more|not in this spine's ledger any more|the spine moved on/;
 
-type Progress = { id: string; title: string; state: "writing" | "done" | "kept"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number> };
+type Progress = { id: string; title: string; state: "writing" | "done" | "kept"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number>; movedOn?: string };
 
 /**
  * every review press the console saved (its 202) gets a line at the bottom of the screen while it is written to
@@ -743,7 +745,7 @@ function usePressProgress(itemOf: (id: string) => Listed | undefined): Progress[
           const i = of.current(id);
           const title = i?.face?.title ?? i?.post?.title ?? i?.title ?? "Your press";
           setLines((l) => [...l.filter((x) => x.id !== id), { id, title, state: "writing", at: Date.now() }]);
-        } else if (n.state === "landed") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "done", doneAt: Date.now(), ms: n.ms ?? Date.now() - x.at, steps: n.steps } : x)));
+        } else if (n.state === "landed") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "done", doneAt: Date.now(), ms: n.ms ?? Date.now() - x.at, steps: n.steps, ...(n.movedOn ? { movedOn: n.movedOn } : {}) } : x)));
         // kept until its row is repaired: said once, like a landed press, then the line goes
         else if (n.state === "kept") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "kept", doneAt: Date.now() } : x)));
         else setLines((l) => l.filter((x) => x.id !== id));
@@ -755,7 +757,9 @@ function usePressProgress(itemOf: (id: string) => Listed | undefined): Progress[
     if (!lines.length) return;
     const t = setInterval(() => {
       tick((n) => n + 1);
-      setLines((l) => (l.some((x) => x.doneAt && Date.now() - x.doneAt > PRESS.doneShowMs) ? l.filter((x) => !x.doneAt || Date.now() - x.doneAt <= PRESS.doneShowMs) : l));
+      // a line saying where a moved-on press went stays long enough to read (20 s)
+      const keep = (x: Progress) => !x.doneAt || Date.now() - x.doneAt <= (x.movedOn ? 20_000 : PRESS.doneShowMs);
+      setLines((l) => (l.some((x) => !keep(x)) ? l.filter(keep) : l));
     }, 1000);
     return () => clearInterval(t);
   }, [lines.length]);
@@ -787,7 +791,8 @@ function PressProgress({ lines }: { lines: Progress[] }) {
         >
           {l.state !== "writing" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
           <span className="min-w-0">
-            <b>{l.state === "kept" ? KEPT_LINE : l.state === "done" ? `${PRESS.done} in ${secs(l.ms ?? 0)}.` : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
+            {/* E948-S206: a press on a card that had moved on says where it went, never a refusal */}
+            <b data-testid={l.movedOn ? "press-moved-on" : undefined}>{l.state === "kept" ? KEPT_LINE : l.state === "done" ? (l.movedOn ? `Done ✓ ${l.movedOn}` : `${PRESS.done} in ${secs(l.ms ?? 0)}.`) : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
             <span className="block truncate text-xs opacity-80">{l.title}</span>
           </span>
         </div>
@@ -824,7 +829,8 @@ const saidOf = (key: string) =>
  */
 function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
   const [pressing, setPressing] = useState<Pressing>();
-  const [err, setErr] = useState<string | undefined>(failed && `It was not written: ${failed}. Press again.`);
+  // E948-S206: a card that moved on before the press is never "press again" (pressing it again only fails again)
+  const [err, setErr] = useState<string | undefined>(failed && (MOVED_ON_WHY.test(failed) ? `This card had moved on before your press: ${failed}. Your inbox shows where it is now.` : `It was not written: ${failed}. Press again.`));
   // the failed action, so Retry runs it again (a refused spine write changed nothing).
   const [last, setLast] = useState<{ key: string; fn: () => Promise<unknown> }>();
   const [landing, setLanding] = useState<string>();

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sameOpenProblem, sameQuestion } from "../inbox/duplicate.js";
-import { citesRef, meaningCall, nearest, sameMeaningProblem } from "../inbox/sameMeaning.js";
+import { citesRef, epicCall, meaningCall, nearest, sameMeaningProblem } from "../inbox/sameMeaning.js";
 import fs from "node:fs";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
@@ -259,6 +259,19 @@ export function editRowStatus(text: string, ref: string, next: (status: string) 
 export const outOfColumns = (ref: string, r: Pick<LedgerLine, "cells" | "headers">) => ({
   skip: `row ${ref} has ${r.cells.length} cells but its header has ${r.headers.length}; nothing written until it is repaired (scripts/ledger_rows.py repair)`,
 });
+
+/**
+ * E948-S206 round 3 (the owner, 25 Nov, vn_e4dbcbce: he pressed "Yes: fill the forms tonight" five times on a card whose
+ * row had just been folded into its sibling after his note on the sibling, and each press was refused "Press again"):
+ * the row a status cell says this row went to (`folded into E995-S2`, `merged into …`, `superseded by …`), else undefined.
+ */
+export const MOVED_INTO = /\b(?:folded|merged|moved)\s+into\s+(?:row\s+)?([A-Z][A-Z0-9]*-[A-Z]*\d+)\b|\bsuperseded by\s+(?:row\s+)?([A-Z][A-Z0-9]*-[A-Z]*\d+)\b/;
+export const movedInto = (status: string): string | undefined => {
+  const m = MOVED_INTO.exec(stripInline(status));
+  return m ? (m[1] ?? m[2]) : undefined;
+};
+/** a refusal because the row left review (or left the ledger) before his press was written: such a press is landed, never refused. */
+export const MOVED_ON = /is not in review any more|is not in this spine's ledger any more|the spine moved on/;
 
 const notInReview = (ref: string, status: string) => ({ skip: `row ${ref} is not in review any more (it reads “${stripInline(status).slice(0, 120)}”); nothing written` });
 
@@ -823,6 +836,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
   for (const r of rows) ids.set(r.id, (ids.get(r.id) ?? 0) + 1);
   for (const r of rows) if ((ids.get(r.id) ?? 0) > 1) r.id = reviewLegacyId(r.repo, r.path, r.ref);
   onePageOneCard(rows, branchOf);
+  oneSubjectOneCard(rows);
   oneQuestionOneCard(rows);
   return { rows, goals, closedGoals };
 }
@@ -880,6 +894,50 @@ export function oneQuestionOneCard(rows: ReviewRow[]): void {
     const mine = texts.get(x) ?? "";
     const same = nearest(mine, earlier, (y) => texts.get(y)).find((y) => !citesRef(mine, y.ref) && meaningCall(texts.get(y), mine, { a: `${y.repo} ${y.ref}`, b: `${x.repo} ${x.ref}` }) === "same");
     if (same) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameMeaningProblem(`${same.ref}'s card`)] };
+  }
+}
+
+/**
+ * E948-S206 round 3 (the owner, 25 Nov 18:13Z, vn_e4dbcbce: "there were two cards on the same subject waiting for me, and
+ * one was stale ... we didn't detect that the two tickets were about the same subject, didn't merge them"): two open cards
+ * of ONE epic (one spine) that put the same work in front of him (inbox/sameMeaning.ts epicCall: what each delivered and
+ * asks, every pair of the epic, no word gate) are one card. The NEWER one stays (the latest version of the work, the
+ * freshest Last Verified, then row order); the older goes back to its agents as "card needs rewriting", to fold into it.
+ * Before, E995-S2 (a tracker whose page showed our form answers) and E995-S22 (the same forms, every field answered) waited
+ * together; he answered the stale one, and the other then refused his press.
+ */
+export const sameSubjectProblem = (ref: string): string =>
+  `it puts the same work in front of ${ownerName()} as ${ref}, the newer card of this epic: one subject, one card, so he never answers a stale one. Fold what it delivered and his words into ${ref} and close this row \`done (folded into ${ref.replace(/'s card$/, "")})\`, or make it ask something ${ref.replace(/'s card$/, "")} does not`;
+/** what a card puts in front of him, for the one-epic judge: title, what was delivered, what to look at, the decision. */
+export const subjectText = (x: Pick<ReviewRow, "title" | "face">): string =>
+  [
+    x.face?.title ?? x.title,
+    x.face?.delivered?.length ? `Delivered: ${x.face.delivered.map((d) => d.text.replace(/^[✓✗]\s*/, "")).join(" ")}` : "",
+    x.face?.evidence?.look ? `Look: ${x.face.evidence.look}` : "",
+    x.face?.decision ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+/**
+ * a card held only because it repeats another (one subject, one question, one page): it was a card a moment ago and may
+ * still be on his screen, so his press on it lands like a press on any card (review.ts notACard), never refused.
+ */
+export const REPEAT_HOLD = /^it (?:puts the same work in front of|asks the same as|opens the same page as) /;
+export const heldAsRepeat = (v: ReviewVerdict): boolean => v.kind === "needs-rewriting" && !!v.problems?.length && v.problems.every((p) => REPEAT_HOLD.test(p));
+export function oneSubjectOneCard(rows: ReviewRow[]): void {
+  const live = rows.filter((x) => x.verdict.kind === "card" && !x.test);
+  const byEpic = new Map<string, ReviewRow[]>();
+  for (const x of live) byEpic.set(`${x.repo}\0${x.path}`, [...(byEpic.get(`${x.repo}\0${x.path}`) ?? []), x]);
+  const newer = (a: ReviewRow, b: ReviewRow) => (b.verifiedAt ?? "") > (a.verifiedAt ?? "") || ((b.verifiedAt ?? "") === (a.verifiedAt ?? "") && rows.indexOf(b) > rows.indexOf(a));
+  for (const cards of byEpic.values()) {
+    if (cards.length < 2) continue;
+    const texts = new Map(cards.map((x) => [x, subjectText(x)]));
+    for (const x of cards) {
+      // the newest card it overlaps (judged once per pair, cached; a pair still waiting for its verdict keeps both)
+      const later = cards.filter((y) => y !== x && newer(x, y)).sort((p, q) => (newer(p, q) ? 1 : -1));
+      const same = later.find((y) => epicCall(texts.get(x), texts.get(y), { a: `${x.repo} ${x.ref}`, b: `${y.repo} ${y.ref}` }) === "same");
+      if (same) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameSubjectProblem(`${same.ref}'s card`)] };
+    }
   }
 }
 

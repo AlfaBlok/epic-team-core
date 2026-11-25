@@ -18,12 +18,14 @@ import type { ObjectiveCard } from "./inbox.js";
  * a post or a key result itself.
  */
 
-export const marketingAgentName = () => `${socialProduct()} senior marketing call`;
-export const MARKETING_PAGE = "senior marketing call";
-export const MARKETING_HEAD = "📞 From the senior marketing call";
+// the owner, 25 Nov: "shouldn't this be in" the social product: it is
+// the social product's briefer, named for it everywhere he sees it, served on the social product's console.
+export const marketingAgentName = () => `${socialProduct()} briefer`;
+export const MARKETING_PAGE = "briefer call";
+export const MARKETING_HEAD = "📞 From the briefer call";
 /** the brief the call starts from, in the home repo (the social product's Context place). */
 export const marketingBrief = () => process.env.CONSOLE_MARKETING_BRIEF || `docs/${socialProduct().toLowerCase()}/marketing-call.md`;
-export const MARKETING_GREETING = () => `Hi ${ownerName()}, marketing here. Do you want the numbers first, posts, replies, DMs and testers, or straight to the number one blocker?`;
+export const MARKETING_GREETING = () => `Hi ${ownerName()}, your ${socialProduct()} briefer here. Do you want the numbers first, posts, replies, DMs and testers, or straight to the number one blocker?`;
 
 export const MARKETING_TOOLS = [
   {
@@ -74,7 +76,7 @@ export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[];
 export function marketingInstructions(): string {
   const name = ownerName();
   return [
-    `You are ${name}'s senior marketing person for ${socialProduct()}, on a phone call with him while he walks. ${socialProduct()} runs the marketing campaigns of his products, named in what you know below. Your job on this call: settle the strategy with him, campaign by campaign: the number one blocker, who it is for, the one message, the channels, what a win looks like and by when.`,
+    `You are ${name}'s ${socialProduct()} briefer, his senior marketing person for ${socialProduct()}, on a phone call with him while he walks. ${socialProduct()} runs the marketing campaigns of his products, named in what you know below. Your job on this call: settle the strategy with him, campaign by campaign: the number one blocker, who it is for, the one message, the channels, what a win looks like and by when.`,
     `When the line opens, the console has you say this greeting, once: "${MARKETING_GREETING()}" Never greet again.`,
     "How you work: you are senior and have a view. When he asks for the number one blocker, give yours from what you know below in one or two sentences, then ask for his. Ask one question at a time and let him talk. Bounce ideas: offer one idea at a time, with why, and ask what he thinks. Say back in one sentence what you heard before the next question. Never lecture, never list more than three things, never read codes, links or long numbers.",
     "The numbers: what you know below holds the numbers read live as the call started: the posts of the last 7 days with views, engagement, the best and the worst, the Reddit replies to us, the DMs waiting on us, the tester invites and each campaign's next steps. When he wants the numbers, walk them in that order, one part at a time, in plain words and round numbers, and stop after each part for his word. Name a post by what it says, never by its id. A part that could not be read: say so in one line and why, never guess a number.",

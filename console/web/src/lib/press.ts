@@ -14,6 +14,8 @@ export type PressNote = {
   /** the press (Bring it back takes it back by id) and its undo window, on the first `landing` note. */
   id?: string;
   undoMs?: number;
+  /** E948-S206: the card had moved on (merged into another) before the press was written: where his press went, in plain words. */
+  movedOn?: string;
 };
 type Try = { steps?: Record<string, number> };
 type Press = { id: string; state: "landing" | "landed" | "failed" | "undone"; reason?: string; response?: unknown; ms?: number; tries?: Try[]; held?: string };
@@ -86,7 +88,8 @@ export async function landed<T>(first: unknown, path: string, get: (id: string) 
       return { press: { id: p.id, state: "kept", message: KEPT_LINE } } as T;
     }
     if (now.state === "landed") {
-      tell({ path, state: "landed", ...(now.ms !== undefined ? { ms: now.ms } : {}), ...(lastSteps(now) ? { steps: lastSteps(now) } : {}) });
+      const movedOn = (now.response as { movedOn?: { line?: string } } | undefined)?.movedOn?.line;
+      tell({ path, state: "landed", ...(now.ms !== undefined ? { ms: now.ms } : {}), ...(lastSteps(now) ? { steps: lastSteps(now) } : {}), ...(movedOn ? { movedOn } : {}) });
       return now.response as T;
     }
     if (now.state === "undone") {

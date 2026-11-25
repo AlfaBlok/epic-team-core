@@ -128,7 +128,9 @@ describe("T72-S10 a pressed card button answers in the frame of the tap", () => 
     fail({ state: "failed", reason: "the row is not in review any more" });
     // landed asks again 700 ms after the 202
     const back = await screen.findByTestId("review-card", {}, { timeout: 4000 });
-    expect(within(back).getByTestId("review-error").textContent).toContain("It was not written: the row is not in review any more. Press again.");
+    // E948-S206: a row that moved on before the press is never "press again" (pressing again only failed again, five times on 25 Nov)
+    expect(within(back).getByTestId("review-error").textContent).toContain("This card had moved on before your press: the row is not in review any more. Your inbox shows where it is now.");
+    expect(within(back).getByTestId("review-error").textContent).not.toContain("Press again");
     expect((within(back).getByRole("button", { name: MARK }) as HTMLButtonElement).disabled).toBe(false);
   }, 10_000);
 

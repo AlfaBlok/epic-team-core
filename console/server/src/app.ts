@@ -130,7 +130,7 @@ import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
-import { anthropicPairJudge, borderlinePairs, callOf, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
+import { anthropicPairJudge, borderlinePairs, callOf, EPIC_JUDGE_SYSTEM, EPIC_SURE, epicMerged, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
 import { anthropicSpokenJudge, mountSpokenAnswers } from "./inbox/spokenAnswers.js";
 import type { WaitingItem } from "./inbox/waiting.js";
 import { anthropicStoreFile, ANTHROPIC_TEXT_MODEL, textModelProvider } from "./textModel.js";
@@ -253,6 +253,7 @@ import { ensureWorldStamps, milestoneWorld, mountWorldFilters, repoWorlds } from
 import { worldClaims } from "./tenancy/repoScope.js";
 import { configureRepoScope, milestoneRepoRefusal } from "./tenancy/repoScope.js";
 import { createSpineReads } from "./spineReads.js";
+import { createMilestoneInfoMemo } from "./milestoneList.js";
 import { treeOff, type TreeOff } from "./adapters/treeOff.js";
 import { createReadModelHost, type ReadModelHost } from "./readModel/host.js";
 import { driftLine, type DriftResult } from "./readModel/drift.js";
@@ -455,6 +456,7 @@ export function createApp(
      * each request. Set to `the home world` it must answer exactly as unset while every row is the home world's.
      */ tenant?: string;
     /** milestone tree memo TTL in ms (CONSOLE_TREE_TTL_MS; 0 = no memo, no coalescing). */ treeTtlMs?: number;
+    /** the goals list keeps each milestone's info and refreshes it in the background after this many ms (CONSOLE_MILESTONE_LIST_MS; 0 = off). */ milestoneListMs?: number;
     /** where trees are built off the loop (default: the console's tree worker, when its bundle is there). */ treeOff?: TreeOff;
     /**
      * read model: waiting-on-you lists and statuses served from console.db, kept current off the request path.
@@ -467,6 +469,8 @@ export function createApp(
      */
     /** E948-S206: the pair judge (tests); unset = Claude Haiku on the console's key. */
     sameMeaningJudge?: PairJudge;
+    /** E948-S206 round 3: the judge of two cards of one epic (tests pass their own). */
+    sameSubjectJudge?: PairJudge;
     indexer?: { mode: IndexerLaunchMode; port: string | number; revision?: string; onLaunched?: (h: IndexerHandle) => void };
     readModel?: {
       mode?: "worker" | "in-process" | "none";
@@ -615,6 +619,15 @@ export function createApp(
   const treeWorker = opts.treeOff ?? treeOff();
   const reads = createSpineReads({ db, store, reposRoot: read.reposRoot, spines: read.spines, treeTtlMs: opts.treeTtlMs, treeOff: treeWorker });
   const { soft, spinesFor, locateDir, treeFor, docTitleOf, withDerived, withOutcome } = reads;
+  // the goals list (GET /milestones) answers each milestone's last info at once and refreshes it off the request
+  const listInfo = createMilestoneInfoMemo({
+    compute: async (m: Milestone) => {
+      const { doctrine: _d, ...out } = await withOutcome(m, 1_500);
+      return out;
+    },
+    dirOf: locateDir,
+    freshMs: opts.milestoneListMs ?? (process.env.CONSOLE_MILESTONE_LIST_MS ? Number(process.env.CONSOLE_MILESTONE_LIST_MS) : 10_000),
+  });
   // a stopped monitor item's ask may sit in another world (a social world repo's Reddit waits on the code repo/): an unscoped read.
   const monitorAskLookup = askLookupIn(createStore(db, { tenant: tenantScope }), (m) => treeFor(m, 1_500), worldHost, (m) => resolveRepo(read.reposRoot, m.repo)?.name);
   /** the Delivery Manager's wake section for its milestone's stopped / overdue monitor items. */
@@ -640,6 +653,7 @@ export function createApp(
   /** A write to or pull of a checkout: drop its spines.py output and the memoized trees built from it. */
   const dropSpines = (dir: string) => {
     reads.drop(dir);
+    listInfo.drop(dir);
     book?.invalidate();
     readModel?.dirty(dir);
     // the screens read tickets from the index: rebuild it for this checkout, then read again
@@ -652,6 +666,7 @@ export function createApp(
    */
   const pulledSpines = (dir: string) => {
     reads.drop(dir, { stale: true });
+    listInfo.drop(dir);
     book?.invalidate();
     readModel?.dirty(dir, { stale: true }); // a pull is re-read within the rescan gap
     void ticketIndex().refresh(dir).then(() => readModel?.dirty(dir, { stale: true }));
@@ -2507,10 +2522,11 @@ export function createApp(
   mountSpokenAnswers(api, { ...(textProvider === "anthropic" && !process.env.VITEST ? { judge: anthropicSpokenJudge(anthropicKey) } : {}) });
   // E948-S206: cards that ask the same in other words: Haiku judges the close pairs the inbox builders queue, once a minute.
   const pairJudge = opts.sameMeaningJudge ?? anthropicPairJudge(anthropicKey);
-  if (!opts.passive && !process.env.VITEST && process.env.CONSOLE_SAME_MEANING !== "off") startSameMeaningJudge(pairJudge, 60_000, (m) => console.log(m));
+  const epicJudge = opts.sameSubjectJudge ?? anthropicPairJudge(anthropicKey, fetch, undefined, EPIC_JUDGE_SYSTEM);
+  if (!opts.passive && !process.env.VITEST && process.env.CONSOLE_SAME_MEANING !== "off") startSameMeaningJudge(pairJudge, 60_000, (m) => console.log(m), 120_000, epicJudge);
   // judge pairs now (scripts/duplicate_taps.py measures his taps with it; at most 60 a call), and what it merged or left borderline.
   api.post("/inbox/same-meaning", async (c) => {
-    const b = (await c.req.json().catch(() => ({}))) as { pairs?: unknown; system?: unknown };
+    const b = (await c.req.json().catch(() => ({}))) as { pairs?: unknown; system?: unknown; epic?: unknown };
     const pairs = (Array.isArray(b.pairs) ? b.pairs : [])
       .filter((p): p is { a: string; b: string; refA?: string; refB?: string } => !!p && typeof (p as { a?: unknown }).a === "string" && typeof (p as { b?: unknown }).b === "string")
       .slice(0, 60)
@@ -2522,13 +2538,15 @@ export function createApp(
         const trial = await anthropicPairJudge(anthropicKey, fetch, undefined, b.system.slice(0, 4000))(pairs);
         return c.json({ trial: true, verdicts: trial.map((v) => ({ same: v.same, confidence: v.confidence, call: callOf({ ...v }) })) });
       }
-      const verdicts = await judgePairs(pairJudge, pairs);
-      return c.json({ sure: MEANING_SURE, border: MEANING_BORDER, verdicts: verdicts.map((v) => ({ key: v.key, same: v.same, confidence: v.confidence, call: v.call })) });
+      // E948-S206 round 3: `epic: true` judges cards of one epic on the overlap question (its own cache and bar)
+      const epic = b.epic === true;
+      const verdicts = epic ? await judgePairs(epicJudge, pairs, undefined, "epic") : await judgePairs(pairJudge, pairs);
+      return c.json({ sure: epic ? EPIC_SURE : MEANING_SURE, border: MEANING_BORDER, ...(epic ? { epic: true } : {}), verdicts: verdicts.map((v) => ({ key: v.key, same: v.same, confidence: v.confidence, call: v.call })) });
     } catch (e) {
       return c.json({ error: String((e as Error)?.message ?? e).slice(0, 300) }, 502);
     }
   });
-  api.get("/inbox/same-meaning", (c) => c.json({ sure: MEANING_SURE, border: MEANING_BORDER, borderline: borderlinePairs().slice(0, 100), merged: mergedPairs().slice(0, 100) }));
+  api.get("/inbox/same-meaning", (c) => c.json({ sure: MEANING_SURE, border: MEANING_BORDER, epicSure: EPIC_SURE, borderline: borderlinePairs().slice(0, 100), merged: mergedPairs().slice(0, 100), sameSubject: epicMerged().slice(0, 100) }));
   const textStructurer: Structurer = opts.voice?.structure ?? (textProvider === "anthropic" ? anthropicStructurer(anthropicKey) : openAiStructurer(openAiKey));
   // the owner edits a red line (typed or a voice note, reworded by the same text model) or deletes it, from its slim
   // row on top of Team home; docs/pursuits.json, the root Red line lines and an Decisions row, one commit.
@@ -3656,7 +3674,7 @@ export function createApp(
     ...voiceBase,
     eleven: marketingEleven,
     mint: async () => {
-      throw new VoiceError(409, "marketing_eleven_only", "The senior marketing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+      throw new VoiceError(409, "marketing_eleven_only", `The ${socialProduct()} briefer runs on ElevenLabs only, and ElevenLabs calls are off on this console.`);
     },
     scope: { world: DEFAULT_TENANT },
     contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 25_000, // live reads (the Team Browser) take seconds
@@ -3707,7 +3725,7 @@ export function createApp(
       return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm() }, "The senior marketing call");
+  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm() }, `The ${socialProduct()} briefer`);
   // the team product's strategy call (/strategy): its own ElevenLabs agent sets the team product's launch
   // strategy with him from the strategy brief (the launch timeline, what ready waits on, the questions) and its
   // objectives; his words go to the Team desk or the social desk. The marketing call's tools and relay, reused.
@@ -4125,16 +4143,13 @@ export function createApp(
   });
 
   // Milestones
-  // nonGreen and verdict; short wait so the list stays fast. The list omits doctrine.
+  // nonGreen and verdict, each milestone's last info at once (listInfo, refreshed in the background). The list omits doctrine.
   // settled milestones are hidden unless ?includeSettled=true; each row carries settledAt.
   // ?tenant=<world> keeps one world's milestones (the Team desk acts only on the home world's; the rest are other worlds').
   api.get("/milestones", async (c) =>
     c.json(
       await Promise.all(
-        store.listMilestones({ includeSettled: includeSettled(c) }).filter((m) => !c.req.query("tenant") || store.worldOfMilestone(m.id) === c.req.query("tenant")).map(async (m) => {
-          const { doctrine: _d, ...out } = await withOutcome(m, 1_500);
-          return out;
-        }),
+        store.listMilestones({ includeSettled: includeSettled(c) }).filter((m) => !c.req.query("tenant") || store.worldOfMilestone(m.id) === c.req.query("tenant")).map((m) => listInfo.get(m)),
       ),
     ),
   );

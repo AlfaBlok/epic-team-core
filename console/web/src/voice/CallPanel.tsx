@@ -82,6 +82,8 @@ export function useCallDock(
     base?: string;
     /** whom the button calls ("the desk", "the campaign desk"). */
     callee?: string;
+    /** the compact (phone) Call button's words, when a page names its call in full ("Call the <product> briefer"); default "Call". */
+    label?: string;
     /** start the call by itself once the voice is available (a Team home card's Call); `onAutoStart` runs once it did. */
     autoStart?: boolean;
     onAutoStart?: () => void;
@@ -318,7 +320,7 @@ export function useCallDock(
         title={`Talk to ${callee}, in English or Spanish. This month ${money(month)}${cap ? ` of ${money(cap)}` : ""}.`}
         onClick={() => void start()}
       >
-        <Phone /> Call
+        <Phone /> {props.label ?? "Call"}
       </Button>
     ) : undefined;
   return { bar, button, live, liveKey, onCall };

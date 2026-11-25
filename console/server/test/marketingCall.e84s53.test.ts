@@ -37,7 +37,7 @@ describe("the senior marketing call", () => {
     const r = marketingRelayIn({ desk: "Social", words: "Open a waitlist for EpicTeam", campaign: "EpicTeam" });
     expect(r.desk).toBe("social");
     const t = marketingNoteText("call_1", { ...r, note: "" }, true);
-    expect(t).toMatch(/^📞 From the senior marketing call \(call_1\) · EpicTeam/);
+    expect(t).toMatch(/^📞 From the briefer call \(call_1\) · EpicTeam/);
     expect(t).toContain('"Open a waitlist for EpicTeam"');
     expect(t).toMatch(/pass only his words there/);
   });

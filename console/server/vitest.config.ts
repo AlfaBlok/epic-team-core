@@ -35,6 +35,6 @@ export default defineConfig({
     // name test files that never loaded (e.g. vite's esbuild service stopped mid-run) and say why.
     reporters: ["default", "./test/unloadedGuard.ts"],
     // tests edit spines on disk and read them back at once; the tree memo (3 s) is off here, its own tests turn it on.
-    env: { CONSOLE_TREE_TTL_MS: "0" },
+    env: { CONSOLE_TREE_TTL_MS: "0", CONSOLE_MILESTONE_LIST_MS: "0" },
   },
 });

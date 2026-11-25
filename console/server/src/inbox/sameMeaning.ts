@@ -26,8 +26,22 @@ export const MEANING_SURE = 85;
 export const MEANING_BORDER = 50;
 /** at most this many earlier cards are judged against one card: the ones sharing the most words. */
 export const MEANING_TOP = 6;
+/**
+ * E948-S206 round 3 (the owner, 25 Nov 18:13Z, vn_e4dbcbce: "there were two cards on the same subject waiting for me, and
+ * one was stale ... We didn't detect that the two tickets were about the same subject"): E995-S2 (a tracker whose page
+ * also showed our answers on the credit forms) and E995-S22 (the same forms prepared, every field answered) waited at once.
+ * Their faces shared no content word ("was"/"were", "recommends"/"recommend"), so the pair never reached the judge, and
+ * the judge, asked "the one thing each card is about", called them different anyway (a tracker, a prep: 92 to 97 sure).
+ * Cards of ONE epic waiting together are judged as a group on a sharper question, no word gate: does what one asks him
+ * to judge overlap the other (his answer on one would change or outdate the other)? Their own prompt, cache key and bar,
+ * set on this pair and the open cards of the day (docs/inbox/same-subject-eval.json): overlap at EPIC_SURE or more holds
+ * the older card for its owner to fold into the newer one, so he only ever sees the latest.
+ */
+export const EPIC_SURE = 60;
 
 export interface MeaningVerdict {
+  /** `epic`: judged on the one-epic overlap question (EPIC_JUDGE_SYSTEM, bar EPIC_SURE). */
+  kind?: "epic";
   same: boolean;
   confidence: number;
   /** when judged (ISO) */
@@ -51,6 +65,11 @@ const h = (s: string) => crypto.createHash("sha1").update(s).digest("hex").slice
 export const JUDGE_VERSION = 3;
 /** one key per pair, the same either way round. */
 export const pairKey = (a: string, b: string): string => `v${JUDGE_VERSION}:${[h(norm(a)), h(norm(b))].sort().join(":")}`;
+/** the epic judge's prompt version and its own key space (`e<version>:`), so a pair of one epic is judged on its own question. */
+export const EPIC_JUDGE_VERSION = 1;
+export const epicPairKey = (a: string, b: string): string => `e${EPIC_JUDGE_VERSION}:${[h(norm(a)), h(norm(b))].sort().join(":")}`;
+/** a key's judge: `epic` for the one-epic overlap question, else the cross-card meaning one. */
+export const kindOfKey = (key: string): "epic" | "meaning" => (key.startsWith("e") ? "epic" : "meaning");
 
 let cache: { file: string; mtime: number; checked: number; verdicts: Record<string, MeaningVerdict> } | undefined;
 function verdicts(file = sameMeaningFile()): Record<string, MeaningVerdict> {
@@ -97,6 +116,7 @@ export function flushWanted(): void {
 }
 /** a pair not yet judged: queued for the main thread's next judging (once per process). */
 function want(key: string, a: string, b: string, refA?: string, refB?: string, file = sameMeaningFile()): void {
+  // (the key says which judge: epic pairs carry `e<version>:`)
   if (asked.has(key) || off()) return;
   asked.add(key);
   if (pending && pending.file !== file) flushWanted();
@@ -116,6 +136,21 @@ export function meaningCall(a: string | null | undefined, b: string | null | und
   want(key, a, b, refs.a, refs.b);
   return undefined;
 }
+
+/**
+ * E948-S206 round 3: do two open cards of ONE epic overlap (the same work for him to judge)? Every pair of the epic is
+ * judged, no word gate; undefined while the pair waits to be judged (then it is queued for the epic judge).
+ */
+export function epicCall(a: string | null | undefined, b: string | null | undefined, refs: { a?: string; b?: string } = {}): MeaningCall | undefined {
+  if (!a?.trim() || !b?.trim() || off()) return undefined;
+  const key = epicPairKey(a, b);
+  const v = verdicts()[key];
+  if (v) return epicCallOf(v);
+  want(key, a, b, refs.a, refs.b);
+  return undefined;
+}
+/** the call on an epic verdict: overlap at EPIC_SURE or more is the same subject. */
+export const epicCallOf = (v: Pick<MeaningVerdict, "same" | "confidence">): MeaningCall => (v.same && v.confidence >= EPIC_SURE ? "same" : v.same ? "border" : "different");
 
 /** content words, kept per text: a list build compares the same texts many times. */
 const wordsMemo = new Map<string, Set<string>>();
@@ -157,6 +192,18 @@ export const sameMeaningProblem = (ref: string, since?: string | null): string =
 /** a card that names the earlier one builds on it (a follow-up): never merged by meaning. */
 export const citesRef = (text: string | null | undefined, ref: string | null | undefined): boolean =>
   !!ref && !!text && new RegExp(`(^|[^A-Za-z0-9-])${ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z0-9])`, "i").test(text);
+
+/** E948-S206 round 3: the question for two cards of one epic, on what each puts in front of him (title, delivered, look, decision). */
+export const EPIC_JUDGE_SYSTEM =
+  "You check pairs of cards from ONE project that wait for one busy owner at the same time. Each card shows work the team delivered and asks him to judge it.\n" +
+  "For each pair, first write in thing_a and thing_b the concrete things each card puts in front of him to judge (the documents, forms, answers, page, plan, feature, number or decision), not its title: " +
+  "a title can name an older part of the work, so read what was delivered and what he is asked.\n" +
+  "same = true when the two cards overlap: some of what one asks him to judge is also on the other (the same forms or answers, the same page, the same plan, the same decision), even when one card also " +
+  "has other parts (a tracker, research, counts) or the wording differs. Then his answer or feedback on one changes or outdates the other, and he would answer the same thing twice. " +
+  "Example: card A \"a tracker of our credit applications; one page with the questions the forms ask and our answers\" and card B \"the startup forms prepared, every field answered, for you to send\" " +
+  "overlap: both ask him to judge our answers on the same credit forms.\n" +
+  "same = false when nothing he judges on one is on the other: another feature, fix, page, plan, use of money or decision, even on the same topic or goal, so that answering one leaves the other fully open.\n" +
+  "confidence is how sure you are of your call, 0 to 100.";
 
 // ---- the judge (main thread) -------------------------------------------------------------------------------------
 
@@ -232,11 +279,14 @@ export async function judgePairs(
   judge: PairJudge,
   pairs: (JudgePair & { refA?: string; refB?: string })[],
   file = sameMeaningFile(),
+  kind: "meaning" | "epic" = "meaning",
 ): Promise<(MeaningVerdict & { key: string; call: MeaningCall })[]> {
+  const keyOf = kind === "epic" ? epicPairKey : pairKey;
+  const callOfKind = kind === "epic" ? epicCallOf : callOf;
   const known = { ...verdicts(file) };
   const todo = new Map<string, JudgePair & { refA?: string; refB?: string }>();
   for (const p of pairs) {
-    const k = pairKey(p.a, p.b);
+    const k = keyOf(p.a, p.b);
     if (!known[k] && !todo.has(k)) todo.set(k, p);
   }
   if (todo.size) {
@@ -246,15 +296,15 @@ export async function judgePairs(
     const fresh = { ...verdicts(file) };
     list.forEach(([k, p], i) => {
       const v = got[i];
-      if (v) fresh[k] = { same: v.same, confidence: v.confidence, at, a: norm(p.a).slice(0, 300), b: norm(p.b).slice(0, 300), ...(p.refA ? { refA: p.refA } : {}), ...(p.refB ? { refB: p.refB } : {}) };
+      if (v) fresh[k] = { ...(kind === "epic" ? { kind: "epic" as const } : {}), same: v.same, confidence: v.confidence, at, a: norm(p.a).slice(0, 300), b: norm(p.b).slice(0, 300), ...(p.refA ? { refA: p.refA } : {}), ...(p.refB ? { refB: p.refB } : {}) };
     });
     writeVerdicts(file, fresh);
     Object.assign(known, fresh);
   }
   return pairs.map((p) => {
-    const key = pairKey(p.a, p.b);
+    const key = keyOf(p.a, p.b);
     const v = known[key] ?? { same: false, confidence: 0, at: "" };
-    return { ...v, key, call: callOf(v) };
+    return { ...v, key, call: callOfKind(v) };
   });
 }
 
@@ -274,8 +324,16 @@ export function mergedPairs(file = sameMeaningFile()): (MeaningVerdict & { key: 
     .sort((p, q) => (q.at ?? "").localeCompare(p.at ?? ""));
 }
 
+/** E948-S206 round 3: the epic pairs judged to overlap (the older card held), newest first. */
+export function epicMerged(file = sameMeaningFile()): (MeaningVerdict & { key: string })[] {
+  return Object.entries(verdicts(file))
+    .filter(([k, v]) => k.startsWith(`e${EPIC_JUDGE_VERSION}:`) && epicCallOf(v) === "same")
+    .map(([key, v]) => ({ key, ...v }))
+    .sort((p, q) => (q.at ?? "").localeCompare(p.at ?? ""));
+}
+
 /** one pass over the wanted queue: judge what is not known yet (at most `max` pairs), then empty the queue. */
-export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), max = 60): Promise<number> {
+export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), max = 60, epicJudge?: PairJudge): Promise<number> {
   flushWanted();
   const wf = wantedFile(file);
   let text = "";
@@ -303,20 +361,24 @@ export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), ma
   }
   const now = pairs.slice(0, max);
   // over the cap: back on the queue for the next pass
-  if (pairs.length > max) fs.appendFileSync(wf, pairs.slice(max).map((p) => JSON.stringify({ key: pairKey(p.a, p.b), ...p })).join("\n") + "\n");
-  if (now.length) await judgePairs(judge, now, file);
-  return now.length;
+  if (pairs.length > max) fs.appendFileSync(wf, pairs.slice(max).map((p) => JSON.stringify(p)).join("\n") + "\n");
+  // each pair goes to its own judge (the key says which); epic pairs without an epic judge wait
+  const epic = now.filter((p) => kindOfKey((p as { key?: string }).key ?? "") === "epic");
+  const meaning = now.filter((p) => !epic.includes(p));
+  if (meaning.length) await judgePairs(judge, meaning, file);
+  if (epic.length && epicJudge) await judgePairs(epicJudge, epic, file, "epic");
+  return meaning.length + (epicJudge ? epic.length : 0);
 }
 
 /** the main thread's minute timer over the wanted queue (never under tests). */
-export function startSameMeaningJudge(judge: PairJudge, everyMs = 60_000, log: (m: string) => void = () => {}, firstAfterMs = 120_000): () => void {
+export function startSameMeaningJudge(judge: PairJudge, everyMs = 60_000, log: (m: string) => void = () => {}, firstAfterMs = 120_000, epicJudge?: PairJudge): () => void {
   let busy = false;
   // not in the console's first 2 minutes: its inbox warms up then (production restarts every few minutes on busy days)
   const from = Date.now() + firstAfterMs;
   const t = setInterval(() => {
     if (busy || Date.now() < from) return;
     busy = true;
-    judgeWanted(judge)
+    judgeWanted(judge, sameMeaningFile(), 60, epicJudge)
       .then((n) => n && log(`same-meaning: judged ${n} pair(s)`))
       .catch((e) => log(`same-meaning: ${String((e as Error)?.message ?? e).slice(0, 200)}`))
       .finally(() => (busy = false));
