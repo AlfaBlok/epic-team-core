@@ -87,6 +87,39 @@ export interface PersonaStep {
   label?: StepLabel;
   labelledAt?: string;
 }
+/** a wheel's Consumption chapter: its share of his whole AI subscription and of what was used, per persona. */
+export interface ConsumptionPersona {
+  persona: string;
+  ofTotal: number;
+  ofUsed: number;
+  ofWheel?: number;
+  runs: number;
+  outcomes: number;
+  madeTrue: number;
+}
+export interface ConsumptionWheel {
+  key: string;
+  name: string;
+  kind: string;
+  ofTotal: number;
+  ofUsed: number;
+  runs: number;
+  outcomes: number;
+  madeTrue: number;
+  personas: ConsumptionPersona[];
+}
+export interface Consumption {
+  at: string | null;
+  seats: number;
+  usedOfTotal: number;
+  wheel: ConsumptionWheel | null;
+  rank: number | null;
+  of: number;
+  wheels?: ConsumptionWheel[];
+  personas?: ConsumptionPersona[];
+  page?: string | null;
+  file: string;
+}
 export interface PersonaLog {
   wheel: string;
   days: number;

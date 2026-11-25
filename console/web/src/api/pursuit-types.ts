@@ -11,6 +11,18 @@ export interface PursuitTotem {
   url?: string;
   missing?: string;
 }
+/**
+ * His sidebar groups, in his order, central first (his voice note 25 Nov 14:34Z, Log/2026-11-25.md#^e-3941fc: "some
+ * of them are personal, some of them are business ... more in the background, but some of them are like central").
+ */
+export const OBJECTIVE_GROUPS = [
+  { id: "central", name: "Central" },
+  { id: "business", name: "Business" },
+  { id: "personal", name: "Personal" },
+  { id: "background", name: "Background" },
+] as const;
+export type ObjectiveGroup = (typeof OBJECTIVE_GROUPS)[number]["id"];
+
 export interface Pursuit {
   id: string;
   name: string;
@@ -39,6 +51,8 @@ export interface Pursuit {
   milestones?: PursuitMilestone[];
   /** his Daily briefing switch: its key results and tester table go into his 06:00 and 18:00 briefings. */
   briefing?: boolean;
+  /** his sidebar group (docs/pursuits.json `group`). */
+  group?: ObjectiveGroup;
 }
 export interface PursuitEffort {
   tier: string;
@@ -262,6 +276,8 @@ export interface ScorecardNode {
   foldedInto?: string;
   /** its owner persona when the file names one (else its milestone's Delivery Manager, whose regular wake reads it). */
   owner?: string;
+  /** his sidebar group (docs/pursuits.json `group`): the sidebar folds his objectives by it. */
+  group?: ObjectiveGroup;
   /** the idle mark: below green with no worker, no ask, no card. */
   idle?: { idle: boolean; reason: string };
   /** its open tickets that hang under no key result: the page lists them under the key results. */

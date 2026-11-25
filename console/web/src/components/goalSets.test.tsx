@@ -268,7 +268,7 @@ describe("goal sets: the screens", () => {
     // progress: rows turned green today and this week, for this set
     expect(screen.getByTestId("set-progress-today").textContent).toContain("1");
     expect(screen.getByTestId("set-progress-week").textContent).toContain("3");
-    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
+    expect(screen.getAllByTestId(/^set-tab-/).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Consumption", "Log"]);
   });
 
   it("the kanban shows ready, running, waiting and review for the set and the sets inside it", async () => {
@@ -771,5 +771,42 @@ describe("krNumber (vn_1e5a86e8: the number big, its words small)", () => {
     expect(krNumber("done by 24 Nov")).toBeNull();
     expect(krNumber("live")).toBeNull();
     expect(krNumber("not yet")).toBeNull();
+  });
+});
+
+describe("his objective groups in the sidebar (his voice note 25 Nov: groups that collapse and expand, central first)", () => {
+  it("shows each group in his order with its objectives, folds one with a tap and keeps it folded in this browser", async () => {
+    vi.spyOn(api, "listScorecards").mockResolvedValue({ ...BODY, nodes: BODY.nodes.map((n) => (n.id === "launch" ? { ...n, group: "personal" as const } : n.id === "vault" ? { ...n, group: "central" as const } : n)) });
+    const view = render(
+      <MemoryRouter initialEntries={["/"]}>
+        <SidebarGoalSets />
+      </MemoryRouter>,
+    );
+    const groups = await screen.findAllByTestId("sidebar-group");
+    expect(groups.map((g) => g.dataset.group)).toEqual(["central", "personal"]);
+    expect(within(groups[0]).getAllByTestId("sidebar-set").map((x) => x.dataset.set)).toEqual(["vault"]);
+    fireEvent.click(within(groups[1]).getByTestId("sidebar-group-toggle"));
+    expect(within(groups[1]).queryByTestId("sidebar-set")).toBeNull();
+    expect(within(groups[1]).getByTestId("sidebar-group-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect(localStorage.getItem("sidebar.group.personal.folded")).toBe("1");
+    view.unmount();
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <SidebarGoalSets />
+      </MemoryRouter>,
+    );
+    const again = await screen.findAllByTestId("sidebar-group");
+    expect(within(again[1]).queryByTestId("sidebar-set")).toBeNull();
+    expect(within(again[0]).getAllByTestId("sidebar-set")).toHaveLength(1);
+  });
+
+  it("keeps one list with no headings while no objective has a group", async () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <SidebarGoalSets />
+      </MemoryRouter>,
+    );
+    await screen.findAllByTestId("sidebar-set");
+    expect(screen.queryByTestId("sidebar-group")).toBeNull();
   });
 });

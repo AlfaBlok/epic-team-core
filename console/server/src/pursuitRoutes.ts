@@ -6,7 +6,7 @@ import { DEFAULT_TENANT } from "./db.js";
 import type { Cadence } from "./schemas.js";
 import type { Milestone, Store } from "./store.js";
 import { workspaceDataDir } from "./workspaceData.js";
-import { PURSUITS_FILE, activeText, briefingText, doneText, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
+import { PURSUITS_FILE, activeText, briefingText, doneText, groupText, isObjectiveGroup, OBJECTIVE_GROUPS, parkText, reorderText, scaleCadence, type PursuitsBody } from "./pursuits.js";
 
 /**
  * The navigable scorecard's links and the owner's two switches:
@@ -163,6 +163,16 @@ export function mountPursuitWrites(api: Hono, o: { writer?: SpineWriter; repo: (
     if (!/^[\w-]{1,80}$/.test(id) || typeof body.on !== "boolean") return c.json({ error: { code: "bad_briefing", message: "on is true or false" } }, 400);
     const on = body.on;
     const r = await write(`objective ${id}`, (t) => briefingText(t, id, on), `daily briefing ${on ? "on" : "off"} for objective ${id}`, on ? `switched the Daily briefing on for the objective ${id} (its key results and tester table go into the 06:00 and 18:00 briefings)` : `switched the Daily briefing off for the objective ${id}`);
+    return c.json(r.body, r.status as 200);
+  });
+
+  api.post("/pursuits/:id/group", async (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found", message: "no pursuits here" } }, 404);
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { group?: unknown };
+    if (!/^[\w-]{1,80}$/.test(id) || !isObjectiveGroup(body.group)) return c.json({ error: { code: "bad_group", message: `group is one of ${OBJECTIVE_GROUPS.join(", ")}` } }, 400);
+    const group = body.group;
+    const r = await write(`objective ${id}`, (t) => groupText(t, id, group), `move objective ${id} to the ${group} group`, `moved the objective ${id} to the ${group} group of the sidebar`);
     return c.json(r.body, r.status as 200);
   });
 

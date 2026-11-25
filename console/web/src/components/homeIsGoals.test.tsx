@@ -104,8 +104,10 @@ describe("Home is the goals view, the Inbox one tap away", () => {
     const bar = await screen.findByTestId("topbar-pills");
     expect(onlyInboxChatMic(bar)).toBe(true);
     for (const gone of ["topbar-home", "topbar-more", "topbar-one-offs", "topbar-outcomes", "topbar-pages"]) expect(screen.queryByTestId(gone)).toBeNull();
-    // the whole name stands with the mark again: the bar has room for it at 360 px
-    expect(screen.getByTestId("topbar-brand-name").className).not.toMatch(/sr-only/);
+    // the name is whole or gone, never cut (vn_62a29765): no truncation, and on a phone (below 480 px) the mark alone
+    const name = screen.getByTestId("topbar-brand-name").className;
+    expect(name).not.toMatch(/truncate/);
+    expect(name).toMatch(/max-\[479px\]:hidden/);
     // every page you read sits in one folded Tools list, in the owner's order of 22 Nov: Pages, Post
     // stats, the pages pinned by name, Persona outcomes, Voice notes (kept, not first); One-offs is an objective now.
     const tools = (await screen.findAllByTestId("nav-pages"))[0];

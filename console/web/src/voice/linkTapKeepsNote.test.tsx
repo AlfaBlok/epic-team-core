@@ -176,10 +176,12 @@ describe("a link tapped mid-recording never loses the note", () => {
       // a plain outside link: a new window too
       tap(screen.getByText("The whole kernel on one page"));
       expect(opened).toHaveBeenCalledWith("https://pages.example.com/kernel", "_blank", "noopener");
-      // a server page of ours while recording: never loaded in place
+      // a server page of ours while recording: never loaded in place (that would end the note)
       const sp = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
       screen.getByText("a steps page").dispatchEvent(sp);
-      expect(sp.defaultPrevented).toBe(false);
+      expect(sp.defaultPrevented).toBe(true);
+      // ...and never window.open: inside the app's scope that starts a second copy of the app (vn_982a8bd6)
+      expect(opened.mock.calls.some((c) => String(c[0]).includes("/steps/"))).toBe(false);
       // an app page: moves inside the app
       await act(async () => void fireEvent.click(screen.getByText("the card in the inbox")));
       expect(loads).toEqual([]);

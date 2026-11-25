@@ -13,7 +13,7 @@ import { SCORECARD_PATH } from "@/lib/scorecards";
 // nine tabs in this order, whatever its product carries; a launch board, a feature list or a product deck is content
 // inside one of them. This test refuses any other tab set. (the owner 24 Nov 05:11Z, "One of these data totems should
 // be persona logs"): Log is the tenth, on every wheel.
-const NINE = ["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"];
+const NINE = ["Key results", "Plan", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Consumption", "Log"];
 
 const obj = (id: string, name: string, rank: number): ScorecardNode => ({
   id,

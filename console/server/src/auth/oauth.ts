@@ -291,6 +291,12 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
     db.prepare("INSERT INTO oauth_connects (id, detail, at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET detail = excluded.detail, at = excluded.at").run(id, detail, new Date(now()).toISOString());
   const keySeen = new Map<string, KeySeen>();
   const hasKey = o.hasKey ?? keptKeyCheck(keySeen, async (name) => !!(await sudoRead(keyFile(name)).catch(() => undefined))?.trim(), now);
+  // the first look after a start would wait on those reads (30 s measured once): the default check reads them once,
+  // 20 s after the start (after the inbox's own warm-up), so a visitor finds them known
+  if (!o.hasKey)
+    setTimeout(() => {
+      for (const spec of connectList()) for (const k of [spec.keys.clientId, spec.keys.clientSecret, spec.keys.refreshToken]) void hasKey(k);
+    }, 20_000).unref?.();
   /** the customer site that carries a connect's callback: the first EpicTeam customer site (cloud.epicteam.app) */
   const connectHost = () => env.CONSOLE_CONNECT_HOST?.trim() || [...customers].find(([, p]) => p === "team")?.[0] || [...customers.keys()][0];
   const connectView = async (spec: ConnectSpec): Promise<ConnectView> => {

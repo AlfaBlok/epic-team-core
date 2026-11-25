@@ -799,7 +799,7 @@ const mockMail = () => ({
     // the scorecard tree from the sample pursuits: each pursuit a scorecard, no epics inside.
     async listScorecards() {
       return ok({
-        nodes: SAMPLE_PURSUITS.pursuits.map((p) => ({ id: p.id, kind: "pursuit" as const, name: p.name, rank: p.rank ?? null, greens: p.greens, total: p.total, state: p.state, motion: p.motion, spines: [], children: [], rows: p.lines.map((l) => ({ label: l.label, state: l.state, value: l.value, kind: "check" as const })), objective: p.greenWhen })),
+        nodes: SAMPLE_PURSUITS.pursuits.map((p) => ({ id: p.id, kind: "pursuit" as const, name: p.name, rank: p.rank ?? null, greens: p.greens, total: p.total, state: p.state, motion: p.motion, spines: [], children: [], rows: p.lines.map((l) => ({ label: l.label, state: l.state, value: l.value, kind: "check" as const })), objective: p.greenWhen, ...(p.group ? { group: p.group } : {}) })),
         spineInfo: {},
       });
     },
@@ -866,6 +866,11 @@ const mockMail = () => ({
     async setPursuitBriefing(id: string, on: boolean) {
       const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
       if (p) p.briefing = on || undefined;
+      return ok({ ok: true as const });
+    },
+    async setPursuitGroup(id: string, group: import("./pursuit-types").ObjectiveGroup) {
+      const p = SAMPLE_PURSUITS.pursuits.find((x) => x.id === id);
+      if (p) p.group = group;
       return ok({ ok: true as const });
     },
     async setPursuitDone(id: string, done: boolean) {
@@ -1570,6 +1575,11 @@ const mockMail = () => ({
     },
     async getTrackers(wheel: string) {
       return ok({ wheel, name: wheel, tables: [{ id: "influencers", name: "Influencers", for: "people to invite as testers", columns: ["Name", "Proposed for first message", "Where", "Status", "Reply"], statuses: ["candidate", "contacted", "replied"], from: "frame" as const, open: true, first: "Proposed for first message", rows: [], counts: [], file: `docs/trackers/${wheel}/influencers.csv` }] });
+    },
+    async getConsumption(wheel: string) {
+      const w = { key: wheel, name: "EpicTeam: Get the team to understand me", kind: "objective", ofTotal: 0.154, ofUsed: 0.333, runs: 649, outcomes: 596, madeTrue: 0.8,
+        personas: [{ persona: "Ticket worker", ofTotal: 0.112, ofUsed: 0.243, ofWheel: 0.73, runs: 420, outcomes: 560, madeTrue: 0.9 }, { persona: "Delivery Manager", ofTotal: 0.025, ofUsed: 0.053, ofWheel: 0.16, runs: 200, outcomes: 30, madeTrue: 0.3 }] };
+      return ok({ at: "2026-11-25T15:00:00Z", seats: 16, usedOfTotal: 0.46, wheel: wheel === "all" ? null : w, rank: wheel === "all" ? null : 1, of: 30, wheels: wheel === "all" ? [w] : undefined, personas: wheel === "all" ? w.personas : undefined, file: "docs/consumption/latest.json" });
     },
     async getPersonaLog(wheel: string, days?: number) {
       const steps = [

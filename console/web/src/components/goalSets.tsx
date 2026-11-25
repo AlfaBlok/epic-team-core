@@ -4,13 +4,14 @@ import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api, type ChatRead, type DeskChat, type PendingItem, type ReviewItem } from "@/api";
-import type { PersonaGapsBody, ScorecardNode, ScorecardRow, ScorecardRowState, ScorecardsBody, ScorecardWork } from "@/api/pursuit-types";
+import { OBJECTIVE_GROUPS, type PersonaGapsBody, type ScorecardNode, type ScorecardRow, type ScorecardRowState, type ScorecardsBody, type ScorecardWork } from "@/api/pursuit-types";
 import { CountPill, PILL_SHAPE, PILL_TITLES, SortControl, useSectionSort, type SectionSort } from "@/components/homeSection";
 import { InboxSearchBox } from "@/components/inboxSearch";
 import { TeamCardsSections } from "@/components/teamCards";
 import { epicDeckHref } from "@/components/pursuitsMap";
 import { usePursuits } from "@/components/pursuits";
-import { DailyBriefingSwitch, InactiveObjectives, ObjectiveOffButton } from "@/components/objectiveSwitch";
+import { DailyBriefingSwitch, InactiveObjectives, ObjectiveGroupPick, ObjectiveOffButton } from "@/components/objectiveSwitch";
+import { useStoredFlag } from "@/lib/storedFlag";
 import { kitPursuitOf } from "@/components/socialKit";
 import { useQuery } from "@/lib/data";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
@@ -44,6 +45,7 @@ import { MadeOfLink } from "@/pages/MadeOf";
 import type { Totem } from "@/api/totem-types";
 import { TrackersTab } from "@/components/trackersTab";
 import { PersonaLogTab } from "@/components/personaLogTab";
+import { ConsumptionTab } from "@/components/consumptionTab";
 import { homeFilesOf, pagesOfObjective } from "@/lib/wheelPages";
 import { FoldChevron } from "@/components/foldChevron";
 import { GOAL_INBOX_TAB, GoalPills, RING_ARC_ORDER, ringArcs, SetWheel, STATE_FILL, topObjectives, useGoalSets } from "@/components/goalRing";
@@ -985,6 +987,45 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
   );
 }
 
+/**
+ * one of his sidebar groups (docs/pursuits.json `group`): its name and count, its objectives when open. Open by default;
+ * a tap folds or opens it, kept in this browser (`sidebar.group.<id>.folded`). A folded group still shows what waits on
+ * him inside it, so nothing hides there. No objectives: nothing.
+ */
+function SidebarObjectiveGroup({ id, name, nodes, countFor, onNavigate, activeId }: { id: string; name: string; nodes: ScorecardNode[]; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
+  const [folded, setFolded] = useStoredFlag(`sidebar.group.${id}.folded`);
+  if (!nodes.length) return null;
+  const open = !folded;
+  const waiting = nodes.reduce((a, n) => { const c = countFor(n.id); return { ask: a.ask + c.ask, review: a.review + c.review }; }, { ask: 0, review: 0 });
+  return (
+    <section className="grid min-w-0 gap-1" data-testid="sidebar-group" data-group={id}>
+      <button
+        type="button"
+        className="mt-1 flex min-h-9 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+        aria-expanded={open}
+        onClick={() => setFolded(open)}
+        data-testid="sidebar-group-toggle"
+      >
+        <FoldChevron open={open} />
+        <span className="min-w-0 truncate">{name}</span>
+        <span className="tabular-nums" data-testid="sidebar-group-count">{nodes.length}</span>
+        {!open && (waiting.ask > 0 || waiting.review > 0) && (
+          <span className="ml-auto flex shrink-0 items-center normal-case tracking-normal">
+            <GoalPills c={waiting} onNavigate={onNavigate} ids={{ ask: "sidebar-group-asks", review: "sidebar-group-review" }} />
+          </span>
+        )}
+      </button>
+      {open && (
+        <ul className="grid min-w-0 gap-1" data-testid="sidebar-group-list">
+          {nodes.map((n) => (
+            <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /** the sidebar, both skins: All objectives on top (every key result, the combined inbox), then each objective in his order, nested. */
 export function SidebarGoalSets({ onNavigate }: { onNavigate?: () => void }) {
   const { data } = useGoalSets();
@@ -1034,12 +1075,29 @@ export function SidebarGoalSetsOf({
           {krs.filter((r) => r.state === "green").length} green · {krs.filter((r) => r.state === "red").length} red
         </span>
       </NavLink>
-      <ul className="grid min-w-0 gap-1" data-testid="sidebar-objectives">
-        {/* his order, unnumbered (the owner picked A, "lose the one, two, three") */}
-        {top.map((n) => (
-          <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
-        ))}
-      </ul>
+      {top.some((n) => n.group) ? (
+        // his groups, central first, each folding with one tap (his voice note 25 Nov: "make groups of objectives ...
+        // collapse and expand"); inside each, his order. One not in a group yet sits after them, unheaded.
+        <div className="grid min-w-0 gap-1" data-testid="sidebar-objectives">
+          {OBJECTIVE_GROUPS.map((g) => (
+            <SidebarObjectiveGroup key={g.id} id={g.id} name={g.name} nodes={top.filter((n) => n.group === g.id)} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+          ))}
+          <ul className="grid min-w-0 gap-1">
+            {top
+              .filter((n) => !OBJECTIVE_GROUPS.some((g) => g.id === n.group))
+              .map((n) => (
+                <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+              ))}
+          </ul>
+        </div>
+      ) : (
+        <ul className="grid min-w-0 gap-1" data-testid="sidebar-objectives">
+          {/* his order, unnumbered (the owner picked A, "lose the one, two, three") */}
+          {top.map((n) => (
+            <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} />
+          ))}
+        </ul>
+      )}
       {footer}
       {/* each product defined once; its objectives and its social kit read it there. */}
       {products && (
@@ -1605,6 +1663,7 @@ export function GoalSetPage() {
             )}
             <span className="inline-flex flex-wrap items-center gap-2">
               <DailyBriefingSwitch id={node.id} />
+              <ObjectiveGroupPick id={node.id} />
               <ObjectiveOffButton id={node.id} openBoxes={node.children.reduce((n, c) => n + Math.max(0, c.total - c.greens), 0)} />
             </span>
           </GoalHeader>
@@ -1668,6 +1727,7 @@ export function GoalSetPage() {
           {tab === "plan" && <WheelPlanTab id={pursuit.id} keyResults={keyResultsOf(node)} />}
           {tab === "trackers" && <TrackersTab wheel={pursuit.id} />}
           {tab === "log" && <PersonaLogTab wheel={pursuit.id} />}
+          {tab === "consumption" && <ConsumptionTab wheel={pursuit.id} />}
           {tab === "pages" && <WheelPagesTab pages={myPages} loading={pagesList.loading} what={SET_NAME.one.toLowerCase()} files={{ entries: myFiles, loading: homeFiles.loading }} />}
         </>
       )}

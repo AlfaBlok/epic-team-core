@@ -32,6 +32,7 @@ import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./s
 import { ChatIntro, HistoryTab, ObservationsTab, PillarsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignTrackersTab } from "@/components/trackersTab";
 import { PersonaLogTab } from "@/components/personaLogTab";
+import { ConsumptionTab } from "@/components/consumptionTab";
 import { worldId } from "@/lib/useSocial";
 import { CampaignProductTab, Crumbs } from "@/pages/social/Motion";
 import { brandOfRepo, useProject } from "@/lib/project";
@@ -728,6 +729,7 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         {/* a chapter added to the product's graph file with no screen of its own yet: what it holds and where, from the same file. */}
         {!DRAWN.has(tab) && tab !== "settings" && <ChapterFromGraph id={tab} />}
         {tab === "log" && <PersonaLogTab wheel={`milestone:${m.id}`} />}
+        {tab === "consumption" && <ConsumptionTab wheel={`milestone:${m.id}`} />}
         {tab === "history" && <HistoryTab m={m} posts={oldHistory} runs={runs} />}
         {tab === "chat" && (
           <>

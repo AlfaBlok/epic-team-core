@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "@/api";
+import { OBJECTIVE_GROUPS, type ObjectiveGroup } from "@/api/pursuit-types";
 import { ObjectiveName } from "@/components/objectiveName";
 import { usePursuits } from "@/components/pursuits";
 import { mutate } from "@/lib/data";
@@ -107,6 +108,55 @@ export function DailyBriefingSwitch({ id }: { id: string }) {
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * His group pick on every objective page (his voice note 25 Nov 14:34Z: "make groups of objectives ... personal,
+ * business ... background ... central"): Central, Business, Personal or Background. Saved with the objective in
+ * docs/pursuits.json (`"group"`, one commit), never only in the database; the sidebar folds his objectives by it.
+ */
+export function ObjectiveGroupPick({ id }: { id: string }) {
+  const { data } = usePursuits();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const p = data?.pursuits.find((x) => x.id === id);
+  if (!p) return null;
+  const move = async (group: ObjectiveGroup) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await mutate(() => api.setPursuitGroup(id, group), "inbox");
+    } catch (e) {
+      setError(`Not saved: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <label className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-2.5 text-xs text-foreground md:h-8" data-testid="objective-group">
+      <span className="text-muted-foreground">Group</span>
+      <select
+        className="h-full min-w-0 bg-transparent text-xs text-foreground outline-none disabled:opacity-30"
+        value={p.group ?? ""}
+        disabled={saving}
+        onChange={(e) => void move(e.target.value as ObjectiveGroup)}
+        data-testid="objective-group-pick"
+      >
+        {!p.group && <option value="">None yet</option>}
+        {OBJECTIVE_GROUPS.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name}
+          </option>
+        ))}
+      </select>
+      {saving && <span>…</span>}
+      {error && (
+        <span className="text-xs text-destructive" role="alert">
+          {error}
+        </span>
+      )}
+    </label>
   );
 }
 

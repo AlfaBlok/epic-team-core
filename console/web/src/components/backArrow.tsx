@@ -21,13 +21,14 @@ export const historyStep = () => {
  * carries a back arrow, left of the bar on the desktop and the phone. It goes back one step in the app's
  * history and is not there on the first screen (nothing to go back to). In a browser tab it never shows: the
  * browser's own back is already there.
+ * On a phone it keeps its 40 px tap area (polish.css) but sits closer to the edge and the menu (vn_62a29765).
  */
 export function BackArrow({ className, installed = installedApp }: { className?: string; installed?: () => boolean }) {
   useLocation(); // read again on every move, so the arrow comes and goes with the history step
   const navigate = useNavigate();
   if (!installed() || historyStep() < 1) return null;
   return (
-    <Button variant="ghost" size="icon" className={cn("shrink-0 max-[379px]:h-9 max-[379px]:w-8 md:h-8 md:w-8", className)} aria-label="Back" title="Back" onClick={() => navigate(-1)} data-testid="topbar-back">
+    <Button variant="ghost" size="icon" className={cn("shrink-0 max-md:-ml-1.5 max-md:-mr-1 max-[379px]:mx-0 max-[379px]:h-9 max-[379px]:w-8 md:h-8 md:w-8", className)} aria-label="Back" title="Back" onClick={() => navigate(-1)} data-testid="topbar-back">
       <ArrowLeft className="h-5 w-5 md:h-4 md:w-4" />
     </Button>
   );

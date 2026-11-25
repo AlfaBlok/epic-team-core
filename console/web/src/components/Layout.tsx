@@ -1289,9 +1289,11 @@ export function Layout() {
           </Button>
           {/* the product's mark and name, as in the sidebar. */}
           {/* the mark is the way Home on a phone: the bar itself keeps only Inbox, Chat and the mic (vn_87528e51). */}
-          <NavLink to="/" end aria-label={`${w.appName} Home`} className="flex min-h-[40px] min-w-0 items-center gap-2 md:hidden" data-testid="topbar-brand">
+          {/* below 480 px (every phone, the widest is 430) the mark stands alone: with the back arrow, the menu and the
+              pills the name never fits whole there, and it is shown whole or not at all, never cut (vn_62a29765). */}
+          <NavLink to="/" end aria-label={`${w.appName} Home`} className="flex min-h-[40px] min-w-0 shrink-0 items-center gap-2 md:hidden" data-testid="topbar-brand">
             <BrandMark brand={brandOf(w.appName)} className="h-6 w-6" />
-            <span className="truncate font-brand text-[17px] font-semibold tracking-[-0.02em]" data-testid="topbar-brand-name">{w.appName}</span>
+            <span className="whitespace-nowrap font-brand text-[17px] font-semibold tracking-[-0.02em] max-[479px]:hidden" data-testid="topbar-brand-name">{w.appName}</span>
           </NavLink>
           <TopBarPills counts={counts} />
         </header>

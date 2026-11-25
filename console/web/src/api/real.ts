@@ -342,6 +342,7 @@ export function createRealClient(): ApiClient {
     setPursuitActive: (id, active) => call("POST", `/pursuits/${encodeURIComponent(id)}/active`, { active }),
     setPursuitDone: (id, done) => call("POST", `/pursuits/${encodeURIComponent(id)}/done`, { done }),
     setPursuitBriefing: (id, on) => call("POST", `/pursuits/${encodeURIComponent(id)}/briefing`, { on }),
+    setPursuitGroup: (id, group) => call("POST", `/pursuits/${encodeURIComponent(id)}/group`, { group }),
     listOneOffs: () => call("GET", "/one-offs"),
     listOutcomes: (f) => {
       const q = new URLSearchParams(Object.entries(f ?? {}).filter((e): e is [string, string] => !!e[1])).toString();
@@ -533,6 +534,7 @@ export function createRealClient(): ApiClient {
     getTotem: (product, id) => call("GET", `/totems/${encodeURIComponent(product)}/${encodeURIComponent(id)}`),
     getTrackers: (wheel) => call("GET", `/trackers/${encodeURIComponent(wheel)}`),
     getPersonaLog: (wheel, days) => call("GET", `/persona-log/${encodeURIComponent(wheel)}${days ? `?days=${days}` : ""}`),
+    getConsumption: (wheel) => call("GET", `/consumption/${encodeURIComponent(wheel)}`),
     labelStep: (id, label) => call("POST", "/persona-log/labels", { id, label }),
     getOnboarding: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/onboarding`),
     getSocials: (tenantId) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/socials`),

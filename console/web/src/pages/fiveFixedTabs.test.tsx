@@ -122,7 +122,7 @@ describe("E964-S14 five fixed tabs", () => {
   it("opens on Key results; then the social product's data tabs Benefits, Plan, Pipeline, History; then the console's engine tabs as on an objective; one Settings button", async () => {
     page("/milestones/ms-memo");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Product", "Benefits", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Log"]);
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Key results", "Product", "Benefits", "Plan", "Pipeline", "History", "Inbox", "Chat", "Personas", "Board", "Context", "Pages", "Trackers", "Consumption", "Log"]);
     // "the same console ... with slightly different data tabs": the data tabs are marked, the rest is the console's.
     expect(within(tabs).getAllByRole("tab").filter((t) => t.getAttribute("data-kind") === "data").map((t) => t.textContent)).toEqual(["Product", "Benefits", "Plan", "Pipeline", "History"]);
     expect(await screen.findByTestId("campaign-key-results")).toBeTruthy();
@@ -137,7 +137,7 @@ describe("E964-S14 five fixed tabs", () => {
     vi.spyOn(api, "getMilestone").mockImplementation(async (id: string) => ({ ...(await real(id)), status: "done" }) as never);
     page("/milestones/ms-memo?tab=product");
     const tabs = await screen.findByTestId("five-tabs");
-    expect(within(tabs).getAllByRole("tab")).toHaveLength(14);
+    expect(within(tabs).getAllByRole("tab")).toHaveLength(15);
     expect(screen.getByTestId("tab-product").getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByTestId("campaign-product-chapter")).toBeTruthy();
     expect(screen.getByTestId("chapters-kept").textContent).toBe("This campaign has ended. Its chapters are kept.");

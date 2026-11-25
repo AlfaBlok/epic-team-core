@@ -1,9 +1,9 @@
 import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef, SentBackCard } from "./review-types";
 import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
+import type { ObjectiveGroup, PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
-import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, PersonaLog, StepLabel, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
+import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, Consumption, PersonaLog, StepLabel, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
 import type { AdvisorVerdictBody, TeamCard, TeamCardAnswer, TeamCardKind, TeamCardsBody } from "./teamcard-types";
 import type { AskLogSummary, HomeTabBody, PagesBody, PageView, PinnedStatus, VoiceNotesBody, XStatsBody } from "./pages-types";
@@ -282,6 +282,8 @@ export interface ApiClient {
   setPursuitDone(id: string, done: boolean): Promise<{ ok: true; sha?: string }>;
   /** his Daily briefing switch on one objective (one commit in docs/pursuits.json). */
   setPursuitBriefing(id: string, on: boolean): Promise<{ ok: true; sha?: string }>;
+  /** move one objective to another sidebar group (one commit in docs/pursuits.json). */
+  setPursuitGroup(id: string, group: ObjectiveGroup): Promise<{ ok: true; sha?: string }>;
   /** single jobs outside every pursuit, by stage (rows titled `One-off:` and docs/spines/one-offs.md). */
   listOneOffs(): Promise<OneOffsBody>;
   /** the outcome log: one line per real outcome every persona logged at the end of a wake, filtered. */
@@ -587,6 +589,7 @@ export interface ApiClient {
   getTrackers(wheel: string): Promise<WheelTrackers>;
   /** a wheel's persona log (an objective id, or `milestone:<id>` for a campaign): every step, what and why. */
   getPersonaLog(wheel: string, days?: number): Promise<PersonaLog>;
+  getConsumption(wheel: string): Promise<Consumption>;
   /** his one-tap label on a step nobody asked for, committed to the home repo. */
   labelStep(id: string, label: StepLabel | "clear"): Promise<{ id: string; label: string; sha?: string }>;
   /** the world's onboarding scorecard (six ticks read from live state). */

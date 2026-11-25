@@ -85,6 +85,7 @@ import { createHomeTabs, readHomeFile, readHomeWheels } from "./homeFiles.js";
 import { spawnHostStats } from "./spawnHost.js";
 import { createPlacer } from "./homePlace.js";
 import { wheelTrackers } from "./trackers.js";
+import { readConsumption } from "./consumption.js";
 import { isStepId, isStepLabel, labelEdit, PERSONA_LOG_LABELS, readPersonaLog } from "./personaLog.js";
 import { hasOwnerPower } from "./auth/owner.js";
 import { storePersonas, wheelReader } from "./wheel.js";
@@ -229,6 +230,7 @@ import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { mountReplyNote } from "./voice/replyNote.js";
 import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince } from "./voice/briefing.js";
+import { marketingAgentName, marketingBrief, MARKETING_GREETING, MARKETING_PAGE, MARKETING_TOOLS, marketingInstructions, marketingKnows, marketingNoteText, marketingRelayIn } from "./voice/marketing.js";
 import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
@@ -564,7 +566,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -2377,6 +2379,12 @@ export function createApp(
   });
   // the wheel's persona log (every step an agent took on it, what and why, asked or chosen) and his label on
   // a step nobody asked for, one tap, committed to the home repo (personaLog.ts); `milestone:<id>` reads a campaign's.
+  // the wheel's Consumption chapter: its share of his whole AI subscription and of what was used this week,
+  // and each persona's part with what it made true, from docs/consumption/latest.json (consumption.ts); `all` for every wheel.
+  api.get("/consumption/:wheel", (c) => {
+    if (!homeOnly()) return c.json({ error: { code: "not_found" } }, 404);
+    return c.json(readConsumption(totemHome(), c.req.param("wheel")));
+  });
   api.get("/persona-log/:wheel", (c) => {
     if (!homeOnly()) return c.json({ error: { code: "not_found" } }, 404);
     const days = Math.min(30, Math.max(1, Number(c.req.query("days")) || 7));
@@ -3586,6 +3594,76 @@ export function createApp(
     },
   });
   mountOwnCall(api, "/voice/briefing", briefingVoice, { world: () => store.tenant }, "The briefing call");
+  // the senior marketing call (/marketing): its own ElevenLabs agent talks the social product's strategy with him (the
+  // number one blocker, each campaign's plan) from the marketing brief, its objectives and the campaigns' own plans;
+  // his words go to the social desk (campaigns, posts, channels) or the Team desk. The coach's call path, reused.
+  const marketingEleven: ElevenCalls | undefined =
+    opts.voice?.marketingEleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          name: marketingAgentName(),
+          tags: [socialProduct().toLowerCase(), "marketing-call"],
+          key: elevenKey,
+          prompt: marketingInstructions,
+          firstMessage: MARKETING_GREETING,
+          tools: () => MARKETING_TOOLS as any,
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_marketing_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_marketing_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
+  let marketingNotes = 0;
+  const marketingVoice = createVoice({
+    ...voiceBase,
+    eleven: marketingEleven,
+    mint: async () => {
+      throw new VoiceError(409, "marketing_eleven_only", "The senior marketing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+    },
+    scope: { world: DEFAULT_TENANT },
+    instructions: marketingInstructions,
+    tools: () => MARKETING_TOOLS as any,
+    desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    quickStatus: noStatus,
+    context: async () => {
+      const home = resolveRepo(read.reposRoot, homeRepo())?.path;
+      let brief: string | undefined;
+      try {
+        if (home) brief = fs.readFileSync(path.join(home, marketingBrief()), "utf8");
+      } catch {
+        /* no brief on this console: the call still has the objectives and the campaigns */
+      }
+      let campaigns: string | undefined;
+      try {
+        campaigns = worldCallKnows(socialWorld());
+      } catch {
+        /* no social world on this console */
+      }
+      return marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns });
+    },
+    walkRule: () => "",
+    relay: async (callId, args) => {
+      let r: ReturnType<typeof marketingRelayIn>;
+      try {
+        r = marketingRelayIn(args);
+      } catch (e) {
+        throw new VoiceError(400, "bad_relay", (e as Error).message);
+      }
+      const n = ++marketingNotes;
+      if (r.desk === "social") {
+        const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: MARKETING_PAGE, requestId: `marketing-${callId}-${n}` });
+        if (p) {
+          console.log(`[voice] ${callId} marketing note ${n} passed to the social desk (${p.state})`);
+          return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+        }
+      }
+      // the Team desk: his note about building, or (no social desk paired here) his words for the social desk.
+      await desk.send(marketingNoteText(callId, r, r.desk === "social"), MARKETING_PAGE, `marketing-${callId}-${n}`);
+      console.log(`[voice] ${callId} marketing note ${n} sent to the Team desk`);
+      return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
+    },
+  });
+  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant }, "The senior marketing call");
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";

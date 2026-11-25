@@ -72,6 +72,8 @@ export interface Pursuit {
   owner?: string;
   /** his Daily briefing switch: its key results (and its tester table) go into his 06:00 and 18:00 briefings. */
   briefing?: boolean;
+  /** his sidebar group (central, business, personal, background): the sidebar folds his objectives by it. */
+  group?: ObjectiveGroup;
 }
 export interface PursuitGoal {
   now: number;
@@ -175,6 +177,8 @@ interface Declared {
   plan?: { repo: string; path: string };
   /** `"briefing": true` in the file: in his 06:00 and 18:00 briefings. */
   briefing?: boolean;
+  /** `"group"` in the file: the sidebar group it sits in. */
+  group?: ObjectiveGroup;
 }
 export interface PursuitKitRef {
   /** Repo-relative folder: kit.json, previews/*.webp; the fonts sit in its parent's fonts/. */
@@ -269,7 +273,7 @@ export function parsePursuits(text: string): PursuitsDoc {
     const pr = str(obj(o.plan).repo);
     const pp = str(obj(o.plan).path);
     const plan = pr && pp && /^[\w./-]+\.md$/.test(pp) && !pp.includes("..") && !pp.startsWith("/") ? { repo: pr, path: pp } : undefined;
-    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER, ...(o.briefing === true ? { briefing: true } : {}) }];
+    return [{ id, name, greenWhen, watch, lines, totems, ...(plan ? { plan } : {}), ...(kit ? { kit } : {}), ...(product && /^[\w-]+$/.test(product) ? { product } : {}), parked: o.parked === true, epics, ...(goal ? { goal } : {}), owner: str(o.owner) ?? DEFAULT_OWNER, ...(o.briefing === true ? { briefing: true } : {}), ...(isObjectiveGroup(o.group) ? { group: o.group } : {}) }];
   });
   const said = obj(doc.said);
   // retired milestones: each by its repo and spine, as the epics name theirs.
@@ -491,6 +495,26 @@ export function briefingText(text: string, id: string, on: boolean): string | nu
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
+/**
+ * His sidebar groups, in his order (his voice note 25 Nov 14:34Z, Log/2026-11-25.md#^e-3941fc: "some of them are
+ * personal, some of them are business ... some of them are like research ... more in the background, but some of them
+ * are like central"): central first. Each objective's `"group"` in docs/pursuits.json; the sidebar folds by it.
+ */
+export const OBJECTIVE_GROUPS = ["central", "business", "personal", "background"] as const;
+export type ObjectiveGroup = (typeof OBJECTIVE_GROUPS)[number];
+export const isObjectiveGroup = (x: unknown): x is ObjectiveGroup => typeof x === "string" && (OBJECTIVE_GROUPS as readonly string[]).includes(x);
+
+/** his move of one objective to another group: `"group"` written on it; null when no such objective or group. */
+export function groupText(text: string, id: string, group: string): string | null {
+  if (!isObjectiveGroup(group)) return null;
+  const doc = obj(JSON.parse(text));
+  const list = Array.isArray(doc.pursuits) ? (doc.pursuits as Record<string, unknown>[]) : [];
+  const p = list.find((x) => str(obj(x).id) === id);
+  if (!p) return null;
+  p.group = group;
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
 /** his active and inactive objective ids from the home repo's file (kept while its mtime holds); no file: undefined. */
 let idsMemo: { file: string; mtime: number; v: { live: string[]; off: string[] } } | undefined;
 export function objectiveIds(homeDir: string | undefined): { live: string[]; off: string[] } | undefined {
@@ -656,6 +680,7 @@ export async function buildPursuits(
       ...(d.goal ? { goal: d.goal } : {}),
       owner: d.owner,
       ...(d.briefing ? { briefing: true } : {}),
+      ...(d.group ? { group: d.group } : {}),
       rank: ranks.get(d.id) ?? null,
       parked: d.parked,
       effort: effortOf(ranks.get(d.id) ?? null, d.parked, doc.effort),

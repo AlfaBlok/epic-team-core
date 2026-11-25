@@ -8,7 +8,7 @@ import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { forgetWorld } from "@/lib/useSocial";
 import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
 import { forgetDeskVoiceWorld } from "@/voice/deskBase";
-import { installInPlaceLinks, linkKind } from "./inPlaceLinks";
+import { installInPlaceLinks, linkKind, ourPagePath } from "./inPlaceLinks";
 import { linkUrls } from "./linkjsx/links";
 
 // The owner 25 Nov (vn_77ec9815), said again: a link to the app stays in the app;
@@ -37,12 +37,12 @@ afterEach(() => {
 });
 
 describe("where a link opens", () => {
-  it("an app screen in the app; an outside site and a page of ours the app does not draw in a new window", () => {
+  it("an app screen, a page of ours the app does not draw, and another site", () => {
     expect(linkKind("/milestones/ms_1?tab=deck", origin)).toBe("route");
     expect(linkKind(`${origin}/inbox#E907-S3`, origin)).toBe("route");
-    expect(linkKind("/steps/view/abc", origin)).toBe("outside");
-    expect(linkKind("/api/files/x", origin)).toBe("outside");
-    expect(linkKind("/status/e18-s28/shot.webp", origin)).toBe("outside");
+    expect(linkKind("/steps/view/abc", origin)).toBe("page");
+    expect(linkKind("/api/files/x", origin)).toBe("page");
+    expect(linkKind("/status/e18-s28/shot.webp", origin)).toBe("page");
     expect(linkKind("https://github.com/example/repo", origin)).toBe("outside");
     expect(linkKind("http://host1.example.net:9484/#diagram", origin)).toBe("outside");
     expect(linkKind("mailto:", origin)).toBeUndefined();
@@ -89,15 +89,37 @@ for (const installed of [true, false])
       expect(r.state.location.pathname).toBe("/inbox");
     });
 
-    it("a page of ours the app does not draw (a steps page) opens a new window, never in the app's window", () => {
-      const open = vi.spyOn(window, "open").mockReturnValue(null);
-      const r = mount(installed);
-      expect(tap("steps page").defaultPrevented).toBe(true);
-      expect(open).toHaveBeenLastCalledWith(`${origin}/steps/view/abc`, "_blank", "noopener");
-      expect(tap("steps page new").defaultPrevented).toBe(false); // target=_blank: the browser's new window
-      window.open("/steps/view/ghi", "_blank");
-      expect(open.mock.calls.at(-1)?.slice(0, 2)).toEqual(["/steps/view/ghi", "_blank"]);
-      expect(r.state.location.pathname).toBe("/inbox");
+    it(installed ? "a page of ours the app does not draw shows on the app's own screen for it, never window.open (a second app)" : "a page of ours the app does not draw opens a new tab", async () => {
+      const before = window.open;
+      const open = vi.fn(() => null);
+      window.open = open as unknown as typeof window.open; // a plain stand-in: the rule's own window.open wraps it
+      const r = createMemoryRouter([{ path: "*", element: <Card /> }], { initialEntries: ["/inbox"] });
+      render(<RouterProvider router={r} />);
+      const undo = installInPlaceLinks((to) => void r.navigate(to), { installed });
+      try {
+        expect(tap("steps page").defaultPrevented).toBe(true);
+        if (installed) {
+          await act(async () => undefined);
+          expect(r.state.location.pathname + r.state.location.search).toBe(ourPagePath("/steps/view/abc"));
+          expect(tap("steps page new").defaultPrevented).toBe(true);
+          await new Promise((ok) => setTimeout(ok, 5)); // a later tap, not the same click
+          await act(async () => void window.open("/steps/view/ghi", "_blank"));
+          expect(r.state.location.search).toBe(`?u=${encodeURIComponent("/steps/view/ghi")}`);
+          expect(open).not.toHaveBeenCalled();
+          // Back walks the app's own history to the card
+          await act(async () => void (await r.navigate(-1)));
+          await act(async () => void (await r.navigate(-1)));
+          await act(async () => void (await r.navigate(-1)));
+          expect(r.state.location.pathname).toBe("/inbox");
+        } else {
+          expect(open).toHaveBeenLastCalledWith(`${origin}/steps/view/abc`, "_blank", "noopener");
+          expect(tap("steps page new").defaultPrevented).toBe(false); // target=_blank: the browser's new tab
+          expect(r.state.location.pathname).toBe("/inbox");
+        }
+      } finally {
+        undo();
+        window.open = before;
+      }
     });
 
     it("an auto-linked outside URL in a button opens a new window", async () => {

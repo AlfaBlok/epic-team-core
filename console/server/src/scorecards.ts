@@ -222,6 +222,8 @@ export interface ScorecardNode {
   foldedInto?: string;
   /** the wheel's owner persona, the one the idle watch wakes. */
   owner?: string;
+  /** his sidebar group (docs/pursuits.json `group`): central, business, personal or background. */
+  group?: string;
   /** set by the idle watch: below all-green with no worker, no ask and no card: it must move. */
   idle?: { idle: boolean; reason: string; nudgedAt?: string; runId?: string };
   /**
@@ -485,6 +487,7 @@ export function buildScorecards(
       state: p.state,
       motion: p.motion,
       ...(p.owner ? { owner: p.owner } : {}),
+      ...(p.group ? { group: p.group } : {}),
       spines,
       children,
       ...withTurner(pursuitRows(p, children)),
