@@ -256,7 +256,16 @@ export interface TenancyArea {
   /** GET /tenants/:id/onboarding. */
   mountOnboarding(o: { api: Hono; db: DB; store: Store; reposRoot: string; social: unknown; ownBrowser: (w: string) => string | undefined; lentBrowsers: (w: string) => string[]; siteHeaders: (url: string) => Record<string, string>; customerSites: () => any; hosts: (w: string) => string[] }): void;
   /** the Testers page. */
-  mountTesters(o: { api: Hono; db: DB; notify?: (text: string, id: string) => Promise<true | string> }): void;
+  /** spineAsks: a decide ask raised in a spine of a checkout, and its state and answer read back from the file. */
+  mountTesters(o: {
+    api: Hono;
+    db: DB;
+    notify?: (text: string, id: string) => Promise<true | string>;
+    spineAsks?: {
+      raise(o: { repo: string; path: string; question: string; row?: string; askedBy: string }): Promise<{ code?: string; error?: string }>;
+      read(o: { repo: string; path: string; code: string }): { state: "open" | "answered" | "superseded"; answer?: string } | undefined;
+    };
+  }): void;
   /** a signup made a working world. */
   mountTesterWorlds(o: { api: Hono; db: DB; reposRoot: string; campaigns: unknown; socialUrl: string; wake?: (id: string, note: string) => Promise<{ id: string } | undefined>; browser?: object; consoleUrl: string; wakeHold: (world: string) => string | undefined; notify?: (text: string) => void }): TesterWorldsArea;
 }

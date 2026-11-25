@@ -24,6 +24,10 @@ describe("sortRows", () => {
     expect(sizeOf("Followers not read")).toBeNull();
     expect(pillTone("agreed")).toContain("emerald");
     expect(pillTone("declined")).toContain("rose");
+    expect(pillTone("granted")).toContain("emerald"); // an application's stage has its colour
+    expect(pillTone("applied")).toContain("sky");
+    expect(pillTone("drafted")).toContain("amber");
+    expect(pillTone("to research")).toContain("muted");
     expect(pillTone("candidate")).toContain("muted");
   });
 });

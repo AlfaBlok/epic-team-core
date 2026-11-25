@@ -61,7 +61,27 @@ export interface Press {
   ref?: string;
   /** What the route answered when it landed (the card's new state), for the page that waits on it. */
   response?: unknown;
+  /**
+   * kept, not written yet: the row it writes could be read two ways (cells out of line with its header), so the
+   * press waits in the outbox, its row's owner was woken, and it is tried every minute until the row is whole.
+   * While `state` is `landing` the card says it was kept; the value stays after it lands (it was kept that long).
+   */
+  held?: string;
+  /** when it was first kept. */
+  heldAt?: string;
 }
+
+/**
+ * a row the console cannot read one way (rows.ts `outOfColumns`: more or fewer cells than its header, not the one
+ * stray empty cell the console mends): nothing is written until the row is repaired. Such a refusal keeps the press.
+ */
+export const OUT_OF_COLUMNS = /row (\S+) has (\d+) cells but its header has (\d+)/;
+/** a kept press is tried again this often for HELD_FAST_MS, then every HELD_SLOW_MS. */
+export const HELD_RETRY_MS = 60_000;
+export const HELD_FAST_MS = 2 * 3600_000;
+export const HELD_SLOW_MS = 5 * 60_000;
+/** a kept press whose row is still not repaired after this fails (and shows on /api/write-health): 7 days. */
+export const HELD_GIVE_UP_MS = 7 * 86_400_000;
 
 /** Pause before try 2, 3, …; the last pause repeats until GIVE_UP_MS. */
 export const PRESS_RETRY_MS = [5_000, 15_000, 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000];
@@ -99,6 +119,10 @@ export function ensurePresses(db: DB): void {
     CREATE INDEX IF NOT EXISTS presses_ref ON presses(ref);
     CREATE UNIQUE INDEX IF NOT EXISTS presses_key ON presses(client_key) WHERE client_key IS NOT NULL;
   `);
+  // a press kept for a row that could be read two ways (added to logs made before it)
+  const cols = new Set((db.prepare("PRAGMA table_info(presses)").all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("held")) db.exec("ALTER TABLE presses ADD COLUMN held TEXT");
+  if (!cols.has("held_at")) db.exec("ALTER TABLE presses ADD COLUMN held_at TEXT");
 }
 
 /** What the outbox replays: the original request, minus anything secret (a secret press is never replayed). */
@@ -142,6 +166,8 @@ type Row = {
   request: string | null;
   response: string | null;
   tenant_id: string | null;
+  held?: string | null;
+  held_at?: string | null;
 };
 
 const parse = <T>(s: string | null, d: T): T => {
@@ -193,11 +219,13 @@ function toPress(r: Row, withResponse = false): Press {
     ...(r.http_status !== null ? { httpStatus: r.http_status } : {}),
     ...(r.ref ? { ref: r.ref } : {}),
     ...(withResponse && r.response ? { response: parse<unknown>(r.response, undefined) } : {}),
+    ...(r.held ? { held: r.held } : {}),
+    ...(r.held_at ? { heldAt: r.held_at } : {}),
   };
 }
 
 /** How a try ended: in the repo, worth another try, or refused for good. */
-export type Verdict = { kind: "landed"; sha?: string; note?: string } | { kind: "retry"; reason: string } | { kind: "refused"; reason: string };
+export type Verdict = { kind: "landed"; sha?: string; note?: string } | { kind: "retry"; reason: string } | { kind: "refused"; reason: string } | { kind: "held"; reason: string };
 
 /** Checkout and git trouble a later try can get past (a write refused for the checkout's state, not for the press). */
 const CHECKOUT_TROUBLE =
@@ -217,6 +245,8 @@ export function judge(status: number, body: unknown): Verdict {
   const reason = (b.error?.message ?? `HTTP ${status}`).slice(0, 600);
   if (code === "wake_failed") return { kind: "landed", ...(sha ? { sha } : {}), note: reason };
   if (status >= 500) return { kind: "retry", reason };
+  // the row could be read two ways: kept until it is repaired, never refused into nothing
+  if (status === 409 && OUT_OF_COLUMNS.test(reason)) return { kind: "held", reason };
   if (status === 409 && CHECKOUT_TROUBLE.test(reason)) return { kind: "retry", reason };
   return { kind: "refused", reason };
 }
@@ -310,7 +340,7 @@ export interface Presses {
   health(days?: number): WriteHealth;
 }
 
-export function createPresses(db: DB, o: { now?: () => number; retryMs?: number[]; giveUpMs?: number } = {}): Presses {
+export function createPresses(db: DB, o: { now?: () => number; retryMs?: number[]; giveUpMs?: number; heldRetryMs?: number } = {}): Presses {
   ensurePresses(db);
   const now = o.now ?? Date.now;
   const retryMs = o.retryMs ?? PRESS_RETRY_MS;
@@ -460,8 +490,23 @@ export function createPresses(db: DB, o: { now?: () => number; retryMs?: number[
           t.response === undefined ? null : JSON.stringify(t.response).slice(0, 200_000),
           id,
         );
+      } else if (t.verdict.kind === "held" && t.retry && total < HELD_GIVE_UP_MS) {
+        // kept: the row is flagged to its owner; tried every minute (then every 5) until the row is whole
+        const heldAt = r.held_at ?? iso();
+        const wait = o.heldRetryMs ?? (now() - Date.parse(heldAt) < HELD_FAST_MS ? HELD_RETRY_MS : HELD_SLOW_MS);
+        db.prepare(`UPDATE presses SET state = 'landing', result = 'queued', reason = ?, held = ?, held_at = ?, attempts = ?, tries = ?, next_at = ?, http_status = ? WHERE id = ?`).run(
+          t.verdict.reason,
+          t.verdict.reason.slice(0, 600),
+          heldAt,
+          attempts,
+          JSON.stringify(kept),
+          iso(now() + wait),
+          t.status,
+          id,
+        );
       } else if (t.verdict.kind === "retry" && t.retry && total < giveUpMs) {
-        const wait = retryMs[Math.min(attempts - 1, retryMs.length - 1)];
+        // a kept press (its row being repaired) never waits longer than a kept press would
+        const wait = r.held ? Math.min(retryMs[Math.min(attempts - 1, retryMs.length - 1)], HELD_SLOW_MS) : retryMs[Math.min(attempts - 1, retryMs.length - 1)];
         db.prepare(`UPDATE presses SET state = 'landing', result = 'queued', reason = ?, attempts = ?, tries = ?, next_at = ?, http_status = ? WHERE id = ?`).run(
           t.verdict.reason,
           attempts,
@@ -471,7 +516,10 @@ export function createPresses(db: DB, o: { now?: () => number; retryMs?: number[
           id,
         );
       } else {
-        const why = t.verdict.kind === "retry" && t.retry ? `still not landed after ${attempts} tries in ${Math.round(total / 3600_000)} h: ${t.verdict.reason}` : t.verdict.reason;
+        const why =
+          (t.verdict.kind === "retry" || t.verdict.kind === "held") && t.retry
+            ? `still not landed after ${attempts} tries in ${Math.round(total / 3600_000)} h: ${t.verdict.reason}`
+            : t.verdict.reason;
         db.prepare(`UPDATE presses SET state = 'failed', result = 'failed', reason = ?, attempts = ?, tries = ?, next_at = NULL, ms = ?, http_status = ?, response = ? WHERE id = ?`).run(
           attempts > 1 ? `on try ${attempts}: ${why}` : why,
           attempts,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { sameOpenProblem, sameQuestion } from "../inbox/duplicate.js";
+import { meaningCall, nearest, sameMeaningProblem } from "../inbox/sameMeaning.js";
 import fs from "node:fs";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
@@ -869,7 +870,14 @@ export function oneQuestionOneCard(rows: ReviewRow[]): void {
   for (const x of live) {
     if (x.verdict.kind !== "card") continue;
     const older = live.find((y) => y !== x && y.repo === x.repo && y.verdict.kind === "card" && ((y.verifiedAt ?? "") < (x.verifiedAt ?? "") || ((y.verifiedAt ?? "") === (x.verifiedAt ?? "") && rows.indexOf(y) < rows.indexOf(x))) && sameQuestion(text(x), text(y)) && sameQuestion(x.title, y.title));
-    if (older) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameOpenProblem(`${older.ref}'s card`)] };
+    if (older) {
+      x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameOpenProblem(`${older.ref}'s card`)] };
+      continue;
+    }
+    // E948-S206: the same question in other words, judged by meaning (inbox/sameMeaning.ts): only a sure verdict merges.
+    const earlier = live.filter((y) => y !== x && y.repo === x.repo && y.verdict.kind === "card" && ((y.verifiedAt ?? "") < (x.verifiedAt ?? "") || ((y.verifiedAt ?? "") === (x.verifiedAt ?? "") && rows.indexOf(y) < rows.indexOf(x))));
+    const same = nearest(text(x), earlier, text).find((y) => meaningCall(text(y), text(x), { a: `${y.repo} ${y.ref}`, b: `${x.repo} ${x.ref}` }) === "same");
+    if (same) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameMeaningProblem(`${same.ref}'s card`)] };
   }
 }
 

@@ -17,7 +17,34 @@ export const BUY_LABEL = (p: Pick<PlanState, "price">) => `Buy ${p.price.name}, 
 export const BUNDLE_LABEL = (b: { seats: number; eurPerMonth: number }) => `${b.seats} seats, €${b.eurPerMonth.toLocaleString("en-GB")} a month`;
 /** the locked model in one line ("your AI subscription, our console"), wherever the plan shows. */
 export const PLAN_WORDS =
-  "Your AI subscription, our console. Your team runs on your own AI seats, vault, repo and cloud. We host the console for €49 a month, and can run your compute at cost plus 20%.";
+  "Your AI subscription, our console. Your team runs on your own AI seats, vault, repo and cloud. We host the console for €49 a month, and can run your server too, billed by the minute.";
+/** one plain price per server size (cents a minute, a month at most), never how it was set. */
+export const centsLabel = (c: number) => `${c.toLocaleString("en-GB", { maximumFractionDigits: 2 })} cents`;
+export function ComputePrices({ plan }: { plan: PlanState }) {
+  const sizes = plan.compute?.sizes ?? [];
+  if (!sizes.length) return null;
+  return (
+    <table className="w-full text-sm tabular-nums" data-testid="compute-prices">
+      <caption className="mb-1 text-left text-xs text-muted-foreground">A server on our cloud, if you want one</caption>
+      <thead>
+        <tr className="text-left text-xs text-muted-foreground">
+          <th className="py-1 pr-2 font-normal">Size</th>
+          <th className="py-1 pr-2 font-normal">A minute</th>
+          <th className="py-1 font-normal">A month at most</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sizes.map((z) => (
+          <tr key={z.size} className="border-t border-border">
+            <td className="py-1 pr-2">{z.size}, {z.cores} cores, {z.memoryGb} GB</td>
+            <td className="py-1 pr-2">{centsLabel(z.centsPerMinute)}</td>
+            <td className="py-1">€{z.eurPerMonthMax}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 /** @deprecated the seat bundles are retired; kept as the plan's words for older imports. */
 export const SEAT_WORDS = PLAN_WORDS;
 /** the own-AI button's words, like "Own AI, €49 a month". */
@@ -174,6 +201,7 @@ export function PlanCard({ world }: { world: string | undefined }) {
             {back === "cancelled" && <p className="mt-1 text-sm text-muted-foreground" data-testid="plan-cancelled">The payment was cancelled. Nothing was charged.</p>}
           </div>
           <BundleButtons plan={plan} />
+          <ComputePrices plan={plan} />
         </div>
       )}
     </Card>

@@ -288,7 +288,16 @@ export function createAfterClose(o: AfterCloseOptions) {
     return [...out.values()];
   }
 
-  return { comment, reopen, recent };
+  /**
+   * flag a row to its owner now (the milestone's Delivery manager is woken with `text`), the same way a
+   * comment wakes it. Who was woken, or why nobody was.
+   */
+  async function flagRow(c: Card, text: string, key: string): Promise<string> {
+    const r = await wake(c, text, key);
+    return r.woke ?? `nobody (${r.wakeError ?? "no wake"})`;
+  }
+
+  return { comment, reopen, recent, flagRow };
 }
 
 /** one closed card on Team home's Recently closed list (Add comment files to its row or ask). */

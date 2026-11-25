@@ -128,6 +128,7 @@ import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
+import { anthropicPairJudge, borderlinePairs, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
 import { anthropicSpokenJudge, mountSpokenAnswers } from "./inbox/spokenAnswers.js";
 import type { WaitingItem } from "./inbox/waiting.js";
 import { anthropicStoreFile, ANTHROPIC_TEXT_MODEL, textModelProvider } from "./textModel.js";
@@ -150,6 +151,7 @@ import { cloneDirFor, createCloneWriter } from "./inbox/writeClone.js";
 import { createPresses } from "./press/presses.js";
 import { mountPresses, whoPressed, type PressWorker } from "./press/mount.js";
 import { createAfterClose, mountAfterClose } from "./review/afterClose.js";
+import { heldCard, heldRowBrief } from "./press/heldRow.js";
 import { createSentBack, mountSentBack } from "./review/sentBack.js";
 import { createPickup, PICKUP_TICK_MS, type Pickup } from "./review/pickup.js";
 import type { WorkerLaunchInput } from "./cycle/workerLaunch.js";
@@ -453,6 +455,8 @@ export function createApp(
      * separate niced, CPU-capped process this console starts (indexer/launch.ts; `unit` = a systemd user unit, `child` =
      * a child process); the console only reads their results from console.db. Needs readModel.dbPath. Unset = in process.
      */
+    /** E948-S206: the pair judge (tests); unset = Claude Haiku on the console's key. */
+    sameMeaningJudge?: PairJudge;
     indexer?: { mode: IndexerLaunchMode; port: string | number; revision?: string; onLaunched?: (h: IndexerHandle) => void };
     readModel?: {
       mode?: "worker" | "in-process" | "none";
@@ -496,7 +500,7 @@ export function createApp(
      * the press log and outbox (press/). tickMs: how often the worker retries presses not landed yet (0 or unset =
      * no timer; tests call the worker); retryMs / giveUpMs: its backoff; onWorker hands the worker to index.ts / tests.
      */
-    presses?: { tickMs?: number; retryMs?: number[]; giveUpMs?: number; onWorker?: (w: PressWorker) => void; answerFirst?: boolean };
+    presses?: { tickMs?: number; retryMs?: number[]; giveUpMs?: number; /** how often a kept press is tried (tests) */ heldRetryMs?: number; onWorker?: (w: PressWorker) => void; answerFirst?: boolean };
     /**
      * press writes commit in the console's checkout and push in the background (retried; a commit that cannot be
      * rebased puts its presses back in the outbox), and skip the hooks after an in-process secret check. Off in tests by
@@ -725,11 +729,12 @@ export function createApp(
   });
   // every press on the owner's buttons is logged, and the review buttons are saved first and retried
   // until they land (press/mount.ts); before every route it wraps. The clone status is bound once the writer exists.
-  const presses = createPresses(db, { ...(opts.presses?.retryMs ? { retryMs: opts.presses.retryMs } : {}), ...(opts.presses?.giveUpMs ? { giveUpMs: opts.presses.giveUpMs } : {}) });
+  const presses = createPresses(db, { ...(opts.presses?.retryMs ? { retryMs: opts.presses.retryMs } : {}), ...(opts.presses?.giveUpMs ? { giveUpMs: opts.presses.giveUpMs } : {}), ...(opts.presses?.heldRetryMs !== undefined ? { heldRetryMs: opts.presses.heldRetryMs } : {}) });
   let cloneStatus: () => unknown = () => ({ enabled: false });
   // set below once the spine writer (its background pushes) and the review list (a card's row) exist
   let pressPushes: import("./inbox/spineWrite.js").BackgroundPushes | undefined;
   let cardOfPress: ((id: string) => { repo: string; path: string; ref: string; title?: string; milestoneId?: string } | undefined) | undefined;
+  let flagHeldRow: ((p: import("./press/presses.js").Press & { request?: import("./press/presses.js").PressRequest }) => Promise<string | undefined>) | undefined;
   const pressWorker = mountPresses(api, {
     db,
     presses,
@@ -739,6 +744,8 @@ export function createApp(
     answerFirst: !!opts.presses?.answerFirst,
     pushes: () => pressPushes,
     cardOf: (id) => cardOfPress?.(id),
+    // a press kept for a row read two ways wakes the row's owner the same minute, never only the repair timer
+    onHeld: (p) => flagHeldRow?.(p),
   });
   // the world wake gate's on/off shows here so a check (deploy, regression) can confirm it without a login.
   // and the last read-model drift check (the cache rebuilt from the repo and compared): ok, when, how many views.
@@ -1908,6 +1915,11 @@ export function createApp(
   // after a card closes: Add comment (a last thought, any time later) and Bring it back once the press landed.
   const afterClose = createAfterClose({ db, showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1", store, reposRoot: read.reposRoot, writer: spine, cycle: cycle.enabled ? cycle : undefined, wrote: dropSpines, ...(attachments ? { attachments } : {}), who: () => (currentAuth()?.identity?.kind === "legacy" && (currentAuth()?.identity as { peer?: string }).peer === PRESS_TEST_RUN ? "the daily press test" : ownerName()) });
   mountAfterClose(api, afterClose);
+  flagHeldRow = async (p) => {
+    const card = heldCard(p, cardOfPress);
+    if (!card) return undefined;
+    return afterClose.flagRow({ kind: "review", ...card }, heldRowBrief(p, card), `held-row:${card.repo}:${card.ref}:${(p.heldAt ?? p.at).slice(0, 13)}`);
+  };
   // every card he sent back stays on his inbox, marked in progress with its worker, until it returns to review
   const sentBackDeps = { store, reposRoot: read.reposRoot, goals: () => review.goals(), rows: () => review.rows(), recent: (o: { days: number; limit: number; world?: string }) => afterClose.recent(o), world: () => whoPressed().tenant };
   mountSentBack(api, sentBackDeps);
@@ -2447,6 +2459,25 @@ export function createApp(
   const textJudge: Judge = textProvider === "anthropic" ? anthropicJudge(anthropicKey) : openAiJudge(openAiKey);
   // his words on a card answer its asks (read only; the card presses each answer through its own route).
   mountSpokenAnswers(api, { ...(textProvider === "anthropic" && !process.env.VITEST ? { judge: anthropicSpokenJudge(anthropicKey) } : {}) });
+  // E948-S206: cards that ask the same in other words: Haiku judges the close pairs the inbox builders queue, once a minute.
+  const pairJudge = opts.sameMeaningJudge ?? anthropicPairJudge(anthropicKey);
+  if (!opts.passive && !process.env.VITEST && process.env.CONSOLE_SAME_MEANING !== "off") startSameMeaningJudge(pairJudge, 60_000, (m) => console.log(m));
+  // judge pairs now (scripts/duplicate_taps.py measures his taps with it; at most 60 a call), and what it merged or left borderline.
+  api.post("/inbox/same-meaning", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { pairs?: unknown };
+    const pairs = (Array.isArray(b.pairs) ? b.pairs : [])
+      .filter((p): p is { a: string; b: string; refA?: string; refB?: string } => !!p && typeof (p as { a?: unknown }).a === "string" && typeof (p as { b?: unknown }).b === "string")
+      .slice(0, 60)
+      .map((p) => ({ a: p.a.slice(0, 4000), b: p.b.slice(0, 4000), ...(typeof p.refA === "string" ? { refA: p.refA.slice(0, 80) } : {}), ...(typeof p.refB === "string" ? { refB: p.refB.slice(0, 80) } : {}) }));
+    if (!pairs.length) return c.json({ error: "pairs: [{a, b}] needed" }, 400);
+    try {
+      const verdicts = await judgePairs(pairJudge, pairs);
+      return c.json({ sure: MEANING_SURE, border: MEANING_BORDER, verdicts: verdicts.map((v) => ({ key: v.key, same: v.same, confidence: v.confidence, call: v.call })) });
+    } catch (e) {
+      return c.json({ error: String((e as Error)?.message ?? e).slice(0, 300) }, 502);
+    }
+  });
+  api.get("/inbox/same-meaning", (c) => c.json({ sure: MEANING_SURE, border: MEANING_BORDER, borderline: borderlinePairs().slice(0, 100), merged: mergedPairs().slice(0, 100) }));
   const textStructurer: Structurer = opts.voice?.structure ?? (textProvider === "anthropic" ? anthropicStructurer(anthropicKey) : openAiStructurer(openAiKey));
   // the owner edits a red line (typed or a voice note, reworded by the same text model) or deletes it, from its slim
   // row on top of Team home; docs/pursuits.json, the root Red line lines and an Decisions row, one commit.
@@ -3948,7 +3979,33 @@ export function createApp(
   const campaigns = sites?.campaigns;
   // the social product tester signup (public form on epicspine.dev → this db, a `[tester]` note to the owner's desk, /testers list).
   // the Testers page (hosted/tenancy.ts).
-  tenancy?.mountTesters({ api, db, notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined });
+  // the hosted layer may raise a decide ask in a spine of one of its checkouts and read its answer back from the file
+  // (the spine is the record; the console's one writer commits it).
+  const spineAsks = {
+    raise: async (o: { repo: string; path: string; question: string; row?: string; askedBy: string }) => {
+      const home = resolveRepo(read.reposRoot, o.repo);
+      if (!home) return { error: `no ${o.repo} checkout` };
+      const ms = store.listMilestones().filter((m) => resolveRepo(read.reposRoot, m.repo)?.path === home.path);
+      const m = ms.find((x) => x.path.replace(/^\.\//, "") === o.path) ?? ms.find((x) => /(?:^|\/)root\.md$/.test(x.path)) ?? ms[0];
+      if (!m) return { error: `no milestone in ${o.repo} to raise the ask in` };
+      const r = await raiseAsk(raiseDeps(), m, { question: o.question, askedBy: o.askedBy, row: o.row, kind: "decide" }, o.path);
+      return r.status === "written" ? { code: r.code } : { error: r.reason };
+    },
+    read: (o: { repo: string; path: string; code: string }) => {
+      const home = resolveRepo(read.reposRoot, o.repo);
+      if (!home) return undefined;
+      let text = "";
+      try {
+        text = fs.readFileSync(path.join(home.path, o.path), "utf8");
+      } catch {
+        return undefined;
+      }
+      if (new RegExp(`\\[superseded\\s+${o.code}\\b`).test(text)) return { state: "superseded" as const };
+      const a = parseAsks(text).find((x) => x.code === o.code);
+      return a ? { state: a.state === "open" ? ("open" as const) : ("answered" as const), answer: a.answer ?? undefined } : undefined;
+    },
+  };
+  tenancy?.mountTesters({ api, db, notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined, spineAsks });
   // the overnight read's three morning items, one Team desk message a day (scripts/overnight_read.py morning).
   mountMorningRead(api, { db, notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined });
   // the "I'm on my laptop" switch (laptop.ts): Mac tasks first in the inbox while on, one Team desk line each way,

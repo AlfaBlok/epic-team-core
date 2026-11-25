@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { authModeFromEnv, currentAuth, runWithAuth, type AuthMode } from "../auth/identity.js";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import { timeWrites, withPress, type BackgroundPushes } from "../inbox/spineWrite.js";
-import { judge, serverTiming, undoHoldMs, type Presses, type PressRequest, type Verdict } from "./presses.js";
+import { judge, serverTiming, undoHoldMs, type Press, type Presses, type PressRequest, type Verdict } from "./presses.js";
 
 /**
  * the press log and outbox on the routes behind the owner's buttons (Team home, review cards, asks, the inbox, and the
@@ -173,7 +173,16 @@ export interface PressMountOptions {
   pushes?: () => BackgroundPushes | undefined;
   /** a review card's row (repo, spine, code), kept with the press so his words land even if the row moves on. */
   cardOf?: (id: string) => PressRequest["card"];
+  /**
+   * a press was kept because its row could be read two ways (nothing written until the row is repaired):
+   * flag the row to its owner now, once per press (the console wakes the row's Delivery manager), never only on the
+   * 15-minute repair timer. Its answer is logged; a failure never touches the press.
+   */
+  onHeld?: (p: Press & { request?: PressRequest }) => Promise<string | undefined> | string | undefined;
 }
+
+/** what the card says when his press is kept for a row being repaired. */
+export const KEPT_MESSAGE = "Kept ✓ It goes into the project as soon as its row is fixed; the team was told.";
 
 /** presses that carry the owner's words (Changes wanted, Deny with a reason): never refused into nothing. */
 const WORDS_ROUTE = /\/review-items\/([^/?]+)\/(relaunch|deny)(?:\?|$)/;
@@ -197,8 +206,15 @@ export interface PressWorker {
 }
 
 /** what a saved press answers (the card says "Saved" and follows GET /api/presses/:id until it lands). */
-const landingReply = (p: { id: string; reason?: string; nextAt?: string }) => ({
-  press: { id: p.id, state: "landing" as const, message: "Saved, landing…", ...(p.reason ? { reason: p.reason } : {}), ...(p.nextAt ? { nextAt: p.nextAt } : {}) },
+const landingReply = (p: { id: string; reason?: string; nextAt?: string; held?: string }) => ({
+  press: {
+    id: p.id,
+    state: "landing" as const,
+    message: p.held ? KEPT_MESSAGE : "Saved, landing…",
+    ...(p.reason ? { reason: p.reason } : {}),
+    ...(p.nextAt ? { nextAt: p.nextAt } : {}),
+    ...(p.held ? { held: p.held } : {}),
+  },
 });
 
 export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
@@ -219,6 +235,16 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
     presses.link(id, ref, reply);
     jobEnd(ref);
   };
+  /** a press just kept for a row that could be read two ways: its owner is told now, once. */
+  const flagHeld = (p: Press, wasHeld: boolean, request?: PressRequest) => {
+    if (wasHeld || p.state !== "landing" || !p.held) return;
+    log(`press ${p.id} (${p.action} ${p.target}): kept until its row is repaired (${p.held}); tried again at ${p.nextAt}`);
+    if (!o.onHeld) return;
+    void Promise.resolve()
+      .then(() => o.onHeld!({ ...p, ...(request ? { request } : {}) }))
+      .then((who) => log(`press ${p.id}: its row flagged to ${who ?? "nobody (no owner found; the repair timer still runs)"}`))
+      .catch((e) => log(`press ${p.id}: flagging its row failed (${(e as Error).message}); the repair timer still runs`));
+  };
 
   api.use("*", async (c: Context, next) => {
     if (c.req.method !== "POST") return next();
@@ -236,18 +262,7 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
       if (prior?.state === "failed") key = undefined;
       else if (prior) {
         if (prior.state === "landed" && prior.response !== undefined) return c.json(prior.response as object, (prior.httpStatus ?? 200) as 200);
-        if (prior.state === "landing")
-          return c.json(
-            {
-              press: {
-                id: prior.id,
-                state: "landing",
-                message: "Saved, landing…",
-                reason: prior.reason,
-              },
-            },
-            202,
-          );
+        if (prior.state === "landing") return c.json(landingReply(prior), 202);
       }
     }
     // pressing again while the first press is landing (a double click, a second tab) returns that press
@@ -338,6 +353,7 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
       followAnswer(id, (out as { id: string }).id, { status: res.status, ms });
     } else {
       const verdict = judge(res.status, out);
+      const wasHeld = !!presses.get(id)?.held;
       const settled = presses.settle(id, {
         verdict,
         status: res.status,
@@ -346,19 +362,10 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
         ...(verdict.kind === "landed" ? { response: out } : {}),
         retry: r.mode === "outbox",
       });
-      if (r.mode === "outbox" && settled.state === "landing")
-        c.res = new Response(
-          JSON.stringify({
-            press: {
-              id,
-              state: "landing",
-              message: "Saved, landing…",
-              reason: settled.reason,
-              nextAt: settled.nextAt,
-            },
-          }),
-          { status: 202, headers: { "content-type": "application/json" } },
-        );
+      if (r.mode === "outbox" && settled.state === "landing") {
+        c.res = new Response(JSON.stringify(landingReply(settled)), { status: 202, headers: { "content-type": "application/json" } });
+        flagHeld(settled, wasHeld, request);
+      }
     }
     try {
       c.res.headers.set("x-press-id", id);
@@ -526,6 +533,7 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
         if (verdict.kind === "landed") status = 200;
       }
     }
+    const wasHeld = !!presses.get(id)?.held;
     const p = presses.settle(id, {
       verdict,
       status,
@@ -534,6 +542,8 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
       ...(verdict.kind === "landed" ? { response: out } : {}),
       retry: true,
     });
+    flagHeld(p, wasHeld, req);
+    if (wasHeld && p.state === "landed") log(`press ${id} (${p.action} ${p.target}): its row was repaired; the kept press landed ${p.sha ?? ""}`.trim());
     log(`press ${id} (${p.action} ${p.target}): try ${p.attempts} ${p.state === "landed" ? "landed" : p.state === "failed" ? `failed: ${p.reason}` : `not yet (${p.reason}), again at ${p.nextAt}`} in ${Date.now() - t0} ms${steps ? ` (${Object.entries(steps).map(([k, v]) => `${k} ${v}`).join(", ")})` : " (no steps)"}`);
   }
 

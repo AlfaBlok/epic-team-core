@@ -6,6 +6,7 @@ import { api } from "@/api";
 import type { SentBackCard } from "@/api/review-types";
 import { ProjectProvider } from "@/lib/project";
 import { SKINS, SkinProvider } from "@/lib/skin";
+import { LandFolded } from "./homeSection";
 import { InboxSentBack, SENT_BACK_SECTION, workerLine } from "./sentBack";
 
 /**
@@ -26,16 +27,20 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-const draw = () =>
+const draw = (inbox = false) =>
   render(
     <SkinProvider skin={SKINS.console}>
       <MemoryRouter>
         <ProjectProvider>
-          <InboxSentBack />
+          <LandFolded.Provider value={inbox}>
+            <InboxSentBack />
+          </LandFolded.Provider>
         </ProjectProvider>
       </MemoryRouter>
     </SkinProvider>,
   );
+/** E948-S208: the section starts folded; his tap on its heading opens it */
+const openIt = async () => fireEvent.click(await screen.findByTestId("sent-back-toggle"));
 
 describe("Sent back, in progress", () => {
   it("lists only work truly in progress: its worker, the round and his own words; a waiting one or one the team closed never shows", async () => {
@@ -44,6 +49,7 @@ describe("Sent back, in progress", () => {
     const section = await screen.findByTestId("sent-back");
     expect(section.textContent).toContain(SENT_BACK_SECTION);
     expect(within(section).getByTestId("sent-back-count").textContent).toBe("1");
+    await openIt();
     const cards = within(section).getAllByTestId("sent-back-card");
     expect(cards.map((c) => [c.getAttribute("data-ref"), c.getAttribute("data-state")])).toEqual([["E907-S3", "in_progress"]]);
     expect(within(cards[0]).getByTestId("sent-back-state").textContent).toBe("In progress");
@@ -58,6 +64,7 @@ describe("Sent back, in progress", () => {
   it("he takes a card off the list with its x; it stays off after a reload and returns only when he sends it back again", async () => {
     const list = vi.spyOn(api as Required<typeof api>, "listSentBackCards").mockResolvedValue(CARDS);
     draw();
+    await openIt();
     const [first] = await screen.findAllByTestId("sent-back-card");
     fireEvent.click(within(first).getByTestId("sent-back-away"));
     await waitFor(() => expect(screen.queryByTestId("sent-back")).toBeNull());
@@ -68,6 +75,7 @@ describe("Sent back, in progress", () => {
     cleanup();
     list.mockResolvedValue([card({ since: new Date().toISOString() })]);
     draw();
+    // the home kept his open tap from before (per viewer)
     expect(await screen.findAllByTestId("sent-back-card")).toHaveLength(1);
   });
 
@@ -75,6 +83,7 @@ describe("Sent back, in progress", () => {
     vi.spyOn(api as Required<typeof api>, "listSentBackCards").mockResolvedValue(CARDS);
     const sent = vi.spyOn(api, "commentClosedCard").mockResolvedValue({ sha: "abc1234" });
     draw();
+    await openIt();
     const [first] = await screen.findAllByTestId("sent-back-card");
     fireEvent.click(within(first).getByTestId("card-feedback-text"));
     fireEvent.change(within(first).getByRole("textbox"), { target: { value: "Also show it on the phone" } });
@@ -84,6 +93,28 @@ describe("Sent back, in progress", () => {
     // the card stays where it is, and says his words went
     await waitFor(() => expect(first.textContent).toContain("Sent ✓"));
     expect(screen.getAllByTestId("sent-back-card")).toHaveLength(1);
+  });
+
+  it("E948-S208 (vn_7a378324): starts folded with its count, on the Inbox and the home alike, even a card sent back a minute ago; his tap opens it and the home keeps his choice", async () => {
+    vi.spyOn(api as Required<typeof api>, "listSentBackCards").mockResolvedValue([card({ since: new Date(Date.now() - 60_000).toISOString() }), card({ id: "rv_4", ref: "E907-S6" })]);
+    for (const inbox of [true, false]) {
+      draw(inbox);
+      const section = await screen.findByTestId("sent-back");
+      expect(within(section).getByTestId("sent-back-count").textContent).toBe("2");
+      expect(within(section).getByTestId("sent-back-toggle").getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByTestId("sent-back-section")).toBeNull();
+      expect(screen.queryAllByTestId("sent-back-card")).toHaveLength(0);
+      await openIt();
+      expect(await screen.findAllByTestId("sent-back-card")).toHaveLength(2);
+      cleanup();
+    }
+    // the home keeps his own tap (per viewer, this browser); the Inbox lands folded on every visit
+    draw(false);
+    expect(await screen.findAllByTestId("sent-back-card")).toHaveLength(2);
+    cleanup();
+    draw(true);
+    await screen.findByTestId("sent-back");
+    expect(screen.queryAllByTestId("sent-back-card")).toHaveLength(0);
   });
 
   it("nothing sent back: no section at all", async () => {

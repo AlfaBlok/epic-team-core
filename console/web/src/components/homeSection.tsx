@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { FoldChevron } from "@/components/foldChevron";
+import { landFoldedSection, resetKeepPlace, stopHold } from "@/lib/keepPlace";
+import { answeredWithin } from "@/lib/sentRows";
 
 /** a Team home section's fold, kept per section in localStorage (default open). */
 const SECTION_STORE = "teamHome.section.";
@@ -168,6 +170,43 @@ export function CountPill({
 }
 
 /**
+ * E948-S208 (the owner 25 Nov, vn_7a378324: "a section folds when its last card is answered"): inside the Inbox (both
+ * products, phone and laptop), an open section whose count of cards waiting on him falls to 0 because he just answered
+ * its last one folds by itself after a short beat (the green Sent row shows first), its 0 on the heading line:
+ *
+ *   ▾ Blocked on you 1   [ card ]   ──his answer──▶   ✓ Sent …   ──FOLD_AFTER_MS──▶   ▸ Blocked on you 0
+ *                                                                                      ▸ next section …
+ *
+ * Only his own answer in this page folds it (ANSWERED_WINDOW_MS): a list that empties on a refetch or a search stays as
+ * it was. The fold is for this visit (the Inbox lands folded on every visit anyway); his tap opens it again.
+ */
+export const FOLD_AFTER_MS = 700;
+export const ANSWERED_WINDOW_MS = 15_000;
+function useFoldWhenDone(count: number | undefined, open: boolean, onToggle: ((open: boolean) => void) | undefined, ref: { current: HTMLElement | null }) {
+  const inInbox = useContext(LandFolded);
+  const had = useRef(count);
+  const live = useRef({ open, onToggle });
+  live.current = { open, onToggle };
+  useEffect(() => {
+    if (count === undefined) return undefined; // still counting: keep the last known number
+    const before = had.current;
+    had.current = count;
+    if (!inInbox || !onToggle || !open || count !== 0 || !before || !answeredWithin(ANSWERED_WINDOW_MS)) return undefined;
+    const t = setTimeout(() => {
+      const { open: still, onToggle: fold } = live.current;
+      if (!still || !fold) return;
+      // folding takes its cards away on purpose: no card to land on, no place to hold
+      resetKeepPlace();
+      stopHold();
+      fold(false);
+      const el = ref.current;
+      if (el) requestAnimationFrame(() => landFoldedSection(el));
+    }, FOLD_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [count]);
+}
+
+/**
  * the one fold section, used by every Team home section and every ListPane list (heading +
  * pane): one bordered box, a header line of chevron, title-case title and count pill (the fold button), then `meta`
  * (always) and `actions` (open only: sort, Show 20 / 50 / all); open, the body sits under a rule inside the same box.
@@ -208,6 +247,8 @@ export function FoldSection({
   children?: ReactNode;
 }) {
   const pill = hideZero && count === 0 ? null : <CountPill count={count} tone={tone} testId={`${testId}-count`} />;
+  const ref = useRef<HTMLElement>(null);
+  useFoldWhenDone(count, open, onToggle, ref);
   // a folded section is its header line alone, so its sticky heading never moves: one class for open and folded
   const stick = !!onToggle;
   const label = (
@@ -219,7 +260,7 @@ export function FoldSection({
   );
   return (
     // a section is its heading and its cards, room instead of a frame around them.
-    <section className={cn("mb-7 min-w-0 [overflow-wrap:anywhere]", className)} data-testid={testId} data-fold-section="">
+    <section ref={ref} className={cn("mb-7 min-w-0 [overflow-wrap:anywhere]", className)} data-testid={testId} data-fold-section="">
       {/* E948-S145 (vn_a95bfbab): an open section's heading sticks under the top bar while he scrolls its cards */}
       <div
         className={cn("flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1", stick && "sticky top-[calc(52px+env(safe-area-inset-top))] z-30 bg-background md:top-[calc(2.75rem+env(safe-area-inset-top))]")}

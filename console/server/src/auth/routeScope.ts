@@ -491,7 +491,6 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["POST", /^\/api\/platform\/campaigns$/],
   ["POST", /^\/api\/platform\/persona-tokens$/],
   ["PUT|DELETE", new RegExp(`^/api/rubric-settings(/${ID})?$`)],
-  ["PUT", /^\/api\/settings\/startup-credits$/], // how many credits an accepted startup gets (a hosted setting), the owner login only
 ];
 
 /**

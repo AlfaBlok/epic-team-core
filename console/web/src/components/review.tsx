@@ -14,7 +14,7 @@ import { mutate, useQuery } from "@/lib/data";
 import { milestoneBookHref } from "@/lib/book";
 import { deckHref } from "@/lib/deck";
 import { snoozeReview, unsnoozeReview, useSnoozes } from "@/lib/snooze";
-import { onPress, PressUndone } from "@/lib/press";
+import { KEPT_LINE, onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
 import { reviewQuestion } from "@/lib/pending";
@@ -721,7 +721,7 @@ function FromBand({ from }: { from: NonNullable<CardFace["from"]> }) {
 export const SAVED_LINE = "Saved ✓ It is being written to the project now.";
 export const LANDED_LINE = "Done ✓ It is in the project.";
 
-type Progress = { id: string; title: string; state: "writing" | "done"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number> };
+type Progress = { id: string; title: string; state: "writing" | "done" | "kept"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number> };
 
 /**
  * every review press the console saved (its 202) gets a line at the bottom of the screen while it is written to
@@ -744,6 +744,8 @@ function usePressProgress(itemOf: (id: string) => Listed | undefined): Progress[
           const title = i?.face?.title ?? i?.post?.title ?? i?.title ?? "Your press";
           setLines((l) => [...l.filter((x) => x.id !== id), { id, title, state: "writing", at: Date.now() }]);
         } else if (n.state === "landed") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "done", doneAt: Date.now(), ms: n.ms ?? Date.now() - x.at, steps: n.steps } : x)));
+        // kept until its row is repaired: said once, like a landed press, then the line goes
+        else if (n.state === "kept") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "kept", doneAt: Date.now() } : x)));
         else setLines((l) => l.filter((x) => x.id !== id));
       }),
     [],
@@ -777,15 +779,15 @@ function PressProgress({ lines }: { lines: Progress[] }) {
           key={l.id}
           className={cn(
             "pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
-            l.state === "done" ? "border-emerald-600/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "bg-card text-card-foreground",
+            l.state !== "writing" ? "border-emerald-600/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "bg-card text-card-foreground",
           )}
           data-testid="press-progress-line"
           data-state={l.state}
           title={l.state === "done" ? stepsText(l.steps) : undefined}
         >
-          {l.state === "done" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+          {l.state !== "writing" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
           <span className="min-w-0">
-            <b>{l.state === "done" ? `${PRESS.done} in ${secs(l.ms ?? 0)}.` : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
+            <b>{l.state === "kept" ? KEPT_LINE : l.state === "done" ? `${PRESS.done} in ${secs(l.ms ?? 0)}.` : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
             <span className="block truncate text-xs opacity-80">{l.title}</span>
           </span>
         </div>
@@ -895,6 +897,7 @@ function useCardPress({ item, onDone, onFailed, failed, onBack }: CardProps) {
       if (n.state === "landing" && n.id) pressId ??= n.id;
       if (n.state === "landing") onSaved();
       if (n.state === "landed" && !onDone) setLanding(LANDED_LINE);
+      if (n.state === "kept" && !onDone) setLanding(KEPT_LINE);
     });
     try {
       await fn();

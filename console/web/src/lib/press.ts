@@ -6,7 +6,8 @@
  */
 export type PressNote = {
   path: string;
-  state: "landing" | "landed" | "failed" | "undone";
+  /** `kept`: saved and kept until its row is repaired; it lands by itself, the card treats it as done. */
+  state: "landing" | "kept" | "landed" | "failed" | "undone";
   reason?: string;
   /** landed, from the press to its commit */ ms?: number;
   steps?: Record<string, number>;
@@ -15,7 +16,10 @@ export type PressNote = {
   undoMs?: number;
 };
 type Try = { steps?: Record<string, number> };
-type Press = { id: string; state: "landing" | "landed" | "failed" | "undone"; reason?: string; response?: unknown; ms?: number; tries?: Try[] };
+type Press = { id: string; state: "landing" | "landed" | "failed" | "undone"; reason?: string; response?: unknown; ms?: number; tries?: Try[]; held?: string };
+
+/** what a card says when its press is kept until its row is repaired. */
+export const KEPT_LINE = "Kept ✓ It goes into the project as soon as its row is fixed; the team was told.";
 
 /**
  * how long a card press that closes it waits on the console before it is written: the floating note's
@@ -74,6 +78,12 @@ export async function landed<T>(first: unknown, path: string, get: (id: string) 
         throw fail(why);
       }
       continue; // the console restarting: the press is saved there, keep asking
+    }
+    if (now.state === "landing" && now.held) {
+      // the row it writes could be read two ways; the console keeps the press, told the row's owner and
+      // writes it by itself once the row is repaired. Nothing for him to do: the card says it was kept.
+      tell({ path, state: "kept", reason: now.held, id: p.id });
+      return { press: { id: p.id, state: "kept", message: KEPT_LINE } } as T;
     }
     if (now.state === "landed") {
       tell({ path, state: "landed", ...(now.ms !== undefined ? { ms: now.ms } : {}), ...(lastSteps(now) ? { steps: lastSteps(now) } : {}) });

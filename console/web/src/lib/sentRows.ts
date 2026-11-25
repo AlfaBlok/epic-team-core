@@ -1,6 +1,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import type { ClosedCardRef } from "@/api/review-types";
 import type { BackResult } from "@/lib/afterClose";
+import { holdAfterAnswer } from "@/lib/keepPlace";
 
 /**
  * (the owner 2026-11-15 06:09Z, vn_e00f1134: "I pasted a key and then I think
@@ -129,6 +130,9 @@ if (typeof window !== "undefined")
 /** Mark one card (or several cards closed by one press: a set) as sent; returns the entry. */
 export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at" | "gone">): SentEntry {
   const entry: SentEntry = { ...e, id: ++seq, at: Date.now() };
+  lastAnswer = entry.at;
+  // E948-S208: his place holds (or moves on to the next card still waiting), measured before the card turns into its row
+  holdAfterAnswer([slots].flat());
   // E948-S140: only the newest answer keeps its green row; every earlier one leaves the page (still answered)
   const next = new Map([...sent].map(([k, v]) => [k, v.gone ? v : { ...v, gone: true }]));
   for (const s of [slots].flat()) next.set(s, entry);
@@ -137,6 +141,10 @@ export function markSent(slots: string | string[], e: Omit<SentEntry, "id" | "at
   emit();
   return entry;
 }
+
+/** E948-S208: when he last answered a card in this page (markSent), so a section that just emptied knows it was him. */
+let lastAnswer = 0;
+export const answeredWithin = (ms: number, now = Date.now()) => lastAnswer > 0 && now - lastAnswer < ms;
 
 /** The card is back (Bring it back, or the press failed): it shows as a card again. */
 export function unmarkSent(slots: string | string[]) {
@@ -342,6 +350,7 @@ function savePlaces(list: string, rows: { slot: string }[]) {
 /** Tests only. */
 export const resetSent = () => {
   sent = new Map();
+  lastAnswer = 0;
   serverKey = "";
   try {
     storage()?.removeItem(STORE);

@@ -1,25 +1,52 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router-dom";
 import { InPlaceLinks } from "@/components/InPlaceLinks";
-import { inPlaceKind, installInPlaceLinks } from "./inPlaceLinks";
+import { CARD_TYPES } from "@/components/cardInventory";
+import { ChatMarkdown } from "@/lib/chatMarkdown";
+import { forgetWorld } from "@/lib/useSocial";
+import { clearAnswerVoiceState } from "@/voice/AnswerVoice";
+import { forgetDeskVoiceWorld } from "@/voice/deskBase";
+import { installInPlaceLinks, linkKind } from "./inPlaceLinks";
 import { linkUrls } from "./linkjsx/links";
 
-// The owner, 22 Nov: in the installed app a card's link opened a new app window he could not go back from.
+// The owner 25 Nov (vn_77ec9815), said again: a link to the app stays in the app;
+// every other URL opens a new window, so the app's back and a voice note being recorded stay.
 const origin = window.location.origin;
 
-describe("where a link opens in place", () => {
-  it("routes our own screens, loads our server pages and leaves outside sites to a new window", () => {
-    expect(inPlaceKind("/milestones/ms_1?tab=deck", origin)).toBe("route");
-    expect(inPlaceKind(`${origin}/inbox#E907-S3`, origin)).toBe("route");
-    expect(inPlaceKind("/steps/view/abc", origin)).toBe("load");
-    expect(inPlaceKind("/api/files/x", origin)).toBe("load");
-    expect(inPlaceKind("/status/e18-s28/shot.webp", origin)).toBe("load");
-    expect(inPlaceKind("https://github.com/example/repo", origin)).toBeUndefined();
-    expect(inPlaceKind("http://host1.example.net:9693/", origin)).toBeUndefined();
-    expect(inPlaceKind("mailto:", origin)).toBeUndefined();
-    expect(inPlaceKind("blob:abc", origin)).toBeUndefined();
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
+beforeEach(() => {
+  forgetWorld();
+  forgetDeskVoiceWorld();
+  clearAnswerVoiceState();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ error: { message: "not faked" } }), { status: 404, headers: { "content-type": "application/json" } })),
+  );
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("where a link opens", () => {
+  it("an app screen in the app; an outside site and a page of ours the app does not draw in a new window", () => {
+    expect(linkKind("/milestones/ms_1?tab=deck", origin)).toBe("route");
+    expect(linkKind(`${origin}/inbox#E907-S3`, origin)).toBe("route");
+    expect(linkKind("/steps/view/abc", origin)).toBe("outside");
+    expect(linkKind("/api/files/x", origin)).toBe("outside");
+    expect(linkKind("/status/e18-s28/shot.webp", origin)).toBe("outside");
+    expect(linkKind("https://github.com/example/repo", origin)).toBe("outside");
+    expect(linkKind("http://host1.example.net:9484/#diagram", origin)).toBe("outside");
+    expect(linkKind("mailto:", origin)).toBeUndefined();
+    expect(linkKind("blob:abc", origin)).toBeUndefined();
   });
 });
 
@@ -29,8 +56,11 @@ function Card() {
     <div data-inbox-card="E907-S3">
       <p data-testid="at">{loc.pathname}</p>
       <a href="/milestones/ms_1" target="_blank" rel="noreferrer">deck</a>
-      <a href="https://example.com/page" target="_blank" rel="noreferrer">outside</a>
-      <a href="https://example.com/file.pdf" target="_blank" download>file</a>
+      <a href="http://host1.example.net:9484/#diagram" target="_blank" rel="noreferrer">Open the three tiers</a>
+      <a href="http://host1.example.net:9484/#diagram">bare outside</a>
+      <a href="/steps/view/abc">steps page</a>
+      <a href="/steps/view/def" target="_blank" rel="noreferrer">steps page new</a>
+      <a href="https://example.com/file.pdf" download>file</a>
       {/* an auto-linked URL inside a button (lib/linkjsx): its own handler calls window.open */}
       <button type="button">{linkUrls("see https://example.org/x now")}</button>
     </div>
@@ -42,14 +72,54 @@ function mount(installed: boolean) {
   render(<RouterProvider router={r} />);
   return r;
 }
+const tap = (text: string) => {
+  const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+  screen.getByText(text).dispatchEvent(click);
+  return click;
+};
 
-describe("links on a card in the installed app", () => {
-  afterEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
+for (const installed of [true, false])
+  describe(installed ? "in the installed app" : "in a browser tab", () => {
+    it("an outside page never takes the app's window: target=_blank stays the browser's new window, a bare link opens one", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const r = mount(installed);
+      expect(tap("Open the three tiers").defaultPrevented).toBe(false); // the browser's own new window
+      expect(tap("bare outside").defaultPrevented).toBe(true);
+      expect(open).toHaveBeenLastCalledWith("http://host1.example.net:9484/#diagram", "_blank", "noopener");
+      expect(r.state.location.pathname).toBe("/inbox");
+    });
+
+    it("a page of ours the app does not draw (a steps page) opens a new window, never in the app's window", () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const r = mount(installed);
+      expect(tap("steps page").defaultPrevented).toBe(true);
+      expect(open).toHaveBeenLastCalledWith(`${origin}/steps/view/abc`, "_blank", "noopener");
+      expect(tap("steps page new").defaultPrevented).toBe(false); // target=_blank: the browser's new window
+      window.open("/steps/view/ghi", "_blank");
+      expect(open.mock.calls.at(-1)?.slice(0, 2)).toEqual(["/steps/view/ghi", "_blank"]);
+      expect(r.state.location.pathname).toBe("/inbox");
+    });
+
+    it("an auto-linked outside URL in a button opens a new window", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      mount(installed);
+      await act(async () => { fireEvent.click(screen.getByText("https://example.org/x")); });
+      expect(open).toHaveBeenCalledWith("https://example.org/x", "_blank", "noopener,noreferrer");
+    });
+
+    it("a download and a Ctrl or Cmd click keep their own way", () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      mount(installed);
+      expect(tap("file").defaultPrevented).toBe(false);
+      const cmd = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true });
+      screen.getByText("bare outside").dispatchEvent(cmd);
+      expect(cmd.defaultPrevented).toBe(false);
+      expect(open).not.toHaveBeenCalled();
+    });
   });
 
-  it("opens our own screen in place, so Back returns to the card", async () => {
+describe("the app's own screens", () => {
+  it("installed: a new-window link to our screen opens in place, so Back returns to the card", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const r = mount(true);
     await act(async () => { fireEvent.click(screen.getByText("deck")); });
@@ -59,60 +129,52 @@ describe("links on a card in the installed app", () => {
     expect(r.state.location.pathname).toBe("/inbox");
   });
 
-  it("opens an outside site in a new window, never in place (vn_ce90e291)", async () => {
-    const loads: string[] = [];
-    const open = vi.fn(() => null);
-    window.open = open as unknown as typeof window.open;
-    const undo = installInPlaceLinks(() => undefined, (to) => loads.push(to), () => false);
-    render(<><Card /></>, { wrapper: ({ children }) => <RouterProvider router={createMemoryRouter([{ path: "*", element: children }])} /> });
-    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
-    screen.getByText("outside").dispatchEvent(click);
-    expect(click.defaultPrevented).toBe(false); // the browser's own target=_blank: a new window
-    await act(async () => { fireEvent.click(screen.getByText("https://example.org/x")); });
-    expect(open).toHaveBeenCalledWith("https://example.org/x", "_blank", "noopener,noreferrer");
-    window.open("https://example.net/a", "_blank", "noopener");
-    expect(open).toHaveBeenLastCalledWith("https://example.net/a", "_blank", "noopener");
-    expect(loads).toEqual([]);
-    undo();
-    expect(window.open).toBe(open);
-  });
-
-  it("loads a server page of ours in place, but a new window while a note is on", async () => {
-    const loads: string[] = [];
-    const open = vi.fn(() => null);
-    window.open = open as unknown as typeof window.open;
-    let busy = false;
-    const undo = installInPlaceLinks(() => undefined, (to) => loads.push(to), () => busy);
-    window.open("/steps/view/abc", "_blank");
-    expect(loads).toEqual([`${origin}/steps/view/abc`]);
-    await new Promise((r) => setTimeout(r, 0));
-    busy = true;
-    window.open("/steps/view/def", "_blank");
-    expect(loads).toHaveLength(1);
-    expect(open).toHaveBeenCalledWith("/steps/view/def", "_blank", undefined);
-    undo();
-  });
-
-  it("leaves a download and a Ctrl or Cmd click alone", () => {
-    const loads: string[] = [];
-    const undo = installInPlaceLinks(() => undefined, (to) => loads.push(to));
-    render(<RouterProvider router={createMemoryRouter([{ path: "*", element: <Card /> }])} />);
-    const dl = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
-    screen.getByText("file").dispatchEvent(dl);
-    const cmd = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true });
-    screen.getByText("outside").dispatchEvent(cmd);
-    expect(loads).toEqual([]);
-    undo();
-  });
-
-  it("changes nothing in a browser tab", async () => {
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
+  it("in a browser tab: unchanged (a new tab)", () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
     const r = mount(false);
-    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
-    screen.getByText("deck").dispatchEvent(click);
-    expect(click.defaultPrevented).toBe(false);
+    expect(tap("deck").defaultPrevented).toBe(false);
     expect(r.state.location.pathname).toBe("/inbox");
-    await act(async () => { fireEvent.click(screen.getByText("https://example.org/x")); });
-    expect(open).toHaveBeenCalledWith("https://example.org/x", "_blank", "noopener,noreferrer");
   });
+
+  it("the undo puts window.open back", () => {
+    const before = window.open;
+    const undo = installInPlaceLinks(() => undefined, { installed: true });
+    expect(window.open).not.toBe(before);
+    undo();
+    expect(window.open).toBe(before);
+  });
+});
+
+// Every card kind his inbox draws, with its real links: each link to a page outside the app opens a new window.
+describe("every card kind: an outside link opens a new window, never the app's window", () => {
+  for (const installed of [true, false])
+    it(`${installed ? "installed app" : "browser tab"}: every card kind and a chat answer`, () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      let outside = 0;
+      const kinds: string[] = [];
+      const items = [
+        ...CARD_TYPES.map((c) => ({ name: c.name, el: c.render() })),
+        { name: "chat answer", el: <ChatMarkdown text={"See [the three tiers](http://host1.example.net:9484/#diagram) and http://host1.example.net:9547/ and [steps](/steps/view/abc)"} /> },
+      ];
+      for (const c of items) {
+        const r = createMemoryRouter([{ path: "*", element: <><InPlaceLinks installed={() => installed} /><div data-testid="card">{c.el}</div></> }], { initialEntries: ["/inbox"] });
+        const { container, unmount } = render(<RouterProvider router={r} />);
+        const links = [...container.querySelectorAll<HTMLAnchorElement>("a[href]")].filter((a) => !a.hasAttribute("download") && linkKind(a.href) === "outside");
+        for (const a of links) {
+          open.mockClear();
+          const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+          a.dispatchEvent(click);
+          const blank = a.target === "_blank";
+          if (blank) expect(a.rel, `${c.name}: ${a.href} opens a new window without noopener`).toMatch(/noopener|noreferrer/);
+          const newWindow = (blank && !click.defaultPrevented) || (click.defaultPrevented && open.mock.calls.some(([u, t]) => String(u) === a.href && t === "_blank"));
+          expect(newWindow, `${c.name}: "${a.textContent?.trim()}" ${a.href} does not open a new window`).toBe(true);
+          expect(r.state.location.pathname, `${c.name}: an outside link moved the app`).toBe("/inbox");
+          outside++;
+          if (!kinds.includes(c.name)) kinds.push(c.name);
+        }
+        unmount();
+      }
+      expect(outside).toBeGreaterThan(5);
+      expect(kinds).toContain("chat answer");
+    });
 });

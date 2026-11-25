@@ -2000,8 +2000,8 @@ export interface PlanState {
   seats?: number;
   /** own AI, the team on the customer's own AI key, no seats (Stripe test mode until real payments are proven) */
   ownAi?: { eurPerMonth: number; testMode: boolean };
-  /** optional compute on our cloud at cost plus this markup */
-  compute?: { markupPct: number };
+  /** optional server on our cloud: one plain price per size, billed by the minute up to a monthly most */
+  compute?: { billed: "minute"; sizes: { size: string; cores: number; memoryGb: number; centsPerMinute: number; centsPerHour: number; eurPerMonthMax: number }[] };
   /** how the world's AI is paid now */
   ai?: "own" | "included";
   subscription?: { status: string; since: string; testMode: boolean };

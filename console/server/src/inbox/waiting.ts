@@ -1,6 +1,7 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
 import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
 import { sameOpenProblem, sameQuestion } from "./duplicate.js";
+import { meaningCall, nearest, sameMeaningProblem } from "./sameMeaning.js";
 import { createAskLogReader, repeatProblem, sizeProblem, topicsIn, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "../spawnHost.js";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
@@ -746,6 +747,13 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
             ((o.a.since ?? "") < (a.since ?? "") || ((o.a.since ?? "") === (a.since ?? "") && `${o.rel}:${o.a.line ?? 0}` < `${rel}:${a.line ?? 0}`)) &&
             sameQuestion(o.a.question, a.question),
         )?.a;
+      // E948-S206: the same ask in other words, judged by meaning (sameMeaning.ts): only a sure verdict holds it.
+      const olderSameMeaning = (a: (typeof openOfHis)[number]["a"], rel: string) => {
+        const older = openOfHis.filter(
+          (o) => o.a !== a && !!o.a.code && ((o.a.since ?? "") < (a.since ?? "") || ((o.a.since ?? "") === (a.since ?? "") && `${o.rel}:${o.a.line ?? 0}` < `${rel}:${a.line ?? 0}`)),
+        );
+        return nearest(a.question, older, (o) => o.a.question).find((o) => meaningCall(o.a.question, a.question, { a: `${repo.name} ${o.a.code}`, b: `${repo.name} ${a.code ?? a.question.slice(0, 40)}` }) === "same")?.a;
+      };
       for (const [rel, asks] of Object.entries(tree.asks ?? {})) {
         const v = nodeByPath.get(rel);
         if (!v || isClosed(v.node)) continue;
@@ -766,7 +774,9 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
               repeatProblem({ ...a, repo: repo.name, at: `${repo.name}:${rel}:${a.line ?? ""}` }, answered) ??
               (() => {
                 const o = olderSame(a, rel);
-                return o ? sameOpenProblem(o.code!, o.since) : undefined;
+                if (o) return sameOpenProblem(o.code!, o.since);
+                const m = olderSameMeaning(a, rel);
+                return m ? sameMeaningProblem(m.code!, m.since) : undefined;
               })() ??
               sizeProblem(a))
             : undefined;

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveRepo } from "../adapters/repos.js";
 import { homeRepo, ownerName } from "../identity.js";
+import { meaningCall, nearest } from "./sameMeaning.js";
 
 /**
  * E996-S48 (the owner, 2026-11-14, sending E996-S44 back: "We need to extract insights from it. What categories of failure,
@@ -84,7 +85,7 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const short = (s: string, n = 140) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
 /** the earlier answer this open ask repeats, with how it matched; undefined when it is new. */
-export function repeatOf(a: RepeatAsk, answered: PriorAnswer[]): { prior: PriorAnswer; how: "code" | "row" | "words" } | undefined {
+export function repeatOf(a: RepeatAsk, answered: PriorAnswer[], meaning = true): { prior: PriorAnswer; how: "code" | "row" | "words" | "meaning" } | undefined {
   const all = [a.question, a.contextText, a.context, a.why, a.recommend, a.steps].filter(Boolean).join(" — ");
   const mine = contentWords(a.question);
   let best: { prior: PriorAnswer; how: "code" | "row" | "words"; score: number } | undefined;
@@ -109,7 +110,21 @@ export function repeatOf(a: RepeatAsk, answered: PriorAnswer[]): { prior: PriorA
     const how = sameRow(a.row, p.row) && score >= 0.4 ? "row" : score >= 0.6 ? "words" : undefined;
     if (how && (!best || score > best.score)) best = { prior: p, how, score };
   }
-  return best && { prior: best.prior, how: best.how };
+  if (best) return { prior: best.prior, how: best.how };
+  if (!meaning) return undefined;
+  // E948-S206: the same ask he already answered, in other words (sameMeaning.ts): only a sure verdict holds it.
+  const earlier = answered.filter((p) => {
+    if (a.at && p.at && a.at === p.at) return false;
+    if (a.since && p.on && p.on > a.since) return false;
+    if (a.code && p.code && a.code.toUpperCase() === p.code.toUpperCase()) return false;
+    if (p.code && new RegExp(`(^|[^A-Za-z0-9-])${esc(p.code)}($|[^A-Za-z0-9])`, "i").test(all)) return false;
+    if (p.answer && p.answer.trim().length >= 12 && all.toLowerCase().includes(p.answer.trim().toLowerCase().slice(0, 40))) return false;
+    return true;
+  });
+  const hit = nearest(a.question, earlier, (p) => p.question).find(
+    (p) => meaningCall(p.question, a.question, { a: `${p.repo ?? ""} ${p.code ?? p.row ?? ""}`.trim(), b: `${a.repo ?? ""} ${a.code ?? ""}`.trim() }) === "same",
+  );
+  return hit && { prior: hit, how: "meaning" };
 }
 
 /**
@@ -201,8 +216,8 @@ export function repeatProblem(a: RepeatAsk, answered: PriorAnswer[]): string | u
   const said = (p.answer ?? "").replace(/\s+/g, " ").trim();
   const which = p.code ? `${p.code}${p.repo ? ` in ${p.repo}` : ""}` : p.row ? `row ${p.row}` : "an earlier ask";
   return (
-    `already answered on ${p.on}: ${said ? `"${short(said)}"` : "answered"} (${which}). ` +
-    `Act on that answer; ask again only with what is new, citing ${p.code ?? "his answer"} (E996-S48)`
+    `already answered on ${p.on}: ${said ? `"${short(said)}"` : "answered"} (${which}${hit.how === "meaning" ? ", the same ask in other words" : ""}). ` +
+    `Act on that answer; ask again only with what is new, citing ${p.code ?? "his answer"} (E996-S48${hit.how === "meaning" ? ", E948-S206" : ""})`
   );
 }
 

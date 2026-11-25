@@ -28,11 +28,13 @@ function Cell({ v }: { v: string | undefined }) {
  * The owner 2026-11-18 (vn_7ae712dc): click a column to sort, a coloured status pill per row. Colour sits only on the
  * status cell; the rest stays ink and grey.
  */
+// "for each one, we should have a color" (the owner, 25 Nov): an application's stage, granted green, applied blue,
+// drafted amber (its filled form waits on his yes), refused red; to research stays grey.
 const TONES: [RegExp, string][] = [
-  [/^(agreed|done|yes|won|paying|live)$/i, "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"],
+  [/^(agreed|done|yes|won|paying|live|granted)$/i, "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"],
   [/^(testing|trial|in test)$/i, "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300"],
-  [/^(replied|answered|quoted)$/i, "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"],
-  [/^(contacted|asked|sent|invited)$/i, "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"],
+  [/^(replied|answered|quoted|drafted)$/i, "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"],
+  [/^(contacted|asked|sent|invited|applied)$/i, "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"],
   [/^(declined|lost|no answer|refused)$/i, "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"],
 ];
 export const pillTone = (v: string) => TONES.find(([re]) => re.test(v.trim()))?.[1] ?? "bg-muted text-muted-foreground";

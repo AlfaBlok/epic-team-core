@@ -8,9 +8,6 @@ export type ScreenRoute = { screen: ScreenId; path: string; element: JSX.Element
  * testers, credits, the social pages) live in src/hosted and register their routes in src/hosted/routes.tsx.
  * The glob is optional: a build without src/hosted finds nothing and serves the core screens only.
  */
-const plugs = import.meta.glob<{ HOSTED_ROUTES?: ScreenRoute[]; HOSTED_SETTINGS?: (() => JSX.Element | null)[] }>("../../../../../hosted/console/web/src/hosted/routes.tsx", { eager: true });
+const plugs = import.meta.glob<{ HOSTED_ROUTES?: ScreenRoute[] }>("../../../../../hosted/console/web/src/hosted/routes.tsx", { eager: true });
 
 export const HOSTED_ROUTES: ScreenRoute[] = Object.values(plugs).flatMap((m) => m.HOSTED_ROUTES ?? []);
-
-/** sections the hosted layer adds to Settings (each an input the owner changes, root L-80); none in a core-only build. */
-export const HOSTED_SETTINGS: (() => JSX.Element | null)[] = Object.values(plugs).flatMap((m) => m.HOSTED_SETTINGS ?? []);

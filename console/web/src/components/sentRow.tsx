@@ -1,7 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Check, Loader2, MessageSquarePlus, Undo2, X } from "lucide-react";
 import { invalidate } from "@/lib/data";
-import { GAP, scrollerOf, visibleTop } from "@/lib/keepPlace";
 import { dismissSent, sentMounted, shownSent, unmarkSent, useSent, type SentEntry } from "@/lib/sentRows";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,8 +17,8 @@ import { useNoteTab } from "@/voice/NoteProvider";
  *
  * Add comment opens a note box on the same card (typed or a voice note, filed to its row or ask and sent to its owner;
  * a card with no row, like a persona's request, sends it to the Team desk with the card named).
- * It keeps `data-inbox-card` so the page does not jump to the next card; if the card's top was above the screen (he
- * pressed low in a long card) the row is brought just under the top bar, so he sees it landed.
+ * It keeps `data-inbox-card` so the page does not jump. E948-S208 (vn_7a378324): it never scrolls the page back up to
+ * itself either: a card whose top was above the screen lets the next card still waiting land under the top bar instead.
  *
  * E948-S140 (the owner 17 Nov 21:39Z: "I just want to see the last one that was done. I don't want to see 20 cards
  * parked."): only the newest answer shows its row; an earlier one draws nothing (its card stays answered).
@@ -46,16 +45,7 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
   const going = !!entry.voice && !entry.failed;
   const failed = entry.voice ? entry.failed : undefined;
   useEffect(() => sentMounted(slot), [slot]);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || typeof el.getBoundingClientRect !== "function") return;
-    const scroller = scrollerOf(el);
-    const top0 = visibleTop(scroller);
-    const top = el.getBoundingClientRect().top;
-    if (top >= top0) return;
-    const by = Math.round(top - top0 - GAP);
-    if (by) (scroller ?? window).scrollBy?.({ top: by, behavior: "auto" });
-  }, []);
+  // E948-S208 (vn_7a378324): the row never scrolls the page back up to itself; lib/keepPlace holds his place instead
   const bringBack = async () => {
     if (!entry.back) return;
     setBack({ s: "busy" });

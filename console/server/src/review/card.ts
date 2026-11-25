@@ -513,7 +513,7 @@ export function cardRepeatProblem(c: Pick<CardFields, "row" | "decision" | "sour
       return `its decision asks ${ownerName()} to approve what his own words in its source already ask for ("${quote.slice(0, 100)}${quote.length > 100 ? "…" : ""}"): do it from his words, show it done, and ask only what is still open (E907-S76)`;
   }
   const others = answered.filter((p) => !(c.row && p.row && p.row.trim().toUpperCase() === c.row.trim().toUpperCase()));
-  const hit = repeatOf({ question, ...(c.source ? { contextText: c.source } : {}) }, others);
+  const hit = repeatOf({ question, ...(c.source ? { contextText: c.source } : {}) }, others, false);
   if (hit && hit.how === "words") {
     const p = hit.prior;
     const said = (p.answer ?? "").replace(/\s+/g, " ").trim();

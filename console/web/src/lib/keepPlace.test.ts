@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GAP, installKeepPlace, keepPlace, keptPlace, landingTop, resetKeepPlace, scrollDelta, SETTLE_MS } from "./keepPlace";
+import { GAP, holdAfterAnswer, installKeepPlace, keepPlace, keptPlace, landFoldedSection, landingTop, resetKeepPlace, scrollDelta, SETTLE_MS, stopHold } from "./keepPlace";
 
 /**
  * after a card leaves the Team inbox, the next card's top lands where the old card's top was (or just under the
@@ -54,6 +54,7 @@ beforeEach(() => {
   off = installKeepPlace();
 });
 afterEach(() => {
+  stopHold();
   off();
   resetKeepPlace();
   vi.restoreAllMocks();
@@ -177,6 +178,88 @@ describe("T72-S17 keep his place when a card leaves", () => {
     document.querySelector('[data-testid="blocked"] ul')!.remove();
     layout();
     await new Promise((r) => setTimeout(r, SETTLE_MS + 60));
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+});
+
+/** E948-S208 (the owner 25 Nov, vn_7a378324): the screen never jumps to a card he already sent. */
+describe("E948-S208 no jump to a card he already sent", () => {
+  const frames = () => new Promise((r) => setTimeout(r, 80));
+  const sentRow = (id: string) => document.querySelector(`[data-inbox-card="ask:${id}"]`)!.setAttribute("data-testid", "sent-row");
+  const collapse = (id: string, h: number) => {
+    document.querySelector<HTMLElement>(`[data-inbox-card="ask:${id}"]`)!.dataset.h = String(h);
+    layout();
+  };
+
+  it("a card whose top is on the screen: its spot holds while it and an older Sent row above it collapse", async () => {
+    page([
+      { id: "a", h: 70 },
+      { id: "b", h: 400 },
+      { id: "c", h: 300 },
+    ]);
+    sentRow("a"); // an earlier answer's green row, above
+    scrolled = 0;
+    const was = topOf("b");
+    holdAfterAnswer(["ask:b"]);
+    collapse("b", 60); // the card becomes its Sent row
+    collapse("a", 0); // the older row leaves (only the newest shows)
+    await frames();
+    expect(topOf("b")).toBe(was);
+    expect(scrollBy.mock.calls.every(([o]) => o.behavior === "auto")).toBe(true);
+  });
+
+  it("a long card answered at its buttons: the next card still waiting lands under the top bar, never the Sent row before it", async () => {
+    page([
+      { id: "a", h: 1200 },
+      { id: "s", h: 60 },
+      { id: "c", h: 600 },
+    ]);
+    sentRow("s");
+    scrolled = 900;
+    holdAfterAnswer(["ask:a"]);
+    collapse("a", 60);
+    await frames();
+    expect(topOf("c")).toBe(52 + GAP);
+  });
+
+  it("his own scroll ends the hold", async () => {
+    page([
+      { id: "a", h: 200 },
+      { id: "b", h: 400 },
+    ]);
+    scrolled = 50;
+    holdAfterAnswer(["ask:b"]);
+    window.dispatchEvent(new Event("touchmove"));
+    collapse("a", 20);
+    await frames();
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it("a card that leaves lands on the next card still waiting, skipping a Sent row", async () => {
+    page([
+      { id: "z", h: 100 },
+      { id: "a", h: 300 },
+      { id: "s", h: 60 },
+      { id: "c", h: 300 },
+    ]);
+    sentRow("s");
+    scrolled = 0;
+    press("a");
+    expect(keptPlace()?.next[0]).toBe("card:ask:c");
+    const was = topOf("a");
+    await leave("a");
+    expect(topOf("c")).toBe(was);
+  });
+
+  it("a section that folded by itself: a heading above the screen lands under the top bar, one on the screen stays", () => {
+    page([{ id: "a", h: 100 }]);
+    const sec = document.querySelector<HTMLElement>('[data-testid="waiting-for-review"]')!;
+    scrolled = Number(sec.dataset.y) + 300;
+    landFoldedSection(sec);
+    expect(sec.getBoundingClientRect().top).toBe(52 + GAP);
+    scrollBy.mockClear();
+    scrolled = 0;
+    landFoldedSection(sec);
     expect(scrollBy).not.toHaveBeenCalled();
   });
 });

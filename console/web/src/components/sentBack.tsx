@@ -37,7 +37,6 @@ export const SENT_BACK_KIND = "Returned";
 export const SENT_BACK_WORD: Record<SentBackCard["state"], string> = { in_progress: "In progress", waiting: "Waiting for a worker", closed_by_team: "Being reopened" };
 /** on a phone the first few show; one button shows the rest (as Done, waiting for your review). */
 const PHONE_FIRST = 5;
-const DAY_MS = 86_400_000;
 
 const clock = (iso?: string) => {
   const t = iso ? Date.parse(iso) : NaN;
@@ -179,10 +178,9 @@ export function InboxSentBack() {
   // only work truly in progress: a worker on it now. Waiting and closed ones are the console's to start, not his to look at.
   const all = (data ?? []).filter((c) => c.state === "in_progress" && !gone.includes(goneId(c)) && project.keep(c.milestoneId));
   const cards = q ? all.filter((c) => saysNeedle(q, c.title, c.ref, c.words)) : all;
-  // one he sent back in the last day opens the section by itself, even where the Inbox lands folded: he just pressed
-  // and looks for it
-  const fresh = all.some((c) => c.since && Date.now() - Date.parse(c.since) < DAY_MS);
-  const [open, setOpen] = useSectionOpen("sent-back", true, fresh);
+  // E948-S208 (the owner 25 Nov, vn_7a378324): the section starts folded, its count on the heading line, everywhere and
+  // on every visit (a card he just sent back no longer opens it by itself); his own tap opens it, kept per viewer.
+  const [open, setOpen] = useSectionOpen("sent-back", false);
   const [phoneAll, setPhoneAll] = useState(false);
   if (!cards.length) return null;
   return (

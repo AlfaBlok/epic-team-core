@@ -26,6 +26,9 @@ type Armed = { id: string; top: number; next: string[]; path: string; until: num
 let armed: Armed | undefined;
 let installed: (() => void) | undefined;
 
+/** E948-S208: a green Sent row keeps its card's `data-inbox-card`, but it is a card he already sent: never a place to land on. */
+const SENT_ROW = '[data-testid="sent-row"]';
+const isSentRow = (el: Element) => !!el.closest?.(SENT_ROW);
 const esc = (s: string) => (typeof CSS !== "undefined" && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"));
 const cardEl = (id: string) => document.querySelector<HTMLElement>(`${CARD}[data-inbox-card="${esc(id)}"]`);
 /** A stable key for a landing place: a card's id, or a section's test id. */
@@ -79,7 +82,7 @@ function measure(a: Armed) {
   a.top = el.getBoundingClientRect().top;
   // the next few places after it, in page order: the following cards, then the next section's header
   const all = Array.from(document.querySelectorAll(NEXT));
-  const after = all.filter((n) => n !== el && !el.contains(n) && !n.contains(el) && el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const after = all.filter((n) => n !== el && !el.contains(n) && !n.contains(el) && !isSentRow(n) && el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING);
   a.next = after.slice(0, 8).map(keyOf);
 }
 
@@ -160,4 +163,87 @@ export function installKeepPlace(): () => void {
     installed = undefined;
   };
   return installed;
+}
+
+/**
+ * E948-S208 (the owner 25 Nov, vn_7a378324: the screen never jumps to a card he already sent, so he sees the rest of his
+ * inbox). The moment he answers a card (lib/sentRows markSent, before the card turns into its Sent row):
+ *
+ *   its top on the screen     ──▶  that spot holds: the Sent row stays where the card's top was, nothing moves
+ *   its top above the screen  ──▶  the next card still waiting on him lands just under the top bar
+ *                                  (never a Sent row, never back up to the row he just sent)
+ *
+ * The place is held for HOLD_MS, frame by frame, while the card collapses, an older Sent row leaves and the counts redraw
+ * (no browser's own scroll anchoring is needed: iPhone Safari has none). His own scroll or swipe ends the hold.
+ */
+export const HOLD_MS = 900;
+let holding: (() => void) | undefined;
+
+/** Stop holding his place (a new answer, a section that folds). */
+export function stopHold() {
+  holding?.();
+  holding = undefined;
+}
+
+function hold(key: string, want: number, scroller: HTMLElement | null) {
+  stopHold();
+  if (typeof window === "undefined") return;
+  const until = Date.now() + HOLD_MS;
+  let stop = false;
+  const mine = () => void (stop = true);
+  const end = () => {
+    stop = true;
+    window.removeEventListener("wheel", mine);
+    window.removeEventListener("touchmove", mine);
+  };
+  window.addEventListener("wheel", mine, { passive: true });
+  window.addEventListener("touchmove", mine, { passive: true });
+  holding = end;
+  const keep = () => {
+    if (stop) return;
+    const el = byKey(key);
+    if (el?.isConnected) {
+      const d = scrollDelta(el.getBoundingClientRect().top, want);
+      if (d) (scroller ?? window).scrollBy({ top: d, behavior: "auto" });
+    }
+    if (Date.now() < until) requestAnimationFrame(keep);
+    else if (holding === end) stopHold();
+  };
+  requestAnimationFrame(keep);
+}
+
+/** The place to hold when card `slot` is answered (pure on the page as it is now); undefined = nothing to hold. */
+export function answerPlace(slots: string[]): { key: string; want: number; scroller: HTMLElement | null } | undefined {
+  if (typeof document === "undefined") return undefined;
+  const el = slots.map(cardEl).find((x): x is HTMLElement => !!x && !isSentRow(x));
+  if (!el || typeof el.getBoundingClientRect !== "function") return undefined;
+  const scroller = scrollerOf(el);
+  const top0 = visibleTop(scroller);
+  const top = el.getBoundingClientRect().top;
+  if (top >= top0) return { key: keyOf(el), want: top, scroller };
+  const next = Array.from(document.querySelectorAll(NEXT)).find(
+    (n) => n !== el && !el.contains(n) && !n.contains(el) && !isSentRow(n) && !!(el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING),
+  );
+  return next ? { key: keyOf(next), want: top0 + GAP, scroller } : undefined;
+}
+
+/** He answered card(s) `slots`: hold his place (see above). Called by markSent before the card turns into its Sent row. */
+export function holdAfterAnswer(slots: string[]) {
+  const p = answerPlace(slots);
+  if (p) hold(p.key, p.want, p.scroller);
+}
+
+/**
+ * E948-S208: a section that folded by itself after he answered its last card. When its heading had scrolled above the
+ * screen (a long section, he was low in it) the folded heading lands just under the top bar, with the next section right
+ * under it; a heading still on the screen stays where it is.
+ */
+export function landFoldedSection(section: Element) {
+  if (typeof document === "undefined" || typeof section.getBoundingClientRect !== "function") return;
+  const bar = document.querySelector('[data-testid="topbar"]');
+  const top0 = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
+  const top = section.getBoundingClientRect().top;
+  if (top >= top0) return;
+  const d = scrollDelta(top, top0 + GAP);
+  if (d) window.scrollBy({ top: d, behavior: "auto" });
 }
