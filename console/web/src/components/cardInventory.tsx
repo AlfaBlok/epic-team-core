@@ -5,7 +5,7 @@ import { FyiCard, MonitorAlertCard, StatusItemRow, WaitingCard } from "@/compone
 import { PostReviewCard, ReviewCard } from "@/components/review";
 import { AskSet } from "@/components/askSet";
 import { LaptopCard, MacCards, type LaptopRow } from "@/components/laptopSwitch";
-import { AdvisorSetCard, CampaignGoalCard, GoalTalkCard, TeamDigestCard, TeamIdeaCard } from "@/components/teamCards";
+import { AdvisorSetCard, CampaignGoalCard, GoalTalkCard, TeamDigestCard, TeamIdeaCard, TeamSupportCard } from "@/components/teamCards";
 import type { TeamCard } from "@/api/teamcard-types";
 import { ConnectCard } from "@/components/connectCards";
 import type { ConnectCard as ConnectItem } from "@/api/types";
@@ -24,7 +24,7 @@ export interface CardType {
   name: string;
   /** where he meets it */
   where: string;
-  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamIdeaCard" | "GoalTalkCard" | "CampaignGoalCard" | "AdvisorSetCard" | "ConnectCard" | "SentBackCardView";
+  component: "WaitingCard" | "FyiCard" | "StatusItemRow" | "MonitorAlertCard" | "AskSet" | "ReviewCard" | "OldCard" | "PostReviewCard" | "LaptopCard" | "MacCards" | "TeamDigestCard" | "TeamSupportCard" | "TeamIdeaCard" | "GoalTalkCard" | "CampaignGoalCard" | "AdvisorSetCard" | "ConnectCard" | "SentBackCardView";
   /**
    * E948-S69 (the owner 2026-11-13, vn_9e6f5fa4: "understand the different types of cards that we have ... and have clarity
    * over the buttons"): what the card asks of him. A `decision` card's buttons are its options, each named by what happens
@@ -182,6 +182,9 @@ const macRow = (page: boolean): LaptopRow => ({
 const teamSample = (over: Partial<TeamCard>): TeamCard => ({ id: "tc_sample", kind: "idea", scorecard: "sample-testers", scorecardName: "5 testers using SocialApp", by: "Strategist", at: SINCE, day: "2026-11-12", title: "A sample", ...over });
 export const sampleDigest = () =>
   teamSample({ id: "tc_sample_digest", kind: "digest", by: "Performance", title: "5 testers using SocialApp went greener: 3 of 7 lines are green, up from 2.", digest: { greens: 3, total: 7, prevGreens: 2, prevTotal: 7, prevDay: "2026-11-11", trend: "greener", reasons: [{ text: "Two people applied to be testers", url: "https://example.com/testers/" }, { text: "The tester call went out on X" }], lines: [{ label: "People apply to be testers", state: "green", value: "2 this week", was: "red" }] } });
+/** a help desk's day: the inbound mails sorted by product, drafted or needing the owner. */
+export const sampleSupport = () =>
+  teamSample({ id: "tc_sample_support", kind: "support", by: "Help desk", title: "Support on 2026-11-13: 3 mails, 1 needs you", support: { products: [{ product: "Memo", mails: 2 }, { product: "SocialApp", mails: 1 }], drafted: 2, needsYou: 1, items: [{ product: "Memo", subject: "Voice notes do not show up from Sam", state: "drafted" }, { product: "Memo", subject: "Re: Your setup from Lee", state: "drafted" }, { product: "SocialApp", subject: "Charged twice from Kim", state: "needs you", note: "Why you: money back" }], links: [{ label: "Open your Gmail Drafts", url: "https://mail.google.com/mail/u/0/#drafts" }] } });
 export const sampleIdea = () => teamSample({ id: "tc_sample_idea", title: "Invite the five people who replied last week straight to a call.", idea: { gain: "Testers about a week sooner", recommend: "Do it this week: the team writes the invites." } });
 export const sampleGoal = () =>
   teamSample({ id: "tc_sample_goal", kind: "goal", by: "Gap finder", scorecard: "sample-memory", scorecardName: "Memory live", title: "Memory live has no number for paying users yet.", goal: { unset: "How many paying users, by when", options: [{ goal: "3 paying users by December 1", number: "3" }, { goal: "10 paying users by December 15", number: "10" }], recommend: 0 } });
@@ -385,6 +388,7 @@ export const CARD_TYPES: CardType[] = [
   { id: "mac-ticket", kind: "do", buttons: "Copy the text · Done · Stuck or changes wanted.", name: "Mac: a ticket Claude on your Mac does", where: "Inbox, Needs Mac agent", component: "LaptopCard", render: () => <LaptopCard row={macRow(true)} n={1} /> },
   { id: "mac-no-page", kind: "do", buttons: "Copy the text. Voice · Text.", name: "Mac: a ticket whose page is not written yet", where: "Inbox, Needs Mac agent", component: "MacCards", render: () => <MacCards rows={[macRow(false)]} /> },
   { id: "team-digest", kind: "news", buttons: "Seen. Voice · Text.", name: "Digest: a scorecard greener or redder, and why", where: "Inbox, Scorecard digests", component: "TeamDigestCard", render: () => <TeamDigestCard card={sampleDigest()} /> },
+  { id: "team-support", kind: "news", buttons: "Seen. Voice · Text.", name: "Support: the day's mails by product, drafted or needing you", where: "Inbox, Ideas and digests from the team", component: "TeamSupportCard", render: () => <TeamSupportCard card={sampleSupport()} /> },
   { id: "team-idea", kind: "decision", buttons: "Go ahead. Park. Voice · Text.", name: "Idea: a way to reach a goal faster, the gain, our recommendation", where: "Inbox, Ideas", component: "TeamIdeaCard", render: () => <TeamIdeaCard card={sampleIdea()} /> },
   { id: "team-advisor", kind: "decision", buttons: "Accept all on top, then Accept · Decline per suggestion. Voice · Text on each.", name: "Senior advisor: the week's suggestions as one set", where: "Inbox, From the Senior advisor", component: "AdvisorSetCard", render: () => <AdvisorSetCard card={sampleAdvisor()} /> },
   { id: "connect", kind: "do", buttons: "Connect with Google, in this browser. Voice · Text.", name: "Connect: one tap to let the team use a Google account", where: "Inbox, top (and the Connections page)", component: "ConnectCard", render: () => <ConnectCard c={sampleConnect()} /> },

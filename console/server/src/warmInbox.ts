@@ -58,7 +58,15 @@ let current: InboxWarmState = { state: "off", paths: [], budgetMs: WARM_BUDGET_M
 export const inboxWarmHealth = (): InboxWarmState => current;
 
 /**
- * warm the first-draw reads: a pass is every path at once; passes repeat (1 s apart) until one is under budget or
+ * the pause after pass `n` (1-based): 1, 2, 4, 8, 16 s, then 20 s. On a busy host (load 11 to 16 on 4 cores)
+ * a pass took 20 to 60 s and the next began 1 s later, so for 3 min after each release the console kept asking itself
+ * for 19 reads at once while his browser waited behind them. The first pass fills the caches; later passes only time
+ * them, so they back off. `fixed` (tests) replaces the whole schedule.
+ */
+export const pauseAfter = (n: number, fixed?: number): number => fixed ?? Math.min(20_000, 1_000 * 2 ** Math.max(0, n - 1));
+
+/**
+ * warm the first-draw reads: a pass is every path at once; passes repeat (backing off, pauseAfter) until one is under budget or
  * `maxMs` passed. Resolves with the final state (never throws).
  */
 export async function warmInbox(o: {
@@ -101,6 +109,6 @@ export async function warmInbox(o: {
       o.log?.(`inbox warm: ${paths.length} first-draw reads in ${ms} ms on pass ${passes}, ${((now() - t0) / 1000).toFixed(1)} s after the start${ok ? "" : ` (over the ${budget} ms budget${failed.length ? `, failed: ${failed.join(", ")}` : ""})`}`);
       return current;
     }
-    await new Promise((r) => setTimeout(r, o.pauseMs ?? 1_000));
+    await new Promise((r) => setTimeout(r, pauseAfter(passes, o.pauseMs)));
   }
 }

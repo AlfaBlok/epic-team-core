@@ -450,12 +450,14 @@ export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the n
  * under a send the console holds while T3 is down or slow: it is sent (the console has it and delivers it by itself),
  * never worded as a doubt (the owner, 18 Nov: "queued" read as not sent while the desk had his message).
  */
-export const QUEUED_NOTE = "Sending · the desk gets it as soon as T3 answers";
+export const QUEUED_NOTE = "✓ Sent · the desk gets it as soon as T3 answers";
 /**
  * his typed message the desk's thread does not show minutes after he sent it (22 Nov: three sat in T3's queue for two
  * hours and his screen said nothing): said plainly on the message itself, like a voice note's.
  */
 export const MSG_NOT_DELIVERED = "Not delivered to the desk yet";
+/** what his message says once the console has it (it delivers to the desk by itself; a failure comes back on it). */
+export const SENT_NOTE = "✓ Sent";
 /** his voice note the desk does not have yet: said plainly on the note itself. */
 export const NOTE_RETRYING = "Voice note not delivered yet, retrying";
 export const NOTE_NOT_DELIVERED = "Voice note not delivered. Its words are kept and the team has been told";
@@ -550,7 +552,7 @@ export function notesInTime<N extends { at: string }>(notes: N[] | undefined, me
 }
 /** the same quiet lines in a customer's workspace, which never names our T3. */
 export const CUSTOMER_T3_DOWN_MESSAGE = { restarting: "The chat is reconnecting…", maintenance: "The chat is down for planned maintenance, reconnecting…" } as const;
-export const CUSTOMER_QUEUED_NOTE = "Sending · the team gets it as soon as the chat is back";
+export const CUSTOMER_QUEUED_NOTE = "✓ Sent · the team gets it as soon as the chat is back";
 
 /**
  * a message he sent that the transcript does not show yet. It shows at once ("sending…"), the console's reply
@@ -1121,8 +1123,9 @@ export function ChatView({
                   {q.page && <p className="mb-1 text-[11px] opacity-80 [overflow-wrap:anywhere]">about: {q.page}</p>}
                   <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{splitAttachments(q.text).text}</p>
                   <SentFiles files={splitAttachments(q.text).files} />
+                  {/* the console holds it (it sends it by itself), so it is Sent, no spinner */}
                   <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-queued-state">
-                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />{chat.customer ? CUSTOMER_QUEUED_NOTE : QUEUED_NOTE}
+                    {chat.customer ? CUSTOMER_QUEUED_NOTE : QUEUED_NOTE}
                   </p>
                 </div>
               </li>
@@ -1145,10 +1148,18 @@ export function ChatView({
                       </span>
                     </div>
                   ) : (
-                    // E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e: "instead of saying Sent, it stays spinning until it fully
-                    // has been sent"): it spins until the desk's chat holds it; ✓ Sent shows only on the message there
+                    // the owner 25 Nov (vn_083b0ef7, replaces E948-S174's spin-until-the-desk-holds-it for the chat): "Why can't the
+                    // console get the message at once? And then say to the front end, I got the message. Go away." It spins only
+                    // until the console has it; a later failure comes back on this bubble (sendError) or as "Not delivered".
                     <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-posting-state">
-                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />{o.ids?.length ? `Sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "Sending…"}
+                      {o.state === "sent" ? (
+                        SENT_NOTE
+                      ) : (
+                        <>
+                          <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+                          {o.ids?.length ? `Sending with ${o.ids.length} file${o.ids.length > 1 ? "s" : ""}…` : "Sending…"}
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
@@ -1296,11 +1307,12 @@ export function StepsFold({ msgs }: { msgs: DeskMessage[] }) {
   );
 }
 
-/** what the bubble of a voice note on its way says under it. */
+/** what the bubble of a voice note on its way says under it (it spins only until the console has it). */
 export const POSTING_TEXT: Record<PostingNote["state"], string> = {
   writing: "Sending…",
-  safe: "Sending…",
-  sent: "Sending…",
+  // the console has his audio (safe) or his words (sent): Sent at once; it writes and posts them by itself
+  safe: SENT_NOTE,
+  sent: SENT_NOTE,
   kept: "Sending · saved on this phone, it goes by itself",
   failed: "not sent yet: Send again below",
 };
@@ -1316,7 +1328,7 @@ function PostingBubble({ p }: { p: PostingNote }) {
         {p.words && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="chat-voice-posting-words">{p.words}</p>}
         {/* E948-S174: one spinner until the desk's chat holds the note; its ✓ Sent is the message's own mark there */}
         <p className="mt-1 flex items-center gap-1 text-[11px] opacity-80" data-testid="chat-voice-posting-state">
-          {p.state !== "failed" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />}{POSTING_TEXT[p.state]}
+          {(p.state === "writing" || p.state === "kept") && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />}{POSTING_TEXT[p.state]}
         </p>
       </div>
     </li>

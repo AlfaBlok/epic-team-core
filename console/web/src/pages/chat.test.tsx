@@ -505,8 +505,36 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     await waitFor(() => expect(screen.queryByTestId("chat-posting")).toBeNull());
   });
 
-  // E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e): the console holds it, the desk does not yet: it spins, never ✓ Sent
-  it("a send queued while T3 is down shows as its own bubble, spinning Sending until the desk has it", async () => {
+  // the owner 25 Nov (vn_083b0ef7): "Why can't the console get the message at once? And then say to the front end, I got the
+  // message. Go away." The bubble spins only while the console has not answered; once it has (T3 not holding it yet, the
+  // desk's chat not showing it), it says ✓ Sent with no spinner; a failure the console finds later comes back on it with Retry.
+  it("a typed send spins only until the console answers, then ✓ Sent with no spinner while the desk has not shown it; a later failure comes back on it", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    let answer!: (v: { threadId: string; pending: boolean }) => void;
+    const send = vi.spyOn(api, "sendDeskMessage").mockImplementation(() => new Promise((r) => (answer = r)));
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "why is sending so slow" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    const crid = send.mock.calls[0][2] as string;
+    // the console has not answered yet: Sending… with a spinner
+    const b = await screen.findByTestId("chat-posting");
+    expect(within(b).getByTestId("chat-posting-state").textContent).toBe("Sending…");
+    expect(b.querySelector(".animate-spin")).not.toBeNull();
+    // the console answers at once (202, T3 has not taken it): Sent, no spinner, though the desk's chat does not show it
+    await act(async () => answer({ threadId: "th_desk", pending: true }));
+    await waitFor(() => expect(within(screen.getByTestId("chat-posting")).getByTestId("chat-posting-state").textContent).toBe("✓ Sent"));
+    expect(screen.getByTestId("chat-posting").querySelector(".animate-spin")).toBeNull();
+    // T3 refuses it later: the console's sendError comes back on this bubble, with Retry
+    get.mockResolvedValue(chat({ sendError: { text: "thread compacting after 5 attempts", at: new Date().toISOString(), clientRequestId: crid } }));
+    const f = await screen.findByTestId("chat-failed", {}, { timeout: 5000 });
+    expect(f.textContent).toContain("Not sent: thread compacting after 5 attempts");
+    expect(within(f).getByTestId("chat-retry")).toBeTruthy();
+  });
+
+  // the owner 25 Nov (vn_083b0ef7, replaces E948-S174 here): the console holds it and sends it by itself: ✓ Sent, no spinner
+  it("a send queued while T3 is down shows as its own bubble, Sent with no spinner (the console holds it)", async () => {
     const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));
     const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true, queued: true });
     renderChat();
@@ -517,8 +545,8 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     await waitFor(() => expect(send).toHaveBeenCalled());
     const q = await screen.findByTestId("chat-queued");
     expect(q.textContent).toContain("move it to PLAN-17");
-    expect(q.textContent).toContain("Sending · the desk gets it as soon as T3 answers");
-    expect(q.textContent).not.toContain("✓");
+    expect(q.textContent).toContain("✓ Sent · the desk gets it as soon as T3 answers");
+    expect(q.querySelector(".animate-spin")).toBeNull();
     expect(box.value).toBe("");
     expect(screen.queryByTestId("chat-send-error")).toBeNull();
   });

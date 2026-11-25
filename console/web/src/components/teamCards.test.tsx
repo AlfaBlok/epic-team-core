@@ -36,7 +36,7 @@ beforeEach(() => {
     const open = cards()
       .filter((c) => !q.scorecard || c.scorecard === q.scorecard)
       .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
-    return { open, answered: [], counts: { digest: 1, idea: 1, goal: 1, advisor: 0 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" };
+    return { open, answered: [], counts: { digest: 1, idea: 1, goal: 1, advisor: 0, support: 0 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" };
   });
   vi.spyOn(api, "answerTeamCard").mockImplementation(async (id, body) => {
     posted.push({ id, body: body as Record<string, unknown> });
@@ -96,11 +96,11 @@ describe("E948-S66 the team's cards in the inbox", () => {
 
   it("the Show filter keeps one part of the inbox", () => {
     // the filter names the Inbox's few sections; an old one-kind address (?show=idea) still keeps that kind.
-    expect(showKeeps("all")).toEqual({ blocked: true, review: true, rest: true, goals: true, kinds: ["advisor", "idea", "digest"] });
+    expect(showKeeps("all")).toEqual({ blocked: true, review: true, rest: true, goals: true, kinds: ["support", "advisor", "idea", "digest"] });
     expect(showKeeps("advisor").kinds).toEqual(["advisor"]);
     expect(showKeeps("blocked")).toEqual({ blocked: true, review: false, rest: false, goals: false, kinds: [] });
     expect(showKeeps("goal")).toMatchObject({ goals: true, kinds: [] });
-    expect(showKeeps("team").kinds).toEqual(["advisor", "idea", "digest"]);
+    expect(showKeeps("team").kinds).toEqual(["support", "advisor", "idea", "digest"]);
     const on = vi.fn();
     render(<InboxShowFilter show="all" onChange={on} />);
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Blocked", "Goals to set", "Review", "Ideas and digests"]);
@@ -111,7 +111,7 @@ describe("E948-S66 the team's cards in the inbox", () => {
   it("every card points at its goal set and key result: the meta line, each digest reason, Open the set", async () => {
     const idea = { ...sampleIdea(), scorecard: "launch", scorecardName: "Launch", keyResult: "Tester applications" };
     const digest = { ...sampleDigest(), scorecard: "launch", scorecardName: "Launch", digest: { ...sampleDigest().digest!, reasons: [{ text: "Still red: Tester applications, 0", keyResult: "Tester applications" }, { text: "plain reason" }] } };
-    vi.spyOn(api, "listTeamCards").mockResolvedValue({ open: [digest, idea], answered: [], counts: { digest: 1, idea: 1, goal: 0, advisor: 0 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
+    vi.spyOn(api, "listTeamCards").mockResolvedValue({ open: [digest, idea], answered: [], counts: { digest: 1, idea: 1, goal: 0, advisor: 0, support: 0 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
     render(
       <MemoryRouter>
         <TeamCardsSections />
@@ -145,7 +145,7 @@ describe("E948-S59 the Senior advisor's weekly set", () => {
     },
   });
   it("one marked set: the header names the Senior advisor and the week, each suggestion a card with Accept, Decline and its answer box; Accept all", async () => {
-    vi.spyOn(api, "listTeamCards").mockResolvedValue({ open: [set(), sampleIdea()], answered: [], counts: { digest: 0, idea: 1, goal: 0, advisor: 1 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
+    vi.spyOn(api, "listTeamCards").mockResolvedValue({ open: [set(), sampleIdea()], answered: [], counts: { digest: 0, idea: 1, goal: 0, advisor: 1, support: 0 }, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
     const calls: unknown[] = [];
     vi.spyOn(api, "advisorVerdict").mockImplementation(async (id, v) => {
       calls.push({ id, ...v });

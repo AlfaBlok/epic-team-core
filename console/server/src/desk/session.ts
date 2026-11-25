@@ -65,8 +65,10 @@ const MAX_PAGES = 40;
  * the owner's send answers after at most this long (`pending: true`), the T3 work (thread check, send, busy
  * retries) runs on after the reply; a failure lands on `sendError` with his message's clientRequestId. Was 20 s, which
  * held his phone's Send on three T3 calls over the worker server's tunnel (0.2 to 2.2 s each, measured 2026-11-12).
+ * Was 1.2 s until 25 Nov (vn_083b0ef7 "say to the front end, I got the message. Go away."): T3 took his sends
+ * 7 to 28 s after the post, so every answer waited the whole 1.2 s; the app now says Sent on this answer.
  */
-export const SEND_WAIT_MS = 1_200;
+export const SEND_WAIT_MS = 150;
 /** how long a send stored behind earlier ones waits for its prefix before it is stored without it. */
 export const PREFIX_QUEUE_WAIT_MS = 300;
 /** console context before his words: ready text, or a build that runs after the reply. */

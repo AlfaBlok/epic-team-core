@@ -132,7 +132,7 @@ describe("E948-S66 team cards", () => {
     const l = listCards(doc, { now: "2026-11-13T16:00:00Z" });
     expect(l.open.map((c) => c.kind)).toEqual(["digest", "digest", "idea", "goal"]);
     expect(l.open.some((c) => c.id === old.id)).toBe(false);
-    expect(l.counts).toEqual({ digest: 2, idea: 1, goal: 1, advisor: 0 });
+    expect(l.counts).toEqual({ digest: 2, idea: 1, goal: 1, advisor: 0, support: 0 });
     expect(listCards(doc, { now: "2026-11-13T16:00:00Z", scorecard: "s2" }).open.map((c) => c.scorecard)).toEqual(["s2"]);
     expect(listCards(doc, { now: "2026-11-13T16:00:00Z", kind: "idea" }).open).toHaveLength(1);
   });

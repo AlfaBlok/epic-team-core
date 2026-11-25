@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.spyOn(api, "listTeamCards").mockResolvedValue({
     open: [sampleGoal(), { ...sampleGoal(), id: "tc_goal_2" } as TeamCard, sampleIdea()],
     answered: [],
-    counts: { digest: 0, idea: 1, goal: 2, advisor: 0 },
+    counts: { digest: 0, idea: 1, goal: 2, advisor: 0, support: 0 },
     limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 },
     today: "2026-11-18",
   });
@@ -147,6 +147,63 @@ describe("his phone and his laptop show the same counts", () => {
     expect(answeredSlot("review:rv_done_2")).toBe(false);
     openAll();
     await waitFor(() => allMatch());
+  });
+
+  it("E948-S210: a card with a landed press and a later failed one counts the same on the phone (its own marks) and the laptop", async () => {
+    // the count check 25 Nov 13:04Z: the press log listed a landed answer and, 7 min later, a failed press on one card;
+    // the phone (its own mark) showed red 10, the laptop (no mark) red 9
+    answers = [
+      { target: "rv_decision", at: ago(30), action: "review feedback", state: "landed" },
+      { target: "rv_done_1", at: ago(20), action: "review complete", state: "landed" },
+      { target: "ms_x:1", at: ago(10), action: "ask answer", state: "landed" },
+      { target: "rv_decision", at: ago(23), action: "review complete", state: "failed" },
+    ];
+    // the laptop: no Sent mark of its own
+    inbox();
+    openAll();
+    await waitFor(() => expect(pill("waiting-on-you")).toBe("1"));
+    await waitFor(() => expect(pill("waiting-for-review")).toBe("3"));
+    openAll();
+    await waitFor(() => allMatch());
+    const laptop = counters();
+    // its newest press failed: the decision is his to answer again
+    expect(laptop).toMatchObject({ "inbox-decisions": 1, red: 2, green: 3 });
+    cleanup();
+    resetSent();
+    resetReviewGone();
+
+    // the phone: its own marks for the same three cards, pressed 30, 20 and 10 min ago (before the failed press)
+    const real = Date.now();
+    for (const [slot, min] of [["review:rv_decision", 30], ["review:rv_done_1", 20], ["ask:ms_x:1", 10]] as const) {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(real - min * 60_000);
+      act(() => void markSent(slot, { said: "Closed", title: slot }));
+      clock.mockRestore();
+    }
+    inbox();
+    openAll();
+    await waitFor(() => expect(pill("waiting-for-review")).toBe("3"));
+    openAll();
+    await waitFor(() => allMatch());
+    await waitFor(() => expect(counters()).toEqual(laptop));
+  });
+
+  it("the rule: only a card's newest press counts, the same with or without this browser's own mark", () => {
+    const now = Date.now();
+    const iso = (min: number) => new Date(now - min * 60_000).toISOString();
+    const log = [
+      { target: "rv_a", at: iso(30), action: "review feedback", state: "landed" },
+      { target: "rv_a", at: iso(23), action: "review complete", state: "failed" },
+      { target: "rv_b", at: iso(25), action: "review complete", state: "failed" },
+      { target: "rv_b", at: iso(15), action: "review feedback", state: "landed" },
+    ];
+    const laptop = withServerAnswers(new Map(), log, now);
+    const phone = withServerAnswers(new Map([["review:rv_a", { id: 1, said: "Closed", title: "a", at: now - 30 * 60_000 }], ["review:rv_b", { id: 2, said: "Closed", title: "b", at: now - 15 * 60_000 }]]), log, now);
+    for (const m of [laptop, phone]) {
+      expect(m.has("review:rv_a")).toBe(false); // newest press failed: open again
+      expect(m.has("review:rv_b")).toBe(true); // newest press landed: answered
+    }
+    // a server mark goes once the card's newest press no longer lands, whatever the order of the log
+    expect(withServerAnswers(laptop, [...log, { target: "rv_b", at: iso(5), action: "review complete", state: "failed" }], now).has("review:rv_b")).toBe(false);
   });
 
   it("the rule: landing or landed counts as answered, failed or brought back does not, older than two hours is forgotten", () => {

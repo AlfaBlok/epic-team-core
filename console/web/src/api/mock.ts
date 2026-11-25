@@ -826,7 +826,7 @@ const mockMail = () => ({
     async listTeamCards(q: { scorecard?: string; kind?: import("./teamcard-types").TeamCardKind } = {}) {
       const keep = (c: import("./teamcard-types").TeamCard) => (!q.scorecard || c.scorecard === q.scorecard) && (!q.kind || c.kind === q.kind);
       const open = SAMPLE_TEAM_CARDS.filter((c) => !c.answer && keep(c));
-      const counts = { digest: 0, idea: 0, goal: 0, advisor: 0 };
+      const counts = { digest: 0, idea: 0, goal: 0, advisor: 0, support: 0 };
       for (const c of open) counts[c.kind]++;
       return ok({ open, answered: SAMPLE_TEAM_CARDS.filter((c) => !!c.answer && keep(c)), counts, limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 }, today: "2026-11-13" });
     },

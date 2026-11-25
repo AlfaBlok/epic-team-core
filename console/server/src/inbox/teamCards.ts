@@ -21,6 +21,8 @@ import { acceptOnSpine, ADVISOR_BY, advisorOpen, checkAdvisor, type AdvisorItem,
  *           (the Gap finder or the Alignment persona).
  *   advisor the Senior advisor's suggestions of one week as one marked set (E948-S59, advisorCards.ts): Accept all,
  *           accept or decline each; an accepted one becomes a ready row on its spine first (L-45).
+ *   support a help desk persona's day: one card a day, the inbound mails sorted by product, what was drafted and
+ *           what needs the owner; only a mail that needs the owner reaches the phone, everything else waits here.
  *
  * The record is one file in the home code repo, docs/inbox/cards.json (root L-45: the console's DB is only a cache);
  * every post and every answer is one commit. The limits are his ("never more cards than he can handle"):
@@ -37,9 +39,9 @@ import { acceptOnSpine, ADVISOR_BY, advisorOpen, checkAdvisor, type AdvisorItem,
  */
 
 export const TEAM_CARDS_FILE = "docs/inbox/cards.json";
-export const TEAM_CARD_KINDS = ["digest", "idea", "goal", "advisor"] as const;
+export const TEAM_CARD_KINDS = ["digest", "idea", "goal", "advisor", "support"] as const;
 export type TeamCardKind = (typeof TEAM_CARD_KINDS)[number];
-export const LIMITS = { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1, advisorSetsPerWeek: 1 } as const;
+export const LIMITS = { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1, advisorSetsPerWeek: 1, supportPerDay: 1 } as const;
 export const DAY_ZONE = "America/Mexico_City";
 /** answered cards stay listed (in Answered) this long; the file keeps them all. */
 export const ANSWERED_DAYS = 14;
@@ -89,11 +91,32 @@ export interface TeamCard {
   idea?: { gain: string; recommend: string; links?: CardLink[] };
   goal?: { unset: string; options: { goal: string; number: string }[]; recommend?: number; links?: CardLink[] };
   advisor?: AdvisorSet;
+  /** a help desk's day: inbound mails sorted by product, what was drafted, what needs the owner. */
+  support?: SupportDay;
   answer?: { at: string; text: string; pick?: number; via: "text" | "voice" | "button"; attachments?: string[] };
   /** withdrawn by the team without his answer, because his newer word overtook it or its goal is
    * already set (`why` says which, quoting him); a closed card leaves the inbox like an answered one. Written in the repo's
    * cards file (the repo is the only source), or with closeCard. */
   closed?: { at: string; by: string; why: string };
+}
+export const SUPPORT_STATES = ["drafted", "needs you", "answered", "waiting"] as const;
+export interface SupportItem {
+  /** the product the mail is about, a short name (the persona's own list; "Other" when none) */
+  product: string;
+  subject: string;
+  state: (typeof SUPPORT_STATES)[number];
+  /** why it needs him, or what the draft says, one line */
+  note?: string;
+  test?: boolean;
+}
+export interface SupportDay {
+  /** support mails of the day per product */
+  products: { product: string; mails: number }[];
+  drafted: number;
+  needsYou: number;
+  items: SupportItem[];
+  /** where the drafts wait (his Gmail Drafts) or the tracker */
+  links?: CardLink[];
 }
 export interface TeamCardsDoc {
   version: 1;
@@ -147,7 +170,7 @@ export type Checked = { ok: true; card: Omit<TeamCard, "id" | "at" | "day"> } | 
 /** the body a persona posts, checked and trimmed (no free fields kept). */
 export function checkPost(b: Record<string, unknown>, day = dayOf(new Date().toISOString())): Checked {
   const kind = b.kind as TeamCardKind;
-  if (!TEAM_CARD_KINDS.includes(kind)) return { ok: false, code: "bad_kind", message: "kind is digest, idea, goal or advisor" };
+  if (!TEAM_CARD_KINDS.includes(kind)) return { ok: false, code: "bad_kind", message: "kind is digest, idea, goal, advisor or support" };
   const by = str(b.by, 80);
   if (!by) return { ok: false, code: "no_by", message: "by names the persona that makes the card" };
   const title = str(b.title, 200);
@@ -189,6 +212,11 @@ export function checkPost(b: Record<string, unknown>, day = dayOf(new Date().toI
     if (!a.ok) return a;
     return { ok: true, card: { ...base, advisor: a.set } };
   }
+  if (kind === "support") {
+    const s = checkSupport((b.support ?? {}) as Record<string, unknown>);
+    if (!s.ok) return s;
+    return { ok: true, card: { ...base, support: s.day } };
+  }
   if (kind === "idea") {
     const i = (b.idea ?? {}) as Record<string, unknown>;
     const gain = str(i.gain, 400);
@@ -208,10 +236,25 @@ export function checkPost(b: Record<string, unknown>, day = dayOf(new Date().toI
   return { ok: true, card: { ...base, goal: { unset, options, ...(recommend !== undefined ? { recommend } : {}), ...(links(g.links) ? { links: links(g.links) } : {}) } } };
 }
 
+/** a help desk's day, checked: a product name and a known state per mail, counts made here, at most 20 items. */
+export function checkSupport(d: Record<string, unknown>): { ok: true; day: SupportDay } | { ok: false; code: string; message: string } {
+  const items = (Array.isArray(d.items) ? d.items : [])
+    .map((x) => x as Record<string, unknown>)
+    .filter((x) => !!str(x?.product, 40) && (SUPPORT_STATES as readonly string[]).includes(x?.state as string) && !!str(x?.subject, 160))
+    .map((x) => ({ product: str(x.product, 40)!, subject: str(x.subject, 160)!, state: x.state as SupportItem["state"], ...(str(x.note, 240) ? { note: str(x.note, 240) } : {}), ...(x.test === true ? { test: true } : {}) }))
+    .slice(0, 20);
+  if (!items.length) return { ok: false, code: "no_support", message: "a support day lists one to twenty mails (product, subject, state)" };
+  const products = [...new Set(items.map((i) => i.product))].map((p) => ({ product: p, mails: items.filter((i) => i.product === p).length }));
+  const day: SupportDay = { products, drafted: items.filter((i) => i.state === "drafted").length, needsYou: items.filter((i) => i.state === "needs you").length, items, ...(links(d.links) ? { links: links(d.links) } : {}) };
+  return { ok: true, day };
+}
+
 /** null when the card fits his limits, else why not. */
 export function overLimit(doc: TeamCardsDoc, card: Pick<TeamCard, "kind" | "scorecard" | "advisor">, day: string, others: TeamCard[] = []): { code: string; message: string } | null {
   if (card.kind === "advisor" && doc.cards.some((c) => c.kind === "advisor" && c.advisor?.week === card.advisor?.week))
     return { code: "limit_advisor", message: `one ${ADVISOR_BY} set a week: ${card.advisor?.week} has its set` };
+  if (card.kind === "support" && doc.cards.some((c) => c.kind === "support" && c.day === day && !c.world))
+    return { code: "limit_support", message: `one support summary a day: today's (${day}) is in` };
   if (card.kind === "digest" && doc.cards.some((c) => c.kind === "digest" && c.scorecard === card.scorecard && c.day === day))
     return { code: "limit_digest", message: `one digest per scorecard a day: ${card.scorecard} has today's (${day})` };
   // one cap across worlds: `others` are the other files' cards (the home world's and the card worlds')
@@ -250,7 +293,7 @@ export function answerCard(doc: TeamCardsDoc, id: string, answer: NonNullable<Te
   return { doc: { ...doc, cards: doc.cards.map((c) => (c.id === id ? next : c)) }, card: next };
 }
 
-export const KIND_ORDER: Record<TeamCardKind, number> = { advisor: -1, digest: 0, idea: 1, goal: 2 };
+export const KIND_ORDER: Record<TeamCardKind, number> = { advisor: -1, support: -0.5, digest: 0, idea: 1, goal: 2 };
 
 /** open: no answer yet and not withdrawn; an advisor set while one suggestion still waits for his verdict. */
 export const isOpen = (c: TeamCard) => !c.closed && (c.kind === "advisor" ? advisorOpen(c.advisor) : !c.answer);
@@ -296,7 +339,7 @@ export function listCards(doc: TeamCardsDoc, o: { now: string; scorecard?: strin
   const order = (a: TeamCard, b: TeamCard) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.at.localeCompare(a.at);
   const open = keep.filter((c) => isOpen(c) && (c.kind !== "digest" || newestDigest.get(c.scorecard!) === c.at)).sort(order);
   const answered = keep.filter((c) => !isOpen(c) && !!c.answer && Date.parse(c.answer.at) >= cutoff).sort((a, b) => b.answer!.at.localeCompare(a.answer!.at));
-  const counts = { digest: 0, idea: 0, goal: 0, advisor: 0 } as Record<TeamCardKind, number>;
+  const counts = { digest: 0, idea: 0, goal: 0, advisor: 0, support: 0 } as Record<TeamCardKind, number>;
   for (const c of open) counts[c.kind]++;
   const goalObjectives = live && !o.scorecard ? { active: live.size, needGoal: new Set(open.filter((c) => c.kind === "goal" && !c.world).map((c) => c.scorecard)).size } : undefined;
   return { open, answered, counts, limits: LIMITS, today: dayOf(o.now), ...(goalObjectives ? { goalObjectives } : {}) };

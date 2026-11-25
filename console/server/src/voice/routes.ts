@@ -119,12 +119,20 @@ export function mountCampaignVoice(api: Hono, voiceFor: (milestoneId: string) =>
  * Voice (his objectives read only, his words relayed to a desk). The owner's own console only.
  */
 export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => string | undefined }) {
+  mountOwnCall(api, "/voice/coach", coach, o, "The objectives coach");
+}
+
+/**
+ * one of the owner's own calls with its own agent (the objectives coach at /voice/coach, the briefing call at
+ * /voice/briefing): the same call routes under its prefix, on its own Voice. The owner's own console only.
+ */
+export function mountOwnCall(api: Hono, prefix: string, call: Voice, o: { world: () => string | undefined }, what: string) {
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
   api.get(
-    "/voice/coach/state",
-    guard((c) => (inWorld() ? c.json(coach.state()) : c.json({ available: false, enabled: false, reason: `The objectives coach is only on ${ownerName()}'s own console` }))),
+    `${prefix}/state`,
+    guard((c) => (inWorld() ? c.json(call.state()) : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console` }))),
   );
-  mountCalls(api, "/voice/coach", (c) => (inWorld() ? coach : c.json({ error: { code: "world_scope", message: `The objectives coach is only on ${ownerName()}'s own console` } }, 403)));
+  mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "world_scope", message: `${what} is only on ${ownerName()}'s own console` } }, 403)));
 }
 
 /** a world team desk's Call: the same call routes under /tenants/:id/desk/voice, on the world's Voice (or a 404). */

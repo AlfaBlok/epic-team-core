@@ -47,3 +47,11 @@ describe("warmInbox", () => {
     expect(s.failed).toEqual(["/api/b 500"]);
   });
 });
+
+describe("pauseAfter", () => {
+  it("backs off 1, 2, 4, 8, 16 s, then stays at 20 s; a fixed pause wins", async () => {
+    const { pauseAfter } = await import("../src/warmInbox.js");
+    expect([1, 2, 3, 4, 5, 6, 9].map((n) => pauseAfter(n))).toEqual([1000, 2000, 4000, 8000, 16000, 20000, 20000]);
+    expect(pauseAfter(7, 0)).toBe(0);
+  });
+});

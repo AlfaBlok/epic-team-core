@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.spyOn(api, "listTeamCards").mockResolvedValue({
     open: [sampleGoal(), sampleIdea(), sampleDigest()],
     answered: [],
-    counts: { digest: 1, idea: 1, goal: 1, advisor: 0 },
+    counts: { digest: 1, idea: 1, goal: 1, advisor: 0, support: 0 },
     limits: { digestPerScorecardPerDay: 1, ideasPerDay: 3, openGoalsPerScorecard: 1 },
     today: "2026-11-15",
   });

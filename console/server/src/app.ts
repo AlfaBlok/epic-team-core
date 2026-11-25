@@ -223,11 +223,12 @@ import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, moun
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
-import { mountCampaignVoice, mountCoachVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { mountCampaignVoice, mountCoachVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { mountReplyNote } from "./voice/replyNote.js";
+import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince } from "./voice/briefing.js";
 import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
@@ -563,7 +564,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -3528,6 +3529,63 @@ export function createApp(
     },
   });
   mountCoachVoice(api, coachVoice, { world: () => store.tenant });
+  // the briefing call (/briefing): its own ElevenLabs agent tells him the desk's news since his last briefing (what
+  // shipped, what waits on him) and takes his notes, each one request on the Team desk. The coach's call path, reused.
+  const briefingEleven: ElevenCalls | undefined =
+    opts.voice?.briefingEleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          name: BRIEFING_AGENT_NAME,
+          tags: ["epicteam", "briefing-call"],
+          key: elevenKey,
+          prompt: briefingInstructions,
+          firstMessage: BRIEFING_GREETING,
+          tools: () => BRIEFING_TOOLS as any,
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_briefing_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_briefing_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
+  const briefingLast = () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'briefing_last_at'").get() as { value: string } | undefined)?.value;
+  let briefingNotes = 0;
+  const briefingVoice = createVoice({
+    ...voiceBase,
+    eleven: briefingEleven,
+    // where the next briefing starts: this call's start, once it ended with words in it.
+    onEnded: (id: string) => {
+      voiceBase.onEnded(id);
+      const r = db.prepare("SELECT started_at FROM voice_calls WHERE id = ?").get(id) as { started_at: string } | undefined;
+      if (r) db.prepare("INSERT INTO voice_settings (key, value) VALUES ('briefing_last_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(r.started_at);
+    },
+    mint: async () => {
+      throw new VoiceError(409, "briefing_eleven_only", "The briefing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+    },
+    scope: { world: DEFAULT_TENANT },
+    instructions: briefingInstructions,
+    tools: () => BRIEFING_TOOLS as any,
+    desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    quickStatus: noStatus,
+    context: async () => {
+      const now = opts.voice?.now?.() ?? Date.now();
+      const since = briefingSince(briefingLast(), now);
+      const home = (mid?: string) => !mid || (store.worldOfMilestone?.(mid) ?? DEFAULT_TENANT) === DEFAULT_TENANT;
+      const shipped = outcomes.all().filter((x) => x.at >= since && home(x.milestoneId));
+      const waiting = await voiceInbox().catch(() => [] as InboxCard[]);
+      return briefingKnows({ since, now, shipped, waiting });
+    },
+    walkRule: () => "",
+    relay: async (callId, args) => {
+      const words = typeof args.words === "string" ? args.words.replace(/\s+/g, " ").trim().slice(0, 6000) : "";
+      if (!words) throw new VoiceError(400, "no_words", "words (his words, as he said them) are required");
+      const note = typeof args.note === "string" ? args.note.trim().slice(0, 600) : "";
+      const n = ++briefingNotes;
+      await desk.send(briefingNoteText(callId, { words, note }), BRIEFING_PAGE, `briefing-${callId}-${n}`);
+      console.log(`[voice] ${callId} briefing note ${n} sent to the Team desk`);
+      return { desk: "team", state: "sent", result: "Passed to the Team desk as one request. Tell him in a few words." };
+    },
+  });
+  mountOwnCall(api, "/voice/briefing", briefingVoice, { world: () => store.tenant }, "The briefing call");
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";

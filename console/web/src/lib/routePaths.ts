@@ -31,4 +31,6 @@ export const VOICE_NOTES_PATH = "voice-notes";
 export const ON_DEVICE_PATH = "voice-on-device";
 /** the objectives coach call: one link he opens on his phone. */
 export const COACH_PATH = "coach";
+/** the briefing call: what happened since his last briefing, then his notes to the Team desk. */
+export const BRIEFING_PATH = "briefing";
 export const X_STATS_PATH = "x-stats";

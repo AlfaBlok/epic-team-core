@@ -1,5 +1,5 @@
 /** GET /api/inbox/team-cards: the team's own inbox cards (server/src/inbox/teamCards.ts, docs/inbox/cards.json). */
-export type TeamCardKind = "digest" | "idea" | "goal" | "advisor";
+export type TeamCardKind = "digest" | "idea" | "goal" | "advisor" | "support";
 export interface TeamCardLink {
   label: string;
   url: string;
@@ -34,7 +34,23 @@ export interface TeamCard {
   goal?: { unset: string; options: { goal: string; number: string }[]; recommend?: number; links?: TeamCardLink[] };
   /** the Senior advisor's suggestions of one week, one marked set (E948-S59). */
   advisor?: AdvisorSet;
+  /** a help desk's day: the inbound mails sorted by product, what was drafted, what needs the owner. */
+  support?: SupportDay;
   answer?: { at: string; text: string; pick?: number; via: "text" | "voice" | "button"; attachments?: string[] };
+}
+export interface SupportItem {
+  product: string;
+  subject: string;
+  state: "drafted" | "needs you" | "answered" | "waiting";
+  note?: string;
+  test?: boolean;
+}
+export interface SupportDay {
+  products: { product: string; mails: number }[];
+  drafted: number;
+  needsYou: number;
+  items: SupportItem[];
+  links?: TeamCardLink[];
 }
 export interface AdvisorItem {
   id: string;
@@ -64,7 +80,7 @@ export interface TeamCardsBody {
   open: TeamCard[];
   answered: TeamCard[];
   counts: Record<TeamCardKind, number>;
-  limits: { digestPerScorecardPerDay: number; ideasPerDay: number; openGoalsPerScorecard: number; advisorSetsPerWeek?: number };
+  limits: { digestPerScorecardPerDay: number; ideasPerDay: number; openGoalsPerScorecard: number; advisorSetsPerWeek?: number; supportPerDay?: number };
   today: string;
   /** Goals to set's part that is his objectives: his active ones, and how many of them still need a goal. */
   goalObjectives?: { active: number; needGoal: number };

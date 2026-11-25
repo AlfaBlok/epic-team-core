@@ -49,6 +49,30 @@ import { ENABLE_SCOPE, expectedChannels, projectNumberOf, resultPage, YOUTUBE_KE
  * (type an email), so the whole path runs end to end before the real apps exist. Production never shows it.
  */
 
+
+export type KeySeen = { v: boolean; at: number; refreshing?: boolean };
+/**
+ * whether a key is in the store, kept in `seen`: a key file read is a `sudo cat`, which on a busy host took up to 35 s
+ * while the inbox and the menu waited on GET /api/connects for it. A known answer is given at once; once it is a minute
+ * old, one read refreshes it after the answer. Clearing `seen` (a connect or a disconnect) makes the next look read again.
+ */
+export function keptKeyCheck(seen: Map<string, KeySeen>, read: (name: string) => Promise<boolean>, now: () => number = Date.now, maxAgeMs = 60_000) {
+  return async (name: string): Promise<boolean> => {
+    const c = seen.get(name);
+    const fresh = async () => {
+      const v = await read(name).catch(() => false);
+      if (seen.get(name) === c) seen.set(name, { v, at: now() }); // a clear while it read wins: the next look reads again
+      return v;
+    };
+    if (!c) return fresh();
+    if (now() - c.at >= maxAgeMs && !c.refreshing) {
+      c.refreshing = true;
+      void fresh().finally(() => (c.refreshing = false));
+    }
+    return c.v;
+  };
+}
+
 export type ProviderId = "google" | "github" | "test";
 export const PROVIDERS: Record<ProviderId, { name: string }> = { google: { name: "Google" }, github: { name: "GitHub" }, test: { name: "TEST provider" } };
 const STATE_MS = 10 * 60_000;
@@ -265,16 +289,8 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   const inboxUrl = () => `${(env.CONSOLE_TEAM_URL || sites().teamUrl).replace(/\/$/, "")}/inbox`;
   const markConnected = (id: string, detail: string) =>
     db.prepare("INSERT INTO oauth_connects (id, detail, at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET detail = excluded.detail, at = excluded.at").run(id, detail, new Date(now()).toISOString());
-  const keySeen = new Map<string, { v: boolean; at: number }>();
-  const hasKey =
-    o.hasKey ??
-    (async (name: string) => {
-      const c = keySeen.get(name);
-      if (c && now() - c.at < 60_000) return c.v;
-      const v = !!(await sudoRead(keyFile(name)).catch(() => undefined))?.trim();
-      keySeen.set(name, { v, at: now() });
-      return v;
-    });
+  const keySeen = new Map<string, KeySeen>();
+  const hasKey = o.hasKey ?? keptKeyCheck(keySeen, async (name) => !!(await sudoRead(keyFile(name)).catch(() => undefined))?.trim(), now);
   /** the customer site that carries a connect's callback: the first EpicTeam customer site (cloud.epicteam.app) */
   const connectHost = () => env.CONSOLE_CONNECT_HOST?.trim() || [...customers].find(([, p]) => p === "team")?.[0] || [...customers.keys()][0];
   const connectView = async (spec: ConnectSpec): Promise<ConnectView> => {

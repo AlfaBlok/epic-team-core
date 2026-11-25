@@ -34,8 +34,8 @@ import { cn } from "@/lib/utils";
  * the persona that made the card reads it on its next wake.
  */
 
-export const TEAM_KIND_WORD: Record<TeamCardKind, string> = { digest: "Digest", idea: "Idea", goal: "Goal", advisor: "Suggestion" };
-export const TEAM_SECTION_TITLE: Record<TeamCardKind, string> = { digest: "Scorecard digests", idea: "Ideas to reach a goal faster", goal: "Goals to set", advisor: "From the Senior advisor" };
+export const TEAM_KIND_WORD: Record<TeamCardKind, string> = { digest: "Digest", idea: "Idea", goal: "Goal", advisor: "Suggestion", support: "Support" };
+export const TEAM_SECTION_TITLE: Record<TeamCardKind, string> = { digest: "Scorecard digests", idea: "Ideas to reach a goal faster", goal: "Goals to set", advisor: "From the Senior advisor", support: "Support today" };
 export const TREND_WORD = { greener: "Greener", redder: "Redder", same: "No change", first: "First digest" } as const;
 
 /** the card's goal set, opened on its key result when it names one (every card points at its objective and key result). */
@@ -214,6 +214,62 @@ function TeamDigestBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c:
         actions={
           st.done === undefined && (
             <CardButton variant="outline" disabled={!!st.busy} pending={st.busy === "seen"} pendingLabel="Saving…" onClick={() => void st.answer("seen", { text: "Seen", via: "button" }).catch(() => {})} data-testid="digest-seen">
+              Seen
+            </CardButton>
+          )
+        }
+      />
+      <Answered text={st.done} />
+      {st.error && <div className="mt-1 text-xs text-destructive">{st.error}</div>}
+    </CardShell>
+  );
+}
+
+/** a help desk's day: one card a day, the inbound mails sorted by product, each drafted or needing the owner. Seen, or words. */
+export function TeamSupportCard(props: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  return (
+    <SentOr slot={teamSlot(props.card)}>
+      <TeamSupportBody {...props} />
+    </SentOr>
+  );
+}
+
+function TeamSupportBody({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
+  const s = card.support!;
+  const st = useAnswer(card, onAnswered);
+  return (
+    <CardShell kind="support" className="text-sm" data-testid="team-card" data-team-kind="support">
+      <Meta card={card} />
+      <div className={CARD_TITLE}>{card.title}</div>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1" data-testid="support-numbers">
+        <span className="text-[15px] font-medium tabular-nums text-foreground">
+          {s.items.length} {s.items.length === 1 ? "mail" : "mails"}
+        </span>
+        <span className="text-xs tabular-nums text-muted-foreground">{s.products.map((p) => `${p.product} ${p.mails}`).join(" · ")}</span>
+        <span className="text-xs font-medium tabular-nums text-foreground" data-testid="support-needs-you">
+          {s.drafted} drafted · {s.needsYou} {s.needsYou === 1 ? "needs" : "need"} you
+        </span>
+      </div>
+      <ul className="mt-2 grid gap-1 text-sm leading-relaxed text-foreground/85" data-testid="support-items">
+        {s.items.map((i, n) => (
+          <li key={n} className="min-w-0 break-words" data-state={i.state}>
+            <span className="text-xs text-muted-foreground">{i.product}</span> {i.subject}
+            <span className={cn("ml-1.5 text-xs", i.state === "needs you" ? "font-medium text-destructive" : "text-muted-foreground")}>{i.state}</span>
+            {i.note ? <div className="text-xs text-muted-foreground">{i.note}</div> : null}
+          </li>
+        ))}
+      </ul>
+      {(s.links ?? []).map((l) => (
+        <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className={CARD_LINK} data-testid="support-open">
+          {l.label}
+        </a>
+      ))}
+      <Feedback
+        card={card}
+        answer={st.answer}
+        actions={
+          st.done === undefined && (
+            <CardButton variant="outline" disabled={!!st.busy} pending={st.busy === "seen"} pendingLabel="Saving…" onClick={() => void st.answer("seen", { text: "Seen", via: "button" }).catch(() => {})} data-testid="support-seen">
               Seen
             </CardButton>
           )
@@ -589,6 +645,7 @@ function AdvisorSuggestionBody({ card, item, n, of, week, busy, send }: Suggesti
 export function TeamCardView({ card, onAnswered }: { card: TeamCard; onAnswered?: (c: TeamCard) => void }) {
   if (card.kind === "advisor" && card.advisor) return <AdvisorSetCard card={card} onAnswered={onAnswered} />;
   if (card.kind === "digest" && card.digest) return <TeamDigestCard card={card} onAnswered={onAnswered} />;
+  if (card.kind === "support" && card.support) return <TeamSupportCard card={card} onAnswered={onAnswered} />;
   if (card.kind === "idea" && card.idea) return <TeamIdeaCard card={card} onAnswered={onAnswered} />;
   if (card.kind === "goal" && card.goal) return <GoalTalkCard card={card} onAnswered={onAnswered} />;
   return null;
@@ -596,7 +653,7 @@ export function TeamCardView({ card, onAnswered }: { card: TeamCard; onAnswered?
 
 /** the words a search looks through on a team card. */
 export function teamCardText(c: TeamCard): string {
-  return [c.title, c.scorecardName, c.by, c.advisor?.weekLabel, ...(c.advisor?.items ?? []).flatMap((i) => [i.title, i.why]), c.digest?.reasons.map((r) => r.text).join(" "), c.idea?.gain, c.idea?.recommend, c.goal?.unset, c.goal?.options.map((o) => o.goal).join(" "), c.answer?.text].filter(Boolean).join(" ").toLowerCase();
+  return [c.title, c.scorecardName, c.by, c.advisor?.weekLabel, ...(c.advisor?.items ?? []).flatMap((i) => [i.title, i.why]), c.digest?.reasons.map((r) => r.text).join(" "), c.idea?.gain, c.idea?.recommend, c.goal?.unset, c.goal?.options.map((o) => o.goal).join(" "), ...(c.support?.items ?? []).map((i) => `${i.product} ${i.subject}`), c.answer?.text].filter(Boolean).join(" ").toLowerCase();
 }
 
 export function useTeamCards(scorecard?: string) {
@@ -608,7 +665,7 @@ export function useTeamCards(scorecard?: string) {
  * those (the inbox's Show filter); `scorecard` keeps one scorecard's cards (a scorecard's own inbox). A kind with no
  * open card shows nothing.
  */
-export function TeamCardsSections({ kinds = ["advisor", "idea", "goal", "digest"], scorecard, extra }: { kinds?: TeamCardKind[]; scorecard?: string; extra?: Partial<Record<TeamCardKind, ReactNode>> }) {
+export function TeamCardsSections({ kinds = ["support", "advisor", "idea", "goal", "digest"], scorecard, extra }: { kinds?: TeamCardKind[]; scorecard?: string; extra?: Partial<Record<TeamCardKind, ReactNode>> }) {
   const { data, error } = useTeamCards(scorecard);
   useSlotReady(!!data || !!error);
   const search = useInboxSearch();
@@ -649,7 +706,7 @@ function KindSection({ kind, cards, onAnswered }: { kind: TeamCardKind; cards: T
  * and the scorecard digests are one list for his review, in green. Never a grey count: a list with nothing in it hides.
  */
 export const INBOX_SECTION_TITLE = { goal: "Goals to set", team: "Ideas and digests from the team" } as const;
-export const TEAM_GROUP_KINDS: TeamCardKind[] = ["advisor", "idea", "digest"];
+export const TEAM_GROUP_KINDS: TeamCardKind[] = ["support", "advisor", "idea", "digest"];
 
 /**
  * what Goals to set's count is made of, in his words: "7 of your 13 objectives still need a goal, and 8 campaigns

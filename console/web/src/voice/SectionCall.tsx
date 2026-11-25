@@ -111,6 +111,7 @@ export function teamCard(c: TeamCard): PressableCard {
     ...(c.goal ? { question: `${c.goal.unset}. Options: ${goals.map((g, n) => `${n + 1}) ${label(g)}`).join("; ")}` } : {}),
     ...(c.goal?.recommend !== undefined && goals[c.goal.recommend] ? { recommend: label(goals[c.goal.recommend]) } : {}),
     ...(c.idea ? { question: c.idea.gain, recommend: c.idea.recommend } : {}),
+    ...(c.support ? { question: `${c.support.items.length} support ${c.support.items.length === 1 ? "mail" : "mails"}: ${c.support.drafted} drafted, ${c.support.needsYou} need you. ${c.support.items.map((i) => `${i.product}: ${i.subject}, ${i.state}`).join(". ")}`.slice(0, 1800) } : {}),
     ...(c.digest ? { question: `${c.digest.greens} of ${c.digest.total} green. ${c.digest.reasons.map((r) => r.text).join(" ")}`.slice(0, 1800) } : {}),
     ...((c.goal?.links ?? c.idea?.links)?.length ? { evidence: (c.goal?.links ?? c.idea?.links)!.map((l) => l.label).join(", "), link: (c.goal?.links ?? c.idea?.links)![0] } : {}),
     buttons: [...goals.map(label), ANSWER_IN_WORDS],

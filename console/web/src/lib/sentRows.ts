@@ -181,17 +181,25 @@ const LANDS = new Set(["landing", "landed"]);
 /** Pure: the Sent marks with the server's answers in (every device's), and this browser's marks its failed press undid. */
 export function withServerAnswers(m: Map<string, SentEntry>, answers: ServerAnswer[], now = Date.now()): Map<string, SentEntry> {
   const next = new Map(m);
-  // the server's earlier answers no longer listed (brought back, or older than the window) leave; ours stay
-  const listed = new Set(answers.filter((a) => LANDS.has(a.state)).flatMap((a) => SERVER_SLOT_KINDS.map((k) => `${k}:${a.target}`)));
-  for (const [k, v] of next) if (v.server && !listed.has(k)) next.delete(k);
-  let n = 0;
+  // the count check, 25 Nov 13:04Z: the top bar showed red 10 on the phone, 9 on the laptop. The log can list
+  // two presses on one card (a landed answer and a later failed one). Read in list order, the laptop (no mark of its own)
+  // took the landed one as a server mark that the later failure never removed, while the phone's own mark was removed
+  // by it: one card answered on the laptop, open on the phone. Now only each card's newest press counts, on every device.
+  const newest = new Map<string, { at: number; lands: boolean }>();
   for (const a of answers) {
     const at = Date.parse(a.at);
     if (!Number.isFinite(at) || now - at >= SENT_KEEP_MS) continue;
+    const had = newest.get(a.target);
+    if (!had || at > had.at) newest.set(a.target, { at, lands: LANDS.has(a.state) });
+  }
+  // the server's earlier answers whose card's newest press no longer lands (failed, brought back, or no longer listed) leave
+  for (const [k, v] of next) if (v.server && !newest.get(k.slice(k.indexOf(":") + 1))?.lands) next.delete(k);
+  let n = 0;
+  for (const [target, { at, lands }] of newest) {
     for (const kind of SERVER_SLOT_KINDS) {
-      const slot = `${kind}:${a.target}`;
+      const slot = `${kind}:${target}`;
       const mine = next.get(slot);
-      if (LANDS.has(a.state)) {
+      if (lands) {
         if (!mine) next.set(slot, { id: -++n, said: "Answered", title: "", at, gone: true, server: true });
       } else if (mine && !mine.server && mine.at <= at + 60_000) {
         // failed or brought back after this mark: the card is his to answer again, here as on every other device
