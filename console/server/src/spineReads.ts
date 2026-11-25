@@ -6,6 +6,7 @@ import { currentStateFor, doctrineFor, docTitleFor, dodFor, invalidateSpines, ou
 import { deriveVerdict, lastCommitLookup } from "./adapters/outcome.js";
 import { createTreeMemo, TREE_TTL_MS } from "./adapters/treeMemo.js";
 import { buildTree, type Tree } from "./adapters/tree.js";
+import type { TreeOff } from "./adapters/treeOff.js";
 import { ownerOf } from "./tenancy/owner.js";
 import { runStateFor } from "./cycle/runState.js";
 import { deriveMilestone } from "./routes/read.js";
@@ -21,6 +22,8 @@ export interface SpineReadsOptions {
   reposRoot: string;
   spines?: SpinesRunner;
   treeTtlMs?: number;
+  /** build trees in this worker thread instead of on the caller's event loop (the console's main thread). */
+  treeOff?: TreeOff;
 }
 
 export function createSpineReads(o: SpineReadsOptions) {
@@ -70,6 +73,7 @@ export function createSpineReads(o: SpineReadsOptions) {
         if (dir) await spinesSettled(o.spines, dir);
         return load();
       },
+      o.treeOff?.available() ? (spines) => o.treeOff!.buildOff(o.reposRoot, m, spines, owner) : undefined,
     );
   };
   /**

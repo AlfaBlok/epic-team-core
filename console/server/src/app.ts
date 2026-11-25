@@ -252,6 +252,7 @@ import { ensureWorldStamps, milestoneWorld, mountWorldFilters, repoWorlds } from
 import { worldClaims } from "./tenancy/repoScope.js";
 import { configureRepoScope, milestoneRepoRefusal } from "./tenancy/repoScope.js";
 import { createSpineReads } from "./spineReads.js";
+import { treeOff, type TreeOff } from "./adapters/treeOff.js";
 import { createReadModelHost, type ReadModelHost } from "./readModel/host.js";
 import { driftLine, type DriftResult } from "./readModel/drift.js";
 import type { AnswerJobs } from "./inbox/answerJobs.js";
@@ -453,6 +454,7 @@ export function createApp(
      * each request. Set to `the home world` it must answer exactly as unset while every row is the home world's.
      */ tenant?: string;
     /** milestone tree memo TTL in ms (CONSOLE_TREE_TTL_MS; 0 = no memo, no coalescing). */ treeTtlMs?: number;
+    /** where trees are built off the loop (default: the console's tree worker, when its bundle is there). */ treeOff?: TreeOff;
     /**
      * read model: waiting-on-you lists and statuses served from console.db, kept current off the request path.
      * `worker` (index.ts; needs dbPath) | `in-process` (tests) | `none` (default here and CONSOLE_READ_MODEL=off: computed per request as before).
@@ -608,7 +610,9 @@ export function createApp(
   const read: ReadConfig = indexer && read0.spines ? { ...read0, spines: persistedSpinesRunner(db, { alive: indexerAlive, fallback: read0.spines }) } : read0;
   configureRepoScope(db, read.reposRoot); // world milestones resolve only to their world's own checkouts
   // the spine reads (spines.py view, trees, derived fields) live in spineReads.ts, shared with the read-model worker.
-  const reads = createSpineReads({ db, store, reposRoot: read.reposRoot, spines: read.spines, treeTtlMs: opts.treeTtlMs });
+  // the console's trees are built in a worker thread (adapters/treeOff.ts), not on the request loop
+  const treeWorker = opts.treeOff ?? treeOff();
+  const reads = createSpineReads({ db, store, reposRoot: read.reposRoot, spines: read.spines, treeTtlMs: opts.treeTtlMs, treeOff: treeWorker });
   const { soft, spinesFor, locateDir, treeFor, docTitleOf, withDerived, withOutcome } = reads;
   // a stopped monitor item's ask may sit in another world (a social world repo's Reddit waits on the code repo/): an unscoped read.
   const monitorAskLookup = askLookupIn(createStore(db, { tenant: tenantScope }), (m) => treeFor(m, 1_500), worldHost, (m) => resolveRepo(read.reposRoot, m.repo)?.name);
@@ -798,7 +802,7 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null, scans: beat.scans ?? null, saved: beat.saved ?? null };
-    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), spawnHost: spawnHostStats(), plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), spawnHost: spawnHostStats(), treeWorker: { state: treeWorker.available() ? "on" : "off", ...treeWorker.stats() }, plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
@@ -3374,6 +3378,11 @@ export function createApp(
    * world with its plan's key results, the newest daily briefing and the Strategist's daily lines, read from its repo.
    */
   const worldCallKnows = (world: string) => {
+    const { campaigns, repoDir } = worldCampaigns(world);
+    return worldCallContext({ world: store.getTenant(world)?.name || world, campaigns, ...(repoDir ? { repoDir } : {}) });
+  };
+  /** a world's campaigns in its order, each with its spine and newest briefing, and the world's repo (its calls read these). */
+  const worldCampaigns = (world: string) => {
     const dirOf = worldRepoDir(read.reposRoot, db, world);
     const dir = (name?: string | null) => (name ? (dirOf(name) ?? resolveRepo(read.reposRoot, name)?.path) : undefined);
     const ranks = worldRanks(store, read.reposRoot, {});
@@ -3394,7 +3403,7 @@ export function createApp(
       return { title: m.title, ...(spine ? { spine } : {}), ...(briefing ? { briefing } : {}) };
     });
     const repoDir = dir(world) ?? dir(mine.find((m) => m.repo)?.repo);
-    return worldCallContext({ world: store.getTenant(world)?.name || world, campaigns, ...(repoDir ? { repoDir } : {}) });
+    return { campaigns, repoDir };
   };
   /** quick status for a world desk's Call: the world's campaigns and jobs (pinned first), what waits, what is stuck. */
   const worldDeskStatus = async (world: string) => {
@@ -3614,6 +3623,34 @@ export function createApp(
           },
         }));
   let marketingNotes = 0;
+  // the marketing call's live numbers: one read at a time, reused for 3 min; opening /marketing starts one (its state GET),
+  // so the read is mostly done when he presses Call. The call's start waits up to MARKETING_CONTEXT_MS for it.
+  const marketingNumbers = (() => {
+    let last: { at: number; text: string } | undefined;
+    let pending: Promise<string> | undefined;
+    const FRESH_MS = 3 * 60_000;
+    const go = (campaigns?: { title: string; spine?: string }[], homeDir?: string): Promise<string> => {
+      if (!socialArea?.callNumbers) return Promise.resolve("");
+      if (pending) return pending;
+      let list = campaigns;
+      try {
+        list ??= worldCampaigns(socialWorld()).campaigns;
+      } catch {
+        list = [];
+      }
+      const p = socialArea
+        .callNumbers({ store, world: socialWorld(), homeDir: homeDir ?? resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {}, campaigns: list })
+        .then((text) => ((last = { at: Date.now(), text }), text))
+        .catch((e) => `The numbers could not be read for this call: ${(e as Error).message.slice(0, 160)}.`)
+        .finally(() => (pending = undefined));
+      pending = p;
+      return p;
+    };
+    return {
+      warm: () => void (last && Date.now() - last.at < FRESH_MS ? undefined : go()),
+      read: async (campaigns: { title: string; spine?: string }[], homeDir?: string) => (last && Date.now() - last.at < FRESH_MS ? last.text : await go(campaigns, homeDir)),
+    };
+  })();
   const marketingVoice = createVoice({
     ...voiceBase,
     eleven: marketingEleven,
@@ -3621,6 +3658,7 @@ export function createApp(
       throw new VoiceError(409, "marketing_eleven_only", "The senior marketing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
+    contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 25_000, // live reads (the Team Browser) take seconds
     instructions: marketingInstructions,
     tools: () => MARKETING_TOOLS as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
@@ -3634,12 +3672,17 @@ export function createApp(
         /* no brief on this console: the call still has the objectives and the campaigns */
       }
       let campaigns: string | undefined;
+      let list: { title: string; spine?: string }[] = [];
       try {
         campaigns = worldCallKnows(socialWorld());
+        list = worldCampaigns(socialWorld()).campaigns;
       } catch {
         /* no social world on this console */
       }
-      return marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns });
+      // the owner asked for posts best and worst, Reddit replies, engagement, views, DMs, tester invites and
+      // next steps, read live; the read the page's opening started (under 3 min old) or a fresh one, a part that fails says so.
+      const numbers = await marketingNumbers.read(list, home);
+      return marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns, numbers });
     },
     walkRule: () => "",
     relay: async (callId, args) => {
@@ -3663,7 +3706,7 @@ export function createApp(
       return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant }, "The senior marketing call");
+  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm() }, "The senior marketing call");
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";

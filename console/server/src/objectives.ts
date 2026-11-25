@@ -58,11 +58,16 @@ export interface RedLine {
 
 export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
 /** Root L-100 in one line (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
- * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again. */
+ * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again
+ * The five words plot, objective, key result, chapter and kernel are in the wording cheap agents got right most often
+ * (the owner's note of 25 Nov; the home repo's scripts/explain_quiz.py quizzed five ways to say them, 0 wrong of 200);
+ * change it only with a new quiz run that scores as well. */
 export const OBJECT_SHAPE_RULE =
-  "What an objective is (root L-100, never ask him again): every objective, and every campaign, is an object of one class, always the same shape; each tab is one of its chapters, a part of its knowledge enforced to exist, both a UX and a data thing; Chapter is his word for one, never property, totem or facet on what he reads. " +
-  "Each product has its own count of chapters (never a fixed nine or ten), some shared by every product and some its own, listed below as read from docs/totems/<product>.json `wheel.tabs`. " +
-  "Write only into those chapters: the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it.";
+  "Our five words, the way agents get them (root L-100, never ask him again; a quiz of cheap agents on five ways to say them kept the clearest): PLOT = the big picture: every objective of the owner's in his order, where each stands and what is next; made from his one objectives list, so it grows or shrinks with it by itself (never a hand-picked set); the desk reads every message of his against it; on his screens never the word plot: the list is titled His objectives. " +
+  "OBJECTIVE = one branch of the plot: one thing the owner wants, named `Product: short goal` (EpicTeam: Finish the Bitwarden migration); green when every key result under it is green; every objective, and every campaign, is an object of one class, always the same shape; it sits under the product whose scope covers it (a product that only communicates holds no login, multi-tenant or server objective: those are the platform product's). " +
+  "KEY RESULT = a leaf under an objective: a short plain sentence a stranger understands, with target and current (All secrets in the team store copied to Bitwarden: 100% (now 62%)); a check makes it green or red; every open ticket hangs under one; the objective's manager adds one: a worker hands it a proposal, never asks the owner. " +
+  "CHAPTER = a fixed tab of an objective or campaign: a part of its knowledge enforced to exist, both the screen and the data behind it; Chapter is his word for one, never property, totem or facet on what he reads; each product has its own count (never a fixed nine or ten), some shared by every product and some its own, listed below as read from docs/totems/<product>.json `wheel.tabs`; an item may sit in two chapters; chapters are kept after a campaign ends; write only into them (the console's /made-of screen and `scripts/totems.py for <repo>` say what each holds, where it lives and who reads and writes it). " +
+  "KERNEL = the engine under the whole tree, two parts: the data graph, which holds what is known (objectives, spines, his words, chapters), and the wheel: one objective plus the personas woken on a cadence that read the graph, act and write back until every key result is green; there is one wheel per objective and a wheel is never a product (his words: \"Epic Team may have five wheels, five wheels are five objectives\"); the desk (where his words enter the graph) and the inbox (where the wheel puts what needs him) are how it shows to him, not extra parts; every build changes or reuses a kernel part, and a new part waits for his yes.";
 
 /**(the owner, 24 Nov 20:37Z: "When you are born as an agent, you are told about these chapters"): each
  * product's chapters, read from its graph file in the home checkout, in one line every wake prompt and worker brief carries. */
@@ -70,6 +75,9 @@ export interface ChapterList {
   product: string;
   kind: string;
   tabs: string[];
+  /** the product's own `scope.is`, first two sentences: which objectives belong to it (a quiz showed agents misplace
+   * objectives when they only read "a product that only communicates"; the data file names the product). */
+  scope?: string;
 }
 export interface Chapters {
   lists: ChapterList[];
@@ -90,10 +98,11 @@ export function readChapters(home: string | undefined): Chapters | undefined {
   let rules: { shared?: unknown; inTwo?: unknown; kept?: unknown } = {};
   for (const n of names) {
     try {
-      const o = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")) as { name?: string; product?: string; chapters?: typeof rules; wheel?: { class?: { name?: string }; tabs?: { label?: string }[] } };
+      const o = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")) as { name?: string; product?: string; scope?: { is?: unknown }; chapters?: typeof rules; wheel?: { class?: { name?: string }; tabs?: { label?: string }[] } };
       if (o.chapters) rules = o.chapters;
       const tabs = (o.wheel?.tabs ?? []).map((t) => t.label).filter((l): l is string => typeof l === "string" && !!l);
-      if (tabs.length) lists.push({ product: o.name ?? o.product ?? n.replace(/\.json$/, ""), kind: o.wheel?.class?.name ?? "Wheel", tabs });
+      const scope = typeof o.scope?.is === "string" ? scopeSentences(o.scope.is) : undefined;
+      if (tabs.length) lists.push({ product: o.name ?? o.product ?? n.replace(/\.json$/, ""), kind: o.wheel?.class?.name ?? "Wheel", tabs, ...(scope ? { scope } : {}) });
     } catch {
       /* a broken map file: scripts/totems.py check names it */
     }
@@ -101,6 +110,11 @@ export function readChapters(home: string | undefined): Chapters | undefined {
   if (!lists.length) return undefined;
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
   return { lists, shared: Array.isArray(rules.shared) ? rules.shared.filter((x): x is string => typeof x === "string") : [], inTwo: str(rules.inTwo), kept: str(rules.kept) };
+}
+/** the first two sentences of a scope text, at most 400 characters. */
+export function scopeSentences(text: string): string {
+  const parts = text.replace(/\s+/g, " ").trim().match(/[^.]+(?:\.(?=\s|$)|$)/g) ?? [];
+  return parts.slice(0, 2).join("").trim().slice(0, 400);
 }
 export function chaptersLine(c: Chapters | undefined): string {
   if (!c?.lists.length) return "";
@@ -110,10 +124,11 @@ export function chaptersLine(c: Chapters | undefined): string {
     return `${l.product} ${l.kind.toLowerCase()}, ${l.tabs.length}: ${l.tabs.join(", ")}${own.length ? ` (its own: ${own.join(", ")})` : ""}`;
   });
   const rules = [c.inTwo && "An item may sit in two chapters.", c.kept && "A campaign's or objective's chapters are kept after it ends."].filter(Boolean).join(" ");
-  return `Your chapters, told at birth (docs/totems/<product>.json \`wheel.tabs\`): ${each.join(" ; ")}.${c.shared.length ? ` Shared by every product: ${c.shared.join(", ")}.` : ""}${rules ? ` ${rules}` : ""}`;
+  const scopes = c.lists.filter((l) => l.scope).map((l) => l.scope).join(" ");
+  return `Your chapters, told at birth (docs/totems/<product>.json \`wheel.tabs\`): ${each.join(" ; ")}.${c.shared.length ? ` Shared by every product: ${c.shared.join(", ")}.` : ""}${rules ? ` ${rules}` : ""}${scopes ? ` Scope: ${scopes}` : ""}`;
 }
 /** the block rides on every wake: kept short. */
-export const OBJECTIVES_MAX_CHARS = 3_600; // room for each objective's tickets line
+export const OBJECTIVES_MAX_CHARS = 5_300; // room for each objective's tickets line, plus the five words (+1 700)
 
 const DOT: Record<string, string> = { green: "🟢", amber: "🟡", red: "🔴" };
 const cut = (s: string | undefined, max: number) => {

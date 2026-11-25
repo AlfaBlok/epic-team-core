@@ -256,11 +256,14 @@ export const REPO_IS_SOURCE_RULE =
  * (the owner on the first "what is unclear" card: "when we're unsure, you can just ask me. Be at the inbox ... I don't think it
  * should be a weekly thing. It should be as soon as you haven't [understood]"): any agent asks the moment the owner's words are
  * truly unclear; `scripts/both_ways.py ask` refuses a question a root learning or an earlier answer already covers.
+ * Merged in (one in, one out): never invent a person's address or name; say what is missing.
  */
 export const ASK_WHEN_UNSURE_RULE =
   `Unsure what ${ownerName()} meant? Ask at once, never saved for later or a weekly card: first read root L-100 and \`python3 ~/github/${homeRepo()}/scripts/both_ways.py gather <objective id|desk>\`; ` +
   `if the words are still truly unclear, put one open question on the inbox with \`both_ways.py ask <objective id|desk> --by <you> --quote "<the exact unclear words>" --unclear "<one open question>" --row <row>\`. ` +
-  `It refuses a question a root learning or an earlier answer already covers (never ask again what a tab, a chapter or "the same engine" means); meanwhile carry on with what is clear.`;
+  `It refuses a question a root learning or an earlier answer already covers (never ask again what a tab, a chapter or "the same engine" means); meanwhile carry on with what is clear. ` +
+  `The same for a fact about a person you write to: ` +
+  `take their address and name only from a record that says where it came from (the product's user directory: \`scripts/users.py for <product> <who>\` before you draft, \`users.py check\` before you send); missing or unsure, stop and say what is missing, never guess; gmail_send holds a mail to anyone outside without its \`facts\`.`;
 
 export const FINISH_THE_JOB_RULE =
   "Finish the job (root L-16): never end a turn offering follow-ups (\"want me to do X?\"). Do them now when they move the goal toward green, " +

@@ -375,6 +375,8 @@ export interface VoiceDeps {
    * results and the newest daily briefing). Read at each call's start, inside the same context wait.
    */
   context?: () => Promise<string> | string;
+  /** how long a call's start waits for `context` (default BRIEF_WAIT_MS); a call whose context reads live sources waits longer. */
+  contextWaitMs?: number;
   /**
    * the rule for his objectives on this call, in place of the briefing walk's (the objectives coach's: read only, his words
    * relayed); with it the walk's own tools are not added (the call's tools carry what it needs).
@@ -724,10 +726,10 @@ export function createVoice(d: VoiceDeps) {
   }
 
   /** At most BRIEF_WAIT_MS for `fn`; slow or failing: `none` (a call never waits longer for its context). */
-  async function inTime<T>(what: string, fn: () => Promise<T> | T, none: T): Promise<T> {
+  async function inTime<T>(what: string, fn: () => Promise<T> | T, none: T, waitMs = BRIEF_WAIT_MS): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([Promise.resolve().then(fn), new Promise<T>((ok) => (timer = setTimeout(() => ok(none), BRIEF_WAIT_MS)))]);
+      return await Promise.race([Promise.resolve().then(fn), new Promise<T>((ok) => (timer = setTimeout(() => ok(none), waitMs)))]);
     } catch (e) {
       console.warn(`voice: ${what} failed: ${(e as Error).message}`);
       return none;
@@ -770,7 +772,7 @@ export function createVoice(d: VoiceDeps) {
       recallNow().catch(() => ""),
       focus ? focus.cards.slice(0, FOCUS_MAX) : d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
       d.objectives ? inTime("objectives", d.objectives, "") : "",
-      d.context ? inTime("context", d.context, "") : "",
+      d.context ? inTime("context", d.context, "", d.contextWaitMs) : "",
       d.objectiveCards ? inTime("objective cards", d.objectiveCards, [] as ObjectiveCard[]) : ([] as ObjectiveCard[]),
     ]);
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).

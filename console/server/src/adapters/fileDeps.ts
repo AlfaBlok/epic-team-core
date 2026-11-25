@@ -41,3 +41,21 @@ export function depsChanged(deps: Deps): boolean {
   for (const [abs, stamp] of deps) if (stampOf(abs) !== stamp) return true;
   return false;
 }
+
+/**
+ * `depsChanged` with async stats: the memo revalidates hundreds of files every few seconds, and one statSync
+ * each on the event loop added up to seconds a minute on the main server. Same answer, the stats run in libuv's pool.
+ */
+export async function depsChangedAsync(deps: Deps): Promise<boolean> {
+  const stamp = (abs: string) =>
+    fs.promises.stat(abs).then(
+      (st) => `${st.mtimeMs}:${st.size}`,
+      () => "-",
+    );
+  const entries = [...deps];
+  for (let i = 0; i < entries.length; i += 64) {
+    const now = await Promise.all(entries.slice(i, i + 64).map(([abs]) => stamp(abs)));
+    if (now.some((s, j) => s !== entries[i + j][1])) return true;
+  }
+  return false;
+}

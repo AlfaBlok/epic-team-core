@@ -126,11 +126,12 @@ export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => strin
  * one of the owner's own calls with its own agent (the objectives coach at /voice/coach, the briefing call at
  * /voice/briefing): the same call routes under its prefix, on its own Voice. The owner's own console only.
  */
-export function mountOwnCall(api: Hono, prefix: string, call: Voice, o: { world: () => string | undefined }, what: string) {
+export function mountOwnCall(api: Hono, prefix: string, call: Voice, o: { world: () => string | undefined; onState?: () => void }, what: string) {
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
   api.get(
     `${prefix}/state`,
-    guard((c) => (inWorld() ? c.json(call.state()) : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console` }))),
+    // onState: the page opened, so a call may follow (the marketing call warms its live numbers then).
+    guard((c) => (inWorld() ? (o.onState?.(), c.json(call.state())) : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console` }))),
   );
   mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "world_scope", message: `${what} is only on ${ownerName()}'s own console` } }, 403)));
 }

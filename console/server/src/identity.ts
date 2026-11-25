@@ -64,9 +64,19 @@ function fromEnv(env: NodeJS.ProcessEnv): Partial<Identity> {
   };
 }
 
+/**
+ * `identity()` runs for nearly every row the console reads, and each call read a dozen environment variables
+ * (each a getenv through node's env proxy): about 4% of the main server's event loop. In production nothing changes
+ * those variables after start (the unit sets them), so their reading is kept; tests and tsx runs still read them on
+ * every call, since the suites set them between cases.
+ */
+let envKept: ReturnType<typeof fromEnv> | undefined;
+const keepEnv = process.env.NODE_ENV === "production" && !process.env.VITEST;
+const envOf = (env: NodeJS.ProcessEnv) => (env === process.env && keepEnv ? (envKept ??= fromEnv(env)) : fromEnv(env));
+
 /** the identity in force: set values first, then the environment, then the neutral defaults */
 export function identity(env: NodeJS.ProcessEnv = process.env): Identity {
-  const e = fromEnv(env);
+  const e = envOf(env);
   return {
     owner: set.owner ?? e.owner ?? rowOwner ?? NEUTRAL_IDENTITY.owner,
     homeWorld: set.homeWorld ?? e.homeWorld ?? NEUTRAL_IDENTITY.homeWorld,

@@ -32,6 +32,14 @@ describe("every agent is told its chapters at birth, read from the graph files",
     expect(line).toContain("its own: Product, A, B");
     expect(line).toContain("Shared by every product: Key results.");
   });
+  it("a product's scope rides on the line, so agents place objectives under the right product", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chapters-"));
+    fs.mkdirSync(path.join(dir, "docs/totems"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs/totems/acme.json"), JSON.stringify({ name: "Acme", scope: { is: "Acme is purely a communication tool: posts and replies. Logins and servers are Beta's. A third sentence is left out." }, wheel: { class: { name: "Campaign" }, tabs: [{ label: "Key results" }] } }));
+    const line = chaptersLine(readChapters(dir));
+    expect(line).toContain("Scope: Acme is purely a communication tool: posts and replies. Logins and servers are Beta's.");
+    expect(line).not.toContain("third sentence");
+  });
   it("the wake block and the worker rule carry the line; the rule names no fixed list", () => {
     const line = "Your chapters, told at birth: Acme campaign, 11: Key results, Product.";
     const block = objectivesBlock({ nodes: [{ id: "a", kind: "pursuit", name: "Acme: Get 5 testers", headline: "Acme: Get 5 testers", rank: 1, greens: 0, total: 1 }] }, undefined, undefined, line);

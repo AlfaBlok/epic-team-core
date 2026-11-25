@@ -1,4 +1,4 @@
-import { depsChanged, trackDeps, type Deps } from "./fileDeps.js";
+import { depsChangedAsync, trackDeps, type Deps } from "./fileDeps.js";
 import { limiter } from "./spines.js";
 
 /**
@@ -24,6 +24,8 @@ export const TREE_TTL_MS = 3_000;
 
 type Loaded<S> = { spines: S | undefined; dir?: string };
 type Load<S> = () => Promise<Loaded<S>> | Loaded<S>;
+/** the same build off the event loop (adapters/treeOff.ts), resolving with the tree and the files it read. */
+export type MakeOff<T, S> = (spines: S | undefined) => Promise<{ value: T; deps: Deps }>;
 
 /** one background tree rebuild at a time across the console (see `revalidate`). */
 const rebuildSlot = limiter(1);
@@ -39,19 +41,24 @@ export function createTreeMemo<T, S>(ttlMs: number = TREE_TTL_MS, now: () => num
   let gen = 0;
   const isStale = (e: { tick: number; dir?: string }) => !!e.dir && (staleSince.get(e.dir) ?? 0) > e.tick;
 
-  const build = async (key: string, load: Load<S>, make: (spines: S | undefined) => T): Promise<T> => {
+  const build = async (key: string, load: Load<S>, make: (spines: S | undefined) => T, makeOff?: MakeOff<T, S>): Promise<T> => {
     const started = gen;
     const startTick = ++tick;
     const { spines, dir } = await load();
     const hit = done.get(key);
     if (hit && hit.spines === spines && !isStale(hit)) {
       if (now() - hit.at < ttlMs) return hit.tree;
-      if (hit.deps.size && !depsChanged(hit.deps)) {
+      // the stamps are read with async stats (the libuv pool), not one statSync per file on the event loop
+      if (hit.deps.size && !(await depsChangedAsync(hit.deps))) {
         hit.at = now();
         return hit.tree;
       }
     }
-    const { value: tree, deps } = trackDeps(() => make(spines));
+    // built in the tree worker when there is one; if it fails (a dead worker, an error) the same build runs here
+    // as before, so a real build error still reaches the caller unchanged.
+    let built: { value: T; deps: Deps } | undefined;
+    if (makeOff) built = await makeOff(spines).catch(() => undefined);
+    const { value: tree, deps } = built ?? trackDeps(() => make(spines));
     if (ttlMs > 0 && started === gen) done.set(key, { at: now(), builtAt: now(), tick: startTick, spines, dir, tree, deps });
     return tree;
   };
@@ -61,11 +68,11 @@ export function createTreeMemo<T, S>(ttlMs: number = TREE_TTL_MS, now: () => num
    * the worker server, more on the main server), so the rebuilds of every memo run one after another through `rebuildSlot`, each after a
    * macrotask: requests answer between two of them instead of behind all the trees a pull made stale at once (5.8 s live).
    */
-  const revalidate = (key: string, fresh: Load<S>, make: (spines: S | undefined) => T) => {
+  const revalidate = (key: string, fresh: Load<S>, make: (spines: S | undefined) => T, makeOff?: MakeOff<T, S>) => {
     if (background.has(key)) return;
     const p = Promise.resolve()
       .then(fresh) // waits for the post-pull spines.py run outside the slot: another repo's trees do not queue behind it
-      .then((loaded) => rebuildSlot(() => new Promise<void>((r) => setImmediate(r)).then(() => build(key, () => loaded, make))))
+      .then((loaded) => rebuildSlot(() => new Promise<void>((r) => setImmediate(r)).then(() => build(key, () => loaded, make, makeOff))))
       .finally(() => {
         if (background.get(key) === p) background.delete(key);
       });
@@ -78,17 +85,17 @@ export function createTreeMemo<T, S>(ttlMs: number = TREE_TTL_MS, now: () => num
      * `load` resolves the spines.py output (and the checkout dir) the tree is built from; `make` builds it.
      * With `shared` (no caller-chosen spines) concurrent calls for `key` share one run of both.
      */
-    get(key: string, load: Load<S>, make: (spines: S | undefined) => T, shared = true, fresh?: Load<S>): Promise<T> {
-      if (ttlMs <= 0) return build(key, load, make);
+    get(key: string, load: Load<S>, make: (spines: S | undefined) => T, shared = true, fresh?: Load<S>, makeOff?: MakeOff<T, S>): Promise<T> {
+      if (ttlMs <= 0) return build(key, load, make, makeOff);
       const hit = done.get(key);
       if (fresh && hit && isStale(hit)) {
-        revalidate(key, fresh, make);
+        revalidate(key, fresh, make, makeOff);
         return Promise.resolve(hit.tree);
       }
-      if (!shared) return build(key, load, make);
+      if (!shared) return build(key, load, make, makeOff);
       let p = inflight.get(key);
       if (!p) {
-        p = build(key, load, make).finally(() => {
+        p = build(key, load, make, makeOff).finally(() => {
           if (inflight.get(key) === p) inflight.delete(key);
         });
         inflight.set(key, p);

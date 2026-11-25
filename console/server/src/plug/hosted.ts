@@ -104,6 +104,9 @@ export interface SocialArea {
   worldDeskCall: CallScript;
   /** the newest daily briefing kept for one campaign (repo, its epic code; null = the repo-level campaign), for its call. */
   callBriefing?(at: { repo: string; code: string | null }): { day: string; text: string } | undefined;
+  /** the social briefer call's numbers, read live at its start (posts best and worst, views,
+   * engagement, Reddit replies, DMs, tester invites, next steps), as one text block. */
+  callNumbers?(o: { store: Store; world: string; homeDir?: string; browserUrls: string[]; browserHeaders: (url: string) => Record<string, string>; campaigns: { title: string; spine?: string }[] }): Promise<string>;
   /**..S27, the social routes and the writer (the wake gate moves late posts with it). */
   mountRoutes(o: { api: Hono; store: Store; skillDir?: string; wake?: (id: string, note: string) => Promise<unknown>; recordAssignments: (s: Store) => any; teamDir: () => string | undefined }): void;
   /** the site numbers and the hourly KPI read, held posts as cards, campaigns, the digest. */

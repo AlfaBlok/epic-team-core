@@ -178,20 +178,14 @@ export function useNote(props: {
   const sub = useMemo(() => (held ? (fn: () => void) => held.engine.subscribe(fn) : nothing), [held]);
   const get = held ? held.engine.view : idle;
   const v = useSyncExternalStore(sub, get, get);
-  // (the owner 2026-11-15 03:16Z, vn_5ef65752: "if I'm recording a voice note and it goes out of the
-  // screen ... the red thing where I have the timing and the voice bar ... should stay visible when I scroll down"): while a
-  // card's note is on and its strip is scrolled off screen, the card lets go of it, so the floating pill (NoteWidget: the
-  // red dot, the time, the level, Cancel and Send) shows at the bottom of the screen; back in view, the strip holds it again.
+  // (the owner 2026-11-15 03:16Z, vn_5ef65752: "the red thing where I have the timing and the voice bar ... should stay visible
+  // when I scroll down"; replaced in part by 2026-11-25 15:27Z, vn_c9beca39: "you only get the floating thing when you scroll up or
+  // down ... it should show immediately ... the floating pane at the bottom, whenever we're recording, should just go on"): from
+  // the moment Voice is pressed on a card and for as long as its note is on, the card lets go of it, so the floating pill (NoteWidget:
+  // the red dot, the time, the level, Cancel and Send) shows at the bottom of the screen at once, wherever he scrolls; the card's strip
+  // stays too. Once Send is pressed the card holds the note again (sending, sent).
   const [stripEl, setStripEl] = useState<HTMLDivElement | null>(null);
-  const [away, setAway] = useState(false);
-  const watch = card && noteOn(v.phase) && !!stripEl;
-  useEffect(() => {
-    if (!watch || typeof IntersectionObserver === "undefined") return setAway(false);
-    const io = new IntersectionObserver(([e]) => setAway(!e.isIntersecting), { threshold: 0.6 });
-    io.observe(stripEl!);
-    return () => (io.disconnect(), setAway(false));
-  }, [watch, stripEl]);
-  const floats = watch && away;
+  const floats = card && noteOn(v.phase);
   useEffect(() => {
     if (!held) return undefined;
     if (floats) {

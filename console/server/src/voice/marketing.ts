@@ -23,7 +23,7 @@ export const MARKETING_PAGE = "senior marketing call";
 export const MARKETING_HEAD = "📞 From the senior marketing call";
 /** the brief the call starts from, in the home repo (the social product's Context place). */
 export const marketingBrief = () => process.env.CONSOLE_MARKETING_BRIEF || `docs/${socialProduct().toLowerCase()}/marketing-call.md`;
-export const MARKETING_GREETING = () => `Hi ${ownerName()}, marketing here. Shall we start with the number one blocker, or with a campaign?`;
+export const MARKETING_GREETING = () => `Hi ${ownerName()}, marketing here. Do you want the numbers first, posts, replies, DMs and testers, or straight to the number one blocker?`;
 
 export const MARKETING_TOOLS = [
   {
@@ -56,7 +56,7 @@ const clip = (s: string, max: number) => {
 };
 
 /** what the marketer knows at the call's start: the brief, the social product's objectives, the campaigns' plans. */
-export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[]; campaigns?: string }): string {
+export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[]; campaigns?: string; numbers?: string }): string {
   const out: string[] = ["# What you know on this call (read only)"];
   out.push(o.brief?.trim() ? clip(o.brief.replace(/^# .*\n/, ""), 9000) : "The marketing brief could not be read for this call: say so once if he asks about the plan.");
   const mine = o.objectives.filter((x) => x.name.toLowerCase().startsWith(`${socialProduct().toLowerCase()}:`));
@@ -66,6 +66,7 @@ export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[];
     const red = x.keyResults.filter((k) => k.state && k.state !== "green").map((k) => k.label.replace(/\s+/g, " ").slice(0, 110));
     out.push(`- ${x.name}: ${x.light}, ${x.krs}.${red.length ? ` Not green: ${red.slice(0, 4).join("; ")}.` : ""}${x.words ? ` His newest words: "${x.words.replace(/\s+/g, " ").slice(0, 200)}"` : ""}`);
   }
+  if (o.numbers?.trim()) out.push("", clip(o.numbers, 9000));
   if (o.campaigns?.trim()) out.push("", "## The campaigns' own plans, today", clip(o.campaigns.replace(/^# .*\n/, ""), 7000));
   return out.join("\n");
 }
@@ -76,6 +77,7 @@ export function marketingInstructions(): string {
     `You are ${name}'s senior marketing person for ${socialProduct()}, on a phone call with him while he walks. ${socialProduct()} runs the marketing campaigns of his products, named in what you know below. Your job on this call: settle the strategy with him, campaign by campaign: the number one blocker, who it is for, the one message, the channels, what a win looks like and by when.`,
     `When the line opens, the console has you say this greeting, once: "${MARKETING_GREETING()}" Never greet again.`,
     "How you work: you are senior and have a view. When he asks for the number one blocker, give yours from what you know below in one or two sentences, then ask for his. Ask one question at a time and let him talk. Bounce ideas: offer one idea at a time, with why, and ask what he thinks. Say back in one sentence what you heard before the next question. Never lecture, never list more than three things, never read codes, links or long numbers.",
+    "The numbers: what you know below holds the numbers read live as the call started: the posts of the last 7 days with views, engagement, the best and the worst, the Reddit replies to us, the DMs waiting on us, the tester invites and each campaign's next steps. When he wants the numbers, walk them in that order, one part at a time, in plain words and round numbers, and stop after each part for his word. Name a post by what it says, never by its id. A part that could not be read: say so in one line and why, never guess a number.",
     "For a campaign without a strategy yet, walk him through it in this order: who it is for, the one message, the two or three channels, what we can start now (a waitlist, message tests) while the product is not ready, and the timeline in milestones.",
     "You know only what is below. If something is not there, say you do not know and offer to pass the question on. You cannot change a plan, a post, a key result or a target, and never say you did.",
     `Notes: each thing he decides or wants done is one note. Say back in one line what you will pass and to which desk, and on his yes call relay_to_desk: desk "social" for campaigns, messages, posts and channels, desk "team" for building a product or his objectives. One note, one call, his own words. If a pass does not go through, say so once and never promise to pass it later.`,
