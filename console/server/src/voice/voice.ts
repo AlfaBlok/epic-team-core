@@ -8,6 +8,7 @@ import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
 import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
+import { ELEVEN_MODEL_LABEL, type ElevenCalls } from "./elevenAgent.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -264,6 +265,11 @@ export interface CallStart {
   turnDetection: Record<string, unknown>;
   /** the one greeting line, which the page has the voice say once when the line opens (never the model's own choice). */
   greeting?: string;
+  /** an ElevenLabs Agents call: the page talks over this signed link, with these instructions and greeting. */
+  provider?: "elevenlabs";
+  signedUrl?: string;
+  agentId?: string;
+  instructions?: string;
 }
 export interface Limits {
   callMaxMin: number;
@@ -285,6 +291,8 @@ export interface VoiceState {
   worldOff?: true;
   /** voice calls are off (voice notes still work): the Call button is gone. */
   callsOff?: true;
+  /** who carries the calls: ElevenLabs Agents on the grant or OpenAI's realtime voice. */
+  provider: "elevenlabs" | "openai";
   reason?: string;
   model: string;
   monthUsd: number;
@@ -341,6 +349,11 @@ export interface VoiceDeps {
   brief?: () => Promise<string> | string;
   /** CONSOLE_VOICE=off forces the switch off, whatever the setting says. */
   envOff?: boolean;
+  /**
+   * calls through ElevenLabs Agents (the grant). With it the calls go there unless the `call_provider` setting
+   * says openai; their own switch `calls:elevenlabs` is on unless set off (the 22 Nov switch-off held OpenAI's paid calls).
+   */
+  eleven?: ElevenCalls;
   /** Model name override (CONSOLE_VOICE_MODEL); the setting wins when set. */
   envModel?: string;
   /**
@@ -574,7 +587,9 @@ export function createVoice(d: VoiceDeps) {
   const worldOn = () => !worldKey || setting(worldKey) === "on";
   const enabled = () => platformOn() && worldOn();
   /** calls are the platform's own switch (every world), off unless set on; notes never read it. */
-  const callsOn = () => (setting("calls") ?? d.callsDefault ?? "on") === "on";
+  const provider = (): "elevenlabs" | "openai" => (d.eleven && setting("call_provider") !== "openai" ? "elevenlabs" : "openai");
+  const callsKey = () => (provider() === "elevenlabs" ? "calls:elevenlabs" : "calls");
+  const callsOn = () => (provider() === "elevenlabs" ? (setting(callsKey()) ?? "on") === "on" : (setting("calls") ?? d.callsDefault ?? "on") === "on");
   const CALLS_OFF = "Calls are off. Send a voice note instead: it is written out free on our own server.";
   const offWhy = () => (platformOn() ? "Voice is not switched on for this workspace." : "Voice is switched off in the console.");
   const historyTokens = () => {
@@ -674,10 +689,11 @@ export function createVoice(d: VoiceDeps) {
     const act = active();
     const last = db.prepare(`SELECT * FROM voice_calls WHERE ended_at IS NOT NULL AND ${inScope} ORDER BY started_at DESC LIMIT 1`).get(sc);
     const why = enabled() ? (!callsOn() ? CALLS_OFF : m.usd >= limits().monthCapUsd - MIN_LEFT_USD ? refusal()?.message : undefined) : offWhy();
-    const mdl = model();
+    const mdl = provider() === "elevenlabs" ? ELEVEN_MODEL_LABEL : model();
     return {
       available: enabled() && !why,
       enabled: enabled(),
+      provider: provider(),
       ...(callsOn() ? {} : { callsOff: true as const }),
       ...(platformOn() && !worldOn() ? { worldOff: true as const } : {}),
       ...(why ? { reason: why } : {}),
@@ -760,6 +776,19 @@ export function createVoice(d: VoiceDeps) {
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
     const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length ? OBJECTIVE_TOOLS : [])];
     const cfg = sessionConfig(mdl, instructions, [...tools, ...walkTools] as unknown as typeof VOICE_TOOLS, historyTokens());
+    const greeting = focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions);
+    if (provider() === "elevenlabs" && d.eleven) {
+      // ElevenLabs Agents on the grant: a signed link for one call, the same instructions and greeting per call.
+      const link = await d.eleven.link();
+      const id = `call_${crypto.randomBytes(4).toString("hex")}`;
+      const t = iso();
+      if (active()) throw new VoiceError(409, "one_call", "A call is already on (one call at a time). Hang it up first.");
+      db.prepare("INSERT INTO voice_calls (id, started_at, last_beat_at, model, session_id, tenant_id, milestone_id, brief_tokens, recall_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, t, t, ELEVEN_MODEL_LABEL, link.agentId, world, ms, brief ? tokensOf(brief) : null, recall ? tokensOf(recall) : null);
+      if (walkCards) db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
+      if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
+      console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId})`);
+      return { call: must(id), clientSecret: "", expiresAt: Math.floor(now() / 1000) + 15 * 60, model: ELEVEN_MODEL_LABEL, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, ...(greeting ? { greeting } : {}), provider: "elevenlabs", signedUrl: link.signedUrl, agentId: link.agentId, instructions };
+    }
     const key = await d.mint(cfg);
     const id = `call_${crypto.randomBytes(4).toString("hex")}`;
     const t = iso();
@@ -773,7 +802,7 @@ export function createVoice(d: VoiceDeps) {
     if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
     if (context) console.log(`[voice] ${id} starts with its context (~${tokensOf(context)} tokens)`);
     if (recall) console.log(`[voice] ${id} starts with ${recall.split("\n").length - 1} lines of earlier conversation (~${tokensOf(recall)} tokens)`);
-    return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting: focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions) };
+    return { call: must(id), clientSecret: key.value, expiresAt: key.expires_at, model: mdl, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, greeting };
   }
 
   /** Recompute a call's totals from its stored usage events (each counted once by event id). */
@@ -1078,7 +1107,7 @@ export function createVoice(d: VoiceDeps) {
     enabled,
     callsOn,
     /** calls on or off for every world (the owner's to turn on; anyone may turn them off). */
-    setCalls: (on: boolean) => put("calls", on ? "on" : "off"),
+    setCalls: (on: boolean) => put(callsKey(), on ? "on" : "off"),
     /** The platform's switch on the home world's Voice; on another world's Voice, that world's own switch. */
     setEnabled: (on: boolean) => put(worldKey ?? "enabled", on ? "on" : "off"),
     setModel: (m: string) => put("model", m),

@@ -22,6 +22,7 @@ import { WordsBox } from "@/components/WordsBox";
 import { usePushToggle } from "@/components/PushToggle";
 import { deskVoiceBase } from "@/voice/deskBase";
 import { passedHead, passedReply } from "@/lib/passed";
+import { consoleSummary, foldChat } from "@/lib/chatFold";
 import { PassedBubble } from "@/components/PassedBubble";
 import { homeWorld } from "@/lib/identity";
 
@@ -450,6 +451,11 @@ export const VOICE_FILES_NOTE = "Files for my voice note, which follows in the n
  * never worded as a doubt (the owner, 18 Nov: "queued" read as not sent while the desk had his message).
  */
 export const QUEUED_NOTE = "Sending · the desk gets it as soon as T3 answers";
+/**
+ * his typed message the desk's thread does not show minutes after he sent it (22 Nov: three sat in T3's queue for two
+ * hours and his screen said nothing): said plainly on the message itself, like a voice note's.
+ */
+export const MSG_NOT_DELIVERED = "Not delivered to the desk yet";
 /** his voice note the desk does not have yet: said plainly on the note itself. */
 export const NOTE_RETRYING = "Voice note not delivered yet, retrying";
 export const NOTE_NOT_DELIVERED = "Voice note not delivered. Its words are kept and the team has been told";
@@ -502,6 +508,26 @@ function UndeliveredNote({ n, t3, base, onSent }: { n: UndeliveredNoteItem; t3?:
               Send again
             </Button>
             {said && <span className="text-muted-foreground" data-testid="chat-undelivered-said">{said}</span>}
+          </span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+type UndeliveredMessageItem = NonNullable<DeskChat["undelivered"]>[number];
+/** his typed message T3 took that the desk's thread does not show yet: what is wrong and since when, on the message. */
+function UndeliveredMessage({ m }: { m: UndeliveredMessageItem }) {
+  return (
+    <li className="flex justify-end" data-testid="chat-undelivered-message">
+      <div className="min-w-0 max-w-[92%] rounded-lg border border-destructive bg-primary/60 px-3 py-2 text-sm text-primary-foreground sm:max-w-[85%]">
+        {m.page && <p className="mb-1 text-[11px] opacity-80 [overflow-wrap:anywhere]">about: {m.page}</p>}
+        <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{splitAttachments(m.text).text}</p>
+        <SentFiles files={splitAttachments(m.text).files} />
+        <div className="mt-1.5 rounded bg-background px-2 py-1.5 text-xs text-destructive" role="alert">
+          <span className="block" data-testid="chat-undelivered-message-state">{MSG_NOT_DELIVERED}</span>
+          <span className="block text-muted-foreground" data-testid="chat-undelivered-message-why">
+            {m.why} · sent <RelTime iso={m.at} />
           </span>
         </div>
       </div>
@@ -725,14 +751,15 @@ export function ChatView({
   }, [seenKey, markSeen]);
 
   const posting = outbox.some((o) => o.state !== "failed");
-  const busy = !!chat?.working || (chat?.sending ?? 0) > 0 || posting || !!chat?.queued?.length;
+  const busy = !!chat?.working || (chat?.sending ?? 0) > 0 || posting || !!chat?.queued?.length || !!chat?.undelivered?.length;
   // a message leaves the outbox once the transcript shows it; a failure the console found after its reply lands on its bubble.
   useEffect(() => {
     if (!chat?.available || !outbox.length) return;
     const all = older ? [...older.messages, ...chat.messages] : chat.messages;
     const err = chat.sendError;
     const next = outbox
-      .filter((o) => o.state === "failed" || !landed(o, all, chat.queued))
+      // his message the console reports not delivered yet gets its own bubble from the console (every device shows it)
+      .filter((o) => o.state === "failed" || !(landed(o, all, chat.queued) || chat.undelivered?.some((u) => u.id === o.crid)))
       .map((o) => (err?.clientRequestId === o.crid && o.state !== "failed" ? { ...o, state: "failed" as const, error: err.text } : o));
     if (next.length !== outbox.length || next.some((o, i) => o !== outbox[i])) setOutbox(next);
   }, [chat, older, outbox]);
@@ -1066,19 +1093,27 @@ export function ChatView({
             hasEarlier && <p className="mb-2 text-center text-xs text-muted-foreground">{chat.customer ? "Older messages are not shown here." : `Older messages are in the ${short}'s T3 thread.`}</p>
           )}
           <ol className="grid min-w-0 gap-3 pb-4" aria-label={`Chat with the ${who}`} data-testid="chat-transcript">
-            {!shown.length && !chat.working && !outbox.length && !chat.queued?.length && (
+            {!shown.length && !chat.working && !outbox.length && !chat.queued?.length && !chat.undelivered?.length && (
               // never a blank panel: say whether the chat is still loading or simply has nothing yet
               <li role="status" className="py-6 text-center text-sm text-muted-foreground" data-testid="chat-empty">
                 {chat.stale || chat.unreachable || chat.t3 ? CHAT_EMPTY.loading : CHAT_EMPTY.empty}
               </li>
             )}
             {notesAt.get("")?.map(undeliveredBubble)}
-            {shown.map((m) => (
-              <Fragment key={m.id}>
-                <Bubble m={m} threadUrl={threadUrl} customer={chat.customer} />
-                {notesAt.get(m.id)?.map(undeliveredBubble)}
-              </Fragment>
-            ))}
+            {foldChat(shown).map((it) =>
+              it.kind === "message" ? (
+                <Fragment key={it.m.id}>
+                  <Bubble m={it.m} threadUrl={threadUrl} customer={chat.customer} />
+                  {notesAt.get(it.m.id)?.map(undeliveredBubble)}
+                </Fragment>
+              ) : (
+                <Fragment key={it.id}>
+                  {it.kind === "console" ? <ConsoleFold lines={it.lines} /> : <StepsFold msgs={it.msgs} />}
+                  {(it.kind === "console" ? it.lines : it.msgs).flatMap((m) => notesAt.get(m.id) ?? []).map(undeliveredBubble)}
+                </Fragment>
+              ),
+            )}
+            {chat.undelivered?.map((m) => <UndeliveredMessage key={m.id} m={m} />)}
             {chat.queued?.map((q) => (
               <li key={q.id} className="flex justify-end" data-testid="chat-queued">
                 <div className="min-w-0 max-w-[92%] rounded-lg bg-primary/70 px-3 py-2 text-sm text-primary-foreground sm:max-w-[85%]">
@@ -1212,6 +1247,50 @@ function WorkingLine({ who, since }: { who: string; since?: string }) {
       <span className="tabular-nums" data-testid="chat-working-elapsed">
         {formatElapsed(now - start)}
       </span>
+    </li>
+  );
+}
+
+/**
+ * E942-S173: a run of console lines (relay receipts, held batches, note-touch lists, steps) and the desk's short replies to
+ * them, as one quiet folded row: they are not his words and not answers to him. Open it to read each line.
+ */
+export function ConsoleFold({ lines }: { lines: DeskMessage[] }) {
+  const n = lines.filter((m) => m.role === "user").length;
+  const last = lines[lines.length - 1];
+  const summary = consoleSummary(lines);
+  return (
+    <li className="min-w-0" data-testid="chat-console-fold">
+      <details className="rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground">
+        <summary className="cursor-pointer [overflow-wrap:anywhere]">
+          <span className="font-medium">Console{n > 1 ? `, ${n} lines` : ""}</span>{summary && <> · {summary}</>} · <RelTime iso={last.at} />
+        </summary>
+        <ol className="mt-2 grid gap-2">
+          {lines.map((m) => (
+            <li key={m.id} className="whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid={m.role === "user" ? "chat-console-line" : "chat-console-reply"}>
+              <span className="font-medium">{m.role === "user" ? "Console" : "Desk"}:</span> {m.text.trim()}
+            </li>
+          ))}
+        </ol>
+      </details>
+    </li>
+  );
+}
+
+/** E942-S173: the desk's short messages before its answer in one turn ("Reading his long note now"), folded above the answer. */
+export function StepsFold({ msgs }: { msgs: DeskMessage[] }) {
+  return (
+    <li className="min-w-0" data-testid="chat-steps-fold">
+      <details className="px-1 text-xs text-muted-foreground">
+        <summary className="cursor-pointer">{msgs.length === 1 ? "1 working step" : `${msgs.length} working steps`}</summary>
+        <ol className="mt-1 grid gap-1 border-l pl-3">
+          {msgs.map((m) => (
+            <li key={m.id} className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {m.text.trim()}
+            </li>
+          ))}
+        </ol>
+      </details>
     </li>
   );
 }

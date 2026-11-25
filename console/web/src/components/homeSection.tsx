@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { FoldChevron } from "@/components/foldChevron";
-import { landFoldedSection, resetKeepPlace, stopHold } from "@/lib/keepPlace";
+import { landFoldedSection, resetKeepPlace, stopHold, visibleTop } from "@/lib/keepPlace";
 import { answeredWithin } from "@/lib/sentRows";
 
 /** a Team home section's fold, kept per section in localStorage (default open). */
@@ -177,6 +177,9 @@ export function CountPill({
  *   ▾ Blocked on you 1   [ card ]   ──his answer──▶   ✓ Sent …   ──FOLD_AFTER_MS──▶   ▸ Blocked on you 0
  *                                                                                      ▸ next section …
  *
+ * The beat is only for a Sent row he can see; a long card answered at its buttons (its row would sit above the screen)
+ * folds its section at once, before the next paint, so the page moves once, to the folded heading.
+ *
  * Only his own answer in this page folds it (ANSWERED_WINDOW_MS): a list that empties on a refetch or a search stays as
  * it was. The fold is for this visit (the Inbox lands folded on every visit anyway); his tap opens it again.
  */
@@ -187,12 +190,13 @@ function useFoldWhenDone(count: number | undefined, open: boolean, onToggle: ((o
   const had = useRef(count);
   const live = useRef({ open, onToggle });
   live.current = { open, onToggle };
-  useEffect(() => {
+  // a layout effect: a fold at once happens before the browser paints the collapsed card
+  useLayoutEffect(() => {
     if (count === undefined) return undefined; // still counting: keep the last known number
     const before = had.current;
     had.current = count;
     if (!inInbox || !onToggle || !open || count !== 0 || !before || !answeredWithin(ANSWERED_WINDOW_MS)) return undefined;
-    const t = setTimeout(() => {
+    const go = () => {
       const { open: still, onToggle: fold } = live.current;
       if (!still || !fold) return;
       // folding takes its cards away on purpose: no card to land on, no place to hold
@@ -201,9 +205,22 @@ function useFoldWhenDone(count: number | undefined, open: boolean, onToggle: ((o
       fold(false);
       const el = ref.current;
       if (el) requestAnimationFrame(() => landFoldedSection(el));
-    }, FOLD_AFTER_MS);
+    };
+    // the beat is for the green Sent row he can see; one off the screen (a long card answered at its buttons) would
+    // only let the page shift under him, so the section folds at once and the page moves once
+    if (!sentRowSeen(ref.current)) return void go();
+    const t = setTimeout(go, FOLD_AFTER_MS);
     return () => clearTimeout(t);
   }, [count]);
+}
+
+/** a green Sent row inside this section shows on the screen now (under the top bar, above the bottom edge). */
+function sentRowSeen(section: HTMLElement | null): boolean {
+  const row = section?.querySelector('[data-testid="sent-row"]');
+  if (!row || typeof row.getBoundingClientRect !== "function") return false;
+  const r = row.getBoundingClientRect();
+  const h = window.innerHeight || document.documentElement.clientHeight;
+  return r.top >= visibleTop(null) && r.top < h;
 }
 
 /**

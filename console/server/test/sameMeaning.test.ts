@@ -132,6 +132,10 @@ describe("review cards: the newer one asking the same in other words goes back t
     expect(b.verdict).toMatchObject({ kind: "needs-rewriting", reason: "card needs rewriting" });
     expect(b.verdict.problems?.[0]).toMatch(/^it asks the same as X1-S1's card in other words, still open: one question, one card\. Fold it into X1-S1's card with the owner's words from both, tell the owners of both rows/);
     expect(c.verdict.kind).toBe("card");
+    // a card that names the earlier one builds on it: not merged
+    const d = row("X1-S4", "2026-11-23", "The X sign-in", `${SIGN_IN_B} After X1-S1 the session expired again.`);
+    oneQuestionOneCard([a, d]);
+    expect(d.verdict.kind).toBe("card");
   });
 });
 

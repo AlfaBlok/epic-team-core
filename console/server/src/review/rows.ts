@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sameOpenProblem, sameQuestion } from "../inbox/duplicate.js";
-import { meaningCall, nearest, sameMeaningProblem } from "../inbox/sameMeaning.js";
+import { citesRef, meaningCall, nearest, sameMeaningProblem } from "../inbox/sameMeaning.js";
 import fs from "node:fs";
 import path from "node:path";
 import { inside } from "../adapters/doc.js";
@@ -867,6 +867,7 @@ export function onePageOneCard(rows: ReviewRow[], branchOf: Map<ReviewRow, strin
 export function oneQuestionOneCard(rows: ReviewRow[]): void {
   const text = (x: ReviewRow) => [x.face?.title ?? x.title, x.face?.decision].filter(Boolean).join(" ");
   const live = rows.filter((x) => x.verdict.kind === "card" && !x.test);
+  const texts = new Map(live.map((x) => [x, text(x)]));
   for (const x of live) {
     if (x.verdict.kind !== "card") continue;
     const older = live.find((y) => y !== x && y.repo === x.repo && y.verdict.kind === "card" && ((y.verifiedAt ?? "") < (x.verifiedAt ?? "") || ((y.verifiedAt ?? "") === (x.verifiedAt ?? "") && rows.indexOf(y) < rows.indexOf(x))) && sameQuestion(text(x), text(y)) && sameQuestion(x.title, y.title));
@@ -876,7 +877,8 @@ export function oneQuestionOneCard(rows: ReviewRow[]): void {
     }
     // E948-S206: the same question in other words, judged by meaning (inbox/sameMeaning.ts): only a sure verdict merges.
     const earlier = live.filter((y) => y !== x && y.repo === x.repo && y.verdict.kind === "card" && ((y.verifiedAt ?? "") < (x.verifiedAt ?? "") || ((y.verifiedAt ?? "") === (x.verifiedAt ?? "") && rows.indexOf(y) < rows.indexOf(x))));
-    const same = nearest(text(x), earlier, text).find((y) => meaningCall(text(y), text(x), { a: `${y.repo} ${y.ref}`, b: `${x.repo} ${x.ref}` }) === "same");
+    const mine = texts.get(x) ?? "";
+    const same = nearest(mine, earlier, (y) => texts.get(y)).find((y) => !citesRef(mine, y.ref) && meaningCall(texts.get(y), mine, { a: `${y.repo} ${y.ref}`, b: `${x.repo} ${x.ref}` }) === "same");
     if (same) x.verdict = { kind: "needs-rewriting", reason: "card needs rewriting", problems: [sameMeaningProblem(`${same.ref}'s card`)] };
   }
 }

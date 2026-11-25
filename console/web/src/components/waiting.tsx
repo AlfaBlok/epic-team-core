@@ -1078,6 +1078,8 @@ function WaitingCardBody({
     to: shortTo(item.question || item.title),
     page: cardPage(item.code ?? item.id, item.question || item.title),
     typed: answer,
+    // a note this card refuses lands on its ask as his note on that card
+    ...(item.source === "ask" && item.repo && item.path && item.code ? { card: { kind: "ask" as const, repo: item.repo, path: item.path, ref: item.code, title: item.question || item.title, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } } : {}),
     deliver: async (reply) => {
       setAnswer("");
       const [as, kind] = voiceAs();

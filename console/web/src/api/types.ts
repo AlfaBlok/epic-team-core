@@ -1262,6 +1262,8 @@ export interface DeskMessage {
   request?: string;
   /** the ticket rows that hold that request id now: [] = on none yet; unset = not read yet. */
   rows?: { code: string; repo: string; path: string; status?: string; title?: string }[];
+  /** E942-S173: a user-role line the console wrote, not him: the Chat folds it with the desk's short reply to it. */
+  from?: "console";
 }
 /** what a chat read asks for: the newest `limit` messages, or (with `before`) the page older than that position. */
 export interface ChatRead {
@@ -1305,6 +1307,8 @@ export interface DeskChat {
   queued?: { id: string; text: string; page?: string; at: string }[];
   /** his voice notes shown sent but not in this chat yet (the console re-sends each minute; `failed`: tries used up). */
   undeliveredNotes?: { id: string; at: string; text: string; state: "retrying" | "failed"; error?: string }[];
+  /** his typed messages T3 took that the desk's thread does not show yet, minutes after he sent them. */
+  undelivered?: { id: string; text: string; page?: string; at: string; why: string }[];
   /** T3 was slow, so this is the console's last good read; a fresh one is under way (the page polls again soon). */
   stale?: boolean;
   /** the host whose T3 runs the desk's thread. */

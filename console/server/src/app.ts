@@ -128,7 +128,7 @@ import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
-import { anthropicPairJudge, borderlinePairs, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
+import { anthropicPairJudge, borderlinePairs, callOf, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
 import { anthropicSpokenJudge, mountSpokenAnswers } from "./inbox/spokenAnswers.js";
 import type { WaitingItem } from "./inbox/waiting.js";
 import { anthropicStoreFile, ANTHROPIC_TEXT_MODEL, textModelProvider } from "./textModel.js";
@@ -148,7 +148,7 @@ import { carryE62s8 } from "./repoState/carryE62s8.js";
 import { createSpineWriter, type SpineWrite, type SpineWriter } from "./inbox/spineWrite.js";
 import { groupEdits } from "./inbox/groupWrite.js";
 import { cloneDirFor, createCloneWriter } from "./inbox/writeClone.js";
-import { createPresses } from "./press/presses.js";
+import { cardFromPresses, createPresses } from "./press/presses.js";
 import { mountPresses, whoPressed, type PressWorker } from "./press/mount.js";
 import { createAfterClose, mountAfterClose } from "./review/afterClose.js";
 import { heldCard, heldRowBrief } from "./press/heldRow.js";
@@ -170,7 +170,7 @@ import { askedNoRowFor, askedNoRowSection, dedupeAsked, mountAskedNoRow, subtree
 import { gitRun, mountOrphanCommits, orphanCommitsIn, orphanSection, sinceFor, type OrphanCommit } from "./status/orphanCommits.js";
 import { cliRunner, libraryRepo, mountTeamSkills, readLibrary, readWorldSkills, wakeSkillCheck, type CliRun, type WorldSkillsOf } from "./teamSkills.js";
 import { threadRefusal, worldOfAssignment, worldOfRun } from "./cycle/threadBinding.js";
-import { citedAskCodes, isDeliveryManager, isUnblocker, parseAsks, unblockerChecksProblem } from "./inbox/asks.js";
+import { citedAskCodes, isDeliveryManager, managerState, isUnblocker, parseAsks, unblockerChecksProblem } from "./inbox/asks.js";
 import { answeredReferences, isDm, waitingAndDefects, waitingAndHeld, waitingOnJordi, type WaitingDeps } from "./inbox/waiting.js";
 import { releaseHeld } from "./cycle/held.js";
 import { createUsageCollector, type UsageOptions } from "./usage/collector.js";
@@ -221,9 +221,10 @@ import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
-import { CALL_TRANSCRIPT_HEAD, createVoice, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
+import { CALL_TRANSCRIPT_HEAD, createVoice, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
+import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
@@ -559,7 +560,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -900,7 +901,7 @@ export function createApp(
     for (const g of orphanMilestones(world).filter((x) => !x.settledAt)) {
       const held = (await waitingAndHeld(inboxDeps, g).catch(() => ({ held: [] }))).held;
       if (!held.length) continue;
-      const managerOn = store.listAssignments({ milestoneId: g.id }).some((a) => a.enabled && !a.parkedAt && isDeliveryManager(store.getPersona(a.personaId)?.name));
+      const managerOn = managerState(store, g.id) === "on";
       goals.push({ milestoneId: g.id, title: g.title, managerOn, held });
     }
     return heldToRoute(goals, home);
@@ -1911,12 +1912,14 @@ export function createApp(
   mountReview(api, review, store, attachments, () => worldPriorities(store, read.reposRoot));
   // the card quality check's model (scripts/card_qc.py on the worker host sends the screens and his words)
   mountQcJudge(api, opts.qcJudge ?? anthropicQcJudge(anthropicKey));
-  cardOfPress = (id) => review.card(id);
+  // a card whose row left review before his press (another press, the team moved it) is found in its earlier
+  // landed presses (their answer holds the card's row), so his words still land on that row and are never refused.
+  cardOfPress = (id) => review.card(id) ?? cardFromPresses(db, id);
   // after a card closes: Add comment (a last thought, any time later) and Bring it back once the press landed.
   const afterClose = createAfterClose({ db, showTest: process.env.REVIEW_SHOW_TEST_CARDS === "1", store, reposRoot: read.reposRoot, writer: spine, cycle: cycle.enabled ? cycle : undefined, wrote: dropSpines, ...(attachments ? { attachments } : {}), who: () => (currentAuth()?.identity?.kind === "legacy" && (currentAuth()?.identity as { peer?: string }).peer === PRESS_TEST_RUN ? "the daily press test" : ownerName()) });
   mountAfterClose(api, afterClose);
   flagHeldRow = async (p) => {
-    const card = heldCard(p, cardOfPress);
+    const card = heldCard(p, (id) => review.cardFresh(id));
     if (!card) return undefined;
     return afterClose.flagRow({ kind: "review", ...card }, heldRowBrief(p, card), `held-row:${card.repo}:${card.ref}:${(p.heldAt ?? p.at).slice(0, 13)}`);
   };
@@ -2464,13 +2467,18 @@ export function createApp(
   if (!opts.passive && !process.env.VITEST && process.env.CONSOLE_SAME_MEANING !== "off") startSameMeaningJudge(pairJudge, 60_000, (m) => console.log(m));
   // judge pairs now (scripts/duplicate_taps.py measures his taps with it; at most 60 a call), and what it merged or left borderline.
   api.post("/inbox/same-meaning", async (c) => {
-    const b = (await c.req.json().catch(() => ({}))) as { pairs?: unknown };
+    const b = (await c.req.json().catch(() => ({}))) as { pairs?: unknown; system?: unknown };
     const pairs = (Array.isArray(b.pairs) ? b.pairs : [])
       .filter((p): p is { a: string; b: string; refA?: string; refB?: string } => !!p && typeof (p as { a?: unknown }).a === "string" && typeof (p as { b?: unknown }).b === "string")
       .slice(0, 60)
       .map((p) => ({ a: p.a.slice(0, 4000), b: p.b.slice(0, 4000), ...(typeof p.refA === "string" ? { refA: p.refA.slice(0, 80) } : {}), ...(typeof p.refB === "string" ? { refB: p.refB.slice(0, 80) } : {}) }));
     if (!pairs.length) return c.json({ error: "pairs: [{a, b}] needed" }, 400);
     try {
+      // calibration: a trial prompt judges the pairs once and is never kept (the cache holds the shipped prompt's verdicts only)
+      if (typeof b.system === "string" && b.system.trim()) {
+        const trial = await anthropicPairJudge(anthropicKey, fetch, undefined, b.system.slice(0, 4000))(pairs);
+        return c.json({ trial: true, verdicts: trial.map((v) => ({ same: v.same, confidence: v.confidence, call: callOf({ ...v }) })) });
+      }
       const verdicts = await judgePairs(pairJudge, pairs);
       return c.json({ sure: MEANING_SURE, border: MEANING_BORDER, verdicts: verdicts.map((v) => ({ key: v.key, same: v.same, confidence: v.confidence, call: v.call })) });
     } catch (e) {
@@ -3205,9 +3213,26 @@ export function createApp(
   // setting (PUT /api/voice/settings {calls}) or CONSOLE_VOICE_CALLS=on turns them on; tests keep the old default.
   const callsDefault: "on" | "off" = process.env.CONSOLE_VOICE_CALLS === "on" || (process.env.VITEST && process.env.CONSOLE_VOICE_CALLS !== "off") ? "on" : "off";
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
+  // The owner asked for voice calls back on through ElevenLabs: calls go through ElevenLabs Agents on the grant.
+  // One agent on the account, its id kept in voice_settings; CONSOLE_VOICE_ELEVEN=off goes back to OpenAI's realtime voice.
+  const voiceEleven: ElevenCalls | undefined =
+    opts.voice?.eleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          key: async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY"))),
+          prompt: voiceInstructions,
+          firstMessage: () => OPENING_LINE,
+          tools: () => [...VOICE_TOOLS, ...INBOX_TOOLS, PRESS_TOOL, ...OBJECTIVE_TOOLS] as any,
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
   const voice = createVoice({
     db,
     mint: voiceMint,
+    eleven: voiceEleven,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     onEnded: (id) => void memoryForward?.enqueueCall(id),
     envOff: process.env.CONSOLE_VOICE === "off",
@@ -3247,6 +3272,7 @@ export function createApp(
   const voiceBase = {
     db,
     mint: voiceMint,
+    eleven: voiceEleven,
     onEnded: (id: string) => void memoryForward?.enqueueCall(id),
     envOff: process.env.CONSOLE_VOICE === "off",
     envModel: process.env.CONSOLE_VOICE_MODEL || undefined,

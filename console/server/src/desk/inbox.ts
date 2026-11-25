@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Hono } from "hono";
 import type { Store } from "../store.js";
+import { managerState, type ManagerState } from "../inbox/asks.js";
 import { homeRepo, ownerName, socialProduct } from "../identity.js";
 
 /**
@@ -238,7 +239,63 @@ export function deskInboxSection(notes: DeskNote[], repo: string): string | unde
  * GET /api/desk/inbox: the caller's world's desk inboxes, one per repo its milestones name (request-scoped store: only that
  * world's repos), every note with its status. Read-only: notes are written and answered in git (scripts/desk_note.py).
  */
+/**
+ * who reads a desk note sent to this repo, asked BEFORE the desk tells the owner where his words went. A note
+ * lands in the repo's desk/inbox/ and only its home goal's Delivery Manager reads it (the goal on a root spine, else the
+ * first: the same pick as the urgent sweep). On 22 Nov the desk told him his Adeje question "wasn't ignored" and that an
+ * urgent note "wakes their manager straight away" while the Travel manager was off: both notes sat unread for hours.
+ * `reads` = the next wake reads it; `urgentWakes` = an urgent note wakes someone within minutes; `say` = the one line the
+ * desk tells him at once when nobody reads it.
+ */
+export type NoteReach = {
+  repo: string;
+  goal?: { id: string; title: string; path?: string };
+  manager: ManagerState | "paused" | "no goal";
+  reads: boolean;
+  urgentWakes: boolean;
+  say: string;
+};
+export function noteReach(d: { store: Store; resolve: (repo: string) => { path: string; name: string } | undefined }, repo: string): NoteReach | undefined {
+  const r = d.resolve(repo);
+  if (!r) return undefined;
+  const same = d.store.listMilestones().filter((m) => !m.settledAt && m.repo && d.resolve(m.repo)?.path === r.path);
+  const live = same.filter((m) => !m.paused);
+  const root = (m: { path?: string | null }) => /(^|\/)root\.md$/i.test(m.path ?? "");
+  const home = live.find(root) ?? live[0];
+  if (!home) {
+    const paused = same.length > 0;
+    return {
+      repo: r.name,
+      manager: paused ? "paused" : "no goal",
+      reads: false,
+      urgentWakes: false,
+      say: paused
+        ? `${r.name}'s goals are all paused, so nobody reads this note until one is switched back on.`
+        : `${r.name} has no goal in the console, so nobody reads this note.`,
+    };
+  }
+  const manager = managerState(d.store, home.id);
+  const goal = { id: home.id, title: home.title, path: home.path ?? undefined };
+  const team = `${home.title}'s Delivery Manager`;
+  const say =
+    manager === "on"
+      ? `${team} is on: it reads this note on its next wake, an urgent one within minutes.`
+      : manager === "parked"
+        ? `${team} is parked: an urgent note wakes it, a plain note waits until it is woken.`
+        : manager === "off"
+          ? `${team} is switched off, so nobody reads this note until it is switched on.`
+          : `${home.title} has no Delivery Manager, so nobody reads this note.`;
+  return { repo: r.name, goal, manager, reads: manager === "on", urgentWakes: manager === "on" || manager === "parked", say };
+}
+
 export function mountDeskInbox(api: Hono, d: { store: Store; resolve: (repo: string) => { path: string; name: string } | undefined }) {
+  // GET /api/desk/inbox/reach?repo=<checkout or owner/name>: who reads a note sent there (desk_note.py asks it)
+  api.get("/desk/inbox/reach", (c) => {
+    const repo = (c.req.query("repo") ?? "").trim();
+    if (!repo) return c.json({ error: "validation_error", message: "repo is required (a checkout name or owner/name)" }, 400);
+    const reach = noteReach(d, repo);
+    return reach ? c.json(reach) : c.json({ error: "not_found", message: `${repo} is not a repo the console has checked out` }, 404);
+  });
   api.get("/desk/inbox", (c) => {
     const seen = new Set<string>();
     const repos: { repo: string; open: number; notes: DeskNote[] }[] = [];

@@ -113,15 +113,20 @@ export function repeatOf(a: RepeatAsk, answered: PriorAnswer[], meaning = true):
   if (best) return { prior: best.prior, how: best.how };
   if (!meaning) return undefined;
   // E948-S206: the same ask he already answered, in other words (sameMeaning.ts): only a sure verdict holds it.
-  const earlier = answered.filter((p) => {
-    if (a.at && p.at && a.at === p.at) return false;
-    if (a.since && p.on && p.on > a.since) return false;
+  // Cheap first: the closest few by shared words, then the follow-up rules on those alone.
+  const close = nearest(
+    a.question,
+    answered.filter((p) => !(a.at && p.at && a.at === p.at) && !(a.since && p.on && p.on > a.since)),
+    (p) => p.question,
+  );
+  const allLow = all.toLowerCase();
+  const earlier = close.filter((p) => {
     if (a.code && p.code && a.code.toUpperCase() === p.code.toUpperCase()) return false;
-    if (p.code && new RegExp(`(^|[^A-Za-z0-9-])${esc(p.code)}($|[^A-Za-z0-9])`, "i").test(all)) return false;
-    if (p.answer && p.answer.trim().length >= 12 && all.toLowerCase().includes(p.answer.trim().toLowerCase().slice(0, 40))) return false;
+    if (p.code && allLow.includes(p.code.toLowerCase()) && new RegExp(`(^|[^A-Za-z0-9-])${esc(p.code)}($|[^A-Za-z0-9])`, "i").test(all)) return false;
+    if (p.answer && p.answer.trim().length >= 12 && allLow.includes(p.answer.trim().toLowerCase().slice(0, 40))) return false;
     return true;
   });
-  const hit = nearest(a.question, earlier, (p) => p.question).find(
+  const hit = earlier.find(
     (p) => meaningCall(p.question, a.question, { a: `${p.repo ?? ""} ${p.code ?? p.row ?? ""}`.trim(), b: `${a.repo ?? ""} ${a.code ?? ""}`.trim() }) === "same",
   );
   return hit && { prior: hit, how: "meaning" };

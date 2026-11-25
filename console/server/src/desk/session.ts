@@ -1,5 +1,5 @@
 import path from "node:path";
-import { requestIdOf, type RequestRow, type RequestRows } from "./requests.js";
+import { consoleLine, requestIdOf, type RequestRow, type RequestRows } from "./requests.js";
 import { classifyRefusal, refusalText } from "../cycle/capRefusal.js";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import type { Store, Persona } from "../store.js";
@@ -34,6 +34,15 @@ export const PAGE_PREFIX = /^\[page: ([^\]\n]{1,200})\]\n/;
 export const PAGE_HINT_MAX = 200;
 /** Newest messages returned per read (the thread keeps the rest). */
 export const TAIL_MESSAGES = 120;
+/**
+ * his typed sends (the chat page's request ids start `chat-`) are watched until the thread shows them (on 22 Nov
+ * three of his messages sat in T3's queue from 03:00 to 05:02Z after a T3 restart and his screen said nothing).
+ */
+export const WATCHED_SEND = /^chat-/;
+/** a watched send the thread does not show this long after he sent it is shown to him as not delivered yet (as a voice note is). */
+export const NOT_DELIVERED_AFTER_MS = 2 * 60_000;
+/** how far back a watched send is still looked for (older ones are given up quietly). */
+export const NOT_DELIVERED_WATCH_MS = 6 * 3600_000;
 /**
  * a chat open waits at most this long for T3 (2-3 MCP calls of 0.1-4 s each on the main server);
  * past it the last good view answers (memory, else the desk_view_cache row) and the live read lands for the next poll.
@@ -151,6 +160,10 @@ export function migrateDeskSessions(db: DB) {
     );
     CREATE INDEX IF NOT EXISTS desk_outbox_key ON desk_outbox (desk_key, sent_at, failed_at);
   `);
+  // his typed sends T3 took are kept too (`watch` = 1) until the thread shows them (`landed_at`)
+  const outCols = (db.prepare("PRAGMA table_info(desk_outbox)").all() as { name: string }[]).map((c) => c.name);
+  if (!outCols.includes("watch")) db.exec("ALTER TABLE desk_outbox ADD COLUMN watch INTEGER NOT NULL DEFAULT 0");
+  if (!outCols.includes("landed_at")) db.exec("ALTER TABLE desk_outbox ADD COLUMN landed_at TEXT");
   // the last view of each chat, read back from its T3 thread (a cache: safe to drop, rebuilt on the next read), so
   // the first open after a console restart paints at once instead of re-reading the whole thread from T3.
   db.exec(`
@@ -169,6 +182,18 @@ export interface QueuedMessage {
   text: string;
   page?: string;
   at: string;
+}
+
+/** his typed message T3 took but the desk's thread does not show yet, NOT_DELIVERED_AFTER_MS after he sent it. */
+export interface UndeliveredMessage {
+  /** its clientRequestId (the chat page's own bubble for it gives way to this one). */
+  id: string;
+  text: string;
+  page?: string;
+  /** when he sent it. */
+  at: string;
+  /** why it is not there, in plain words. */
+  why: string;
 }
 
 export interface DeskSession {
@@ -212,6 +237,8 @@ export interface DeskMessage {
   rows?: RequestRow[];
   /** the item's position in the T3 thread (`?before=<position>` pages older messages). */
   position?: number;
+  /** E942-S173: a user-role line the console wrote, not him (requests.ts consoleLine): the Chat folds it with the desk's reply. */
+  from?: "console";
 }
 
 export interface DeskView {
@@ -241,6 +268,8 @@ export interface DeskView {
   t3?: "restarting" | "maintenance";
   /** sends stored while T3 was down, oldest first (delivered once it is back). */
   queued?: QueuedMessage[];
+  /** his typed messages T3 took that the thread does not show yet, minutes later: the chat says each is not delivered yet. */
+  undelivered?: UndeliveredMessage[];
   /** T3 did not answer within the view budget: this is the last good view, a fresh read is under way. */
   stale?: boolean;
   /** the host whose T3 runs the live thread. */
@@ -581,7 +610,8 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
     const said = m.role === "user" ? splitSince(hint ? m.text.slice(hint[0].length) : m.text) : { text: dropLabelLine(m.text) };
     const request = m.role === "user" ? requestIdOf(m.itemId, said.text) : undefined;
     const rows = request ? d.requestRows?.rowsOf(request) : undefined;
-    return { ...base, kind: "message", text: said.text, ...(hint ? { page: hint[1] } : {}), ...(said.since ? { since: said.since } : {}), ...(request ? { request } : {}), ...(rows ? { rows } : {}) };
+    const machine = m.role === "user" && consoleLine(said.text);
+    return { ...base, kind: "message", text: said.text, ...(machine ? { from: "console" as const } : {}), ...(hint ? { page: hint[1] } : {}), ...(said.since ? { since: said.since } : {}), ...(request ? { request } : {}), ...(rows ? { rows } : {}) };
   };
 
   // ---- the one session of this key ----
@@ -984,9 +1014,9 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
   function enqueue(clientRequestId: string, text: string, page: string | undefined, message: string) {
     d.db
       .prepare(
-        "INSERT INTO desk_outbox (desk_key, client_request_id, text, page, message, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(client_request_id) DO UPDATE SET failed_at = NULL, error = NULL WHERE sent_at IS NULL AND failed_at IS NOT NULL",
+        "INSERT INTO desk_outbox (desk_key, client_request_id, text, page, message, created_at, watch) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(client_request_id) DO UPDATE SET failed_at = NULL, error = NULL WHERE sent_at IS NULL AND failed_at IS NOT NULL",
       )
-      .run(p.key, clientRequestId, text, page ?? null, message, iso());
+      .run(p.key, clientRequestId, text, page ?? null, message, iso(), WATCHED_SEND.test(clientRequestId) ? 1 : 0);
     console.log(`desk ${p.key}: T3 is down, send ${clientRequestId} queued`);
   }
 
@@ -1186,6 +1216,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
       const body = text.trim();
       if (!body) throw new DeskError(400, "empty_message", "message is required");
       const crid = clientRequestId ?? `${p.key}-send-${randomUUID()}`;
+      const sentAt = iso(); // when he sent it: the watch counts from here
       // the prefix (his objectives block, what changed since) is built after the reply, inside the send below: it once
       // held his message for its whole build, up to 34 s on a busy host, and his browser gave up at 30 s.
       const prefixed = typeof prefix === "function" ? prefix().catch(() => undefined) : Promise.resolve(prefix);
@@ -1230,6 +1261,7 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
           }
           throw e;
         }
+        if (WATCHED_SEND.test(crid)) watchSent(crid, body, page, s.threadId, sentAt);
         sendError = undefined;
         sendErrorFor = undefined;
         return "done";
@@ -1291,8 +1323,61 @@ export function createChatSession(d: SessionDeps, profile: ChatProfile) {
 
   /** the newest `limit` messages of a view; older ones exist when the view had more (or T3 has more). */
   function shape(v: DeskView, limit: number): DeskView {
-    if (v.messages.length <= limit) return v;
-    return { ...v, messages: v.messages.slice(-limit), hasEarlier: true };
+    const out = v.messages.length <= limit ? v : { ...v, messages: v.messages.slice(-limit), hasEarlier: true };
+    const { undelivered: _u, ...rest } = out;
+    let u: UndeliveredMessage[] = [];
+    try {
+      u = undelivered(v);
+    } catch (e) {
+      console.error(`desk ${p.key}: undelivered sends:`, errorText(e));
+    }
+    return u.length ? { ...rest, undelivered: u } : rest;
+  }
+
+  /** a typed send T3 took: watched until the thread shows it (a retry of the same request id keeps the first row). */
+  function watchSent(crid: string, text: string, page: string | undefined, threadId: string, at: string) {
+    d.db
+      .prepare(
+        "INSERT INTO desk_outbox (desk_key, client_request_id, text, page, message, created_at, sent_at, thread_id, watch) VALUES (?, ?, ?, ?, '', ?, ?, ?, 1) ON CONFLICT(client_request_id) DO NOTHING",
+      )
+      .run(p.key, crid, text, page ?? null, at, iso(), threadId);
+  }
+
+  /**
+   * his typed sends T3 took that this view's thread does not show: each found is marked landed; the rest, once
+   * NOT_DELIVERED_AFTER_MS old, say why in plain words. Held sends (T3 down) are the `queued` bubbles instead.
+   */
+  function undelivered(v: DeskView): UndeliveredMessage[] {
+    if (!v.threadId) return [];
+    const t = now();
+    const rows = d.db
+      .prepare("SELECT client_request_id, text, page, created_at FROM desk_outbox WHERE desk_key = ? AND watch = 1 AND sent_at IS NOT NULL AND landed_at IS NULL AND failed_at IS NULL AND thread_id = ? AND created_at >= ? ORDER BY seq")
+      .all(p.key, v.threadId, new Date(t - NOT_DELIVERED_WATCH_MS).toISOString()) as { client_request_id: string; text: string; page: string | null; created_at: string }[];
+    if (!rows.length) return [];
+    const flat = (s: string) => s.replace(/\s+/g, " ").trim();
+    const mine = v.messages.filter((m) => m.role === "user" && m.kind !== "seed").map((m) => ({ at: m.at ? Date.parse(m.at) : undefined, text: flat(m.text) }));
+    const out: UndeliveredMessage[] = [];
+    for (const r of rows) {
+      const sent = Date.parse(r.created_at);
+      // his words as the thread shows them (a re-send from a stuck queue carries them inside one longer message)
+      const want = flat(r.text).slice(0, 200);
+      if (mine.some((m) => (m.at === undefined || m.at >= sent - 120_000) && m.text.includes(want))) {
+        d.db.prepare("UPDATE desk_outbox SET landed_at = ? WHERE client_request_id = ?").run(new Date(t).toISOString(), r.client_request_id);
+        continue;
+      }
+      if (t - sent < NOT_DELIVERED_AFTER_MS) continue;
+      const why = v.t3
+        ? v.t3 === "maintenance"
+          ? "T3 is down for planned maintenance, the desk gets it when it is back"
+          : "T3 is restarting, the desk gets it when it is back"
+        : v.unreachable
+          ? "The desk's server cannot be reached now, it waits there"
+          : v.working
+            ? "The desk is still on an earlier message, yours waits in its queue"
+            : "It waits in T3's queue, the console sends it again if it stays stuck";
+      out.push({ id: r.client_request_id, text: r.text, ...(r.page ? { page: r.page } : {}), at: r.created_at, why });
+    }
+    return out;
   }
 
   /** the last good view of the live thread: this process's, else the desk_view_cache row (after a restart). */

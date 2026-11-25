@@ -67,7 +67,7 @@ export const DB_REGISTRY: Record<string, TableEntry> = {
   cycle_priority_log: { class: "ops", reason: "every park and resume line (run log)", columns: "id session_id at event run_id ticket detail" },
   cycle_seat_hold: { class: "ops", reason: "seat held by a bootstrap run or a console-launched worker", columns: "run_id seat" },
   cycle_worker_launch: { class: "ops", reason: "launch spec of a worker the console starts on the main server for a refused pick (incident override only), kept for its deferred retries", columns: "run_id ticket title brief model created_at" },
-  desk_outbox: { class: "ops", reason: "chat sends queued while T3 was down", columns: "seq desk_key client_request_id text page message created_at sent_at thread_id failed_at error" },
+  desk_outbox: { class: "ops", reason: "chat sends queued while T3 was down, and his typed sends watched until the thread shows them", columns: "seq desk_key client_request_id text page message created_at sent_at thread_id failed_at error watch landed_at" },
   desk_console_lines: { class: "ops", reason: "the console's own lines to the Team desk held while it is busy, sent as one message when it is idle (22 Nov outage)", columns: "crid text at sent_at error" },
   desk_placement: { class: "ops", reason: "what the desk placed in the tree and when its note was sent (placed/delivered/dropped is read from the spine on every read)", columns: "id repo path kind item_id title placed_at noted_at note_error tenant_id" },
   desk_view_cache: { class: "cache", reason: "last view of each chat, read back from its T3 thread; safe to drop, rebuilt on the next read", writers: ["desk/session.ts"], columns: "desk_key thread_id view updated_at" },

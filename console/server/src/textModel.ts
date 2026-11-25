@@ -22,6 +22,8 @@ export interface JsonCall {
   schema: Record<string, unknown>;
   maxTokens: number;
   timeoutMs: number;
+  /** thinking effort, low unless a call needs more (E948-S206's pair judge: medium). */
+  effort?: "low" | "medium" | "high";
 }
 
 /** One strict-JSON Messages call on Haiku 5.5 (`output_config.format`, effort low); returns the parsed value and its cost. */
@@ -36,7 +38,7 @@ export async function anthropicJson<T>(key: () => Promise<string | undefined>, f
       max_tokens: call.maxTokens,
       system: call.system,
       messages: [{ role: "user", content: call.user }],
-      output_config: { effort: "low", format: { type: "json_schema", schema: call.schema } },
+      output_config: { effort: call.effort ?? "low", format: { type: "json_schema", schema: call.schema } },
     });
   } catch (e) {
     const status = e instanceof Anthropic.APIError ? e.status : undefined;

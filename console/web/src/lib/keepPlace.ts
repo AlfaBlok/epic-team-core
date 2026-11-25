@@ -221,7 +221,10 @@ export function answerPlace(slots: string[]): { key: string; want: number; scrol
   const top0 = visibleTop(scroller);
   const top = el.getBoundingClientRect().top;
   if (top >= top0) return { key: keyOf(el), want: top, scroller };
-  const next = Array.from(document.querySelectorAll(NEXT)).find(
+  // the next card still waiting in the same section; none (he answered its last card): the section folds by itself and
+  // lands its own heading (homeSection), so nothing moves now and the page moves once, never down and back up
+  const section = el.closest("[data-fold-section]");
+  const next = Array.from((section ?? document).querySelectorAll(CARD)).find(
     (n) => n !== el && !el.contains(n) && !n.contains(el) && !isSentRow(n) && !!(el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING),
   );
   return next ? { key: keyOf(next), want: top0 + GAP, scroller } : undefined;

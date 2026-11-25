@@ -803,6 +803,11 @@ const SAID: Record<string, string> = { close: "Closed", decline: "Declined", cha
 /** the row a review card is on (its spine), for Add a last thought and Bring it back; undefined when unknown. */
 const cardOf = (item: ReviewItem): ClosedCardRef | undefined =>
   item.repo && item.path && item.ref ? { kind: "review", repo: item.repo, path: item.path, ref: item.ref, ...(item.milestoneId ? { milestoneId: item.milestoneId } : {}) } : undefined;
+/** a voice note this card's press refuses lands on its row as his note on that card. */
+const withCard = (item: ReviewItem): { card?: ClosedCardRef } => {
+  const c = cardOf(item);
+  return c ? { card: { ...c, title: item.face?.title ?? item.title } } : {};
+};
 /**
  * what the Sent row says for each press. E948-S130 (vn_4f13161d): every press collapses its card alike, a Decision's option
  * (its own words, "Yes: plan it") and a held post's schedule too; before, those two slid away with no Sent row.
@@ -956,6 +961,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
     to: shortTo(item.face?.title ?? item.title),
     page: cardPage(item.ref ?? item.id, item.face?.title ?? item.title),
     typed: feedback,
+    ...withCard(item),
     deliver: (reply) => act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, reply, files.ids) : api.relaunchReviewItem(item.id, reply))).then((ok) => (ok ? (setFeedback(""), files.clear()) : refused())),
     disabled: busy,
     big: true,
@@ -1233,7 +1239,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
           </dl>
           {/* closing it as a no stays one tap away, under the card's details (two buttons on the card). */}
           {denyOpen ? (
-            <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.face?.title ?? item.title)} page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)} onCancel={() => setDenyOpen(false)} onDeny={(why, f) => act("decline", () => (f.length ? api.denyReviewItem(item.id, why, f) : api.denyReviewItem(item.id, why)))} sub={ACTION.decline.hint} />
+            <DenyPanel pressing={pressing} origin={`review:${item.id}:decline`} to={shortTo(item.face?.title ?? item.title)} page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)} {...withCard(item)} onCancel={() => setDenyOpen(false)} onDeny={(why, f) => act("decline", () => (f.length ? api.denyReviewItem(item.id, why, f) : api.denyReviewItem(item.id, why)))} sub={ACTION.decline.hint} />
           ) : (
             <button type="button" className="w-max text-xs text-muted-foreground underline max-sm:min-h-11 max-sm:text-left decoration-foreground/25 underline-offset-[3px] hover:text-foreground" disabled={busy} onClick={() => setDenyOpen(true)} data-testid="review-deny">
               Decline it instead: it closes as a no
@@ -1550,6 +1556,7 @@ function PostReviewCardBody(card: CardProps) {
             origin={`review:${item.id}:changes`}
             to={shortTo(item.face?.title ?? item.title)}
             page={cardPage(item.ref ?? item.id, item.face?.title ?? item.title)}
+            {...withCard(item)}
             value={feedback}
             onChange={setFeedback}
             placeholder="What should change? Your words go to the writer."
@@ -1565,6 +1572,7 @@ function PostReviewCardBody(card: CardProps) {
             title={p.title || item.title}
             className="mt-0"
             refName={item.ref ?? item.id}
+            {...withCard(item)}
             send={(words, files) => act("changes", () => (files.length ? api.relaunchReviewItem(item.id, words, files) : api.relaunchReviewItem(item.id, words))).then((ok) => { if (!ok) throw new Error("the card did not take it"); })}
             actions={pickOpen ? undefined : postRow}
           />
@@ -1594,13 +1602,13 @@ function PostReviewCardBody(card: CardProps) {
  * Changes wanted on a review or post card: his words, then one press. Or a voice note, its words in the box
  * (he edits them, then presses); the words sent name the note and keep its recording's link.
  */
-function ChangesPanel(p: { pressing?: Pressing; origin: string; to: string; page: string; value: string; onChange: (v: string) => void; placeholder: string; hint: string; onSend: (words: string, files: string[]) => Promise<boolean>; onCancel: () => void }) {
+function ChangesPanel(p: { pressing?: Pressing; origin: string; to: string; page: string; card?: ClosedCardRef; value: string; onChange: (v: string) => void; placeholder: string; hint: string; onSend: (words: string, files: string[]) => Promise<boolean>; onCancel: () => void }) {
   const busy = !!p.pressing;
   // the same box as Chat: a pasted or dropped screenshot goes with his words (their links follow them).
   const files = useChatAttach({ enabled: true, disabled: busy });
   const send = (words: string) => p.onSend(words, files.ids).then((ok) => (ok && files.clear(), ok));
   // the voice note's Send presses Send what should change itself, with what is typed before the spoken words.
-  const voice = useAnswerVoice({ origin: p.origin, to: p.to, page: p.page, typed: p.value, deliver: (reply) => send(reply).then((ok) => (ok ? p.onChange("") : refused())), disabled: busy });
+  const voice = useAnswerVoice({ origin: p.origin, to: p.to, page: p.page, typed: p.value, ...(p.card ? { card: p.card } : {}), deliver: (reply) => send(reply).then((ok) => (ok ? p.onChange("") : refused())), disabled: busy });
   return (
     <div className="grid gap-2">
       <WordsBox label="Your feedback" boxClassName="min-h-20" placeholder={p.placeholder} value={p.value} onChange={p.onChange} files={files} voice={voice} />
@@ -1620,14 +1628,14 @@ function ChangesPanel(p: { pressing?: Pressing; origin: string; to: string; page
 }
 
 /** Decline on a review card: an optional reason, then one press that closes it as a no. The reason can be spoken. */
-function DenyPanel({ pressing, origin, to, page, onCancel, onDeny, sub, label = `✕ ${ACTION.decline.label}`, words = true }: { pressing?: Pressing; origin: string; to: string; page: string; onCancel: () => void; onDeny: (why: string, files: string[]) => Promise<boolean>; sub: string; label?: string; words?: boolean }) {
+function DenyPanel({ pressing, origin, to, page, card, onCancel, onDeny, sub, label = `✕ ${ACTION.decline.label}`, words = true }: { pressing?: Pressing; origin: string; to: string; page: string; card?: ClosedCardRef; onCancel: () => void; onDeny: (why: string, files: string[]) => Promise<boolean>; sub: string; label?: string; words?: boolean }) {
   const busy = !!pressing;
   const [why, setWhy] = useState("");
   // the reason's box is the same as Chat's (a screenshot can go with it).
   const files = useChatAttach({ enabled: words, disabled: busy });
   const deny = (reason: string) => onDeny(reason, files.ids).then((ok) => (ok && files.clear(), ok));
   // the spoken reason's Send presses Decline itself.
-  const voice = useAnswerVoice({ origin, to, page, typed: why, deliver: (reply) => deny(reply).then((ok) => (ok ? setWhy("") : refused())), disabled: busy || !words });
+  const voice = useAnswerVoice({ origin, to, page, typed: why, ...(card ? { card } : {}), deliver: (reply) => deny(reply).then((ok) => (ok ? setWhy("") : refused())), disabled: busy || !words });
   return (
     <div className="grid gap-2" data-testid="review-deny-panel">
       {words && <WordsBox label="Why you decline it" boxClassName="min-h-16" placeholder={ACTION.decline.placeholder} value={why} onChange={setWhy} files={files} voice={voice} />}

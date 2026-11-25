@@ -41,6 +41,8 @@ export interface LaptopRow {
   done?: boolean;
   /** when it reached his list: its ask's time, the card's age. */
   since?: string;
+  /** where it runs on the owner's Mac, from the Mac list (a Chrome profile, the terminal, their own hands). */
+  where?: string;
 }
 
 const FOR: { f: LaptopFor; label: string }[] = [
@@ -66,10 +68,11 @@ export function plainTitle(q: string, fallback: string): string {
 const ticketOf = (i: WaitingItem) => leadUrl(i.question ?? "") ?? i.contextLinks.find((l) => /\/t\/[^/]+\/?$/.test(l.url))?.url;
 
 /**
- * The Mac tasks in run order: each task ranks by the inbox's Mac ask it answers (the server sorted those red line first,
- * then the owner's level, then the milestone order: `priority`); a task whose ask is not in the inbox comes after, in the Mac
- * list's own order. An ask is a task's by its code, the ticket its link opens, or the row it unblocks. An inbox Mac ask
- * with no task (no ticket written yet) is a row too, without a command.
+ * The Mac tasks in the one run order (the owner: "the different threads were competing with one another ... totally
+ * disconnected tickets that are asking me to do separate things that don't add up"): the Mac list's order, the same as its page and Run all (scripts/laptop_ticket.py run_order: red line first, then each ticket's Order,
+ * one Chrome profile at a time). Before, this panel ranked by the inbox's priority and the page by Order, so the two
+ * lists disagreed. An ask is a task's by its code, the ticket its link opens, or the row it unblocks. An inbox Mac ask
+ * with no task (no ticket written yet) comes after every ticket, red line first, then the inbox's priority.
  */
 export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTask[] = []): LaptopRow[] {
   const mac = macAll.filter((i) => !isListAsk(i));
@@ -82,11 +85,11 @@ export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTas
   const rows = [...tasks, ...done.filter((t) => !tasks.some((x) => x.key === t.key))].map((t) => {
     const all = mac.filter(mine(t));
     for (const i of all) used.add(i.id);
-    // The best-ranked of its asks sets its place (a ticket can answer two).
+    // The best-ranked of its asks is the one its card answers (a ticket can answer two); its place is the list's.
     const i = all.sort((a, b) => rankOf(a, index.get(a.id)!) - rankOf(b, index.get(b.id)!))[0];
-    return { t, i, rank: rankOf(i, index.get(i?.id ?? "") ?? 0) };
+    return { t, i, rank: t.order };
   });
-  rows.sort((a, b) => a.rank - b.rank || a.t.order - b.t.order || a.t.key.localeCompare(b.t.key));
+  rows.sort((a, b) => a.rank - b.rank || a.t.key.localeCompare(b.t.key));
   const out: (LaptopRow & { rank: number })[] = rows.map(({ t, i, rank }) => ({
     key: t.key,
     // A ticket's title is written for him; an inline ask's words are the ask's, without its link.
@@ -102,12 +105,13 @@ export function laptopRows(tasks: MacTask[], macAll: WaitingItem[], done: MacTas
     ...(t.step ? { step: t.step } : {}),
     ...(i ? { item: i } : {}),
     ...(i?.since ? { since: i.since } : {}),
+    ...(t.where ? { where: t.where } : {}),
     ...(finished.has(t.key) || t.step?.state === "done" ? { done: true } : {}),
     rank,
   }));
   for (const [n, i] of mac.entries()) {
     if (used.has(i.id)) continue;
-    out.push({ key: i.id, title: plainTitle(i.question || i.title, i.code ?? i.title), repo: i.repo ?? "", code: i.code, url: ticketOf(i), redLine: !!i.ownerPriority?.redLine, item: i, ...(i.since ? { since: i.since } : {}), rank: rankOf(i, n) });
+    out.push({ key: i.id, title: plainTitle(i.question || i.title, i.code ?? i.title), repo: i.repo ?? "", code: i.code, url: ticketOf(i), redLine: !!i.ownerPriority?.redLine, item: i, ...(i.since ? { since: i.since } : {}), rank: 1e13 + rankOf(i, n) });
   }
   return out.sort((a, b) => a.rank - b.rank).map(({ rank: _r, ...r }) => r);
 }
@@ -236,7 +240,7 @@ export function LaptopSwitch({ view, mac, listUrl, askCard, keyBox }: { view?: L
       <p className="mt-1 text-xs text-muted-foreground" data-testid="laptop-summary">
         {rows.length === 0
           ? "No task waits on your Mac now."
-          : `${withCmd.length} task${withCmd.length === 1 ? "" : "s"} for Claude on your Mac, about ${minutes} minutes one after another, red line first.`}
+          : `${withCmd.length} task${withCmd.length === 1 ? "" : "s"} for Claude on your Mac, about ${minutes} minutes, one at a time in this order, the same as the Mac list. Start the next when the last says Done or Stuck.`}
         {on ? " Open the Claude app, start a new session, paste the text and send it. No Terminal. The team knows you are here." : rows.length ? " Turn it on and they come first here, and the team is told." : ""}
       </p>
       {err && <p className="mt-1 text-xs text-red-700 dark:text-red-400">{err}</p>}
@@ -271,20 +275,20 @@ export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { r
         <li key={r.key} className="min-w-0" data-testid="laptop-task" data-state={r.step?.state ?? "none"}>
           {r.step ? (
             <div className="grid min-w-0 gap-1.5">
-              <LaptopCard row={r} n={open.indexOf(r) + 1} onDone={() => setKept((k) => new Set(k).add(r.key))} />
+              <LaptopCard row={r} n={open.indexOf(r) + 1} of={open.length} onDone={() => setKept((k) => new Set(k).add(r.key))} />
               {/* E996-S29: a ticket whose ask takes a key keeps that ask's private box here (T9-A10 told him to paste into a box this card did not have). */}
               {r.item?.secret && r.item.state === "open" && keyBox?.(r.item)}
             </div>
           ) : r.item && askCard ? (
             <div className="grid min-w-0 gap-1.5">
-              <TaskHead row={r} n={open.indexOf(r) + 1} />
+              <TaskHead row={r} n={open.indexOf(r) + 1} of={open.length} />
               {r.command && <CopyCommand command={r.command} />}
               {askCard(r.item)}
             </div>
           ) : (
             <SentOr slot={`mac:${r.key}`}>
               <CardShell kind="mac" data-testid="mac-ticket-card">
-                <TaskHead row={r} n={open.indexOf(r) + 1} />
+                <TaskHead row={r} n={open.indexOf(r) + 1} of={open.length} />
                 <TaskTitle row={r} />
                 <div className="mt-3.5">{r.command ? <CopyCommand command={r.command} /> : <span className="text-xs text-muted-foreground">No text yet: its next wake writes the ticket.</span>}</div>
                 {/* E948-S60: a ticket with no page yet still takes feedback, to the Team desk with the ticket named. */}
@@ -298,10 +302,12 @@ export function MacCards({ rows, askCard, keyBox, testId = "laptop-tasks" }: { r
   );
 }
 
-function TaskHead({ row: r, n }: { row: LaptopRow; n: number }) {
+function TaskHead({ row: r, n, of = 0 }: { row: LaptopRow; n: number; of?: number }) {
   return (
     <CardMeta kind="Mac" about={aboutFrom(r.title)} since={r.since ?? r.item?.since} sinceWhat="issued">
-      {n > 0 && <span>{n}</span>}
+      {n > 0 && <span data-testid="laptop-place">{of > 1 ? `${n} of ${of}` : n}</span>}
+      {n === 1 && of > 1 && <span className="font-medium text-foreground" data-testid="laptop-next">Next</span>}
+      {r.where && <span data-testid="laptop-where">{r.where}</span>}
       {r.redLine && <span className="text-xs text-muted-foreground" data-testid="laptop-red-line">Red line</span>}
       {r.minutes != null && <span data-testid="laptop-minutes">{r.minutes} min</span>}
       {r.code && <span>{r.code}</span>}
@@ -334,7 +340,7 @@ function changeLine(c: LaptopStep["change"]): { text: string; bad?: boolean } | 
 type Press = "done" | "stuck" | "note" | "todo";
 
 /** E948-S130 (vn_4f13161d): a Mac ticket he pressed (Done, Stuck, a note) collapses to its green Sent row like every card. */
-export function LaptopCard(props: { row: LaptopRow; n: number; onDone?: () => void }) {
+export function LaptopCard(props: { row: LaptopRow; n: number; of?: number; onDone?: () => void }) {
   return (
     <SentOr slot={`mac:${props.row.key}`}>
       <LaptopCardBody {...props} />
@@ -342,7 +348,7 @@ export function LaptopCard(props: { row: LaptopRow; n: number; onDone?: () => vo
   );
 }
 
-function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDone?: () => void }) {
+function LaptopCardBody({ row: r, n, of, onDone }: { row: LaptopRow; n: number; of?: number; onDone?: () => void }) {
   const st = r.step!;
   const [words, setWords] = useState("");
   const [press, setPress] = useState<Pressing>();
@@ -399,7 +405,7 @@ function LaptopCardBody({ row: r, n, onDone }: { row: LaptopRow; n: number; onDo
   return (
     <CardShell kind="mac" className={cn(st.state === "done" && "opacity-80")} data-testid="laptop-card">
       <div className="grid min-w-0 gap-2">
-        <TaskHead row={r} n={st.state === "done" ? 0 : n} />
+        <TaskHead row={r} n={st.state === "done" ? 0 : n} of={of} />
         <TaskTitle row={r} />
         <p className="text-xs text-muted-foreground">
           {st.state === "done"

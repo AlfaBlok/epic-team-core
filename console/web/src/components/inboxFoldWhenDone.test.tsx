@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { FOLD_AFTER_MS, FoldSection, LandFolded } from "./homeSection";
@@ -13,7 +13,7 @@ function Section({ count }: { count: number | undefined }) {
   const [open, setOpen] = useState(true);
   return (
     <FoldSection title="Blocked on you" count={count} tone="needs-you" testId="blocked" bodyTestId="blocked-body" open={open} onToggle={setOpen}>
-      <p>cards</p>
+      <div data-testid="sent-row">✓ Sent</div>
     </FoldSection>
   );
 }
@@ -37,10 +37,17 @@ beforeEach(() => resetSent());
 afterEach(() => {
   cleanup();
   resetSent();
+  vi.restoreAllMocks();
 });
+/** the green Sent row of the card he answered sits on the screen (300 px down) or above it (he pressed low in a long card) */
+const rowAt = (top: number) =>
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return (this.getAttribute("data-testid") === "sent-row" ? { top, bottom: top + 50 } : { top: 0, bottom: 0 }) as DOMRect;
+  });
 
 describe("E948-S208 a section folds when he answers its last card", () => {
   it("his answer empties the section: the green Sent row shows a beat, then the section folds to its heading with 0", async () => {
+    rowAt(300);
     const recount = draw(1);
     expect(expanded()).toBe("true");
     markSent("ask:a1", { said: "Approved", title: "The last card" });
@@ -49,6 +56,15 @@ describe("E948-S208 a section folds when he answers its last card", () => {
     await wait(FOLD_AFTER_MS + 100);
     expect(expanded()).toBe("false");
     expect(screen.queryByTestId("blocked-body")).toBeNull();
+    expect(screen.getByTestId("blocked-count").textContent).toBe("0");
+  });
+
+  it("a long card answered at its buttons (its Sent row above the screen): the section folds at once, the page moves once", () => {
+    rowAt(-400);
+    const recount = draw(1);
+    markSent("ask:a1", { said: "Approved", title: "The last card" });
+    recount(0);
+    expect(expanded()).toBe("false");
     expect(screen.getByTestId("blocked-count").textContent).toBe("0");
   });
 

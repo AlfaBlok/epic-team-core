@@ -34,17 +34,22 @@ export const COMMENT_MAX = HIS_WORDS_MAX;
 const SPINE = /^(?!\/)[\w.-]+(?:\/[\w.-]+)*\.md$/;
 const REF = /^[A-Za-z][\w.-]{0,60}$/;
 
+/** the longest card title a Decisions row quotes (a longer one is cut, never refused). */
+export const TITLE_MAX = 400;
 const cardIn = z.object({
   kind: z.enum(["review", "ask"]),
   repo: z.string().min(1).max(120),
   path: z.string().min(1).max(300),
   ref: z.string().min(1).max(64),
-  title: z.string().max(400).optional(),
+  // a card's title is only its label; a long one is cut short, never a reason to refuse his note
+  title: z.string().transform((t) => (t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1)}…` : t)).optional(),
   milestoneId: z.string().max(80).optional(),
 });
 const commentIn = cardIn.extend({ text: z.string().max(COMMENT_MAX), attachments: z.array(z.string()).max(10).optional(), via: z.enum(["text", "voice"]).optional(),
   /** `in_work` = a note on a card he sent back, while its next round is being built (never "after he closed it"). */
-  stage: z.enum(["closed", "in_work"]).optional(),
+  /** `on_card` = a note he left with a card's own button that could not take it (the row had moved on, the
+   * press refused): it lands on the row as his note on that card, never "after he closed it" and never a refusal. */
+  stage: z.enum(["closed", "in_work", "on_card"]).optional(),
 });
 const reopenIn = cardIn.extend({ kind: z.literal("review").default("review"), /** the card's id (orders it after the close it undoes) */ id: z.string().max(80).optional() });
 
@@ -101,9 +106,13 @@ export function createAfterClose(o: AfterCloseOptions) {
   /** The milestone whose Delivery manager owns the card: the one named (same repo), else the spine's, else the repo's. */
   function owner(c: Card): string | undefined {
     const ms = o.store.listMilestones({ includeSettled: true });
+    // a settled milestone wakes nobody: his words go to the next open one of the repo (its root first), never to no one
+    const open = (x: (typeof ms)[number]) => !x.settledAt;
     const named = c.milestoneId ? ms.find((m) => m.id === c.milestoneId && sameRepo(m.repo, c.repo)) : undefined;
     const mine = ms.filter((x) => sameRepo(x.repo, c.repo));
-    const m = named ?? mine.find((x) => x.path === c.path) ?? mine.find((x) => /root\.md$/.test(x.path ?? "")) ?? mine[0];
+    const pick = (ok: (x: (typeof ms)[number]) => boolean) =>
+      (named && ok(named) ? named : undefined) ?? mine.find((x) => ok(x) && x.path === c.path) ?? mine.find((x) => ok(x) && /root\.md$/.test(x.path ?? "")) ?? mine.find(ok);
+    const m = pick(open) ?? pick(() => true);
     if (!m) return undefined;
     const as = o.store.listAssignments({ milestoneId: m.id });
     return (as.find((a) => isDm(o.store.getPersona(a.personaId)?.name)) ?? as[0])?.id;
@@ -145,7 +154,9 @@ export function createAfterClose(o: AfterCloseOptions) {
     const what = c.kind === "ask" ? `ask ${ref}` : `row ${ref}`;
     // a card he sent back stays on his inbox while it is reworked, and his notes on it reach the round in work
     const inWork = c.stage === "in_work";
-    const when = inWork ? "while its next round is in work" : "after he closed it";
+    const onCard = c.stage === "on_card";
+    const when = inWork ? "while its next round is in work" : onCard ? "on its card" : "after he closed it";
+    const note = inWork || onCard;
     const w = await o.writer.edit({
       repoDir: at.dir,
       path: c.path,
@@ -156,16 +167,18 @@ export function createAfterClose(o: AfterCloseOptions) {
         const t = addDecisionRow(text, {
           date,
           outcome: "comment",
-          decision: `${by}'s ${inWork ? "note" : "comment"} on ${what} ${when}${c.via === "voice" ? " (voice)" : ""}: "${cell(words).slice(0, 1500)}"`,
+          decision: `${by}'s ${note ? "note" : "comment"} on ${what} ${when}${c.via === "voice" ? " (voice)" : ""}: "${cell(words).slice(0, 1500)}"`,
           summary: inWork
             ? "more input for the round in work: the worker on the row gets his words now and the round answers them; the card comes back to his review with it"
-            : "it may change his decision: the owner reads it and acts on it (a new round, a follow-up row, or a reply); the answered line stays as he left it",
-          evidence: inWork ? "console note on a sent-back card" : "console Add comment",
+            : onCard
+              ? "his note from the card's own button, which could not take it as a press: the row's owner answers every point of it"
+              : "it may change his decision: the owner reads it and acts on it (a new round, a follow-up row, or a reply); the answered line stays as he left it",
+          evidence: inWork ? "console note on a sent-back card" : onCard ? "console note kept from a card button" : "console Add comment",
           revisit: "when the owner has acted on it",
         });
         return t === undefined
           ? { skip: `${c.path} has no Decisions table to hold the comment; nothing written` }
-          : { text: t, msg: `${ref}: ${by}'s ${inWork ? "note while it is in work" : "comment after closing it"} (via console)`, body: `${by} added a ${inWork ? "note" : "comment"} on ${what} ("${cell(c.title ?? "")}") from the console ${when}:\n\n${words}` };
+          : { text: t, msg: `${ref}: ${by}'s ${inWork ? "note while it is in work" : onCard ? "note on its card" : "comment after closing it"} (via console)`, body: `${by} added a ${note ? "note" : "comment"} on ${what} ("${cell(c.title ?? "")}") from the console ${when}:\n\n${words}` };
       },
     });
     if (w.status !== "written") return { error: w.status === "skipped" ? 409 : 502, code: w.status === "skipped" ? "spine_write_skipped" : "spine_write_failed", message: `${w.status === "skipped" ? "not written" : "spine write failed"}: ${w.reason ?? "unknown"}; nothing changed` };
@@ -173,12 +186,15 @@ export function createAfterClose(o: AfterCloseOptions) {
     const woke = await wake(
       c,
       [
-        `${by} added a ${inWork ? "note" : "comment"} on ${what}${c.title ? ` ("${cell(c.title)}")` : ""} in ${c.repo} ${c.path} ${when} (written as a Decisions row${w.sha ? ` in commit ${w.sha}` : ""}).`,
+        `${by} added a ${note ? "note" : "comment"} on ${what}${c.title ? ` ("${cell(c.title)}")` : ""} in ${c.repo} ${c.path} ${when} (written as a Decisions row${w.sha ? ` in commit ${w.sha}` : ""}).`,
         `His words: ${words}`,
         ...(inWork
           ? [`He sent this card back and it is still on his inbox, marked in progress: this is more input for the round being built. Hand his words to the worker on ${ref} now (a running worker: send them to its thread; none running: start the round with them), never open a second row for them, and bring the card back to his review answering every point.`]
           : []),
-        ...(inWork ? [] : [`It may change his decision. Read it as a new round of feedback on that ${c.kind === "ask" ? "ask" : "row"}: if he changes his mind, reopen it the EpicSpine way (a new round, a new row, or a corrected answer with a Decisions row); if it adds a follow-up, file it; hand it to the owner persona when it is not you. Never rewrite his answered line silently. Record what you did in the spine.`]),
+        ...(onCard
+          ? [`He left it with the card's own button (Changes wanted, Decline or an answer), which could not take it as a press, so it is written here instead. Treat it as his feedback on ${ref}: answer every point (a new round, a follow-up row or a reply), never drop it, and record what you did in the spine.`]
+          : []),
+        ...(inWork || onCard ? [] : [`It may change his decision. Read it as a new round of feedback on that ${c.kind === "ask" ? "ask" : "row"}: if he changes his mind, reopen it the EpicSpine way (a new round, a new row, or a corrected answer with a Decisions row); if it adds a follow-up, file it; hand it to the owner persona when it is not you. Never rewrite his answered line silently. Record what you did in the spine.`]),
       ].join("\n\n"),
       `comment:${c.repo}:${ref}:${w.sha ?? Date.now()}`,
     );

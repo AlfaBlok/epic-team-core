@@ -679,7 +679,7 @@ export interface ApiClient {
   undoAnswer(responseId: string): Promise<{ undone: true; itemId: string }>;
   reopenReviewRow(card: ClosedCardRef & { /** the card's id: it lands after the close it undoes */ id?: string }): Promise<{ status: "review"; sha?: string }>;
   /** Add a last thought / Add comment: his words on a closed card, to its row or ask owner (spine first, then a wake). */
-  commentClosedCard(input: ClosedCardRef & { text: string; attachments?: string[]; via?: "text" | "voice"; stage?: "closed" | "in_work" }): Promise<{ sha?: string; woke?: string; wakeError?: string }>;
+  commentClosedCard(input: ClosedCardRef & { text: string; attachments?: string[]; via?: "text" | "voice"; stage?: "closed" | "in_work" | "on_card" }): Promise<{ sha?: string; woke?: string; wakeError?: string }>;
   /** every card he sent back that is not back in review yet (the Inbox's Sent back, in progress). */
   listSentBackCards?(): Promise<SentBackCard[]>;
   /** the cards he closed in the last 30 days (Team home's Recently closed). */

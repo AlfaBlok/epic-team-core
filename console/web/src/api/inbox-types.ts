@@ -381,7 +381,10 @@ export interface MacTask {
   minutes?: number;
   url?: string;
   command?: string;
+  /** its place in the Mac list's one run order (the same on the list page, in Run all and here). */
   order: number;
+  /** where it runs on the owner's Mac ("Chrome profile <account>", "the terminal", "your own hands"). */
+  where?: string;
   /** the steps page id the Mac list names. */
   page?: string;
   /** the ticket page's step as the spine has it; the inbox card writes the same step (absent: no page). */

@@ -69,6 +69,24 @@ export function citedAskCodes(text: string): string[] {
 /** The persona that triages its subtree's open asks; matched by name, like the owner routing in waiting.ts. */
 export const isDeliveryManager = (name?: string) => !!name && /delivery[\s-]*manager/i.test(name);
 
+/**
+ * is a goal's own Delivery Manager on? One answer for every place that asks (the held-asks route, the desk's
+ * reach lookup), so the desk never tells the owner a team has his note when nobody there reads it (his 22 Nov Adeje notes
+ * sat unread: the Travel manager was off, and urgent notes only wake a manager that is on). `on` = switched on and not
+ * parked; `parked` = parked for a reason other than settled (an urgent note still wakes it, the cycle's homeDm); `off` =
+ * there is one, switched off; `none` = the goal has no Delivery Manager.
+ */
+export type ManagerState = "on" | "parked" | "off" | "none";
+export function managerState(
+  store: { listAssignments: (q: { milestoneId: string }) => Array<{ enabled: boolean; parkedAt?: string | null; parkedReason?: string | null; personaId: string }>; getPersona: (id: string) => { name?: string } | undefined },
+  milestoneId: string,
+): ManagerState {
+  const dms = store.listAssignments({ milestoneId }).filter((a) => isDeliveryManager(store.getPersona(a.personaId)?.name));
+  if (dms.some((a) => a.enabled && !a.parkedAt)) return "on";
+  if (dms.some((a) => !!a.parkedAt && a.parkedReason !== "settled")) return "parked";
+  return dms.length ? "off" : "none";
+}
+
 /** how the Delivery Manager answers asks that are not in the ask tier (manager section of its wake prompt). */
 export const managerTriageRules = (base: string, milestoneId: string, personaName: string, o: { hasGrants?: boolean } = {}) => {
   const handle = personaName.trim().replace(/\s+/g, "-");

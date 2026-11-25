@@ -576,7 +576,7 @@ export function mountPresses(api: Hono, o: PressMountOptions): PressWorker {
             new Request("http://console.local/api/closed-cards/comment", {
               method: "POST",
               headers: { "content-type": "application/json", [REPLAY_HEADER]: id },
-              body: JSON.stringify({ kind: "review", ...req.card, text, ...(files.length ? { attachments: files } : {}), via: "text" }),
+              body: JSON.stringify({ kind: "review", ...req.card, text, ...(files.length ? { attachments: files } : {}), via: "text", stage: "on_card" }),
             }),
           ),
         ),

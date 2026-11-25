@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { keepOnCard } from "@/voice/deskFallback";
+import { OUT_CARD_SAID, OUT_CARD_TEXT } from "@/voice/NoteProvider";
 import { MessageSquareText, Mic } from "lucide-react";
 import { api } from "@/api";
 import { mutate } from "@/lib/data";
@@ -213,6 +215,7 @@ export function CardFeedback({
   className,
   sent,
   actions,
+  card: cardRef,
 }: {
   /** one per card (`card:<id>`): the floating voice pill sends to it. */
   origin: string;
@@ -232,11 +235,15 @@ export function CardFeedback({
   sent?: { slot: string | string[]; card?: ClosedCardRef; said?: string };
   /** E948-S131: the card's own buttons, first in the one row before Voice and Text. */
   actions?: ReactNode;
+  /** the row the card is on (when `sent` does not name it): a note `send` refuses lands there instead. */
+  card?: ClosedCardRef;
 }) {
   const [words, setWords] = useState("");
   const [sending, setSending] = useState(false);
   const [line, setLine] = useState<string>();
   const files = useChatAttach({ enabled: !disabled, disabled: sending });
+  /** the row this card is on, where a note its own press refuses lands instead */
+  const card = cardRef ?? sent?.card ?? (target?.kind === "card" ? target.card : undefined);
   /** true once sent, else why not (E948-S174: a voice note's row says the card's own reason) */
   const go = async (text: string, via: "text" | "voice"): Promise<true | string> => {
     setSending(true);
@@ -253,6 +260,20 @@ export function CardFeedback({
     } catch (e) {
       // typed words stay in the box, so Not sent is true; a voice note's own line says where his words went
       // (his memory, and the Team desk when the card refuses them), so the card never says Not sent over it.
+      // a card never refuses his typed note either: when the card's own press does not take it, his words land
+      // on the card's row as his note on that card (its owner woken). A voice note does the same in the note's holder.
+      if (via === "text" && send && card) {
+        try {
+          await keepOnCard(card, text, files.ids, via);
+          setWords("");
+          files.clear();
+          setLine(OUT_CARD_TEXT);
+          if (sent) markSent(sent.slot, { said: OUT_CARD_SAID, title, card, back: async () => ({ back: true, line: "The card is back. Your words already reached the team." }) });
+          return true;
+        } catch {
+          /* the row could not be written either: Not sent, his words stay in the box */
+        }
+      }
       setLine(via === "text" ? `Not sent: ${(e as Error).message}` : undefined);
       return (e as Error).message || "the card did not take it";
     } finally {
@@ -265,6 +286,7 @@ export function CardFeedback({
     page: cardPage(refName, title),
     typed: words,
     big: true,
+    ...(send && card ? { card } : {}),
     deliver: async (reply) => {
       const r = await go(reply, "voice");
       if (r !== true) throw new Error(r);

@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import type { ClosedCardRef } from "@/api/review-types";
 import { UNSAFE_LocationContext } from "react-router-dom";
 import { Mic, Play, SendHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -139,6 +140,8 @@ export function useNote(props: {
   deliver?: (reply: string) => Promise<unknown>;
   /** A card: what is typed in its box now (it goes out before the spoken words). */
   typed?: string;
+  /** a card's row; a note its press refuses lands there as his note on that card. */
+  card?: ClosedCardRef;
   /** The microphone's label ("Voice note", "Speak"). */
   idleLabel?: string;
   /** Test ids' prefix ("note" in Chat, "answer-voice" on cards). */
@@ -209,6 +212,7 @@ export function useNote(props: {
       h.deliver = (n) => deliver.current!(withVoiceNote(typed.current, n));
       h.words = (n) => withVoiceNote(typed.current, n);
       h.page = props.page;
+      h.card = props.card;
     }
     h.to = props.to;
   };

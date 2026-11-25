@@ -121,3 +121,24 @@ describe("a closed card of an archived row still takes his comment", () => {
     expect(missing).toMatchObject({ error: 404 });
   });
 });
+
+/** a note on a card whose goal is settled once woke nobody ("the milestone is settled"): it goes to the repo's next open goal. */
+describe("a note on a card of a settled goal still wakes someone", () => {
+  it("wakes the open root goal's Delivery manager, never no one", async () => {
+    const store = {
+      listMilestones: () => [
+        { id: "ms_epic", repo: "app", path: "docs/spines/epic-907.md", settledAt: "2026-11-20T00:00:00Z" },
+        { id: "ms_root", repo: "app", path: "docs/spines/root.md" },
+      ],
+      listAssignments: (f: { milestoneId: string }) => [{ id: `as_${f.milestoneId}`, personaId: "p_dm" }],
+      getPersona: () => ({ name: "Delivery Manager" }),
+    } as unknown as Store;
+    const writer = { edit: async (e: { repoDir: string; path: string; edit: (t: string, d: string) => { text: string } | { skip: string } }) => (e.edit(fs.readFileSync(path.join(e.repoDir, e.path), "utf8"), "2026-11-24"), { status: "written", sha: "abc1234" }) };
+    const woke: string[] = [];
+    const cycle = { runNowRequest: async (target: string) => (woke.push(target), { ok: true }) };
+    const a = createAfterClose({ store, reposRoot: root, writer: writer as never, cycle: cycle as never, who: () => "Sam" });
+    const out = await a.comment({ kind: "review", repo: "app", path: "docs/spines/epic-907.md", ref: "E907-S9", milestoneId: "ms_epic", text: "can you see it in logs?", stage: "on_card" });
+    expect(out).toMatchObject({ sha: "abc1234", woke: "as_ms_root" });
+    expect(woke).toEqual(["as_ms_root"]);
+  });
+});

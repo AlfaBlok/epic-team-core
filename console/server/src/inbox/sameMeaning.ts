@@ -47,8 +47,10 @@ const wantedFile = (f: string) => f.replace(/\.json$/, "") + ".wanted.jsonl";
 
 const norm = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/https?:\/\/\S+/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
 const h = (s: string) => crypto.createHash("sha1").update(s).digest("hex").slice(0, 16);
+/** the judge's prompt version: a new prompt judges every pair afresh. */
+export const JUDGE_VERSION = 3;
 /** one key per pair, the same either way round. */
-export const pairKey = (a: string, b: string): string => [h(norm(a)), h(norm(b))].sort().join(":");
+export const pairKey = (a: string, b: string): string => `v${JUDGE_VERSION}:${[h(norm(a)), h(norm(b))].sort().join(":")}`;
 
 let cache: { file: string; mtime: number; checked: number; verdicts: Record<string, MeaningVerdict> } | undefined;
 function verdicts(file = sameMeaningFile()): Record<string, MeaningVerdict> {
@@ -148,7 +150,11 @@ export function nearest<T>(text: string, cands: T[], textOf: (c: T) => string | 
 
 /** the hold's words when the earlier card is the same question in other words. */
 export const sameMeaningProblem = (ref: string, since?: string | null): string =>
-  `it asks the same as ${ref} in other words, still open${since ? ` since ${since.slice(0, 10)}` : ""}: one question, one card. Fold it into ${ref} with the owner's words from both, tell the owners of both rows, then drop this one`;
+  `it asks the same as ${ref} in other words, still open${since ? ` since ${since.slice(0, 10)}` : ""}: one question, one card. Fold it into ${ref} with the owner's words from both, tell the owners of both rows, then drop this one. If it asks something else, name ${ref.replace(/'s card$/, "")} in it and say how it differs`;
+
+/** a card that names the earlier one builds on it (a follow-up): never merged by meaning. */
+export const citesRef = (text: string | null | undefined, ref: string | null | undefined): boolean =>
+  !!ref && !!text && new RegExp(`(^|[^A-Za-z0-9-])${ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z0-9])`, "i").test(text);
 
 // ---- the judge (main thread) -------------------------------------------------------------------------------------
 
@@ -159,12 +165,14 @@ export interface JudgePair {
 export type PairJudge = (pairs: JudgePair[]) => Promise<{ same: boolean; confidence: number }[]>;
 
 export const JUDGE_SYSTEM =
-  "You check pairs of cards sent to one busy owner. Each card asks him to do, decide, approve, give or answer something.\n" +
-  "For each pair say whether the two cards ask him the same thing: answering one would also answer the other, even in different words " +
-  "(the same decision, the same sign-in, key, payment, account or page, the same thing for him to do).\n" +
-  "They are different when they ask about a different account, server, product, amount or choice, when one is a later step that needs " +
-  "the other's answer first, or when they only share a topic.\n" +
-  "confidence is how sure you are of your same or different call, 0 to 100.";
+  "You check pairs of cards sent to one busy owner. When a card comes back to him he taps \"Duplicate or already answered\".\n" +
+  "For each pair, first write in thing_a and thing_b the one thing each card is about, in a few words: the exact account, sign-in, key, " +
+  "payment, plan, document, message or decision (with its name). Then decide.\n" +
+  "It is a repeat (same = true) when it is the same thing on both cards, even when the wording, the reason given, the urgency or the " +
+  "small step named differs (a reminder, a renewal, a retry, a new reason, one part of the same ask), or when his answer to one already settles the other.\n" +
+  "It is not a repeat (same = false) when the thing differs, even with the same person, site, product or topic: another account, " +
+  "another server, another document, another message, another amount, or a new choice his answer to the other does not settle.\n" +
+  "confidence is how sure you are of your call, 0 to 100.";
 
 const JUDGE_SCHEMA = {
   type: "object",
@@ -176,26 +184,27 @@ const JUDGE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["pair", "same", "confidence"],
-        properties: { pair: { type: "integer" }, same: { type: "boolean" }, confidence: { type: "integer" } },
+        required: ["pair", "thing_a", "thing_b", "same", "confidence"],
+        properties: { pair: { type: "integer" }, thing_a: { type: "string" }, thing_b: { type: "string" }, same: { type: "boolean" }, confidence: { type: "integer" } },
       },
     },
   },
 };
 
 /** Claude Haiku on the console's credit key: up to 15 pairs a call, strict JSON. */
-export function anthropicPairJudge(key: () => Promise<string | undefined>, f: typeof fetch = fetch, onCost?: (usd: number) => void): PairJudge {
+export function anthropicPairJudge(key: () => Promise<string | undefined>, f: typeof fetch = fetch, onCost?: (usd: number) => void, system = JUDGE_SYSTEM): PairJudge {
   return async (pairs) => {
     const out: { same: boolean; confidence: number }[] = [];
     for (let i = 0; i < pairs.length; i += 15) {
       const chunk = pairs.slice(i, i + 15);
       const user = chunk.map((p, n) => `Pair ${n}\nA: ${p.a.slice(0, 700)}\nB: ${p.b.slice(0, 700)}`).join("\n\n");
       const { value, costUsd } = await anthropicJson<{ verdicts: { pair: number; same: boolean; confidence: number }[] }>(key, f, {
-        system: JUDGE_SYSTEM,
+        system,
         user,
         schema: JUDGE_SCHEMA,
-        maxTokens: 4000,
-        timeoutMs: 60_000,
+        maxTokens: 8000,
+        timeoutMs: 120_000,
+        effort: "medium",
       });
       onCost?.(costUsd);
       const by = new Map(value.verdicts.map((v) => [v.pair, v]));

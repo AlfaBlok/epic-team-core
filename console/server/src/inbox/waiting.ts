@@ -1,7 +1,7 @@
 import { askGateProblem, type HeldAsk } from "./askGate.js";
 import { createDryRunReader, dryRunNote, dryRunOverdue, dryRunProblem } from "./askDryRun.js";
 import { sameOpenProblem, sameQuestion } from "./duplicate.js";
-import { meaningCall, nearest, sameMeaningProblem } from "./sameMeaning.js";
+import { citesRef, meaningCall, nearest, sameMeaningProblem } from "./sameMeaning.js";
 import { createAskLogReader, repeatProblem, sizeProblem, topicsIn, type PriorAnswer } from "./askRepeat.js";
 import { execFile } from "../spawnHost.js";
 import { activeMark, noteMarksOf, type NoteMark } from "../review/noteMarks.js";
@@ -752,7 +752,8 @@ export async function waitingAndHeld(d: WaitingDeps, m: Milestone): Promise<{ it
         const older = openOfHis.filter(
           (o) => o.a !== a && !!o.a.code && ((o.a.since ?? "") < (a.since ?? "") || ((o.a.since ?? "") === (a.since ?? "") && `${o.rel}:${o.a.line ?? 0}` < `${rel}:${a.line ?? 0}`)),
         );
-        return nearest(a.question, older, (o) => o.a.question).find((o) => meaningCall(o.a.question, a.question, { a: `${repo.name} ${o.a.code}`, b: `${repo.name} ${a.code ?? a.question.slice(0, 40)}` }) === "same")?.a;
+        const mine = [a.question, a.contextText, a.why, a.recommend].filter(Boolean).join(" ");
+        return nearest(a.question, older, (o) => o.a.question).find((o) => !citesRef(mine, o.a.code) && meaningCall(o.a.question, a.question, { a: `${repo.name} ${o.a.code}`, b: `${repo.name} ${a.code ?? a.question.slice(0, 40)}` }) === "same")?.a;
       };
       for (const [rel, asks] of Object.entries(tree.asks ?? {})) {
         const v = nodeByPath.get(rel);

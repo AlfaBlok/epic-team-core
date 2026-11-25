@@ -160,7 +160,7 @@ export function appendChat(existing: string, day: string, msgs: DeskMessage[]): 
   const blocks = fresh.map((m) => {
     const time = `${m.at!.slice(11, 16)}Z`;
     if (m.kind === "seed") return `## ${time} · new desk session${m.session ? ` ${m.session}` : ""}\n<!-- m:${m.id} -->\n`;
-    const who = m.role === "user" ? ownerName() : "Team desk";
+    const who = m.role === "user" ? (m.from === "console" ? "Console" : ownerName()) : "Team desk";
     const from = m.page ? ` (from ${m.page.replace(/\s+/g, " ")})` : "";
     return `## ${time} · ${who}${from}\n<!-- m:${m.id} -->\n\n${redact(m.text.trim())}${m.truncated ? "\n\n(cut short in the T3 read)" : ""}\n`;
   });

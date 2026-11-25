@@ -25,12 +25,12 @@ export function ComputePrices({ plan }: { plan: PlanState }) {
   if (!sizes.length) return null;
   return (
     <table className="w-full text-sm tabular-nums" data-testid="compute-prices">
-      <caption className="mb-1 text-left text-xs text-muted-foreground">A server on our cloud, if you want one</caption>
+      <caption className="mb-1 text-left text-xs text-muted-foreground">A server on our cloud, if you want one, billed by the minute and never more than the month&apos;s price</caption>
       <thead>
         <tr className="text-left text-xs text-muted-foreground">
           <th className="py-1 pr-2 font-normal">Size</th>
           <th className="py-1 pr-2 font-normal">A minute</th>
-          <th className="py-1 font-normal">A month at most</th>
+          <th className="py-1 font-normal">A month</th>
         </tr>
       </thead>
       <tbody>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { ClosedCardRef } from "@/api/review-types";
 import type { NoteClock, NoteMedia, NotesApi } from "./noteShared";
 import { clearNoteState, useNote, type NoteState } from "./useNote";
 import { useInboxHold } from "@/lib/inboxHold";
@@ -56,6 +57,8 @@ export function useAnswerVoice(props: {
   page: string;
   /** What is typed in the box now: it goes out before the spoken words. */
   typed: string;
+  /** the row the card is on; a note the card's press refuses lands there as his note on that card. */
+  card?: ClosedCardRef;
   /** The card's own press with the reply (his typed words, the spoken words, the note's id and recording). Rejects if it failed. */
   deliver: (reply: string) => Promise<unknown>;
   base?: string;

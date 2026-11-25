@@ -60,6 +60,9 @@ export function noteQuote(n: Pick<DeskNote, "body">): string {
   return q.length > BODY_MAX ? `${q.slice(0, BODY_MAX)}…` : q;
 }
 
+/** The note quotes him (`His words: …`): only then does its landing earn a line in his chat. */
+export const hisWords = (n: Pick<DeskNote, "body">): boolean => /His words:\s*\S/.test(n.body);
+
 const dateOf = (file: string) => /(\d{4}-\d{2}-\d{2})-[^/]*$/.exec(file)?.[1] ?? "";
 
 /** The note is placed once the receiver answered or closed it. */
@@ -174,6 +177,12 @@ export function createNoteCross(d: NoteCrossDeps) {
         // placed since: the receipt goes to the sending desk once its line is in (the relay's sweep sends `note`)
         if (!row.note && !row.noted_at && placed(n)) {
           const at = iso();
+          // E942-S173: a note with none of his words (an alert, a worker's note) gets no receipt in his chat: it is recorded as
+          // placed here and the receiving desk's inbox holds where it landed (the audit: one alert came back 58 times in 50 min).
+          if (!hisWords(n)) {
+            db.prepare("UPDATE desk_crossings SET noted_at = ? WHERE id = ?").run(at, row.id);
+            continue;
+          }
           db.prepare("UPDATE desk_crossings SET note = ?, note_at = ? WHERE id = ?").run(noteReceiptLine(row.id, pair.to, n, landedAs(n, answerOf(n, senderInbox)), at, link), at, row.id);
           out.receipts++;
         }

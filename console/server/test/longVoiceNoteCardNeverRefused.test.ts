@@ -140,3 +140,37 @@ describe("a long voice note on a card is never refused", () => {
     expect(git(w.repo.bare, "rev-parse", "main")).toBe(head);
   });
 });
+
+/**
+ * an audit of the desk found the owner's card notes answered "the card did not take it" (a Changes wanted on a row that had
+ * moved on, a field the route would not take) and his words reached the desk only as a side copy, or were written as "his
+ * comment after he closed it". A card never refuses his note: it lands on the card's row as his note on that card.
+ */
+describe("a card never refuses his note", () => {
+  it("Changes wanted on a row that already moved on lands on that row as his note on its card, never 'after he closed it'", async () => {
+    const w = world();
+    const one = (await w.cards()).find((c) => c.ref === "E907-S3")!;
+    // the row leaves review first (his close), then his Changes wanted arrives on the card still on his screen
+    expect((await w.landed((await w.req("POST", `/api/review-items/${encodeURIComponent(one.id)}/approve`)).pressId!)).state).toBe("landed");
+    const r = await w.req("POST", `/api/review-items/${encodeURIComponent(one.id)}/relaunch`, { feedback: "i sent the vn, but it was nearly 2h, can you see it in logs? MOVED-ON-WORDS" });
+    const p = await w.landed(r.pressId!);
+    expect(p.state, JSON.stringify(p.reason ?? p.response)).toBe("landed");
+    const row = w.origin().split("\n").find((l) => l.includes("MOVED-ON-WORDS"))!;
+    expect(row).toBeTruthy();
+    expect(row).toMatch(/note on row E907-S3 on its card/);
+    expect(row).not.toMatch(/after he closed it/);
+    expect(said(w)).toMatch(/note on its card/);
+  });
+
+  it("a note whose card title is past 400 characters lands (the title is cut, his words are not refused)", async () => {
+    const w = world();
+    const three = (await w.cards()).find((c) => c.ref === "E907-S5")!;
+    const title = `after Sam sends the forms, track each answer ${"and the programs ".repeat(40)}`;
+    expect(title.length).toBeGreaterThan(600);
+    const c = await w.req("POST", "/api/closed-cards/comment", { kind: "review", repo: three.repo, path: three.path, ref: three.ref, title, milestoneId: w.milestone.id, text: "can i see the forms and the programs? LONG-TITLE-WORDS", via: "voice", stage: "on_card" });
+    const p = await w.landed(c.pressId!);
+    expect(p.state, JSON.stringify(p.reason ?? p.response)).toBe("landed");
+    expect(said(w)).toContain("LONG-TITLE-WORDS");
+    expect(w.originRow("E907-S5")).toMatch(/review/);
+  });
+});

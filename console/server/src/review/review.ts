@@ -633,6 +633,14 @@ export function createReview(db: DB, o: ReviewOptions) {
     return r ? { repo: r.repo, path: r.path, ref: r.ref, title: r.title, ...(r.milestoneId ? { milestoneId: r.milestoneId } : {}) } : undefined;
   }
 
+  /** the card's row from the stored view, else read from the spines now (a press kept for its row flags that row). */
+  function cardFresh(id: string): ReturnType<typeof card> {
+    const c = card(id);
+    if (c) return c;
+    const r = fresh(id);
+    return r ? { repo: r.repo, path: r.path, ref: r.ref, title: r.title, ...(r.milestoneId ? { milestoneId: r.milestoneId } : {}) } : undefined;
+  }
+
   async function get(id: string): Promise<ReviewItem | undefined> {
     const r = fresh(id);
     return r && toItem(r);
@@ -1199,7 +1207,7 @@ export function createReview(db: DB, o: ReviewOptions) {
     return out;
   }
 
-  return { list, get, card, recheck, approve, complete, relaunch, deny, snooze, hint, rows, goals, closedGoals, reopen, toItem, screenshot, closeSelf };
+  return { list, get, card, cardFresh, recheck, approve, complete, relaunch, deny, snooze, hint, rows, goals, closedGoals, reopen, toItem, screenshot, closeSelf };
 }
 
 /** the verdict's reason as status words: no backticks, brackets or pipes (the status cell ends at `)`). */

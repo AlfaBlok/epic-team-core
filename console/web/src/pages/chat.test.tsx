@@ -485,6 +485,26 @@ describe("T6-S53 T3 restarting: a quiet line, the last transcript, queued sends"
     expect(within(notes[1]).getByTestId("chat-undelivered-state").textContent).toMatch(/^Voice note not delivered\. Its words are kept/);
   });
 
+  // 22 Nov, three typed messages sat in T3's queue for two hours and his screen showed nothing
+  it("a typed message the desk does not have minutes later says so on the message, and his own Sending bubble gives way", async () => {
+    const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat());
+    const send = vi.spyOn(api, "sendDeskMessage").mockResolvedValue({ threadId: "th_desk", pending: true });
+    renderChat();
+    const box = (await screen.findByLabelText("Message to the Team desk")) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "everything seems broken. tempted to give up." } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    const crid = send.mock.calls[0][2] as string;
+    get.mockResolvedValue(
+      chat({ undelivered: [{ id: crid, text: "everything seems broken. tempted to give up.", at: new Date(Date.now() - 5 * 60_000).toISOString(), why: "It waits in T3's queue, the console sends it again if it stays stuck" }] }),
+    );
+    const m = await screen.findByTestId("chat-undelivered-message", {}, { timeout: 5000 });
+    expect(m.textContent).toContain("everything seems broken. tempted to give up.");
+    expect(within(m).getByTestId("chat-undelivered-message-state").textContent).toBe("Not delivered to the desk yet");
+    expect(within(m).getByTestId("chat-undelivered-message-why").textContent).toMatch(/^It waits in T3's queue.* · sent /);
+    await waitFor(() => expect(screen.queryByTestId("chat-posting")).toBeNull());
+  });
+
   // E948-S174 / E942-S151 iteration 2 (vn_3b3cf02e): the console holds it, the desk does not yet: it spins, never ✓ Sent
   it("a send queued while T3 is down shows as its own bubble, spinning Sending until the desk has it", async () => {
     const get = vi.spyOn(api, "getDeskChat").mockResolvedValue(chat({ t3: "restarting" }));

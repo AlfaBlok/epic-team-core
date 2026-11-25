@@ -236,7 +236,8 @@ describe("T6-S82 his words are never dropped", () => {
     expect(p).toMatchObject({ state: "landed", sha: "abc1234" });
     expect(p.reason).toMatch(/his words were written as a Decisions row of T48-S37/);
     expect(got).toHaveLength(1);
-    expect(got[0]).toMatchObject({ kind: "review", repo: "home_repo", path: "docs/spines/epic-48.md", ref: "T48-S37" });
+    // written as his note on that card, never "his comment after he closed it"
+    expect(got[0]).toMatchObject({ kind: "review", repo: "home_repo", path: "docs/spines/epic-48.md", ref: "T48-S37", stage: "on_card" });
     expect(String(got[0].text)).toMatch(/Changes wanted pressed .* the row had moved on .*\] Show the problem first, then the solution\.$/);
   });
 

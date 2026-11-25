@@ -42,6 +42,10 @@ export interface StartAnswer {
   turnDetection?: Record<string, unknown>;
   /** the greeting this page has the voice say once (older consoles send none: the OPENING_NUDGE way). */
   greeting?: string;
+  /** the call runs on ElevenLabs Agents over this signed link, with these instructions (elevenSession.ts). */
+  provider?: "elevenlabs";
+  signedUrl?: string;
+  instructions?: string;
 }
 export interface Line {
   who: "owner" | "voice" | "tool";
@@ -320,6 +324,8 @@ export class CallEngine {
   /** the line closed while away (reason, when): reconnect on return. */
   private droppedAway?: { reason: string; at: number; since: number };
   private unsession?: () => void;
+  /** the ElevenLabs line, when the console put this call on ElevenLabs Agents. */
+  private el?: import("./elevenSession").ElevenLine;
   private listeners = new Set<(v: EngineView) => void>();
 
   constructor(
@@ -375,6 +381,7 @@ export class CallEngine {
       this.turnDetection = s.turnDetection ?? NORMAL_TURN;
       this.greeting = o.resumed ? RESUME_GREETING : s.greeting?.trim() || undefined;
       this.set({ callId: s.call.id, phase: "connecting" });
+      if (s.provider === "elevenlabs" && s.signedUrl) return await this.startEleven(s);
       const pc = (this.pc = this.media.peer());
       pc.ontrack = (e) => this.media.play(e.streams[0]);
       for (const t of this.mic.getAudioTracks()) pc.addTrack(t, this.mic);
@@ -497,6 +504,7 @@ export class CallEngine {
   }
 
   setMuted(m: boolean) {
+    this.el?.mute(m);
     for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = !m;
     this.set({ muted: m });
   }
@@ -1052,9 +1060,115 @@ export class CallEngine {
     this.set({ deskWaiting: this.asks.size });
   }
 
+  /**
+   * the call on ElevenLabs Agents. The agent speaks the greeting itself (first message) and calls the console's
+   * tools as client tools; captions and the transcript come from its messages. The quiet hang-up is the agent's own;
+   * the 20-minute limit, the console's beat (month cap, switch off) and Hang up stay this engine's.
+   */
+  private async startEleven(s: StartAnswer): Promise<void> {
+    // the ElevenLabs client opens its own microphone: ours only proved the permission.
+    for (const t of this.mic?.getTracks() ?? []) t.stop();
+    this.mic = undefined;
+    const id = s.call.id;
+    const { startEleven, ELEVEN_ASK_WAIT_MS } = await import("./elevenSession");
+    const said = () => this.v.lines.slice(this.wordsFrom).filter((l) => l.who === "owner").map((l) => l.text).join(" ");
+    const walk = async (name: string, args: Record<string, unknown>) => {
+      if (!this.api.tool) return "This page cannot walk the inbox.";
+      const r = (await this.api.tool(id, name, args)) as { place?: string; id?: string; title?: string; link?: { label: string; url: string }; press?: { id: string; kind: string; button: string; words?: string; milestoneId?: string }; file?: { id: string; name: string; words: string } };
+      if (r?.id && !name.endsWith("_objective") && name !== "file_objective_words") {
+        this.set({ onCard: { id: r.id, place: r.place ?? "", ...(r.title ? { title: r.title } : {}), ...(r.link ? { link: r.link } : {}) } });
+        try {
+          (this.focus?.show ?? this.hands?.show)?.(r.id);
+        } catch {
+          /* the page is gone */
+        }
+      }
+      if (r?.press) {
+        const press = this.focus?.press ?? this.hands?.press;
+        const done = press ? await press(r.press).catch((e) => `not pressed: ${(e as Error).message}`) : "not pressed: this page cannot press it";
+        this.line("tool", `pressed ${r.press.button} on ${r.place ?? "the card"}: ${done}`);
+        return JSON.stringify({ ...r, result: done, note: pressNote(done) });
+      }
+      if (r?.file) {
+        const done = this.hands?.file ? await this.hands.file(r.file).catch((e) => `not filed: ${(e as Error).message}`) : "not filed: this page cannot file it";
+        this.line("tool", `filed his words on ${r.place ?? "the objective"}: ${done}`);
+        return JSON.stringify({ ...r, result: done });
+      }
+      this.line("tool", `${name.replace("_", " ")}${r?.place ? `: ${r.place}` : ""}`);
+      return JSON.stringify(r ?? {});
+    };
+    const tools: Record<string, (a: Record<string, unknown>) => Promise<string>> = {
+      quick_status: async () => {
+        this.line("tool", "quick status");
+        return (await this.api.status(id)).text;
+      },
+      ask_the_desk: async (a) => {
+        const req = String(a.request ?? "").trim();
+        const words = said();
+        this.wordsFrom = this.v.lines.length;
+        const r = await this.api.ask(id, req, !!a.confirmed, words);
+        this.line("tool", `asked the desk (${r.askId}): ${req}`);
+        this.set({ deskWaiting: this.v.deskWaiting + 1 });
+        const t0 = this.clock.now();
+        try {
+          // the agent holds its turn on this answer; past the wait the answer still lands in Chat.
+          while (this.clock.now() - t0 < ELEVEN_ASK_WAIT_MS && this.el) {
+            await this.pause(ASK_POLL_MS);
+            const st = await this.api.askState(id, r.askId).catch(() => undefined);
+            if (st?.state === "answered" && st.answer) return `The desk answered: ${st.answer}`;
+            if (st?.state === "failed") return `The desk did not take it (${st.answer ?? "no reason"}). Tell him in one line.`;
+          }
+          return "The desk is still working on it. Tell him its answer will be in Chat on the Team desk.";
+        } finally {
+          this.set({ deskWaiting: Math.max(0, this.v.deskWaiting - 1) });
+        }
+      },
+      listen_for_feedback: async () => "Listen mode is not on this line yet: let him talk without interrupting, say only a short Mm-hm in pauses, and when he says done pass all his words to the desk in one ask_the_desk.",
+      ...Object.fromEntries([...CONSOLE_TOOLS].map((n) => [n, (a: Record<string, unknown>) => walk(n, a)])),
+    };
+    this.el = await startEleven({
+      signedUrl: s.signedUrl!,
+      instructions: s.instructions,
+      greeting: this.greeting,
+      tools,
+      onLive: () => {
+        this.startedAt = this.lastActivity = this.clock.now();
+        this.set({ phase: "live" });
+        this.timers.push(this.clock.every(() => this.elevenTick(), 1000));
+        this.timers.push(this.clock.every(() => void this.beat(), BEAT_MS));
+      },
+      onLine: (who, text) => {
+        this.lastActivity = this.clock.now();
+        this.line(who, text);
+        this.set(who === "owner" ? { hearing: "" } : { speaking: "" });
+      },
+      onMode: (speaking) => this.set({ speaking: speaking ? "…" : "" }),
+      onEnded: (reason) => {
+        if (this.v.phase === "live" || this.v.phase === "connecting") void this.hangup(reason);
+      },
+      onError: (message) => this.set({ warn: message.slice(0, 200) }),
+    });
+    this.lock = (await this.media.wakeLock?.().catch(() => undefined)) ?? undefined;
+    this.unsession = this.media.session?.({ hangup: () => void this.hangup("hangup"), toggleMute: () => this.setMuted(!this.v.muted) }) ?? undefined;
+  }
+
+  /** the ElevenLabs line's clock: elapsed time and the 20-minute limit (the agent ends a quiet call itself). */
+  private elevenTick() {
+    if (this.v.phase !== "live" || !this.limits) return;
+    const elapsedS = Math.floor((this.clock.now() - this.startedAt) / 1000);
+    this.set({ elapsedS });
+    if (elapsedS >= this.limits.callMaxMin * 60) return void this.hangup("call_limit");
+    if (!this.warned && elapsedS >= this.limits.callWarnMin * 60) {
+      this.warned = true;
+      this.set({ warn: `${this.limits.callMaxMin - this.limits.callWarnMin} minutes left on this call. You can call again after.` });
+    }
+  }
+
   private cleanupMedia() {
     for (const t of this.timers) this.clock.stop(t);
     this.timers = [];
+    void this.el?.end();
+    this.el = undefined;
     try {
       this.dc?.close();
     } catch {
@@ -1123,6 +1237,8 @@ export class CallEngine {
     const since = this.away;
     this.away = undefined;
     if (since === undefined && !this.droppedAway) return;
+    // an ElevenLabs line holds its own microphone; it ends by itself when it drops (onEnded).
+    if (this.el && this.v.phase === "live" && since !== undefined) return void this.set({ notice: `The phone was locked for ${mmss(now - since)}. The call held; you are back on it.` });
     if (this.v.phase === "live" && since !== undefined) {
       const st = this.pc?.connectionState;
       if (st === "failed" || st === "disconnected" || st === "closed" || this.dc?.readyState === "closed") {

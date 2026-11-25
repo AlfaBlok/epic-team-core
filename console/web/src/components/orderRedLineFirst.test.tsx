@@ -2,10 +2,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api, type LaptopView, type MacTask, type WaitingItem } from "@/api";
-import { LaptopSwitch, laptopRows, plainTitle } from "@/components/laptopSwitch";
+import { LaptopSwitch, MacCards, laptopRows, plainTitle } from "@/components/laptopSwitch";
 
 // "I'm on my laptop for 1 h / 2 h / until I say" on the Team home; while on,
-// every needs Mac agent task comes first, red line first, then his priority, each with its minutes and Copy command.
+// every needs Mac agent task comes first, in the Mac list's one order (red line first, then each ticket's
+// Order, one Chrome profile at a time; the list writes each task's place as its order), each with its minutes and Copy command.
 
 afterEach(() => {
   cleanup();
@@ -27,7 +28,7 @@ const task = (row: string, ask: string | undefined, order: number, over: Partial
 const ask = (code: string, priority: number, over: Partial<WaitingItem> = {}) =>
   ({ id: `ask:${code}`, code, repo: "home_repo", priority, state: "open", macAgent: true, question: `Ask ${code}`, title: code, contextLinks: [], ...over }) as unknown as WaitingItem;
 
-const tasks = [task("T81-S8", "T81-A6", 10, { minutes: 20 }), task("T86-S7", "T86-A4", 28), task("T88-S12", "T88-A1", 20), task("T88-S13", "T88-A1", 21, { minutes: 10 }), task("T5-S9", undefined, 40)];
+const tasks = [task("T81-S8", "T81-A6", 4, { minutes: 20 }), task("T86-S7", "T86-A4", 1), task("T88-S12", "T88-A1", 2), task("T88-S13", "T88-A1", 3, { minutes: 10 }), task("T5-S9", undefined, 5)];
 // The inbox's Mac asks, as the server sorts them: on the red line (tier 0), then by level and milestone.
 const mac = [
   ask("T86-A4", 3, { ownerPriority: { level: "normal", why: "x", ref: "T86-A4", redLine: { sentence: "s", state: "agreed" } } }),
@@ -37,12 +38,41 @@ const mac = [
 ];
 
 describe("T96-S7 the order", () => {
-  it("red line first, then the inbox's priority; tasks of one ask in the Mac list's order; unmatched last; asks with no ticket keep their place", () => {
+  it("the Mac list's order; asks with no ticket after every ticket, by the inbox's priority", () => {
     const rows = laptopRows(tasks, mac);
-    expect(rows.map((r) => r.code)).toEqual(["T86-S7", "T88-S12", "T88-S13", "T81-S8", "T99-A1", "T5-S9"]);
+    expect(rows.map((r) => r.code)).toEqual(["T86-S7", "T88-S12", "T88-S13", "T81-S8", "T5-S9", "T99-A1"]);
     expect(rows[0]).toMatchObject({ redLine: true, command: "claude --chrome 'T86-S7'", minutes: 15 });
-    expect(rows[4]).toMatchObject({ title: "Ask T99-A1", url: "http://h/t/T99-S1/", redLine: false });
-    expect(rows[4].command).toBeUndefined();
+    expect(rows[5]).toMatchObject({ title: "Ask T99-A1", url: "http://h/t/T99-S1/", redLine: false });
+    expect(rows[5].command).toBeUndefined();
+  });
+});
+
+describe("one list in one order", () => {
+  // Four Mac tickets at once across the terminal and two Chrome profiles, the inbox ranking them by its own priority
+  // while the Mac list and Run all used the tickets' Order.
+  const day = [
+    task("T83-S26", "T83-A13", 4, { where: "Chrome profile ops@example.com" }),
+    task("T86-S40", "T86-A14", 1, { where: "the terminal" }),
+    task("T88-S28", undefined, 2, { where: "Chrome profile sam@example.com" }),
+    task("T86-S43", "T86-A16", 3, { where: "Chrome profile sam@example.com" }),
+  ];
+  // the inbox's own priority put T83-A13 first; the list's place wins, so the inbox and the list never disagree
+  const inbox = [ask("T83-A13", 1), ask("T86-A16", 2), ask("T86-A14", 3)];
+
+  it("the panel shows the list's order, not the inbox's priority", () => {
+    expect(laptopRows(day, inbox).map((r) => r.code)).toEqual(["T86-S40", "T88-S28", "T86-S43", "T83-S26"]);
+  });
+
+  it("each card says its place, which one is next, and where it runs", () => {
+    render(<MacCards rows={laptopRows(day, inbox)} />);
+    expect(screen.getAllByTestId("laptop-place").map((e) => e.textContent)).toEqual(["1 of 4", "2 of 4", "3 of 4", "4 of 4"]);
+    expect(screen.getAllByTestId("laptop-next")).toHaveLength(1);
+    expect(screen.getAllByTestId("laptop-where").map((e) => e.textContent)).toEqual([
+      "the terminal",
+      "Chrome profile sam@example.com",
+      "Chrome profile sam@example.com",
+      "Chrome profile ops@example.com",
+    ]);
   });
 });
 
@@ -59,8 +89,8 @@ describe("T96-S7 an ask finds its ticket", () => {
     );
     expect(rows.map((r) => [r.code, r.title, r.url])).toEqual([
       ["T96-S3", "Make the Memo LinkedIn page", "http://h/t/T96-S3/"],
-      ["T98-A2", "Make a treg account and one key", "http://h:9198/key/"],
       ["T5-S9", "Ticket T5-S9", "http://h/t/T5-S9/"],
+      ["T98-A2", "Make a treg account and one key", "http://h:9198/key/"],
     ]);
     expect(plainTitle("Mac page: http://h/t/TAX-A10/ (Copy button, Done or Stuck)", "TAX-A10")).toBe("TAX-A10");
     expect(plainTitle("Needs Mac agent: a dashboard key", "x")).toBe("A dashboard key");
@@ -100,7 +130,7 @@ describe("T96-S7 the switch", () => {
     expect(items[0].textContent).toContain("Red line");
     expect(items[0].textContent).toContain("15 min");
     expect(screen.getAllByTestId("laptop-red-line")).toHaveLength(1);
-    expect(items[4].textContent).toContain("No text yet");
+    expect(items[5].textContent).toContain("No text yet");
     fireEvent.click(screen.getAllByTestId("laptop-copy")[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("claude --chrome 'T86-S7'"));
     await waitFor(() => expect(screen.getAllByTestId("laptop-copy")[0].textContent).toContain("Copied"));

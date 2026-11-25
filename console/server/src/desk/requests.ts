@@ -38,6 +38,19 @@ export function plainTitle(card: string | undefined, rowTitle: string | undefine
 const NOT_HIS =
   /^\s*(?:↔|🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question|Files for my voice note, which follows|New sign-up on |📞 Call with the desk|📞 After the call|EpicTeam call \(voice call with the desk)/;
 
+/**
+ * a user-role line in his desk chat that the console wrote, not him (E942-S173, the E942-S141 audit: of 778 chat lines in 72 h
+ * only 157 were his; one alert came back 58 times in 50 minutes): a relay receipt (`↔ Passed to the … desk`), a desk note
+ * passed in that quotes none of his words, a held batch, a note-touch list, a step, a Mac question, a worker's relay.
+ * His own words passed in (`↔ From the … desk` quoting him, `📎 Also in this note`) stay his.
+ * The Chat folds these with the desk's reply to them; the chat copy names them `Console`, not him.
+ */
+const CONSOLE_HEAD = /^\s*(?:↔ Passed to the |🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question|New sign-up on )/u;
+export function consoleLine(text = ""): boolean {
+  if (/^\s*↔ From the /u.test(text)) return !/His words:/.test(text);
+  return CONSOLE_HEAD.test(text);
+}
+
 export function requestIdOf(itemId: string | undefined, text = ""): string | undefined {
   if (!itemId) return undefined;
   let m = itemId;

@@ -222,6 +222,18 @@ describe("E948-S208 no jump to a card he already sent", () => {
     expect(topOf("c")).toBe(52 + GAP);
   });
 
+  it("the last card of its section answered low in it: nothing moves now, never down to the next section (the fold moves once)", async () => {
+    page([
+      { id: "a", h: 300 },
+      { id: "b", h: 1200 },
+    ]);
+    scrolled = 900;
+    holdAfterAnswer(["ask:b"]);
+    collapse("b", 60);
+    await frames();
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
   it("his own scroll ends the hold", async () => {
     page([
       { id: "a", h: 200 },

@@ -618,3 +618,28 @@ export function createPresses(db: DB, o: { now?: () => number; retryMs?: number[
   };
   return self;
 }
+
+/**
+ * the row a review card was on, read from the answer of a press on it that landed (a review card's press answers
+ * with the card, its repo, path and ref): for a card whose row left review before his words were pressed.
+ */
+export function cardFromPresses(db: DB, id: string): { repo: string; path: string; ref: string; title?: string; milestoneId?: string } | undefined {
+  let rows: { response: string | null }[];
+  try {
+    rows = db.prepare("SELECT response FROM presses WHERE target = ? AND state = 'landed' AND response IS NOT NULL ORDER BY at DESC LIMIT 20").all(id) as { response: string | null }[];
+  } catch {
+    return undefined;
+  }
+  for (const r of rows) {
+    let it: Record<string, unknown> | undefined;
+    try {
+      it = JSON.parse(r.response ?? "") as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const s = (k: string) => (typeof it?.[k] === "string" && it[k] ? (it[k] as string) : undefined);
+    const repo = s("repo"), path = s("path"), ref = s("ref");
+    if (repo && path && ref) return { repo, path, ref, ...(s("title") ? { title: s("title") } : {}), ...(s("milestoneId") ? { milestoneId: s("milestoneId") } : {}) };
+  }
+  return undefined;
+}

@@ -16,7 +16,7 @@ import type { Run } from "../store.js";
 import { answerWakeMessage, askerFor, epicRunState, requestReads, type Asker } from "./asker.js";
 import type { HeldAsk } from "./askGate.js";
 import { heldToRoute, type HeldOfGoal } from "./heldRoute.js";
-import { isDeliveryManager } from "./asks.js";
+import { managerState } from "./asks.js";
 import { homeRepo } from "../identity.js";
 import { isDm, NO_OWNER, ownerFor, qualifiedCode, VERB, waitingAndHeld, waitingForMilestone, waitingOnJordi, withThreadEnvironments, type Owner, type WaitingDeps, type WaitingItem } from "./waiting.js";
 import { pendingItems } from "../status/compute.js";
@@ -1093,7 +1093,7 @@ export function mountInbox(
     const goals: HeldOfGoal[] = ms.map((m) => ({
       milestoneId: m.id,
       title: m.title,
-      managerOn: store.listAssignments({ milestoneId: m.id }).some((a) => a.enabled && !a.parkedAt && isDeliveryManager(store.getPersona(a.personaId)?.name)),
+      managerOn: managerState(store, m.id) === "on",
       held: held.filter((h) => h.milestoneId === m.id),
     }));
     const routed = home ? heldToRoute(goals, home.id).map(({ code, repo, path, line, question, goal, why, hours }) => ({ code, repo, path, line, question, goal, why, hours })) : [];
