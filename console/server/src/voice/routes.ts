@@ -114,6 +114,19 @@ export function mountCampaignVoice(api: Hono, voiceFor: (milestoneId: string) =>
   mountCalls(api, "/milestones/:id/voice", pick);
 }
 
+/**
+ * the objectives coach's call (/coach): the same call routes under /voice/coach, on the coach's own
+ * Voice (his objectives read only, his words relayed to a desk). The owner's own console only.
+ */
+export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => string | undefined }) {
+  const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
+  api.get(
+    "/voice/coach/state",
+    guard((c) => (inWorld() ? c.json(coach.state()) : c.json({ available: false, enabled: false, reason: `The objectives coach is only on ${ownerName()}'s own console` }))),
+  );
+  mountCalls(api, "/voice/coach", (c) => (inWorld() ? coach : c.json({ error: { code: "world_scope", message: `The objectives coach is only on ${ownerName()}'s own console` } }, 403)));
+}
+
 /** a world team desk's Call: the same call routes under /tenants/:id/desk/voice, on the world's Voice (or a 404). */
 export function mountWorldDeskVoice(api: Hono, voiceFor: (c: Context) => Voice | undefined) {
   const pick = (c: Context) => voiceFor(c) ?? c.json({ error: { code: "not_found", message: `no team desk for world ${c.req.param("id")}` } }, 404);
@@ -220,6 +233,15 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
       const p = toolIn.safeParse(await body(c));
       if (!p.success) return bad(c, "name (string) and args (object) are required");
       return c.json(voice.tool(c.req.param("cid") ?? "", p.data.name, p.data.args ?? {}));
+    }),
+  );
+  // the objectives coach's relay_to_desk: his words to the Team desk or the social desk.
+  api.post(
+    `${prefix}/calls/:cid/relay`,
+    ownerOnly(async (c, voice) => {
+      const p = z.object({ desk: z.string().min(1).max(20), words: z.string().min(1).max(8000), note: z.string().max(2000).optional(), objective: z.string().max(300).optional() }).safeParse(await body(c));
+      if (!p.success) return bad(c, 'desk ("team" or "social") and words (his words) are required');
+      return c.json(await voice.relay(c.req.param("cid") ?? "", p.data), 201);
     }),
   );
   api.get(`${prefix}/calls/:cid/ask/:askId`, ownerOnly(async (c, voice) => c.json(await voice.askState(c.req.param("cid") ?? "", c.req.param("askId") ?? ""))));

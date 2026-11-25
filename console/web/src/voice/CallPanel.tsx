@@ -85,6 +85,8 @@ export function useCallDock(
     /** start the call by itself once the voice is available (a Team home card's Call); `onAutoStart` runs once it did. */
     autoStart?: boolean;
     onAutoStart?: () => void;
+    /** the idle bar's line under Call (default: what to try on the desk's call). */
+    hint?: string;
     /** what the floating call widget names besides the callee (a milestone's title). */
     where?: string;
   } = {},
@@ -189,7 +191,7 @@ export function useCallDock(
               )}
             </p>
           ) : (
-            <p className="phone:hidden">Talk to {callee}, in English or Spanish. Try “What’s waiting on me?”</p>
+            <p className="phone:hidden">{props.hint ?? <>Talk to {callee}, in English or Spanish. Try “What’s waiting on me?”</>}</p>
           )}
           <p data-testid="call-month" className={cn("tabular-nums phone:text-sm", onCall && "phone:hidden")}>
             This month {money(month)}

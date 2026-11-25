@@ -46,10 +46,10 @@ export function clientTool(t: ToolDef) {
 }
 
 /** the agent as made on the account: the base prompt is replaced per call by the console's own instructions. */
-export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[]) {
+export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[], name: string = ELEVEN_AGENT_NAME, tags: string[] = ["epicteam", "team-desk"]) {
   return {
-    name: ELEVEN_AGENT_NAME,
-    tags: ["epicteam", "team-desk"],
+    name,
+    tags,
     conversation_config: {
       agent: {
         first_message: firstMessage,
@@ -81,8 +81,9 @@ export interface ElevenLink {
  * The console's door to ElevenLabs Agents: `link()` finds (or makes, once) the desk agent and returns a signed link
  * for one call. `key` reads agent-team-console/ELEVENLABS_API_KEY per call, held in memory only.
  */
-export function elevenCalls(o: { key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void } }) {
+export function elevenCalls(o: { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void } }) {
   const f = o.f ?? fetch;
+  const agentName = o.name ?? ELEVEN_AGENT_NAME;
   let agentId: string | undefined;
   const api = async (k: string, method: string, path: string, body?: unknown) => {
     let r: Response;
@@ -99,10 +100,10 @@ export function elevenCalls(o: { key: () => Promise<string | undefined>; prompt:
     if (agentId) return agentId;
     let id: string | undefined = o.known?.get() || undefined;
     if (!id) {
-      const found = await api(k, "GET", `/v1/convai/agents?search=${encodeURIComponent(ELEVEN_AGENT_NAME)}&page_size=30`);
-      id = (found.agents ?? []).find((a: any) => a.name === ELEVEN_AGENT_NAME)?.agent_id;
+      const found = await api(k, "GET", `/v1/convai/agents?search=${encodeURIComponent(agentName)}&page_size=30`);
+      id = (found.agents ?? []).find((a: any) => a.name === agentName)?.agent_id;
     }
-    const body = agentBody(o.prompt(), o.firstMessage(), o.tools());
+    const body = agentBody(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags);
     // found: brought in step with this console's tools and greeting once per start; gone from the account: made again.
     if (id)
       await api(k, "PATCH", `/v1/convai/agents/${encodeURIComponent(id)}`, withoutTools(body)).catch((e) => {

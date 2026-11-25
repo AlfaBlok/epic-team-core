@@ -375,6 +375,13 @@ export interface VoiceDeps {
    * results and the newest daily briefing). Read at each call's start, inside the same context wait.
    */
   context?: () => Promise<string> | string;
+  /**
+   * the rule for his objectives on this call, in place of the briefing walk's (the objectives coach's: read only, his words
+   * relayed); with it the walk's own tools are not added (the call's tools carry what it needs).
+   */
+  walkRule?: (total: number) => string;
+  /** the coach's relay_to_desk: his words to the Team desk or the social desk (POST …/calls/:cid/relay). */
+  relay?: (callId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }
 
 /**
@@ -770,11 +777,11 @@ export function createVoice(d: VoiceDeps) {
     const walkCards = cards?.slice(0, INBOX_WALK_MAX);
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
     // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
-    const briefing = objectiveCards.length ? briefingRule(objectiveCards.length) : "";
+    const briefing = objectiveCards.length ? (d.walkRule ?? briefingRule)(objectiveCards.length) : "";
     const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
-    const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length ? OBJECTIVE_TOOLS : [])];
+    const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length && !d.walkRule ? OBJECTIVE_TOOLS : [])];
     const cfg = sessionConfig(mdl, instructions, [...tools, ...walkTools] as unknown as typeof VOICE_TOOLS, historyTokens());
     const greeting = focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions);
     if (provider() === "elevenlabs" && d.eleven) {
@@ -1072,6 +1079,19 @@ export function createVoice(d: VoiceDeps) {
     return step;
   }
 
+  /** the objectives coach's relay: his words to a desk, on a call of this Voice that is still on or just ended. */
+  async function relay(id: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const c = must(id);
+    if (!d.relay) throw new VoiceError(404, "unknown_tool", "this call has no relay");
+    if (c.endedAt && now() - Date.parse(c.endedAt) > 60_000) throw new VoiceError(409, "call_ended", `call ${id} has ended`);
+    try {
+      return await d.relay(id, args);
+    } catch (e) {
+      if (e instanceof VoiceError) throw e;
+      throw new VoiceError(400, "validation_error", (e as Error).message);
+    }
+  }
+
   /** where the walk is (for the page and the tests): the card he is on and how many. */
   function walkState(id: string): { pos: number; total: number } | undefined {
     must(id);
@@ -1100,6 +1120,7 @@ export function createVoice(d: VoiceDeps) {
     ask,
     askState,
     tool,
+    relay,
     walkState,
     list,
     get,

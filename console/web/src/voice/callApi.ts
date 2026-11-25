@@ -26,5 +26,6 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
     askState: (id, askId) => call("GET", `/calls/${id}/ask/${askId}`),
     endActive: (id) => call("POST", "/active/end", { id }),
     tool: (id, name, args) => call("POST", `/calls/${id}/tool`, { name, args }),
+    relay: (id, args) => call("POST", `/calls/${id}/relay`, args),
   };
 }

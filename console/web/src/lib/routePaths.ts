@@ -29,4 +29,6 @@ export const OUTCOMES_PATH = "outcomes";
 export const VOICE_NOTES_PATH = "voice-notes";
 /** the voice notes kept on this device: waiting to send, and the last few sent. */
 export const ON_DEVICE_PATH = "voice-on-device";
+/** the objectives coach call: one link he opens on his phone. */
+export const COACH_PATH = "coach";
 export const X_STATS_PATH = "x-stats";

@@ -116,6 +116,8 @@ export interface VoiceApi {
   endActive?(id: string): Promise<{ ended: boolean }>;
   /** a tool the console answers itself (the inbox walk: next_card, read_card). */
   tool?(id: string, name: string, args: Record<string, unknown>): Promise<unknown>;
+  /** the objectives coach's relay: his words to the Team desk or the social desk. */
+  relay?(id: string, args: Record<string, unknown>): Promise<{ desk?: string; state?: string; result?: string }>;
 }
 
 /** The media and WebRTC pieces (the browser's by default; tests fake them). */
@@ -1121,6 +1123,16 @@ export class CallEngine {
           return "The desk is still working on it. Tell him its answer will be in Chat on the Team desk.";
         } finally {
           this.set({ deskWaiting: Math.max(0, this.v.deskWaiting - 1) });
+        }
+      },
+      relay_to_desk: async (a) => {
+        if (!this.api.relay) return "This line cannot pass words to a desk.";
+        try {
+          const r = await this.api.relay(id, a);
+          this.line("tool", `passed his words to the ${r.desk === "social" ? "social" : "Team"} desk`);
+          return r.result ?? "Passed on.";
+        } catch (e) {
+          return `Not passed (${(e as Error).message.slice(0, 120)}). Tell him in one line that it did not go through, and that the whole call still lands in his Team desk chat when it ends. Never promise to pass it later yourself.`;
         }
       },
       listen_for_feedback: async () => "Listen mode is not on this line yet: let him talk without interrupting, say only a short Mm-hm in pauses, and when he says done pass all his words to the desk in one ask_the_desk.",

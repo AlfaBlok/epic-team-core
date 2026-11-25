@@ -1,4 +1,5 @@
-import { Loader2, Pause, Play, Square, Volume2, VolumeX } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Mic, Pause, Play, Square, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { replySpeaker, useSpeakReplies, useSpeakState } from "./speak";
 
@@ -85,5 +86,46 @@ export function SpeakRepliesSwitch({ compact }: { compact?: boolean }) {
       {on ? <Volume2 className={compact ? "h-3.5 w-3.5" : "h-4 w-4 max-sm:h-[18px] max-sm:w-[18px]"} aria-hidden /> : <VolumeX className={compact ? "h-3.5 w-3.5" : "h-4 w-4 max-sm:h-[18px] max-sm:w-[18px]"} aria-hidden />}
       <span className={compact ? "" : "max-sm:sr-only"}>Speak replies: {on ? "on" : "off"}</span>
     </button>
+  );
+}
+
+/**
+ * the desk's answer to his voice note, as a short voice note too (his 25 Nov note: "could I be
+ * getting a voice note back?"): its lead, spoken by ElevenLabs in the narration voice (POST /api/voice/reply-note, kept by
+ * the console so each answer is spoken once). The newest answer is made ready by itself; an older one on a tap.
+ */
+export function ReplyVoiceNote({ text, ready }: { text: string; ready?: boolean }) {
+  const [st, setSt] = useState<{ url?: string; busy?: boolean; error?: string; play?: boolean }>({});
+  const make = async (play: boolean) => {
+    setSt({ busy: true });
+    try {
+      const r = await fetch("/api/voice/reply-note", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      const j = (await r.json().catch(() => ({}))) as { url?: string; error?: { message?: string } };
+      if (!r.ok || !j.url) throw new Error(j.error?.message ?? `console answered ${r.status}`);
+      setSt({ url: j.url, play });
+    } catch (e) {
+      setSt({ error: (e as Error).message.slice(0, 160) });
+    }
+  };
+  useEffect(() => {
+    if (ready && !st.url && !st.busy) void make(false);
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="mt-2 grid gap-1" data-speak-control data-testid="reply-voice-note">
+      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Mic className="h-3 w-3" aria-hidden /> <span className="font-medium">Voice reply</span>
+        {st.busy && <Loader2 className="h-3 w-3 animate-spin" aria-label="Making the voice reply" />}
+      </p>
+      {st.url ? (
+        <audio controls preload="metadata" autoPlay={st.play} src={st.url} className="h-8 w-full max-w-xs" data-testid="reply-voice-note-audio" />
+      ) : (
+        !st.busy && (
+          <button type="button" className={cn(BTN, "w-fit")} onClick={() => void make(true)} data-testid="reply-voice-note-make">
+            <Play className="h-3.5 w-3.5" aria-hidden /> Listen
+          </button>
+        )
+      )}
+      {st.error && <p className="text-[11px] text-destructive">{st.error}</p>}
+    </div>
   );
 }

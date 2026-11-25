@@ -14,8 +14,8 @@ import { SavedCopyLine } from "@/components/SavedCopyLine";
 import { refreshApp } from "@/components/NewBuild";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { useCallDock } from "@/voice/CallPanel";
-import { clockOf, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
-import { ReplyPlay, SpeakingBar, SpeakRepliesSwitch } from "@/voice/ReplyVoice";
+import { clockOf, parseVoiceNote, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
+import { ReplyPlay, ReplyVoiceNote, SpeakingBar, SpeakRepliesSwitch } from "@/voice/ReplyVoice";
 import { replySpeaker, stopOnTapOutside } from "@/voice/speak";
 import { SentFiles, splitAttachments, useChatAttach } from "@/components/ChatAttach";
 import { WordsBox } from "@/components/WordsBox";
@@ -785,6 +785,7 @@ export function ChatView({
 
   // the history shown = older pages + the newest page; scrolling near the top loads the next older page.
   const shown = older ? [...older.messages, ...(chat?.messages ?? [])] : (chat?.messages ?? []);
+  const voiceReplies = voiceReplyIds(shown, !!chat?.working);
   const hasEarlier = older ? older.hasEarlier : !!chat?.hasEarlier;
   const oldest = shown[0]?.position;
   const canPage = hasEarlier && oldest !== undefined;
@@ -1103,7 +1104,7 @@ export function ChatView({
             {foldChat(shown).map((it) =>
               it.kind === "message" ? (
                 <Fragment key={it.m.id}>
-                  <Bubble m={it.m} threadUrl={threadUrl} customer={chat.customer} />
+                  <Bubble m={it.m} threadUrl={threadUrl} customer={chat.customer} voiceReply={voiceReplies.get(it.m.id)} />
                   {notesAt.get(it.m.id)?.map(undeliveredBubble)}
                 </Fragment>
               ) : (
@@ -1322,7 +1323,33 @@ function PostingBubble({ p }: { p: PostingNote }) {
   );
 }
 
-function Bubble({ m, threadUrl, customer }: { m: DeskMessage; threadUrl: (id: string) => string; customer?: boolean }) {
+/**
+ * the desk's answers to his voice notes: the last finished desk message before his next message, when
+ * his message was a voice note. "ready": the newest of them, under a day old, made into a voice note by itself; "tap": older.
+ */
+export function voiceReplyIds(msgs: DeskMessage[], working: boolean, now = Date.now()): Map<string, "ready" | "tap"> {
+  const out = new Map<string, "ready" | "tap">();
+  let afterNote = false;
+  let answer: DeskMessage | undefined;
+  const close = () => {
+    if (afterNote && answer) out.set(answer.id, "tap");
+  };
+  for (const m of msgs) {
+    if (m.kind === "seed") continue;
+    if (m.role === "user" && m.from !== "console") {
+      close();
+      afterNote = !!parseVoiceNote(m.text);
+      answer = undefined;
+    } else if (m.role === "assistant" && m.status === "completed" && m.text.trim()) answer = m;
+  }
+  if (!working) close();
+  const newest = [...out.keys()].at(-1);
+  const at = newest ? msgs.find((m) => m.id === newest)?.at : undefined;
+  if (newest && at && now - Date.parse(at) < 24 * 3_600_000) out.set(newest, "ready");
+  return out;
+}
+
+function Bubble({ m, threadUrl, customer, voiceReply }: { m: DeskMessage; threadUrl: (id: string) => string; customer?: boolean; voiceReply?: "ready" | "tap" }) {
   if (m.kind === "seed")
     return (
       <li className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="chat-divider">
@@ -1372,6 +1399,7 @@ function Bubble({ m, threadUrl, customer }: { m: DeskMessage; threadUrl: (id: st
           <RelTime iso={m.at} />
           {m.truncated && (customer ? " · cut short" : " · cut short, full text in T3")}
         </p>
+        {!mine && voiceReply && !customer && <ReplyVoiceNote text={call?.rest ?? m.text} ready={voiceReply === "ready"} />}
         {!mine && m.status === "completed" && m.text.trim() && <ReplyPlay id={m.id} text={call?.rest ?? m.text} />}
         {mine && <TicketLine m={m} />}
       </div>

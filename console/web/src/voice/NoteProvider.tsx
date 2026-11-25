@@ -85,6 +85,34 @@ export const CONFIRM_CANCEL_S = 60;
 export const SENT_SHOW_MS = 4000;
 const ROUTE_KEY = (key: string) => `voice-note-route:${key}`;
 const OPEN_KEY = "voice-note-open:";
+/** what a card's note needs to come back after a reload: its routes, its card, where it was started. */
+const CARD_META_KEY = (key: string) => `voice-note-card:${key}`;
+interface CardMeta {
+  base: string;
+  to: string;
+  route?: string;
+  page?: string;
+  card?: ClosedCardRef;
+}
+function keptCard(key: string): CardMeta | undefined {
+  try {
+    const raw = localStorage.getItem(CARD_META_KEY(key));
+    const m = raw ? (JSON.parse(raw) as CardMeta) : undefined;
+    return m && typeof m.base === "string" ? m : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function keepCard(key: string, m: CardMeta | undefined) {
+  try {
+    if (m) localStorage.setItem(CARD_META_KEY(key), JSON.stringify(m));
+    else localStorage.removeItem(CARD_META_KEY(key));
+  } catch {
+    /* storage off */
+  }
+}
+/** a restored card note's words for its row when the card is gone (the card's own control uses withVoiceNote). */
+const cardWords = (n: SentNote) => `${n.transcript?.trim() ?? ""} (voice note ${n.id}${n.audio ? `, audio ${n.audio}` : ""})`;
 
 export interface NoteOpts {
   base?: string;
@@ -134,15 +162,41 @@ export class NoteTab {
     return () => this.unhook?.();
   }
 
-  /** After a reload: every chat note kept in this browser is offered again, paused, whatever page opens first. */
+  /**
+   * After a reload: every note kept in this browser is offered again, paused, whatever page opens first: a chat's, and
+   * (the owner 25 Nov: "I click voice, and then I follow the link ... and then I click back, and
+   * then I land where the voice note started") a card's. His installed phone app goes to the back while the link's page
+   * is in front, and the phone may reload it there; a card's note, held only in memory, was lost with the page. Now it is
+   * kept like a chat's, comes back paused on its card (Resume or Send), and the pill links back to where it started.
+   * Left alone it sends by itself to that card, or to the card's row when the card is no longer shown.
+   */
   restore() {
+    let keys: string[] = [];
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k?.startsWith(OPEN_KEY)) this.note(k.slice(OPEN_KEY.length));
+        if (k?.startsWith(OPEN_KEY)) keys.push(k.slice(OPEN_KEY.length));
       }
     } catch {
-      /* storage off */
+      keys = [];
+    }
+    for (const key of keys) {
+      // a chat's note is kept under its route (`/api/voice`); every other kept note is a card's (`review:<id>:changes`)
+      const m = keptCard(key);
+      if (!m) {
+        if (key.startsWith("/")) this.note(key);
+        else localNoteStore(key).clear();
+        continue;
+      }
+      const h = this.note(key, { fill: true, base: m.base, to: m.to });
+      h.route = m.route;
+      h.page = m.page;
+      h.card = m.card;
+      h.words = (n) => cardWords(n);
+      // the card is not on screen yet: its press refuses, so the note goes to the card's row (or the Team desk).
+      // When the card shows, its own control replaces this with the card's press (useNote).
+      h.deliver = () => Promise.reject(new Error("the card was not on screen when the note was sent"));
+      void h.engine.recover();
     }
   }
 
@@ -157,8 +211,9 @@ export class NoteTab {
     const had = this.get(key, o.api);
     if (had) return had;
     const base = o.base ?? (key.startsWith("/") ? key : "/api/voice");
-    // A chat's open note is kept in browser storage; a card's answer is short and kept in memory. Tests: memory.
-    const store = o.store ?? (o.api || o.fill ? memoryNoteStore() : localNoteStore(base));
+    // A chat's open note is kept in browser storage, and a card's too (under its own origin, so a reload of
+    // the installed app while a link's page is in front never loses it). Tests: memory.
+    const store = o.store ?? (o.api ? memoryNoteStore() : o.fill ? localNoteStore(key) : localNoteStore(base));
     let route: string | undefined;
     if (!o.api)
       try {
@@ -306,6 +361,7 @@ export class NoteTab {
   /** Done with a note: its line goes (and a card's holder with it, if no control shows it). */
   forget(h: HeldNote) {
     h.out = undefined;
+    if (h.deliver && !h.given && !noteOn(h.engine.view().phase)) keepCard(h.key, undefined);
     if (h.engine.view().phase === "sent" || h.engine.view().phase === "failed") h.engine.dismiss();
     if (h.deliver && h.docks === 0 && h.engine.view().phase === "idle" && this.held.get(h.key) === h) this.held.delete(h.key);
     this.changed();
@@ -332,6 +388,7 @@ export class NoteTab {
       } catch {
         /* storage off */
       }
+    if (!h.given && h.deliver && !h.key.startsWith("/")) keepCard(h.key, { base: h.base, to: h.to, route, page: h.page, card: h.card });
     this.changed();
   }
 

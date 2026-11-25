@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHUNK_RELOADED_KEY, lazyPage, reloadForNewBuild } from "@/lib/lazyPage";
+import { hookLinks } from "@/voice/linkGuard";
 
 // the first download: a fresh open loads only what the first screen needs
 
@@ -45,6 +46,17 @@ describe("screens load on first open", () => {
     // the same build failing again (a real outage): no second reload, the page shows its error
     expect(reloadForNewBuild(a.win)).toBe(false);
     expect(a.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("never reloads under a voice note that is on (the note goes on; the screen shows its error)", () => {
+    const a = fakeWindow();
+    let on = true;
+    const off = hookLinks(window, { busy: () => on });
+    expect(reloadForNewBuild(a.win)).toBe(false);
+    expect(a.reload).not.toHaveBeenCalled();
+    on = false;
+    expect(reloadForNewBuild(a.win)).toBe(true);
+    off();
   });
 
   it("the first screen's code names no heavy screen statically (they would be back in the first download)", () => {

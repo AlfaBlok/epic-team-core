@@ -5,7 +5,7 @@ import { NoteProvider, NoteWidget } from "@/voice/NoteProvider";
 import { NewBuild } from "@/components/NewBuild";
 import { InPlaceLinks } from "@/components/InPlaceLinks";
 import { DASHBOARD_PATH, SETTINGS_PATH } from "@/lib/settingsPath";
-import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, ON_DEVICE_PATH, X_STATS_PATH } from "@/lib/routePaths";
+import { FEEDBACK_PATH, TEAM_SKILLS_PATH, YOUR_TEAM_PATH, IDEAS_PATH, CAMPAIGNS_PATH, NEW_CAMPAIGN_PATH, BRIEF_PATH, BOOK_PATH, MILESTONE_BOOK_PATH, DECK_INDEX_PATH, EPIC_DECK_PATH, ROCKS_PAGE_PATH, GOAL_GRAPH_PATH, memoryPagePath, GAP_FINDER_PATH, LAUNCH_PATH, PRIORITY_PATH, PAGES_PATH, ONE_OFFS_PATH, OUTCOMES_PATH, VOICE_NOTES_PATH, ON_DEVICE_PATH, X_STATS_PATH, COACH_PATH } from "@/lib/routePaths";
 import { BookIndexRedirect, BookToDeck } from "@/pages/BookRedirect";
 import { DECK_ALL_PATH } from "@/lib/deck";
 import { ALL_PIPELINE_PATH, PRODUCT_PATH, socialPath } from "@/pages/social/nav";
@@ -27,6 +27,7 @@ import { lazyPage } from "@/lib/lazyPage";
 // time it opens (lib/lazyPage.tsx). A cold open was one 1.7 MB script (495 KB zipped) holding every screen.
 // the notes kept on this device open with their page, not with the inbox
 const OnDevicePage = lazyPage(() => import("@/voice/OnDevice"), "OnDevicePage");
+const CoachPage = lazyPage(() => import("@/voice/Coach"), "CoachPage");
 const CardInventoryPage = lazyPage(() => import("@/components/cardInventory"), "CardInventoryPage");
 // Home too (its goals view and the goal-sets code under it): the Inbox opens without them.
 const HomePage = lazyPage(() => import("@/components/homeView"), "HomePage");
@@ -94,6 +95,8 @@ const CORE_ROUTES: ScreenRoute[] = [
   { screen: "chat", path: "chat", element: <ChatPage /> },
   // the voice notes kept on this device: waiting to send (Send now), and the last 5 sent, to play back.
   { screen: "chat", path: ON_DEVICE_PATH, element: <OnDevicePage /> },
+  // the objectives coach: one call about his objectives and key results, his words relayed to a desk.
+  { screen: "chat", path: COACH_PATH, element: <CoachPage /> },
   // readiness, red lines and What you build, then every operator page (docs/design/console.md).
   { screen: "settings", path: SETTINGS_PATH, element: <SettingsPage /> },
   // the read-only dashboard panels that left Settings (root L-80), one page in the menu's tools.

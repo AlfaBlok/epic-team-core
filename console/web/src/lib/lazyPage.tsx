@@ -1,5 +1,6 @@
 import { Suspense, lazy, type ComponentType, type ReactNode } from "react";
 import { Loading } from "@/components/common";
+import { noteOn } from "@/voice/linkGuard";
 
 /**
  * The first download stays small: every screen but Home and the sidebar loads its own small script the first time it opens, so a cold open
@@ -40,6 +41,9 @@ export const CHUNK_RELOADED_KEY = "console-chunk-reloaded";
  */
 export function reloadForNewBuild(win: Window | undefined = typeof window === "undefined" ? undefined : window): boolean {
   if (!win) return false;
+  // never under a voice note that is on (the owner 25 Nov: "this link ... makes the app reload"):
+  // the screen shows its error with a Reload he presses after Send; the note goes on.
+  if (noteOn()) return false;
   const build = Array.from(win.document.querySelectorAll<HTMLScriptElement>("script[src]")).map((s) => s.getAttribute("src") ?? "").find((s) => /\/assets\/index-/.test(s)) ?? "dev";
   try {
     if (win.sessionStorage.getItem(CHUNK_RELOADED_KEY) === build) return false;

@@ -189,6 +189,8 @@ export interface CycleOptions {
   objectiveOf?: (id: string) => Promise<{ name: string; epics: string[] } | undefined>;
   /** the milestone's product map (totemMap.ts, root L-77): its totems to read first and write back last; "" = no map. */
   totemMap?: (m: Milestone) => Promise<string | undefined>;
+  /** this persona's part on its wheel (yourPart.ts): the chapters it reads and writes, the plot, the objective and its key results; every world. */
+  yourPart?: (m: Milestone, p: Persona) => Promise<string | undefined>;
   /** the persona's line on naming its row in every commit (status/personaRows.ts); undefined = none. */
   commitRow?: (p: Persona, m: Milestone) => string | undefined;
   /** a few lines for the wake message itself: where the objective stands and the owner's newest word on it. */
@@ -2371,6 +2373,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const services = o.teamServices ? await o.teamServices(p, run.id).catch(() => undefined) : undefined;
     const owned = o.ownerObjectives ? await o.ownerObjectives(m).catch(() => undefined) : undefined;
     const map = o.totemMap ? await o.totemMap(m).catch(() => undefined) : undefined;
+    const part = o.yourPart ? await o.yourPart(m, p).catch(() => undefined) : undefined;
     const commitRow = (() => { try { return o.commitRow?.(p, m); } catch { return undefined; } })();
     const deckUrl = deckUrlOf(m);
     const mine = a.objective && o.objectiveOf ? await o.objectiveOf(a.objective).catch(() => undefined) : undefined;
@@ -2378,6 +2381,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
     const otherManagerOn = (x: typeof a) => store.listAssignments().some((y) => y.id !== x.id && y.enabled && y.objective === x.objective && y.milestoneId !== x.milestoneId && isDeliveryManager(store.getPersona(y.personaId)?.name));
     let prompt =
       buildWakePrompt(p, m, a, run.instructions, run.instructionsBy, maxWorkers, children, skills.use, brief, deckUrl, !!jobBase) +
+      (part ? "\n\n" + part : "") +
       (a.objective ? "\n\n" + objectiveSection(a.objective, mine, isDeliveryManager(p.name), m.repo && otherManagerOn(a) ? `${m.repo}: ${m.path}` : undefined) : "") +
       (owned?.block ? "\n\n" + owned.block : "") +
       (map ? "\n\n" + map : "") +

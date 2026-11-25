@@ -98,6 +98,7 @@ import { personaRows, standingRow, standingRowSection } from "./status/personaRo
 import { cardRepoOf, listCards as listTeamCards, mountTeamCards, parseDoc as parseTeamCards, TEAM_CARDS_FILE } from "./inbox/teamCards.js";
 import { worldRepos } from "./worldRepos.js";
 import { chatSection, inForceWords, readHisWords } from "./desk/hisObjectives.js";
+import { campaignObjective, readPlot, readPursuits, readWheel, yourPartSection } from "./yourPart.js";
 import { chaptersLine, keyResultLines, objectiveCards, objectivesBlock, objectivesOneLine, readChapters, readRedLines, type ObjectivesInput } from "./objectives.js";
 import { inboxWarmHealth } from "./warmInbox.js";
 import { keptJson, sendPrepared } from "./keptJson.js";
@@ -221,11 +222,13 @@ import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
-import { CALL_TRANSCRIPT_HEAD, createVoice, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
-import { mountCampaignVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
+import { mountCampaignVoice, mountCoachVoice, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
+import { mountReplyNote } from "./voice/replyNote.js";
+import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
 import { anthropicTouchConfirm, anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchConfirm, openAiTouchJudge, TOUCH_GRACE_MS, type NoteTouch, type TouchCard, type TouchConfirm, type TouchJudge } from "./voice/touch.js";
@@ -560,7 +563,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -1095,7 +1098,9 @@ export function createApp(
   const totemHome = () => resolveRepo(read.reposRoot, homeRepo())?.path;
   const totemMaps = () => readMaps(totemHome());
   /** the objective whose epics list this milestone's spine (docs/pursuits.json), for picking its product. */
-  const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined => wheelReader(totemHome()).ofSpine(m.repo, m.path);
+  // a campaign whose spine no objective's epics or plan hold serves the objective that watches it or names its repo as its campaign.
+  const objectiveOfMilestone = (m: { repo?: string; path: string }): string | undefined =>
+    wheelReader(totemHome()).ofSpine(m.repo, m.path) ?? campaignObjective(readPursuits(pursuits.homeDir()), m.repo, m.path);
   const liveObjective = (id: string) => !!pursuits.doc()?.pursuits.some((p) => p.id === id && (p as { active?: boolean }).active !== false && !(p as { done?: boolean }).done);
   /** the milestone's objective; one under none (a campaign) takes its product's first live objective. */
   const objectiveFor = (m: { repo?: string; path: string }) => {
@@ -1288,6 +1293,26 @@ export function createApp(
     launchDrafts: launchDraftsOf, // launch board reds with no owner row
     objectives: async (m) => (objectivesOf ? objectivesOf(m) : { idle: [] }), // its objectives below green; an idle one is news
     totemMap: async (m) => totemMapFor(m),
+    // every persona of every world is told its chapters (the ones it reads and writes), the plot and its objective with its key results.
+    yourPart: async (m, p) => {
+      const { maps, product, objective, own } = objectiveFor(m);
+      // a wheel of the social world is that product's campaign, whichever product it talks about
+      const social = worldOf(m.id) === socialWorld();
+      const of = social ? maps.products.find((x) => [x.name, x.product].some((n) => n.toLowerCase() === socialProduct().toLowerCase())) : product;
+      const wheel = readWheel(totemHome(), of?.product ?? (social ? socialProduct() : undefined));
+      const raw = objective ? readPursuits(pursuits.homeDir()).find((x) => x.id === objective) : undefined;
+      const node = objective ? (await ownerObjectivesInput?.().catch(() => undefined))?.nodes.find((n) => n.id === objective) : undefined;
+      const how = own ? "it names this campaign or its repo" : "no objective names this campaign: its product's first live objective";
+      return yourPartSection({
+        persona: p.name,
+        milestone: m.title,
+        repo: m.repo?.split("/").pop(),
+        template: of?.repos[0],
+        wheel,
+        plot: readPlot(locateDir(m) ?? resolveRepo(read.reposRoot, m.repo)?.path, m.path),
+        objective: objective ? { id: objective, name: raw?.name ?? node?.name ?? objective, greenWhen: raw?.greenWhen, keyResults: node?.keyResults ?? [], how } : undefined,
+      });
+    },
     // every persona commit names its row (its standing row from docs/functions/catalog.json)
     // a customer's workspace (its plan is not internal) has no row of ours: our catalog's standing rows are for our own worlds
     commitRow: (p, m) => {
@@ -3448,6 +3473,61 @@ export function createApp(
   mountCampaignVoice(api, campaignVoice);
   // Play on a desk reply speaks it in the team's local voice on the worker server (free); down = the browser's best voice.
   mountReplyVoice(api, opts.voice?.speak);
+  // the desk's answer to his voice note comes back as a short voice note too (ElevenLabs, the narration voice, the grant).
+  const elevenKey = async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")));
+  mountReplyNote(api, { key: elevenKey, dir: process.env.CONSOLE_REPLY_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "reply-notes"), ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
+  // the objectives coach (/coach): its own ElevenLabs agent, his objectives read only, his words relayed to a desk.
+  const coachEleven: ElevenCalls | undefined =
+    opts.voice?.coachEleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          name: COACH_AGENT_NAME,
+          tags: ["epicteam", "objectives-coach"],
+          key: elevenKey,
+          prompt: coachInstructions,
+          firstMessage: COACH_GREETING,
+          tools: () => COACH_TOOLS as any,
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_coach_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_coach_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
+  let coachRelays = 0;
+  const coachVoice = createVoice({
+    ...voiceBase,
+    eleven: coachEleven,
+    // the coach runs on ElevenLabs only: never OpenAI's paid realtime voice.
+    mint: async () => {
+      throw new VoiceError(409, "coach_eleven_only", "The objectives coach runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+    },
+    scope: { world: DEFAULT_TENANT },
+    instructions: coachInstructions,
+    tools: () => COACH_TOOLS as any,
+    desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    quickStatus: noStatus,
+    objectiveCards: voiceObjectiveCards,
+    context: async () => coachKnows(await voiceObjectiveCards()),
+    walkRule: () => "",
+    relay: async (callId, args) => {
+      const r = relayIn(args);
+      const n = ++coachRelays;
+      if (r.desk === "team") {
+        await desk.send(teamRelayText(callId, r), COACH_PAGE, `coach-${callId}-${n}`);
+        console.log(`[voice] ${callId} coach relayed his words to the Team desk`);
+        return { desk: "team", state: "sent", result: "Passed to the Team desk. Tell him in a few words." };
+      }
+      const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: COACH_PAGE, requestId: `coach-${callId}-${n}` });
+      if (!p) {
+        // no social desk paired on this console: his words still reach the Team desk, which passes them on itself.
+        await desk.send(teamRelayText(callId, { ...r, note: `For the social desk: pass only these words of his there (no desk across on this console). ${r.note}`.trim() }), COACH_PAGE, `coach-${callId}-${n}`);
+        return { desk: "team", state: "sent", result: "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." };
+      }
+      console.log(`[voice] ${callId} coach relayed his words to the social desk (${p.state})`);
+      return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+    },
+  });
+  mountCoachVoice(api, coachVoice, { world: () => store.tenant });
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";
