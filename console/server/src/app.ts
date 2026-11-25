@@ -14,7 +14,7 @@ import { compress } from "hono/compress";
 export const INBOX_LISTS = ["/waiting-on-owner", "/waiting-on-owner/:id", "/review-items", "/personas", "/status", "/milestones/:id/status", "/owner-activity", "/laptop"];
 import { HTTPException } from "hono/http-exception";
 import type { ZodSchema, z } from "zod";
-import { DEFAULT_TENANT, defaultDbPath, ensureTenancy, type DB } from "./db.js";
+import { DEFAULT_TENANT, defaultDbPath, ensureTenancy, openDb, type DB } from "./db.js";
 import { createStore, forTenant, UnknownReference, type Milestone, type Persona, type Run } from "./store.js";
 import * as s from "./schemas.js";
 import { logToggle, toggleActorFor, worldToggleRefusal } from "./assignmentToggle.js";
@@ -228,7 +228,7 @@ import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
-import { anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchJudge, type NoteTouch, type TouchCard, type TouchJudge } from "./voice/touch.js";
+import { anthropicTouchConfirm, anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchConfirm, openAiTouchJudge, TOUCH_GRACE_MS, type NoteTouch, type TouchCard, type TouchConfirm, type TouchJudge } from "./voice/touch.js";
 import { addMarks } from "./review/noteMarks.js";
 import { createVoiceNotes, DELIVER_WINDOW_MS, geminiTranscriber, mountVoiceNotesRec, voiceSendHealth, type Transcriber, type VoiceNote, type VoiceNotes } from "./voice/notes.js";
 import { writeUndeliveredNote } from "./voice/undeliveredNote.js";
@@ -496,7 +496,7 @@ export function createApp(
      * cards in his inbox; each card it touches is marked updated or stale in its spine and its owner is woken with his words
      * (voice/touch.ts). true = the console's text model; a judge for tests; absent = off. Wakes and the desk line need the cycle.
      */
-    noteTouch?: boolean | { judge?: TouchJudge };
+    noteTouch?: boolean | { judge?: TouchJudge; confirm?: TouchConfirm; graceMs?: number };
     /**
      * the press log and outbox (press/). tickMs: how often the worker retries presses not landed yet (0 or unset =
      * no timer; tests call the worker); retryMs / giveUpMs: its backoff; onWorker hands the worker to index.ts / tests.
@@ -1578,11 +1578,15 @@ export function createApp(
     ).unref();
   // made below, once the review list and the asks can be read; a desk message reaches it through deskSaid.
   let noteTouch: NoteTouch | undefined;
+  /** E942-S174 the same pass on given words, writing nothing (set below with the pass). */
+  let touchTry: ((x: { words: string; after?: string; typed?: boolean; cards?: TouchCard[] }) => Promise<unknown>) | undefined;
+  const touchGraceMs = typeof opts.noteTouch === "object" && opts.noteTouch.graceMs !== undefined ? opts.noteTouch.graceMs : TOUCH_GRACE_MS;
   const touchWhere = (text: string) => (/^🎙 Voice note \(WhatsApp/.test(text) ? "WhatsApp" : /^🎙 Voice note \(Chat\)/.test(text) ? "the Team desk Chat" : "a message to the Team desk");
   const deskSaid = (world: string, text: string, requestId?: string, pending?: boolean) => {
     void deskCross?.said({ world, words: text, ...(requestId ? { requestId } : {}), ...(pending ? { pending } : {}) }).catch((e) => console.error("desk cross:", e));
     // a typed message is read too, from TOUCH_MIN_TYPED_WORDS words: the stale-card mark is not only for voice notes
-    void noteTouch?.heard({ world, words: text, where: touchWhere(text), typed: isTyped(text), ...(requestId ? { id: requestId } : {}) }).catch((e) => console.error("note touch:", e));
+    // E942-S174 read after a grace window, so a message he takes back right after marks nothing
+    void noteTouch?.heard({ world, words: text, where: touchWhere(text), typed: isTyped(text), ...(requestId ? { id: requestId } : {}) }, { graceMs: touchGraceMs }).catch((e) => console.error("note touch:", e));
   };
   // his Chat voice notes posted but not in the desk's chat yet (set once the voice notes are made, below).
   let teamUndelivered: () => VoiceNote[] = () => [];
@@ -2787,20 +2791,44 @@ export function createApp(
   if (touchOpt) {
     const touchJudge: TouchJudge = touchOpt.judge ?? (onClaude ? anthropicTouchJudge(anthropicKey) : openAiTouchJudge(textOpenAiKey));
     const oneLine = (t: string) => t.replace(/\s+/g, " ").trim();
-    noteTouch = createNoteTouch({
-      db,
-      judge: touchJudge,
-      // the owner's own inbox (world the home world): the review cards and his open asks
-      cards: async (world) => {
+    // E942-S174 a test's own judge decides alone unless it brings its own second look
+    const touchConfirm: TouchConfirm | undefined = touchOpt.confirm ?? (touchOpt.judge ? undefined : onClaude ? anthropicTouchConfirm(anthropicKey) : openAiTouchConfirm(textOpenAiKey));
+    // the owner's own inbox (world the home world): the review cards and his open asks
+    const touchCards = async (world: string): Promise<TouchCard[]> => {
         if (world !== DEFAULT_TENANT) return [];
         const rows = (await gateReview.list({ state: "feed" }))
           .filter((i) => i.kind !== "post" && i.verdict.kind === "card" && !i.test && !i.backlogSince)
-          .map((i): TouchCard => ({ kind: "row", ref: i.ref, title: i.face?.title || i.title, about: oneLine(i.face?.taskGoal ?? i.summary ?? "").slice(0, 300), repo: i.repo, path: i.path, ...(i.milestoneId ? { milestoneId: i.milestoneId } : {}), current: i.status, text: `${i.title} ${i.status} ${i.summary ?? ""}` }));
+          .map((i): TouchCard => ({ kind: "row", ref: i.ref, title: i.face?.title || i.title, about: oneLine(i.face?.taskGoal ?? i.summary ?? "").slice(0, 300), ...(i.face?.about ? { topic: i.face.about } : {}), repo: i.repo, path: i.path, ...(i.milestoneId ? { milestoneId: i.milestoneId } : {}), current: i.status, text: `${i.title} ${i.status} ${i.summary ?? ""}` }));
         const asks = (await waitingAndDefects({ ...inboxDeps, store: homeStore }, { world: DEFAULT_TENANT }).catch(() => ({ items: [] as Awaited<ReturnType<typeof waitingAndDefects>>["items"] }))).items
           .filter((a) => a.source === "ask" && a.state === "open" && !!a.code && !!a.repo && !!a.path && !a.snoozedUntil)
-          .map((a): TouchCard => ({ kind: "ask", ref: a.code!, title: oneLine(a.question ?? a.title).slice(0, 200), about: oneLine(a.title ?? "").slice(0, 200), repo: a.repo!, path: a.path!, ...(a.milestoneId ? { milestoneId: a.milestoneId } : {}), current: a.question ?? "", text: `${a.question ?? ""} ${a.title ?? ""} ${a.contextText ?? ""}` }));
+          .map((a): TouchCard => ({ kind: "ask", ref: a.code!, title: oneLine(a.question ?? a.title).slice(0, 200), about: oneLine(a.title ?? "").slice(0, 200), ...(a.about ? { topic: a.about } : {}), repo: a.repo!, path: a.path!, ...(a.milestoneId ? { milestoneId: a.milestoneId } : {}), current: a.question ?? "", text: `${a.question ?? ""} ${a.title ?? ""} ${a.contextText ?? ""}` }));
         return [...rows, ...asks];
-      },
+    };
+    // E942-S174 a dry run of the same pass (same model, same two looks, same grace rule) on a throwaway table: marks, wakes and tells nothing
+    touchTry = async (x) => {
+      const scratch = openDb(":memory:");
+      try {
+        const marks: { ref: string; kind: string; quote: string; why: string }[] = [];
+        let t: NoteTouch | undefined = undefined;
+        t = createNoteTouch({
+          db: scratch,
+          judge: touchJudge,
+          ...(touchConfirm ? { confirm: touchConfirm } : {}),
+          sleep: async () => void (x.after ? await t?.heard({ world: DEFAULT_TENANT, words: x.after, where: "a message to the Team desk", typed: true }) : undefined),
+          cards: async () => x.cards ?? (await touchCards(DEFAULT_TENANT)),
+          mark: async (_r, _p, m) => (marks.push(...m.map(({ ref, kind, quote, why }) => ({ ref, kind, quote, why }))), true),
+        });
+        const state = await t.heard({ world: DEFAULT_TENANT, words: x.words, where: x.typed ? "a message to the Team desk" : "a try", typed: !!x.typed, id: "try" }, { graceMs: 1 });
+        return { state: state ?? "short", marks, pass: t.recent(1)[0] ?? null };
+      } finally {
+        scratch.close();
+      }
+    };
+    noteTouch = createNoteTouch({
+      db,
+      judge: touchJudge,
+      ...(touchConfirm ? { confirm: touchConfirm } : {}),
+      cards: touchCards,
       mark: async (repo, rel, marks) => {
         const dir = resolveRepo(read.reposRoot, repo)?.path;
         if (!dir) return `no checkout for ${repo}`;
@@ -5097,6 +5125,17 @@ export function createApp(
   mountVoiceNotes(api, voiceNotes);
   // the latest long-note passes (which cards each marked, whose owner was woken), newest first.
   api.get("/desk/voice-touches", (c) => c.json({ on: !!noteTouch, passes: noteTouch?.recent(Number(c.req.query("limit") ?? 20) || 20) ?? [] }));
+  // E942-S174 try the pass on given words (a past note, a test), writing nothing: {words, after?, typed?, cards?}
+  api.post("/desk/voice-touches/try", async (c) => {
+    if (!touchTry) return c.json({ error: { code: "off", message: "the long-note pass is off on this console" } }, 503);
+    const b = (await c.req.json().catch(() => ({}))) as { words?: unknown; after?: unknown; typed?: unknown; cards?: unknown };
+    const words = typeof b.words === "string" ? b.words.trim() : "";
+    if (!words || words.length > 90_000) return c.json({ error: { code: "bad_request", message: "words (his note, up to 90,000 characters) is required; after, typed and cards are optional" } }, 400);
+    const cards = Array.isArray(b.cards)
+      ? (b.cards as Record<string, unknown>[]).slice(0, 80).map((x): TouchCard => ({ kind: x.kind === "ask" ? "ask" : "row", ref: String(x.ref ?? ""), title: String(x.title ?? ""), about: String(x.about ?? ""), ...(typeof x.topic === "string" ? { topic: x.topic } : {}), repo: "try", path: "try", current: "" }))
+      : undefined;
+    return c.json(await touchTry({ words, ...(typeof b.after === "string" ? { after: b.after } : {}), typed: b.typed === true, ...(cards ? { cards } : {}) }));
+  });
   // run the pass on one WhatsApp note the relay already posted (a note that came before the pass, or whose pass
   // failed). The words come from the memory service, never from the caller; one pass per note, so a repeat answers its first result.
   api.post("/desk/voice-touches/run", async (c) => {

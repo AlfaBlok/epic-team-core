@@ -20,7 +20,9 @@ export type ChatItem =
 
 /** A desk message short enough to be an echo or a working step: at most 3 lines and 320 characters. */
 export const SHORT_REPLY = 320;
-export const isShort = (text: string) => text.trim().length <= SHORT_REPLY && text.trim().split("\n").filter((l) => l.trim()).length <= 3;
+/** What a reader sees of a message: link words, not their URLs. */
+const seen = (text: string) => text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "").trim();
+export const isShort = (text: string) => seen(text).length <= SHORT_REPLY && seen(text).split("\n").filter((l) => l.trim()).length <= 3;
 
 /** A user-role line the console wrote: marked by the server, else (an older server) a relay receipt it passed in. */
 export function isConsole(m: DeskMessage): boolean {
@@ -90,6 +92,7 @@ export function foldChat(messages: DeskMessage[]): ChatItem[] {
 export function consoleSummary(lines: DeskMessage[]): string {
   const reply = [...lines].reverse().find((m) => m.role === "assistant" && m.text.trim());
   const p = reply ? undefined : passedHead(lines[lines.length - 1].text);
-  const first = (reply ? reply.text.trim().split("\n")[0] : p ? `Passed on to your ${p.desk} desk: ${p.about}` : "").replace(/\*\*/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, "").trim();
+  let first = (reply ? reply.text.trim().split("\n")[0] : p ? `Passed on to your ${p.desk} desk: ${p.about}` : "").replace(/\*\*/g, "");
+  first = seen(first);
   return first.length > 140 ? `${first.slice(0, 138).replace(/\s+\S*$/, "")}…` : first;
 }

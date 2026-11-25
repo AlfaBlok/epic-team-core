@@ -56,6 +56,15 @@ describe("the desk Chat folds machine lines away from his words", () => {
     expect(foldChat([a, b]).map((x) => x.kind)).toEqual(["message", "message"]);
   });
 
+  it("folds the desk's close notices after a held batch, however long their links are (25 Nov 09:54Z)", () => {
+    const batch = msg("user", "[console lines] held while you were busy: 2 lines, oldest first.", "console");
+    const link = (row: string) => `[${row}](https://github.com/example/team/blob/main/docs/spines/a-rather-long-spine-name-for-this-goal.md) ([console](https://team.example.com/milestones/ms_a1c1fa4e-cd02-4d03-9939-9bcf052e69bb?tab=deck&epic=docs/spines/a-rather-long-spine-name-for-this-goal.md))`;
+    const one = msg("assistant", `${link("E942-S141")} has closed: the fix for your phone app showing an old chat is in place.`);
+    const two = msg("assistant", `${link("E984-S51")} has closed: the voice platform is now the default. The plan page lists every way we use it.`);
+    const items = foldChat([batch, one, two]);
+    expect(items.map((x) => x.kind)).toEqual(["console"]);
+  });
+
   it("reads a relay receipt as the console's even before the server marks it", () => {
     const r = msg("user", `↔ Passed to the ${socialProduct()} desk (dn_1): landed as EPIC-900-A32, 02:26Z, Alert: P-0414.`);
     expect(isConsole(r)).toBe(true);

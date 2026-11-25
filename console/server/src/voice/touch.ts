@@ -41,6 +41,24 @@ export const isTyped = (text: string) => !/^\s*🎙/u.test(text);
 const CHARS_MAX = 90_000;
 /** Cards the model is shown at most (newest first is the caller's order). */
 export const TOUCH_MAX_CARDS = 80;
+/**
+ * E942-S174: a typed or spoken desk message waits this long before it is read, so a message he takes back right after
+ * ("I actually just saw them, you can ignore my last message.", 22 Nov 20:01Z, one minute after his 20:00Z message
+ * the console had already put on the family card) marks nothing. CONSOLE_NOTE_TOUCH_GRACE_MS overrides.
+ */
+export const TOUCH_GRACE_MS = Number(process.env.CONSOLE_NOTE_TOUCH_GRACE_MS) || 120_000;
+/** Candidates the confirm pass reads one by one, at most (a note that touches more than this is rare). */
+const CONFIRM_MAX = 8;
+/** Words of the note on each side of his quote the confirm pass reads. */
+const PASSAGE_WORDS = 160;
+/**
+ * A short message that takes back the one before it. Only a short message (a withdrawal is a line, not a new note), and
+ * only words about a message or note, never "ignore that table" (a point about the work itself).
+ */
+const WITHDRAW =
+  /\b(ignore|disregard|forget(?: about)?|scratch|drop)\b[^.?!]{0,40}?\b(last|previous|earlier|above|that|this|my)\b[^.?!]{0,25}?\b(message|messages|note|msg|remark|comment|question|voice ?note)\b|\bnever ?mind\b|\b(?:take|taking) (?:that|it) back\b|^\s*(?:please\s+)?(?:ignore|disregard|forget)\s+(?:that|this|it)\s*[.!]?\s*$/i;
+/** He takes back what he said just before. */
+export const takesBack = (words: string) => wordCount(words) <= 40 && WITHDRAW.test(words);
 /** Console and persona heads: never his words. */
 const SKIP_HEADS = ["↔", SPILL_HEAD, TOUCH_HEAD, "📎", "[", "📞", "🗂"];
 
@@ -61,6 +79,8 @@ export interface TouchCard {
   current: string;
   /** Its words as the spine has them (row title, status, evidence; ask line): a card that cites the note was made from it. */
   text?: string;
+  /** E942-S174: what the card is about, in plain words (its `About:` line: the house, the family, the inbox), so a note about one topic is never put on a card of another. */
+  topic?: string;
 }
 
 export interface TouchNote {
@@ -88,15 +108,43 @@ export interface Touched {
 }
 export interface TouchJudgeInput {
   words: string;
-  cards: Pick<TouchCard, "kind" | "ref" | "title" | "about">[];
+  cards: Pick<TouchCard, "kind" | "ref" | "title" | "about" | "topic">[];
+  /** What he said right after, in the grace window (it may take the note back or correct it). */
+  after?: string;
 }
 export type TouchJudge = (n: TouchJudgeInput) => Promise<Touched[]>;
-export type TouchState = "judging" | "none" | "done" | "failed";
+/**
+ * E942-S174 the second look: one card and the part of his note around his quote. The first pass reads up to 80 cards
+ * against a whole note and matched on a shared word (22 Nov 16:12Z: "a table that had five key results", said about the
+ * house criteria, put on the key-results card; 16:50Z: "he wants me to ... leave a fiction", said about his dad, marked
+ * the script card stale). This pass says first what his words are about, then whether that is this card's work.
+ */
+export interface TouchConfirmInput {
+  card: Pick<TouchCard, "kind" | "ref" | "title" | "about" | "topic">;
+  how: NoteMarkKind;
+  quote: string;
+  /** The note around his quote. */
+  passage: string;
+}
+export interface TouchConfirmed {
+  /** What his words here are about, in his terms. */
+  subject: string;
+  /** His words are about this card's own work and its owner must act. */
+  same: boolean;
+  how: NoteMarkKind;
+  why: string;
+}
+export type TouchConfirm = (x: TouchConfirmInput) => Promise<TouchConfirmed>;
+export type TouchState = "judging" | "none" | "done" | "failed" | "withdrawn";
 
 export interface TouchDeps {
   db: DB;
   /** The model check; absent = off. */
   judge?: TouchJudge;
+  /** E942-S174 the second look at each card the first pass named; absent = the first pass alone decides. */
+  confirm?: TouchConfirm;
+  /** Waits this long (the grace window); a test passes its own clock. */
+  sleep?: (ms: number) => Promise<void>;
   /** The open cards of a world's inbox. */
   cards: (world: string) => Promise<TouchCard[]>;
   /** Write these marks into one spine (one commit): true, else why not. */
@@ -190,6 +238,22 @@ export function wakeText(n: { at: string; where: string; ref: string; typed?: bo
     .slice(0, 6000);
 }
 
+/** The note around his quote: PASSAGE_WORDS words on each side of where it starts (speech to text punctuates freely). */
+export function passageOf(note: string, quote: string, span = PASSAGE_WORDS): string {
+  const words = note.split(/\s+/).filter(Boolean);
+  const flatWords = words.map(flat);
+  const q = flat(quote.split(/\.{3}|…/)[0] ?? quote).split(" ").filter(Boolean).slice(0, 4);
+  let at = -1;
+  if (q.length)
+    for (let i = 0; i < flatWords.length && at < 0; i++) {
+      // a word of the note may flatten to two ("it's" -> "it s"): compare on the joined run
+      const run = flatWords.slice(i, i + q.length + 2).join(" ");
+      if (flatWords[i] && run.startsWith(q.join(" "))) at = i;
+    }
+  if (at < 0) return words.slice(0, span * 2).join(" ");
+  return words.slice(Math.max(0, at - span), at + span).join(" ");
+}
+
 /** The one Team desk line. */
 export function touchLine(n: { at: string; key: string }, list: { card: TouchCard; t: Touched }[]): string {
   return [
@@ -209,12 +273,23 @@ export function createNoteTouch(d: TouchDeps) {
       .prepare("UPDATE voice_note_touches SET state = ?, touched = COALESCE(?, touched), error = ? WHERE note_key = ?")
       .run(state, extra.touched === undefined ? null : JSON.stringify(extra.touched), extra.error ?? null, key);
 
+  // E942-S174 what he said lately, per world, in order: a note read after its grace window sees what came right after it
+  let seq = 0;
+  const said = new Map<string, { seq: number; words: string }[]>();
+  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
+
   return {
-    /** He said something to a desk or a card: if it is a long note, mark the cards it touches and tell their owners. */
-    async heard(n: TouchNote): Promise<TouchState | undefined> {
+    /**
+     * He said something to a desk or a card: if it is a long note, mark the cards it touches and tell their owners.
+     * `graceMs` (the desk passes TOUCH_GRACE_MS): wait that long first, and mark nothing when he takes it back meanwhile.
+     */
+    async heard(n: TouchNote, o: { graceMs?: number } = {}): Promise<TouchState | undefined> {
       if (!d.judge) return undefined;
       const words = n.words.trim();
       if (!words || SKIP_HEADS.some((h) => words.startsWith(h))) return undefined;
+      const mine = ++seq;
+      const lately = [...(said.get(n.world) ?? []).filter((x) => x.seq > mine - 50), { seq: mine, words }];
+      said.set(n.world, lately);
       const count = wordCount(words);
       if (count < (n.typed ? TOUCH_MIN_TYPED_WORDS : TOUCH_MIN_WORDS)) return undefined;
       const key = noteKey(n);
@@ -222,6 +297,17 @@ export function createNoteTouch(d: TouchDeps) {
       // claim the note first: a second arrival (chat note + its filing, a retry) never judges twice
       const claimed = db.prepare("INSERT OR IGNORE INTO voice_note_touches (note_key, tenant_id, at, spoken_at, words, state) VALUES (?, ?, ?, ?, ?, 'judging')").run(key, n.world, iso(), at, count);
       if (!claimed.changes) return (db.prepare("SELECT state FROM voice_note_touches WHERE note_key = ?").get(key) as { state: TouchState }).state;
+      let afterText = "";
+      if (o.graceMs && o.graceMs > 0) {
+        await sleep(o.graceMs);
+        const after = (said.get(n.world) ?? []).filter((x) => x.seq > mine);
+        const back = after.find((x) => takesBack(x.words));
+        if (back) {
+          set(key, "withdrawn", { touched: [], error: `he took it back: ${oneLine(back.words).slice(0, 200)}` });
+          return "withdrawn";
+        }
+        afterText = after.map((x) => oneLine(x.words).slice(0, 600)).join("\n").slice(0, 3000);
+      }
       let cards: TouchCard[];
       let verdict: Touched[];
       // a card whose spine words already cite this note was made from it (the desk placed it before this pass ran)
@@ -232,7 +318,7 @@ export function createNoteTouch(d: TouchDeps) {
           set(key, "none");
           return "none";
         }
-        verdict = await d.judge({ words: words.slice(0, CHARS_MAX), cards: cards.map(({ kind, ref, title, about }) => ({ kind, ref, title, about })) });
+        verdict = await d.judge({ words: words.slice(0, CHARS_MAX), cards: cards.map(({ kind, ref, title, about, topic }) => ({ kind, ref, title, about, ...(topic ? { topic } : {}) })), ...(afterText ? { after: afterText } : {}) });
       } catch (e) {
         set(key, "failed", { error: `model: ${(e as Error).message}`.slice(0, 300) });
         return "failed";
@@ -240,12 +326,30 @@ export function createNoteTouch(d: TouchDeps) {
       const byRef = new Map(cards.map((c) => [c.ref, c]));
       const seen = new Set<string>();
       // his words only: a quote the note does not hold (the model copied the card's words, live 2026-11-11) marks nothing
-      const said = flat(words);
-      const list = verdict
-        .filter((t) => (t.how === "stale" || t.how === "updated") && byRef.has(t.ref) && saidIn(said, t.quote) && !seen.has(t.ref) && seen.add(t.ref))
+      const flatNote = flat(words);
+      const named = verdict
+        .filter((t) => (t.how === "stale" || t.how === "updated") && byRef.has(t.ref) && saidIn(flatNote, t.quote) && !seen.has(t.ref) && seen.add(t.ref))
         .map((t) => ({ card: byRef.get(t.ref)!, t }));
+      // E942-S174 the second look, card by card: only a card his words are about keeps its mark; a doubt, or a failed look, marks nothing
+      const dropped: { ref: string; subject: string }[] = [];
+      let list = named;
+      if (d.confirm && named.length) {
+        list = [];
+        for (const x of named.slice(0, CONFIRM_MAX)) {
+          const { kind, ref: cardRef, title, about, topic } = x.card;
+          const c = await d
+            .confirm({ card: { kind, ref: cardRef, title, about, ...(topic ? { topic } : {}) }, how: x.t.how, quote: x.t.quote, passage: passageOf(words, x.t.quote) })
+            .catch((e: Error) => ({ subject: `look failed: ${e.message}`.slice(0, 200), same: false, how: x.t.how, why: "" }));
+          if (!c.same) {
+            dropped.push({ ref: cardRef, subject: oneLine(c.subject).slice(0, 200) });
+            continue;
+          }
+          // the milder mark wins: a card both looks call stale is stale, else updated
+          list.push({ card: x.card, t: { ...x.t, how: x.t.how === "stale" && c.how === "stale" ? "stale" : "updated", why: c.why || x.t.why } });
+        }
+      }
       if (!list.length) {
-        set(key, "none", { touched: [] });
+        set(key, "none", { touched: dropped.map((x) => ({ ...x, dropped: true })) });
         return "none";
       }
       const date = iso().slice(0, 10);
@@ -282,7 +386,10 @@ export function createNoteTouch(d: TouchDeps) {
         const r = await d.tell(n.world, touchLine({ at, key }, done), `note-touch-${key}`).catch((e: Error) => e.message);
         if (r !== true) errors.push(`desk: ${String(r).slice(0, 160)}`);
       }
-      const touched = list.map(({ card, t }) => ({ ref: card.ref, repo: card.repo, path: card.path, how: t.how, marked: marked.has(card.ref), woken: !!card.milestoneId && woken.includes(card.milestoneId) }));
+      const touched = [
+        ...list.map(({ card, t }) => ({ ref: card.ref, repo: card.repo, path: card.path, how: t.how, marked: marked.has(card.ref), woken: !!card.milestoneId && woken.includes(card.milestoneId) })),
+        ...dropped.map((x) => ({ ...x, dropped: true })),
+      ];
       if (errors.length) d.log?.(`note touch ${key}: ${errors.join("; ")}`);
       set(key, done.length ? "done" : "failed", { touched, ...(errors.length ? { error: errors.join("; ").slice(0, 600) } : {}) });
       return done.length ? "done" : "failed";
@@ -327,9 +434,41 @@ const TOUCH_SYSTEM =
   "A product owner recorded a long voice note. His team's work waits for him as cards in his inbox: rows in review (finished work he judges) and asks (questions to him). " +
   "Find the cards his note clearly speaks about: it names the work, its feature or its topic directly, and says something about it that its owner must act on. " +
   "Mark a card stale when what he says changes, reverses or redirects what the card delivered or asks (judging it as it stands would be wrong); updated when he adds a request, a detail or a comment and the card still holds. " +
-  "Leave out cards he does not speak about, and cards his words only brush past in general talk; never list a card to say it is not about it. Fewer, sure matches beat many guesses: when unsure, leave it out. Quote his words exactly, never the card's words.";
-const cardLine = (c: TouchJudgeInput["cards"][number]) => `- ${c.ref} (${c.kind === "row" ? "review" : "ask"}): ${oneLine(c.title).slice(0, 200)}${c.about ? ` — ${oneLine(c.about).slice(0, 300)}` : ""}`;
-const touchUser = (n: TouchJudgeInput) => `Cards in his inbox:\n${n.cards.map(cardLine).join("\n")}\n\nHis note (speech to text):\n${n.words}`;
+  "Leave out cards he does not speak about, and cards his words only brush past in general talk; never list a card to say it is not about it. Fewer, sure matches beat many guesses: when unsure, leave it out. Quote his words exactly, never the card's words. " +
+  "Each card says what it is About: a note about one subject (his house search, his family, a product) never goes on a card about another, even when they share a word like 'key results', 'table' or 'script'. " +
+  "A private remark about a person is not a verdict on a card made for that person. If what he said right after takes the note back or corrects it, follow what he said after.";
+const cardLine = (c: TouchJudgeInput["cards"][number]) =>
+  `- ${c.ref} (${c.kind === "row" ? "review" : "ask"})${c.topic ? ` [About: ${oneLine(c.topic).slice(0, 80)}]` : ""}: ${oneLine(c.title).slice(0, 200)}${c.about ? ` — ${oneLine(c.about).slice(0, 300)}` : ""}`;
+const touchUser = (n: TouchJudgeInput) =>
+  `Cards in his inbox:\n${n.cards.map(cardLine).join("\n")}\n\nHis note (speech to text):\n${n.words}${n.after ? `\n\nWhat he said right after:\n${n.after}` : ""}`;
+
+const CONFIRM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["subject", "work", "same", "how", "why"],
+  properties: {
+    subject: { type: "string", description: "First, before looking at the card: the area of his life or work this passage is in (his house search, his family, a product and its screen), a colon, then what he says about it. At most 20 words." },
+    work: { type: "string", description: "The card's area (the same way), a colon, then the thing it delivered or the question it asks. At most 20 words." },
+    same: { type: "boolean", description: "true only when his subject IS the card's work (he speaks about that very deliverable or question) and its owner must act. A shared word, the same person or the same wider topic is not enough." },
+    how: { type: "string", enum: ["stale", "updated"], description: "stale only when he plainly rejects, reverses or redirects the card's deliverable itself; else updated." },
+    why: { type: "string", description: "Why, in at most 15 plain words." },
+  },
+};
+const CONFIRM_SYSTEM =
+  "A product owner's note was matched to one card in his inbox by a quick first pass that often matches on a shared word. Check it. " +
+  "Read the passage and say which area of his life or work it is in and what he says, before you read the card; the whole passage tells the area, not one sentence. Then say the card's area and its work. Two different areas are never the same. " +
+  "The card's work is everything it delivered or links to (a page, a script, a table) and the question it asks about it. " +
+  "They are the same when he speaks about that very thing: asking to change, shorten, translate, redo or drop part of what the card made is the same. " +
+  "Not the same: a table in his house search versus a key-results table; a pretence his father asks of him versus a script written for him to read to his father; " +
+  "a remark he then takes back. When his subject is another thing that only shares a word, a person or a wider topic with the card, they are not the same.";
+const confirmUser = (x: TouchConfirmInput) =>
+  `The card: ${x.card.ref} (${x.card.kind === "row" ? "finished work in review" : "a question to him"})${x.card.topic ? `\nAbout: ${oneLine(x.card.topic).slice(0, 120)}` : ""}\nTitle: ${oneLine(x.card.title).slice(0, 300)}${x.card.about ? `\nWhat it is: ${oneLine(x.card.about).slice(0, 400)}` : ""}\n\nThe first pass marked it ${x.how}, quoting him: "${oneLine(x.quote).slice(0, 600)}"\n\nThe passage of his note around that quote (speech to text):\n${x.passage}`;
+const cleanConfirm = (v: Partial<TouchConfirmed> & { work?: unknown }): TouchConfirmed => ({
+  subject: String(v.subject ?? ""),
+  same: v.same === true,
+  how: v.how === "stale" ? "stale" : "updated",
+  why: String(v.why ?? ""),
+});
 const clean = (v: { touched?: unknown }): Touched[] =>
   (Array.isArray(v.touched) ? v.touched : [])
     .filter((t): t is Touched => !!t && typeof t === "object" && typeof (t as Touched).ref === "string" && (t as { speaks?: unknown }).speaks !== false)
@@ -364,5 +503,35 @@ export function anthropicTouchJudge(key: () => Promise<string | undefined>, f: t
   return async (n) => {
     const { value } = await anthropicJson<{ touched?: unknown }>(key, f, { system: TOUCH_SYSTEM, user: touchUser(n), schema: TOUCH_SCHEMA, maxTokens: 4000, timeoutMs: 90_000 });
     return clean(value);
+  };
+}
+
+/** E942-S174 the second look on OpenAI's strict JSON check. */
+export function openAiTouchConfirm(key: () => Promise<string | undefined>, f: typeof fetch = fetch, model = TOUCH_MODEL): TouchConfirm {
+  return async (x) => {
+    const k = await key();
+    if (!k) throw new Error("the console has no OPENAI_API_KEY");
+    const body = {
+      model,
+      temperature: 0,
+      response_format: { type: "json_schema", json_schema: { name: "confirm", strict: true, schema: CONFIRM_SCHEMA } },
+      messages: [
+        { role: "system", content: CONFIRM_SYSTEM },
+        { role: "user", content: confirmUser(x) },
+      ],
+    };
+    const r = await f("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${k}`, "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
+    const j = (await r.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
+    const text = j?.choices?.[0]?.message?.content;
+    if (!r.ok || typeof text !== "string") throw new Error(`the confirm check failed (${r.status}): ${String(j?.error?.message ?? "no message").slice(0, 160)}`);
+    return cleanConfirm(JSON.parse(text) as Partial<TouchConfirmed>);
+  };
+}
+
+/** The same second look on Claude Haiku. */
+export function anthropicTouchConfirm(key: () => Promise<string | undefined>, f: typeof fetch = fetch): TouchConfirm {
+  return async (x) => {
+    const { value } = await anthropicJson<Partial<TouchConfirmed>>(key, f, { system: CONFIRM_SYSTEM, user: confirmUser(x), schema: CONFIRM_SCHEMA, maxTokens: 2000, timeoutMs: 60_000 });
+    return cleanConfirm(value);
   };
 }

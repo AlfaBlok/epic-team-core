@@ -88,6 +88,8 @@ export function flushWanted(): void {
   if (!p?.lines.length) return;
   try {
     fs.mkdirSync(path.dirname(p.file), { recursive: true });
+    // the queue is re-filled after each restart: past 4 MB it waits for the judge to catch up
+    if ((fs.statSync(wantedFile(p.file), { throwIfNoEntry: false })?.size ?? 0) > 4_000_000) return;
     fs.appendFileSync(wantedFile(p.file), p.lines.join("\n") + "\n");
   } catch {
     /* no state dir: the word rule alone holds */
@@ -256,10 +258,10 @@ export async function judgePairs(
   });
 }
 
-/** the borderline pairs (same, not sure), newest first: what the daily read lists instead of merging. */
+/** the borderline pairs (same, not sure) of the prompt in use, newest first: what the daily read lists instead of merging. */
 export function borderlinePairs(file = sameMeaningFile()): (MeaningVerdict & { key: string })[] {
   return Object.entries(verdicts(file))
-    .filter(([, v]) => callOf(v) === "border")
+    .filter(([k, v]) => k.startsWith(`v${JUDGE_VERSION}:`) && callOf(v) === "border")
     .map(([key, v]) => ({ key, ...v }))
     .sort((p, q) => (q.at ?? "").localeCompare(p.at ?? ""));
 }
@@ -267,13 +269,13 @@ export function borderlinePairs(file = sameMeaningFile()): (MeaningVerdict & { k
 /** the merges it made (same, sure), newest first. */
 export function mergedPairs(file = sameMeaningFile()): (MeaningVerdict & { key: string })[] {
   return Object.entries(verdicts(file))
-    .filter(([, v]) => callOf(v) === "same")
+    .filter(([k, v]) => k.startsWith(`v${JUDGE_VERSION}:`) && callOf(v) === "same")
     .map(([key, v]) => ({ key, ...v }))
     .sort((p, q) => (q.at ?? "").localeCompare(p.at ?? ""));
 }
 
 /** one pass over the wanted queue: judge what is not known yet (at most `max` pairs), then empty the queue. */
-export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), max = 40): Promise<number> {
+export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), max = 60): Promise<number> {
   flushWanted();
   const wf = wantedFile(file);
   let text = "";
@@ -307,9 +309,9 @@ export async function judgeWanted(judge: PairJudge, file = sameMeaningFile(), ma
 }
 
 /** the main thread's minute timer over the wanted queue (never under tests). */
-export function startSameMeaningJudge(judge: PairJudge, everyMs = 60_000, log: (m: string) => void = () => {}, firstAfterMs = 300_000): () => void {
+export function startSameMeaningJudge(judge: PairJudge, everyMs = 60_000, log: (m: string) => void = () => {}, firstAfterMs = 120_000): () => void {
   let busy = false;
-  // never in the console's first minutes: its inbox warms up then
+  // not in the console's first 2 minutes: its inbox warms up then (production restarts every few minutes on busy days)
   const from = Date.now() + firstAfterMs;
   const t = setInterval(() => {
     if (busy || Date.now() < from) return;
