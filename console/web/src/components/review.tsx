@@ -18,7 +18,7 @@ import { KEPT_LINE, onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
 import { reviewQuestion } from "@/lib/pending";
-import { CARD_WORD, countsRed, DECIDE_QUESTION, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
+import { CARD_WORD, countsRed, DECIDE_QUESTION, hisIdeaNote, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
 import { LeadLines } from "@/components/readyFirst";
 import { useMinuteClock } from "@/components/deadlineFirst";
 import { cn } from "@/lib/utils";
@@ -1029,7 +1029,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
         {face.project.url ? <A href={face.project.url}>{face.project.name}</A> : <span>{face.project.name}</span>}
         {/* on a phone the long objective tag wraps inside the card, never past its edge */}
         {/* E948-S168: an urgent card says Urgent in its meta line, never only "High priority" */}
-        {(item.ownerPriority || isUrgentReview(item)) && <OwnerPriorityTag p={item.ownerPriority} urgent={isUrgentReview(item)} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
+        {(item.ownerPriority || isUrgentReview(item)) && <OwnerPriorityTag p={item.ownerPriority} urgent={isUrgentReview(item)} urgentNote={hisIdeaNote(item)} className="max-sm:min-w-0 max-sm:shrink max-sm:text-left" />}
       </CardMeta>
       {/* his long voice note touched this card: stale or updated until its owner moves the row. */}
       {item.noteMark && <NoteMarkBand mark={item.noteMark} className="mt-2" />}

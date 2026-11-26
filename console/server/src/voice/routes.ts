@@ -133,7 +133,8 @@ export function mountOwnCall(api: Hono, prefix: string, call: Voice, o: { world:
     // onState: the page opened, so a call may follow (the marketing call warms its live numbers then).
     guard((c) => (inWorld() ? (o.onState?.(), c.json(call.state())) : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console` }))),
   );
-  mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "world_scope", message: `${what} is only on ${ownerName()}'s own console` } }, 403)));
+  // another world: a 404 (this call is the home world's own, never part of a customer's console).
+  mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "home_only", message: `${what} is only on ${ownerName()}'s own console` } }, 404)));
 }
 
 /** a world team desk's Call: the same call routes under /tenants/:id/desk/voice, on the world's Voice (or a 404). */

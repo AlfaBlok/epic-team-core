@@ -228,7 +228,7 @@ import { mountCampaignVoice, mountCoachVoice, mountOwnCall, mountVoice, mountWor
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
-import { mountReplyNote } from "./voice/replyNote.js";
+import { mountListenPage, mountReplyNote } from "./voice/replyNote.js";
 import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince } from "./voice/briefing.js";
 import { marketingAgentName, marketingBrief, MARKETING_GREETING, MARKETING_PAGE, MARKETING_TOOLS, marketingInstructions, marketingKnows, marketingNoteText, marketingRelayIn } from "./voice/marketing.js";
 import { strategyAgentName, strategyBrief, STRATEGY_GREETING, STRATEGY_PAGE, STRATEGY_TOOLS, strategyInstructions, strategyKnows, strategyNoteText, teamProduct } from "./voice/teamStrategy.js";
@@ -3519,7 +3519,9 @@ export function createApp(
   mountReplyVoice(api, opts.voice?.speak);
   // the desk's answer to his voice note comes back as a short voice note too (ElevenLabs, the narration voice, the grant).
   const elevenKey = async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")));
-  mountReplyNote(api, { key: elevenKey, dir: process.env.CONSOLE_REPLY_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "reply-notes"), ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
+  const replyNotesDir = process.env.CONSOLE_REPLY_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "reply-notes");
+  mountReplyNote(api, { key: elevenKey, dir: replyNotesDir, ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
+  mountListenPage(app, replyNotesDir); // the briefing's "Listen: <link>", a player page behind the login
   // the objectives coach (/coach): its own ElevenLabs agent, his objectives read only, his words relayed to a desk.
   const coachEleven: ElevenCalls | undefined =
     opts.voice?.coachEleven ??

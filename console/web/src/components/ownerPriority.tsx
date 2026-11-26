@@ -81,12 +81,12 @@ function RankWords({ p, label }: { p: OwnerPriority; label: string }) {
  */
 export const URGENT_WORD = "Urgent";
 
-export function OwnerPriorityTag({ p, className, urgent }: { p?: OwnerPriority; className?: string; urgent?: boolean }) {
+export function OwnerPriorityTag({ p, className, urgent, urgentNote }: { p?: OwnerPriority; className?: string; urgent?: boolean; urgentNote?: string }) {
   const [open, setOpen] = useState(false);
   if (!p)
     return urgent ? (
       <span className={cn("shrink-0 text-xs font-medium text-muted-foreground", className)} data-testid="urgent-label">
-        {URGENT_WORD}
+        {urgentNote ? `${URGENT_WORD} · ${urgentNote}` : URGENT_WORD}
       </span>
     ) : null;
   const red = p.redLine;
@@ -94,7 +94,8 @@ export function OwnerPriorityTag({ p, className, urgent }: { p?: OwnerPriority; 
   const first = p.objective?.n === 0;
   const base = rankWhy(p);
   // urgent says so first; a bare level ("High priority") gives way to it, a reason (said again, an objective) stays after it
-  const label = urgent ? (base === LABEL[p.level] ? URGENT_WORD : `${URGENT_WORD} · ${base}`) : base;
+  // a card in Urgent because his own words started it that day says so ("Urgent · Your idea, 25 Nov")
+  const label = urgent ? (urgentNote ? `${URGENT_WORD} · ${urgentNote}` : base === LABEL[p.level] ? URGENT_WORD : `${URGENT_WORD} · ${base}`) : base;
   const why = hot ? hot.why : red ? red.sentence : p.why;
   const words = hot ? hot.words : p.words;
   const said = hot ? hot.said : p.said;

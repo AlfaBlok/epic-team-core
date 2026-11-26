@@ -41,7 +41,7 @@ export function spoken(text: string): string {
 }
 
 /** the short voice note's words: whole sentences of the answer's lead up to NOTE_CHARS, then "The rest is in the chat." */
-export function shortNote(text: string, max = NOTE_CHARS): string {
+export function shortNote(text: string, max = NOTE_CHARS, rest = REST): string {
   const all = spoken(text).replace(/\s*\n+\s*/g, " ").trim();
   if (all.length <= max) return all;
   const sentences = all.match(/[^.!?]+(?:[.!?]+|$)\s*/g) ?? [all];
@@ -51,7 +51,7 @@ export function shortNote(text: string, max = NOTE_CHARS): string {
     out += s;
   }
   if (!out) out = `${all.slice(0, all.lastIndexOf(" ", max)).trim()}.`;
-  return `${out.trim()} ${REST}`;
+  return rest ? `${out.trim()} ${rest}` : out.trim();
 }
 
 export function mountReplyNote(api: Hono, o: { key: () => Promise<string | undefined>; dir: string; fetch?: typeof fetch; now?: () => number }) {
@@ -71,14 +71,19 @@ export function mountReplyNote(api: Hono, o: { key: () => Promise<string | undef
   const err = (code: string, message: string, status: number) => new Response(JSON.stringify({ error: { code, message } }), { status, headers: { "content-type": "application/json" } });
   const fileOf = (hash: string) => path.join(o.dir, `${hash}.mp3`);
   const urlOf = (hash: string) => `/api/voice/reply-notes/${hash}.mp3`;
+  const listenOf = (hash: string) => `/listen/${hash}`;
 
   api.post("/voice/reply-note", async (c) => {
-    const p = z.object({ text: z.string().trim().min(1).max(40_000) }).safeParse(await c.req.json().catch(() => undefined));
+    // a daily briefing asks too, with its own title and its own closing words ("" for none).
+    const p = z
+      .object({ text: z.string().trim().min(1).max(40_000), title: z.string().trim().max(120).optional(), rest: z.string().max(120).optional() })
+      .safeParse(await c.req.json().catch(() => undefined));
     if (!p.success) return c.json({ error: { code: "validation_error", message: "text (the desk's answer) is required" } }, 400);
-    const words = shortNote(p.data.text);
+    const words = shortNote(p.data.text, NOTE_CHARS, p.data.rest ?? REST);
+    const title = p.data.title || "A voice note from the team";
     if (!/\w/.test(words)) return c.json({ error: { code: "nothing_to_say", message: "the answer has no words to speak" } }, 422);
     const hash = crypto.createHash("sha256").update(`${ELEVEN_VOICE_ID}|${NOTE_MODEL}|${words}`).digest("hex").slice(0, 24);
-    if (fs.existsSync(fileOf(hash))) return c.json({ url: urlOf(hash), chars: words.length, words, kept: true });
+    if (fs.existsSync(fileOf(hash))) return c.json({ url: urlOf(hash), listen: listenOf(hash), chars: words.length, words, kept: true });
     const u = used();
     if (u.chars + words.length > DAY_CHARS) return err("day_cap", `today's voice replies reached ${DAY_CHARS} characters; the answer is in the text, and Play still reads it`, 429);
     const key = await o.key();
@@ -98,8 +103,9 @@ export function mountReplyNote(api: Hono, o: { key: () => Promise<string | undef
     const mp3 = Buffer.from(await r.arrayBuffer());
     fs.mkdirSync(o.dir, { recursive: true });
     fs.writeFileSync(fileOf(hash), mp3);
+    fs.writeFileSync(path.join(o.dir, `${hash}.json`), JSON.stringify({ title, words, at: new Date(now()).toISOString() }));
     fs.writeFileSync(usageFile, JSON.stringify({ day: u.day, chars: u.chars + words.length, notes: u.notes + 1 }));
-    return c.json({ url: urlOf(hash), chars: words.length, words, kept: false }, 201);
+    return c.json({ url: urlOf(hash), listen: listenOf(hash), chars: words.length, words, kept: false }, 201);
   });
 
   api.get("/voice/reply-notes/:file", (c) => {
@@ -109,4 +115,41 @@ export function mountReplyNote(api: Hono, o: { key: () => Promise<string | undef
   });
 
   api.get("/voice/reply-notes", (c) => c.json({ ...used(), dayCap: DAY_CHARS, voice: ELEVEN_VOICE_ID, model: NOTE_MODEL }));
+}
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch] as string);
+
+/**
+ * The owner, 25 Nov 11:55Z: "he sends a text and says if you want to listen click this link". The link a WhatsApp
+ * caption ends with: GET /listen/<id>, one quiet page with the player and the words, behind the console's login (a
+ * path outside /api, so a phone with no session goes to the login page and comes back here).
+ */
+export function mountListenPage(app: Hono, dir: string) {
+  app.get("/listen/:id", (c) => {
+    const id = c.req.param("id") ?? "";
+    if (!/^[0-9a-f]{24}$/.test(id) || !fs.existsSync(path.join(dir, `${id}.mp3`))) return c.text("No such voice note.", 404);
+    let meta: { title?: string; words?: string; at?: string } = {};
+    try {
+      meta = JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), "utf8"));
+    } catch {
+      /* an older note: the player alone */
+    }
+    const title = meta.title || "A voice note from the team";
+    const when = meta.at ? new Date(meta.at).toUTCString().replace(/:\d\d GMT$/, " UTC") : "";
+    return c.html(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title><meta name="robots" content="noindex">
+<style>
+:root{--paper:#f6f3ec;--ink:#1d1b17;--soft:#6b665c;--line:#ddd6c8;--green:#1f5c43}
+@media (prefers-color-scheme:dark){:root{--paper:#171613;--ink:#ece8df;--soft:#a39d90;--line:#34312b;--green:#6fb894}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:620px;margin:0 auto;padding:40px 16px 64px}
+h1{font:600 26px/1.25 Georgia,"Times New Roman",serif;margin:0 0 4px}.when{color:var(--soft);font-size:14px;margin:0 0 24px}
+.player{border:1px solid var(--line);border-radius:10px;padding:16px}.player p{margin:0 0 10px;color:var(--green);font-weight:600}
+audio{width:100%}.words{margin-top:28px;color:var(--ink);white-space:pre-wrap}.words h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--soft);margin:0 0 8px}
+</style></head><body><main>
+<h1>${esc(title)}</h1><p class="when">${esc(when)}</p>
+<div class="player" id="listen"><p>Press play to listen</p><audio controls preload="metadata" src="/api/voice/reply-notes/${id}.mp3"></audio></div>
+${meta.words ? `<section class="words"><h2>What it says</h2>${esc(meta.words)}</section>` : ""}
+</main></body></html>`);
+  });
 }

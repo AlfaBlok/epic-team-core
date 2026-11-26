@@ -143,6 +143,14 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/desk/voice/calls$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/desk/voice/calls/${ID}/(beat|usage|end|ask)$`)],
   ["GET", new RegExp(`^/api/tenants/${ID}/desk/voice/calls/${ID}/(status|ask/${ID})$`)],
+  // the social briefer's Call (/marketing, voice/routes.ts mountOwnCall "/voice/marketing"): the owner opens it on the
+  // social product's customer site through the door. Every call route is ownerOnly (the owner's session, from the
+  // page) and answers only the home world (another world gets a 404). Off this list the state read was 403, so his
+  // page drew no Call button at all.
+  ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
+  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
   ["POST", new RegExp(`^/api/milestones/${ID}/(tree/add|chat/dispatch)$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/respond$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/snooze$`)], // same world check as respond
@@ -421,6 +429,14 @@ export const DOOR_SAFE: [string, RegExp][] = [
   // card world's, never a digest, goal or advisor card) and the owner's answer on one of them.
   ["GET", /^\/api\/inbox\/team-cards$/],
   ["POST", /^\/api\/inbox\/team-cards\/[\w.-]+\/answer$/],
+  // the social briefer's Call (/marketing, voice/routes.ts mountOwnCall "/voice/marketing"): the owner opens it on the
+  // social product's customer site through the door. Every call route is ownerOnly (the owner's session, from the
+  // page) and answers only the home world (another world gets a 404). Off this list the state read was 403, so his
+  // page drew no Call button at all.
+  ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
+  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
 ];
 /**
  * routes the door reaches that a customer world does not have yet. Each handler cuts its answer to the home

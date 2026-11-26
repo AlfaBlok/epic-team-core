@@ -2,6 +2,7 @@ import { cardKey } from "@/lib/countCheck";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { aboutFrom } from "@/lib/about";
 import { askCard as voiceAsk, SectionCallButton } from "@/voice/SectionCall";
+import { CardCallButton } from "@/voice/callCard";
 import { ParkButton, parkAsk } from "@/components/parkButton";
 import { useSlotReady } from "@/components/slot";
 import { OwnerPriorityTag } from "./ownerPriority";
@@ -1390,6 +1391,8 @@ function WaitingCardBody({
           <FoldChevron open={open} className="mr-1.5" />
           {heading}
         </button>
+        {/* a card that opens a call page carries the Call itself, at the top of its face */}
+        {item.state === "open" && <CardCallButton hrefs={[go?.href]} />}
         {body && (
           <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="ask-question">
             <LinkedText text={body} />

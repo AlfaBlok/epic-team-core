@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../src/db.js";
 import { agentBody, elevenCalls } from "../src/voice/elevenAgent.js";
 import { COACH_AGENT_NAME, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "../src/voice/coach.js";
-import { DAY_CHARS, mountReplyNote, shortNote } from "../src/voice/replyNote.js";
+import { DAY_CHARS, mountListenPage, mountReplyNote, shortNote } from "../src/voice/replyNote.js";
 import { createVoice } from "../src/voice/voice.js";
 
 /**
@@ -107,5 +107,28 @@ describe("a voice note back", () => {
     expect(got.headers.get("content-type")).toBe("audio/mpeg");
     fs.writeFileSync(path.join(dir, "usage.json"), JSON.stringify({ day: new Date().toISOString().slice(0, 10), chars: DAY_CHARS, notes: 1 }));
     expect((await post("Something new to say.")).status).toBe(429);
+  });
+  it("a briefing's spoken version, its own title, no closing words, a listen page with player and words", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e105s311-"));
+    const f = vi.fn(async () => new Response(Buffer.from("ID3fake"), { status: 200 })) as unknown as typeof fetch;
+    const api = new Hono();
+    const app = new Hono();
+    mountReplyNote(api, { key: async () => "k", dir, fetch: f });
+    mountListenPage(app, dir);
+    const long = "Do the wheels turn? Yes. ".repeat(60);
+    const r = await api.request("/voice/reply-note", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: long, title: "Your morning briefing", rest: "" }) });
+    expect(r.status).toBe(201);
+    const j = (await r.json()) as { listen: string; words: string };
+    expect(j.words).not.toContain("The rest is in the chat.");
+    expect(j.words.length).toBeLessThanOrEqual(900);
+    expect(j.listen).toMatch(/^\/listen\/[0-9a-f]{24}$/);
+    const page = await app.request(j.listen);
+    const html = await page.text();
+    expect(page.status).toBe(200);
+    expect(html).toContain("Your morning briefing");
+    expect(html).toContain(`/api/voice/reply-notes/${j.listen.slice(8)}.mp3`);
+    expect(html).toContain("Do the wheels turn?");
+    expect((await app.request("/listen/0123456789abcdef01234567")).status).toBe(404);
+    expect((await app.request("/listen/..%2F..%2Fetc")).status).toBe(404);
   });
 });

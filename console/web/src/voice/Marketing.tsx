@@ -1,7 +1,6 @@
-import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/common";
-import { sites, socialProduct } from "@/lib/identity";
-import { useSkin } from "@/lib/skin";
+import { socialProduct } from "@/lib/identity";
 import { useCallDock } from "./CallPanel";
 
 /**
@@ -9,8 +8,7 @@ import { useCallDock } from "./CallPanel";
  * product's campaigns, their plans and numbers, and talks strategy with him: the number one blocker, who each campaign is
  * for, the message, the channels, the timeline. Each decision he agrees lands on the social desk (or the Team desk) as
  * one request. Same call path as the coach and the briefing call.
- * It lives in the social product, named for it (the owner, 25 Nov: it belongs in the social product): the social console's menu links it; the team console's /marketing forwards there
- * (the team product's own strategy call stays at /strategy).
+ * Named for the social product (the owner, 25 Nov); the social console's menu links it; every console serves it at /marketing; the team product's own strategy call stays at /strategy.
  */
 export const MARKETING_BASE = "/api/voice/marketing";
 
@@ -23,29 +21,36 @@ const STEPS = [
 /** the briefer's name, as he sees it everywhere ("<product> briefer"). */
 export const brieferName = () => `${socialProduct()} briefer`;
 
-/** the team console's /marketing: forward to the same page on the social product's console. */
-function ForwardToSocial() {
-  const to = `${sites().socialUrl.replace(/\/$/, "")}/marketing`;
-  useEffect(() => {
-    if (typeof window !== "undefined" && !/^https?:\/\/social\.example\.com/.test(to)) window.location.replace(to);
-  }, [to]);
-  return (
-    <div className="mx-auto w-full max-w-2xl" data-testid="marketing-forward">
-      <PageHeader title={`The ${brieferName()} moved`} description={`It lives in ${socialProduct()} now.`} />
-      <a className="text-sm underline" href={to}>
-        Open the {brieferName()}
-      </a>
-    </div>
-  );
-}
-
+/**
+ * The owner could not find its button ("I don't see the button ... You keep moving it around"): the briefer
+ * is served here on every console, the team console too, so the page opens in the app he is signed in to (the old
+ * forward to the social console's own site met a sign-in screen there). Its Call sits at the top, and this place stays.
+ */
 export function MarketingPage() {
-  return useSkin().id === "social" ? <BrieferPage /> : <ForwardToSocial />;
+  return <BrieferPage />;
 }
 
 function BrieferPage() {
   const name = brieferName();
-  const call = useCallDock({ base: MARKETING_BASE, callee: `the ${name}`, label: `Call the ${name}`, where: name, hint: "Strategy, in English or Spanish. Try “What is the number one blocker?”" });
+  // a card's Call opens this page with ?call=1: the call starts at once, then the flag leaves the URL.
+  const [params, setParams] = useSearchParams();
+  const call = useCallDock({
+    base: MARKETING_BASE,
+    callee: `the ${name}`,
+    label: `Call the ${name}`,
+    where: name,
+    hint: "Strategy, in English or Spanish. Try “What is the number one blocker?”",
+    autoStart: params.get("call") === "1",
+    onAutoStart: () =>
+      setParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.delete("call");
+          return next;
+        },
+        { replace: true },
+      ),
+  });
   return (
     <div className="mx-auto w-full max-w-2xl" data-testid="marketing-page">
       <PageHeader title={name} description={`Call your ${name}: the numbers, then the campaign strategy.`} actions={call.button} />
