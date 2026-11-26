@@ -299,6 +299,15 @@ function trackable(o: AddOptions, text: string): boolean | undefined {
   }
 }
 
+/**
+ * The Adds being filed right now. One Add runs 20 to 120 s (the filing match builds the ticket tree, then three
+ * judges vote) while a restart drains requests for only 25 s, so a release in the middle of his note's filing cut the
+ * Add and the desk filed it again minutes later (25 Nov: his 11:55Z notes became rows only at 12:24 to 12:30Z, 9
+ * restarts in that half hour). /api/health shows the count as `filing.busy` and deploy.sh waits for 0 before it restarts.
+ */
+let addsInFlight = 0;
+export const treeAddsBusy = (): number => addsInFlight;
+
 export function mountTreeAdd(api: Hono, o: AddOptions) {
   /** the owner's page (the Mark wall), or the Team desk with his words from his newest desk message; else an agent's draft. */
   const askerOf = async (header: (name: string) => string | undefined, input: AddInput): Promise<Asker> => {
@@ -324,7 +333,15 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
     return d ? { delivery: d, ...(d.notice ? { notice: d.notice } : {}) } : {};
   };
   api.post("/milestones/:id/tree/add", async (c) => {
-    const m = o.store.getMilestone(c.req.param("id"));
+    addsInFlight++;
+    try {
+      return await treeAdd(c);
+    } finally {
+      addsInFlight--;
+    }
+  });
+  const treeAdd = async (c: Context) => {
+    const m = o.store.getMilestone(c.req.param("id") ?? "");
     if (!m) return err(c, 404, "not_found", `milestone ${c.req.param("id")} not found`);
     let body: unknown;
     try {
@@ -483,5 +500,5 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
       { kind: input.kind, path: target, ...(id ? { id } : {}), ...(rowId ? { rowId } : {}), ready, ...(draftWhy ? { draftWhy } : {}), ...(w.sha ? { sha: w.sha } : {}), ...(await after(rowId ? `${id} (row ${rowId})` : id, target)), ...delivery(m.id) },
       201,
     );
-  });
+  };
 }

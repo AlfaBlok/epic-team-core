@@ -12,6 +12,8 @@ export interface VoiceState {
   available: boolean;
   enabled: boolean;
   reason?: string;
+  /** the page where this call runs, when it cannot run here (the page links there, never a dead greyed Call). */
+  elsewhere?: string;
   model?: string;
   monthUsd?: number;
   monthMinutes?: number;
@@ -155,6 +157,8 @@ export function useCallDock(
   // calls off, no Call button and no bar.
   if (st.callsOff && !onCall) return { liveKey, onCall };
 
+  // cannot run here but runs on another page: a live link there (a greyed Call he cannot press is a dead end).
+  const away = !st.available && st.elsewhere && !onCall ? st.elsewhere : undefined;
   const cap = st.limits?.monthCapUsd;
   const month = v.monthUsd ?? st.monthUsd;
   const note = (testid: string, text: ReactNode, tone: "warn" | "error" | "muted") => (
@@ -212,6 +216,12 @@ export function useCallDock(
           >
             <PhoneOff className={cn(stray.busy && "animate-pulse")} /> {stray.busy ? "Hanging up…" : "Hang up"}
           </Button>
+        ) : !onCall && away ? (
+          <Button asChild data-testid="call-elsewhere" variant="outline" className={cn(PHONE_TAP, CALL_TAP, "shrink-0 gap-2 border-emerald-600/40 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300 phone:hidden")}>
+            <a href={away}>
+              <Phone /> Call on {hostOf(away)}
+            </a>
+          </Button>
         ) : !onCall ? (
           <Button
             data-testid="call-start"
@@ -264,7 +274,7 @@ export function useCallDock(
               "warn",
             )}
           {stray.error && note("call-other-error", stray.error, "error")}
-          {!st.available && st.reason && !onCall && note("call-reason", st.reason, "warn")}
+          {!st.available && st.reason && !onCall && note("call-reason", away ? `${st.reason}: it calls from ${hostOf(away)}, one tap on the button.` : st.reason, "warn")}
           {!v.error && !onCall && st.lastCall?.endReason === "no_credit" &&
             note("call-no-credit", "The last try could not start: OpenAI's account has no credit left. Voice works again as soon as credit is added.", "warn")}
           {v.error && !other && note("call-error", v.error, "error")}
@@ -310,7 +320,18 @@ export function useCallDock(
     </>
   ) : undefined;
   const button =
-    !onCall && !other ? (
+    !onCall && !other && away ? (
+      <Button
+        asChild
+        data-testid="call-elsewhere-compact"
+        variant="outline"
+        className="hidden h-11 shrink-0 gap-1.5 rounded-full border-emerald-600/50 px-4 text-emerald-800 hover:bg-emerald-500/10 phone:inline-flex dark:text-emerald-300 [&_svg]:size-[18px]"
+      >
+        <a href={away} aria-label={`Call ${callee} on ${hostOf(away)}`}>
+          <Phone /> Call on {hostOf(away)}
+        </a>
+      </Button>
+    ) : !onCall && !other ? (
       <Button
         data-testid="call-start-compact"
         variant="outline"
@@ -331,4 +352,13 @@ function useHere(): () => string | undefined {
   // The router context never comes or goes for a mounted component, so the hook order is stable.
   const loc = useInRouterContext() ? useLocation() : undefined; // eslint-disable-line react-hooks/rules-of-hooks
   return () => (loc ? `${loc.pathname}${loc.search}` : typeof window === "undefined" ? undefined : `${window.location.pathname}${window.location.search}`);
+}
+
+/** the host of a link, for its words ("Call on team.example.com"). */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }

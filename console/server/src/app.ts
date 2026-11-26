@@ -186,7 +186,7 @@ import { mountAlertActions } from "./status/alertActions.js";
 import { mountMorningRead } from "./desk/morning.js";
 import { asksForSettle, deskOnly, mountMark, notJordi, SETTLE_OK, SETTLE_REFUSED } from "./status/mark.js";
 import { mountStamp } from "./status/stamp.js";
-import { mountTreeAdd } from "./status/add.js";
+import { mountTreeAdd, treeAddsBusy } from "./status/add.js";
 import { createTicketSessions, migrateTicketSessions, mountTicketSessions } from "./tickets/sessions.js";
 import { selfReadied } from "./cycle/selfReady.js";
 import { readyToMarkOf } from "./status/autoSettle.js";
@@ -215,7 +215,7 @@ import { noticeRef, parseNoticeRef } from "./plug/marks.js";
 import { ensureAuth } from "./auth/schema.js";
 import { authModeFromEnv, credentialWorld, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
 import { customerHosts, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
-import { mountOAuth, storeCreds } from "./auth/oauth.js";
+import { customerLogins, mountOAuth, storeCreds } from "./auth/oauth.js";
 import { mountWorldGithub } from "./tenancy/worldGithub.js";
 import { socialHead, TEAM_HEAD } from "./brand.js";
 import { requestScopedStore } from "./auth/scopedStore.js";
@@ -818,7 +818,7 @@ export function createApp(
       : !beat
         ? { state: "pending" as const, how: indexer.how }
         : { state: beat.ageMs < 60_000 ? ("ok" as const) : ("stale" as const), how: indexer.how, at: beat.at, pid: beat.pid, startedAt: beat.startedAt, repos: beat.repos, runs: beat.runs, seeded: beat.seeded, book: beat.book ?? null, scans: beat.scans ?? null, saved: beat.saved ?? null };
-    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), spawnHost: spawnHostStats(), treeWorker: { state: treeWorker.available() ? "on" : "off", ...treeWorker.stats() }, plugs: plugsMounted }); // one-team mode; plugs
+    return c.json({ ok: true, inboxWarm: inboxWarmHealth(), worldWakeGate: hooks.worldWakeGateState().on ? "on" : "off", drift, indexer: indexerHealth, checkoutSync: checkoutSync?.health() ?? { state: "off" }, presses: pressHealth, filing: { busy: treeAddsBusy() }, pressTest: pressTest?.health() ?? { state: "off" }, vps3Disk: hostDisk?.health() ?? { state: "off" }, answerSpeed, t3Tokens: t3Tokens?.health() ?? { state: "off" }, jobServers: jobServers?.health() ?? { state: "off" }, voiceSend: voiceSendHealth(db), box: process.env.CONSOLE_BOX === "1" ? { state: "on", team: process.env.CONSOLE_TENANT } : { state: "off" }, keys: secretSourceHealth(), spawnHost: spawnHostStats(), treeWorker: { state: treeWorker.available() ? "on" : "off", ...treeWorker.stats() }, plugs: plugsMounted }); // one-team mode; plugs
   });
   // the last drift check in full (which views differ, where, stored vs rebuilt).
   api.get("/read-model/drift", (c) => c.json({ last: readModel?.drift() ?? null }));
@@ -3754,7 +3754,14 @@ export function createApp(
       return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm(), ownWorld: (w) => isHomeDataWorld(db, w) }, `The ${socialProduct()} briefer`);
+  // on the social product's site his own Google signs in as a declared customer login (CONSOLE_CUSTOMER_LOGINS,
+  // auth/oauth.ts: the owner's verified Google, mapped to that login), whose world is his social workspace, not the
+  // data world: that owner login is him too, so the briefer calls there. Anyone else's login is never on that list.
+  const isOwnerCustomerLogin = (email: string) => {
+    const e = email.trim().toLowerCase();
+    return !!e && customerLogins().some((l) => l.login === e);
+  };
+  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm(), ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email), page: "/marketing" }, `The ${socialProduct()} briefer`);
   // the team product's strategy call (/strategy): its own ElevenLabs agent sets the team product's launch
   // strategy with him from the strategy brief (the launch timeline, what ready waits on, the questions) and its
   // objectives; his words go to the Team desk or the social desk. The marketing call's tools and relay, reused.

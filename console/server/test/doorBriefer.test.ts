@@ -81,4 +81,25 @@ describe("the social briefer's Call in the owner's own workspace on a customer s
     expect((await state(session("w-own", "owner", { door: true }))).available).toBe(false);
     expect((await state(session(homeWorld()))).available).toBe(true);
   });
+
+  it("his owner login on the social site (a declared customer login, its own world) calls; anyone else gets a link, never a call", async () => {
+    const db = await setup();
+    const { Hono } = await import("hono");
+    const { mountOwnCall } = await import("../src/voice/routes.js");
+    const { runWithAuth, currentAuth } = await import("../src/auth/identity.js");
+    const { isHomeDataWorld } = await import("../src/auth/routeScope.js");
+    const api = new Hono();
+    const voice = { state: () => ({ available: true, enabled: true }) } as any;
+    const mine = new Set(["owner-social@example.com"]);
+    mountOwnCall(api, "/voice/marketing", voice, { world: () => currentAuth()?.scope, ownWorld: (w, e) => isHomeDataWorld(db as any, w) || mine.has(e.toLowerCase()), page: "/marketing" }, "The briefer");
+    const state = async (identity: any) =>
+      (await runWithAuth({ mode: "on", identity, scope: identity.tenant }, () => api.request("/voice/marketing/state"))).json() as Promise<any>;
+    const social = (role = "owner", extra = {}) => ({ ...session("w-social", role, extra), email: "Owner-Social@example.com" });
+    expect((await state(social())).available).toBe(true);
+    expect((await state(social("member"))).available).toBe(false);
+    expect((await state(social("owner", { door: true }))).available).toBe(false);
+    const other = await state(session("w-social"));
+    expect(other.available).toBe(false);
+    expect(other.elsewhere).toMatch(/^https?:\/\/[^/]+\/marketing$/);
+  });
 });

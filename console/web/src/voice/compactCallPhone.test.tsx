@@ -70,4 +70,18 @@ describe("T18-S8 compact Call on the phone", () => {
     expect(screen.getByTestId("call-panel").className).not.toMatch(/phone:hidden/);
     expect((screen.getByTestId("call-start-compact") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("a call that runs on another page is a live link there, never a dead greyed Call", async () => {
+    const f = fakes({ available: false, enabled: false, reason: "The briefer is only on Sam's own console", elsewhere: "https://team.example.com/marketing" });
+    render(<Dock f={f} />);
+    const link = (await screen.findByTestId("call-elsewhere-compact")) as HTMLAnchorElement;
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe("https://team.example.com/marketing");
+    expect(link.textContent).toContain("Call on team.example.com");
+    expect(screen.queryByTestId("call-start-compact")).toBeNull();
+    expect(screen.queryByTestId("call-start")).toBeNull();
+    expect(screen.getByTestId("call-elsewhere").getAttribute("href")).toBe("https://team.example.com/marketing");
+    expect(screen.getByTestId("call-reason").textContent).toContain("team.example.com");
+  });
 });
+

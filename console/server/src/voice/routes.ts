@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { notJordi } from "../status/mark.js";
 import { VoiceError, type Voice } from "./voice.js";
-import { homeWorld, ownerName } from "../identity.js";
+import { homeWorld, ownerName, sites } from "../identity.js";
 import { currentAuth, runWithAuth } from "../auth/identity.js";
 
 const usageIn = z.object({ eventId: z.string().min(1).max(120), kind: z.enum(["response", "transcription"]), usage: z.record(z.unknown()) });
@@ -131,24 +131,30 @@ export function mountOwnCall(
   api: Hono,
   prefix: string,
   call: Voice,
-  o: { world: () => string | undefined; onState?: () => void; ownWorld?: (world: string) => boolean },
+  o: { world: () => string | undefined; onState?: () => void; ownWorld?: (world: string, email: string) => boolean; page?: string },
   what: string,
 ) {
-  // the owner's own workspace on a customer site (`ownWorld`: its world is connected to the home world's data repo, his
-  // owner login, routeScope.ts isOwnDataWorldOwner): its call routes run as the home world, so the call, its record and
-  // his words land exactly where they land from his own console.
+  // the owner's own workspace on a customer site (`ownWorld`: its world is connected to the home world's data repo, or
+  // the login is one his own Google signs in as there; his owner login, routeScope.ts isOwnDataWorldOwner): its
+  // call routes run as the home world, so the call, its record and his words land exactly where they land from his own console.
   if (o.ownWorld)
     api.use(`${prefix}/*`, async (c, next) => {
       const a = currentAuth();
       const i = a?.identity;
-      if (!a || !i || i.kind !== "session" || i.role !== "owner" || i.door || i.plain || !o.ownWorld!(i.tenant)) return next();
+      if (!a || !i || i.kind !== "session" || i.role !== "owner" || i.door || i.plain || !o.ownWorld!(i.tenant, i.email)) return next();
       return runWithAuth({ mode: a.mode, identity: { ...i, tenant: VOICE_WORLD }, ...(a.mode === "on" ? { scope: VOICE_WORLD } : {}) }, next);
     });
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
+  // the owner: "why so difficult": where it can run, so a page that cannot call links there instead of a dead greyed Call.
+  const elsewhere = o.page ? `${sites().teamUrl.replace(/\/$/, "")}${o.page}` : undefined;
   api.get(
     `${prefix}/state`,
     // onState: the page opened, so a call may follow (the marketing call warms its live numbers then).
-    guard((c) => (inWorld() ? (o.onState?.(), c.json(call.state())) : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console` }))),
+    guard((c) =>
+      inWorld()
+        ? (o.onState?.(), c.json(call.state()))
+        : c.json({ available: false, enabled: false, reason: `${what} is only on ${ownerName()}'s own console`, ...(elsewhere ? { elsewhere } : {}) }),
+    ),
   );
   // another world: a 404 (this call is the home world's own, never part of a customer's console).
   mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "home_only", message: `${what} is only on ${ownerName()}'s own console` } }, 404)));
