@@ -8,6 +8,7 @@ import { OtherWorldsPill } from "@/components/otherWorlds";
 import { api, apiMode, type CountsView, type Milestone, type MilestoneStatusView, type PendingItem, type ReviewItem, type WorldCounts } from "@/api";
 import { useQuery, useSharedQuery } from "@/lib/data";
 import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
+import { useGoalShown } from "@/lib/goalFilter";
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
 import { cn } from "@/lib/utils";
@@ -245,10 +246,12 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const companyView = useCompanyView(); // parked unless the server turns it on
   const gapFinder = useGapFinder();
   const campaigns = !!useSkin().campaigns;
-  const blockedHere = useBlocked(statuses, { keep: project.keep });
+  // the cards of a goal he hid with the Inbox's goal labels are out of every pill while he is there.
+  const goalShown = useGoalShown();
+  const blockedHere = useBlocked(statuses, { keep: project.keep }).filter(goalShown);
   // spines not read yet: no number (never a low count), as before
   // E948-S103: a review card that waits on his choice is counted red with Blocked, as the Inbox's Decisions bucket is
-  const split = splitDecisions(reviewCards(allCards, { keep: project.keep }));
+  const split = splitDecisions(reviewCards(allCards, { keep: project.keep }).filter(goalShown));
   const openNeeds = statuses?.loading ? null : blockedHere.length + split.decisions.length;
   const teamReview = split.review.length;
   // the social skin lists real campaigns and their jobs only (campaignMilestones): every other milestone of the world
@@ -1343,8 +1346,10 @@ export function TopBarPills({ counts }: { counts: CountsView | undefined }) {
   // the same lists and functions as the menu's Team pills and the Team home sections (lib/inbox), never /counts.
   const { keep } = useProject();
   const { data: statuses } = useStatusBatch();
-  const blockedHere = useBlocked(statuses, { keep });
-  const reviewCardsNow = useReviewCards({ keep }).cards;
+  // the pills count only the goals he shows with the Inbox's goal labels.
+  const goalShown = useGoalShown();
+  const blockedHere = useBlocked(statuses, { keep }).filter(goalShown);
+  const reviewCardsNow = useReviewCards({ keep }).cards?.filter(goalShown);
   const split = splitDecisions(reviewCardsNow);
   const needsYou = statuses?.loading ? null : blockedHere.length + split.decisions.length;
   const review = reviewCardsNow && split.review.length;

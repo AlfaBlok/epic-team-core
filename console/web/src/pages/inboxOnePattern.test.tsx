@@ -32,7 +32,7 @@ globalThis.ResizeObserver ??= class {
 const base = sampleReview().face!;
 const at = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
 const DONE = sampleReview({ id: "rv_done", ref: "E900-S4" });
-const DUE = () => sampleReview({ id: "rv_due", ref: "E900-S12", face: { ...base, title: "Your Airbnb reply was rewritten.", deadline: { at: at(18), why: 'Your words: "We have a 22-hour deadline."' } } } as Partial<ReviewItem>);
+const DUE = () => sampleReview({ id: "rv_due", ref: "E900-S12", face: { ...base, title: "Your Airbnb reply was rewritten.", deadline: { at: at(80), why: 'Your words: "We have a 22-hour deadline."' } } } as Partial<ReviewItem>);
 const READY = () =>
   sampleReview({
     id: "rv_ready",

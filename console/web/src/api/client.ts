@@ -82,6 +82,7 @@ import type {
   RunInput,
   Seat,
   SeatBoard,
+  SeatCapacity,
   Me,
   HostsView,
   TeamService,
@@ -270,7 +271,7 @@ export interface ApiClient {
   listScorecards(): Promise<ScorecardsBody>;
   /** an objective's one where-we-are: docs/scorecards/<id>.md, the top of its Context tab. */
   whereWeAre(id: string): Promise<WhereWeAre>;
-  /** every milestone and objective with no Delivery Manager turning it . */
+  /** every milestone and objective with no Delivery Manager turning it. */
   personaGaps(): Promise<PersonaGapsBody>;
   /** his order of the pursuits (every id once); one commit in docs/pursuits.json. */
   reorderPursuits(ids: string[]): Promise<{ ok: true; sha?: string }>;
@@ -331,7 +332,7 @@ export interface ApiClient {
   uploadChatAttachment(file: Blob, name: string, onProgress?: (sent: number, total: number) => void): Promise<{ attachment: ChatAttachment }>;
   /** the line of links of uploaded files, for a box whose own route takes only words (it goes after his words). */
   attachmentLine(ids: string[]): Promise<{ line: string }>;
-  /** E948-S127: what his words on a card answer, for each of its asks (read only; the card presses each answer). */
+  /** what his words on a card answer, for each of its asks (read only; the card presses each answer). */
   readSpokenAnswers(words: string, asks: { id: string; code?: string; line: string }[]): Promise<{ reads: SpokenRead[]; judgeError?: string }>;
   /** a milestone's Chat tab, a view on its own repo-desk T3 thread (launched on first open, reused across restarts). */
   getMilestoneChat(milestoneId: string, read?: ChatRead): Promise<DeskChat>;
@@ -460,6 +461,8 @@ export interface ApiClient {
   listSeats(): Promise<Seat[]>;
   /** every AI subscription with the personas on it and its load. */
   getSeatBoard(): Promise<SeatBoard>;
+  /** the seats as a share of their capacity, per app; `world` reads a customer own seats. */
+  getSeatCapacity(world?: string): Promise<SeatCapacity>;
   /** status of the main server/the worker server (server-cached ~15 s; never starts the worker server). */
   getHosts(): Promise<HostsView>;
   /** the team services (the memory service, Gmail), their status and which personas may use each; refresh re-probes. */
@@ -677,7 +680,7 @@ export interface ApiClient {
    * 409 once it is being written or landed); `reopenReviewRow` sets a row his press closed back to review after it landed.
    */
   undoPress(pressId: string): Promise<{ undone: true }>;
-  /** E948-S141: his answers from every device in the last two hours, newest press per card (lib/sentRows withServerAnswers). */
+  /** his answers from every device in the last two hours, newest press per card (lib/sentRows withServerAnswers). */
   listAnsweredPresses?(): Promise<{ since: string; answers: { target: string; at: string; action: string; state: string }[] }>;
   undoAnswer(responseId: string): Promise<{ undone: true; itemId: string }>;
   reopenReviewRow(card: ClosedCardRef & { /** the card's id: it lands after the close it undoes */ id?: string }): Promise<{ status: "review"; sha?: string }>;
@@ -697,7 +700,7 @@ export interface ApiClient {
   relaunchReviewItem(id: string, feedback: string, attachments?: string[]): Promise<ReviewItem>;
   /** Deny, the third outcome: the row closes as denied (a held post is not posted). */
   denyReviewItem(id: string, reason: string, attachments?: string[]): Promise<ReviewItem>;
-  /** E948-S139 Duplicate or already answered: the row closes with those words (and his note), its owner is told which card it repeats. */
+  /** Duplicate or already answered: the row closes with those words (and his note), its owner is told which card it repeats. */
   duplicateReviewItem(id: string, note: string): Promise<ReviewItem>;
 
   /** who is calling and their world (`tenant.skin`); optional so older fakes still type-check. */

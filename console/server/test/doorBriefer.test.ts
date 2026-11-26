@@ -28,3 +28,57 @@ describe("the social briefer's Call reaches the door", () => {
       expect(both("GET", p), p).toBe(false);
   });
 });
+
+describe("the social briefer's Call in the owner's own workspace on a customer site", () => {
+  const setup = async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const Database = (await import("better-sqlite3")).default;
+    const { homeRepo } = await import("../src/identity.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "briefer-"));
+    fs.mkdirSync(path.join(root, homeRepo(), "docs"), { recursive: true });
+    fs.writeFileSync(path.join(root, homeRepo(), "docs", "workspace-data.json"), JSON.stringify({ repo: "Owner1/home-data", checkout: "home-data" }));
+    process.env.REPOS_ROOT = root;
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE world_repos (world TEXT PRIMARY KEY, repo TEXT)");
+    db.prepare("INSERT INTO world_repos VALUES (?, ?)").run("w-own", "owner1/home-data");
+    db.prepare("INSERT INTO world_repos VALUES (?, ?)").run("w-other", "owner1/other-data");
+    return db;
+  };
+  const session = (tenant: string, role = "owner", extra = {}) => ({ kind: "session", tenant, userId: "u1", email: "sam@example.com", name: "Sam", role, ...extra }) as any;
+
+  it("the judge lets his owner login there reach every call route", async () => {
+    const db = await setup();
+    const { judge, isHomeDataWorld } = await import("../src/auth/routeScope.js");
+    expect(isHomeDataWorld(db as any, "w-own")).toBe(true);
+    expect(isHomeDataWorld(db as any, "w-other")).toBe(false);
+    for (const [m, p] of [
+      ["GET", "/api/voice/marketing/state"],
+      ["POST", "/api/voice/marketing/calls"],
+      ["POST", "/api/voice/marketing/calls/vc_1/relay"],
+    ])
+      expect(judge(db as any, session("w-own"), m, p).allow, `${m} ${p}`).toBe(true);
+    // only the briefer: his other screens there keep their own rules
+    expect(judge(db as any, session("w-own"), "GET", "/api/voice/strategy/state").allow).toBe(false);
+  });
+
+  it("the call answers there as the home world; a member, another world or the door get no call", async () => {
+    const db = await setup();
+    const { Hono } = await import("hono");
+    const { mountOwnCall } = await import("../src/voice/routes.js");
+    const { runWithAuth, currentAuth } = await import("../src/auth/identity.js");
+    const { isHomeDataWorld } = await import("../src/auth/routeScope.js");
+    const { homeWorld } = await import("../src/identity.js");
+    const api = new Hono();
+    const voice = { state: () => ({ available: true, enabled: true }) } as any;
+    mountOwnCall(api, "/voice/marketing", voice, { world: () => currentAuth()?.scope, ownWorld: (w) => isHomeDataWorld(db as any, w) }, "The briefer");
+    const state = async (identity: any) =>
+      (await runWithAuth({ mode: "on", identity, scope: identity.tenant }, () => api.request("/voice/marketing/state"))).json() as Promise<any>;
+    expect((await state(session("w-own"))).available).toBe(true);
+    expect((await state(session("w-own", "member"))).available).toBe(false);
+    expect((await state(session("w-other"))).available).toBe(false);
+    expect((await state(session("w-own", "owner", { door: true }))).available).toBe(false);
+    expect((await state(session(homeWorld()))).available).toBe(true);
+  });
+});

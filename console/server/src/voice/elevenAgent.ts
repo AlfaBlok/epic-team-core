@@ -104,12 +104,15 @@ export function elevenCalls(o: { /** the agent's name on the account (default: t
       id = (found.agents ?? []).find((a: any) => a.name === agentName)?.agent_id;
     }
     const body = agentBody(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags);
-    // found: brought in step with this console's tools and greeting once per start; gone from the account: made again.
-    if (id)
-      await api(k, "PATCH", `/v1/convai/agents/${encodeURIComponent(id)}`, withoutTools(body)).catch((e) => {
-        if (/\(404\)/.test((e as Error).message)) id = undefined;
-        else console.warn(`voice: ElevenLabs agent not updated: ${(e as Error).message}`);
+    // found: brought in step with this console's greeting once per start, in the background (the call
+    // never waits on it; each call overrides the prompt and greeting anyway); gone from the account: the signed link's
+    // 404 makes it again (link()).
+    if (id) {
+      const known = id;
+      void api(k, "PATCH", `/v1/convai/agents/${encodeURIComponent(known)}`, withoutTools(body)).catch((e) => {
+        if (!/\(404\)/.test((e as Error).message)) console.warn(`voice: ElevenLabs agent not updated: ${(e as Error).message}`);
       });
+    }
     id ??= (await api(k, "POST", "/v1/convai/agents/create", body)).agent_id as string | undefined;
     if (!id) throw new VoiceError(502, "elevenlabs_refused", "ElevenLabs made no agent");
     agentId = id;

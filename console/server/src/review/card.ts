@@ -5,6 +5,7 @@ import { hostOf, ownerName, sites } from "../identity.js";
 import { hasPlaceLink, hisWordsAlreadyAsk } from "../inbox/askGate.js";
 import { repeatOf, type PriorAnswer } from "../inbox/askRepeat.js";
 import { aboutProblem } from "../inbox/about.js";
+import { firstAsk, PICK_QUESTION } from "./cardKind.js";
 
 /**
  * (the owner 2026-11-03, approved mockup docs/status/e48-s26/real-feed-mockup.html; spec docs/status/e48-s26-card-spec.md):
@@ -468,6 +469,17 @@ export function decisionAskProblem(decision: string): string | undefined {
 }
 
 /**
+ * (the owner 26 Nov, "this came as review but was a question??"): a decision whose answers lead to different work
+ * shows him a question (`asksChoice`, review/cardKind.ts), with Yes and No by itself; one that asks which one or when has no
+ * yes or no, so it is held until its options name each answer and what happens next.
+ */
+export function choiceOptionsProblem(decision: string, options: string[] | undefined): string | undefined {
+  const own = (options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
+  if (own.length >= 2 || !PICK_QUESTION.test(firstAsk(decision))) return undefined;
+  return "the decision asks which one or when: add options, one button per answer, like Tenerife: plan the month there";
+}
+
+/**
  * E948-S102: the source lets him place the card. It quotes his own words (in quotes) or names who raised it and why
  * ("The Gap finder raised it: …"); a card that only says "your voice note of 14 Nov" is held.
  */
@@ -568,6 +580,8 @@ export function gateProblems(g: GateInput): string[] {
     add(decisionAskProblem(c.decision));
     // E907-S76: never ask him again what he already said or answered
     add(cardRepeatProblem(c, g.answered));
+    // a decision that asks which one or when shows as a question, so it names its answers as buttons
+    add(choiceOptionsProblem(c.decision, c.options));
   }
   // E948-S69: a decision card's buttons each name what happens next, `<label>: <next step>`
   if (c.options) {

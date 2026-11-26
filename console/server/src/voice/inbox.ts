@@ -1,5 +1,6 @@
 import { ownerName } from "../identity.js";
 import { isYesNoQuestion } from "../inbox/decideChoices.js";
+import { choiceDefaults } from "../review/cardKind.js";
 
 /**
  * (his pick "Walk the inbox by voice"): the call knows his inbox. When a Team
@@ -54,8 +55,6 @@ export const CHANGES_WANTED = "Changes wanted…";
 export const ANSWER_IN_WORDS = "Answer in words…";
 export const ASK_YES = "Yes: go ahead";
 export const ASK_NO = "No: drop it";
-/** a decision asked as a question (web lib/cardKind.ts DECIDE_QUESTION). */
-const DECIDE_QUESTION = /^(?:do|should|shall|will|can|would) (?:we|the team|i)\b[^?]*\?/i;
 const FEEDBACK_OPTION = /^[^:]*:\s*(?:say|tell|change|give|write|send)\b|^(?:change it|not quite|tell us)\b/i;
 
 /**
@@ -67,7 +66,8 @@ export function reviewButtons(face: { decision?: string; options?: string[] } | 
   const own = (face?.options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
   const decision = (face?.decision ?? "").trim();
   if (own.length >= 2 && own.filter((o) => !FEEDBACK_OPTION.test(o.trim())).length >= 2) return [...own.slice(0, 4), CHANGES_WANTED];
-  if (own.length < 2 && DECIDE_QUESTION.test(decision)) return ["Yes: plan it", "No: park it", CHANGES_WANTED];
+  const defaults = own.length < 2 ? choiceDefaults(decision) : undefined;
+  if (defaults) return [...defaults, CHANGES_WANTED];
   return [MARK_COMPLETE, CHANGES_WANTED];
 }
 

@@ -7,6 +7,7 @@ import { backlogFor, deriveMilestone, locate, openTicketFiles, type Ticket } fro
 import { listRepos, repoForDir, resolveRepo, type Repo } from "../adapters/repos.js";
 import { readSeats } from "../adapters/seats.js";
 import { seatBoard } from "../adapters/seatBoard.js";
+import { homeSeatCapacity } from "../adapters/seatCapacityRead.js";
 import fs from "node:fs";
 import type { DB } from "../db.js";
 import { packPyRunner, resolvePackSkillDir, type PackRunner } from "../packRunner.js";
@@ -199,6 +200,15 @@ export function readRoutes(cfg: ReadConfig, store: Store, threadsEnvironment?: (
   r.get("/seats/board", (c) => {
     try {
       return c.json(seatBoard(JSON.parse(fs.readFileSync(cfg.seatsFile, "utf8")), db));
+    } catch (e) {
+      return c.json({ error: { code: "seats_unavailable", message: `seats.json unreadable: ${(e as Error).message}` } }, 503);
+    }
+  });
+
+  // how full the seats are as a share of their capacity, per app, and how much more load fits (live).
+  r.get("/seats/capacity", (c) => {
+    try {
+      return c.json(homeSeatCapacity(JSON.parse(fs.readFileSync(cfg.seatsFile, "utf8")), db, cfg.reposRoot));
     } catch (e) {
       return c.json({ error: { code: "seats_unavailable", message: `seats.json unreadable: ${(e as Error).message}` } }, 503);
     }

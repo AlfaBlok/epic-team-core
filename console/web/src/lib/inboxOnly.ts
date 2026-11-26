@@ -11,6 +11,7 @@ export const INBOX_ALLOWED = [
   "h1", // the page's title
   '[data-testid="inbox-search"]', // filter: search
   '[data-testid="inbox-show"]', // filter: Show
+  '[data-testid="inbox-goals"]', // filter: the goal labels (one per goal of the counted cards)
   "[data-fold-section]", // a section with its cards
   '[data-testid="inbox-skeleton"]', // the sections' place while they load
 ] as const;

@@ -30,8 +30,10 @@ globalThis.ResizeObserver ??= class {
 const DAD = sampleAsk({ id: "wj_dad", code: "E948-A24", ask: "provide", question: "Your reply to your dad, ready to send?", urgent: true, ownerPriority: { level: "high", ref: "E948-A24", why: "first", pressing: { kind: "first", why: "He asked for the dad cards first", order: 0 } } } as Partial<WaitingItem>);
 const AGAIN = sampleAsk({ id: "wj_again", code: "E995-A9", ask: "provide", question: "Which mail do we log on with?", ownerPriority: { level: "high", ref: "E995-A9", why: "asked again", pressing: { kind: "repeated", why: "asked again", order: 3 } } } as Partial<WaitingItem>);
 const PLAIN = sampleAsk({ id: "wj_plain", code: "E900-A1", ask: "provide", question: "Which colour for the logo?" } as Partial<WaitingItem>);
-const PRESSED_REVIEW = sampleReview({ id: "rv_pressed", ref: "E948-S141", ownerPriority: { level: "high", ref: "E948-S141", why: "pills wrong again", pressing: { kind: "repeated", why: "pills wrong again", order: 2 } } } as Partial<ReviewItem>);
+const PRESSED_REVIEW = sampleReview({ id: "rv_pressed", ref: "E948-S141", ownerPriority: { level: "high", ref: "E948-S141", why: "pills wrong again", pressing: { kind: "repeated", why: "pills wrong again", order: 2, said: new Date().toISOString() } } } as Partial<ReviewItem>);
 const DONE = sampleReview({ id: "rv_done", ref: "E900-S4" });
+// Urgent holds at most 5 cards or 15 percent of the inbox, so these tests give it an inbox of 23 or more
+const FILLER = Array.from({ length: 20 }, (_, n) => sampleReview({ id: `rv_fill${n}`, ref: `E900-S${10 + n}` }));
 const pending = (id: string): PendingItem => ({ id, kind: "ask", state: "open", milestoneId: "ms_sample", title: `row of ${id}` });
 const batch = (items: PendingItem[]): StatusBatch => ({ milestones: [], items, needsYou: items.length, at: "2026-11-20T22:00:00Z" });
 
@@ -82,7 +84,7 @@ describe("Urgent: one section at the very top of his inbox", () => {
 
   for (const skin of ["console", "social"] as const) {
     it(`${skin}: Urgent is first, his dad card leads it, and each urgent card shows once`, async () => {
-      serve([PLAIN, AGAIN, DAD], [DONE, PRESSED_REVIEW]);
+      serve([PLAIN, AGAIN, DAD], [DONE, PRESSED_REVIEW, ...FILLER]);
       inbox(skin);
       const urgent = await screen.findByTestId("inbox-urgent");
       await drawn();
@@ -105,6 +107,16 @@ describe("Urgent: one section at the very top of his inbox", () => {
     });
   }
 
+  // round 2 (his chat 26 Nov: "we cant have 80pct of inbox be urgent"): in a small inbox urgent asks fill the
+  // handful, and a pressed review card stays in its own section
+  it("caps Urgent: in an inbox of 4 the urgent ask takes the one place", async () => {
+    serve([PLAIN, DAD], [DONE, PRESSED_REVIEW]);
+    inbox();
+    const urgent = await screen.findByTestId("inbox-urgent");
+    await waitFor(() => expect(within(urgent).getAllByTestId("urgent-ask")).toHaveLength(1));
+    expect(within(urgent).queryAllByTestId("review-feed-item")).toHaveLength(0);
+  });
+
   it("is not drawn when nothing is urgent or pressing", async () => {
     serve([PLAIN], [DONE]);
     inbox();
@@ -116,7 +128,7 @@ describe("Urgent: one section at the very top of his inbox", () => {
   // E948-S178 (vn_facd277a, 22 Nov 20:57Z: "The one in Urgent is a red one ... it's being counted as one of the green ones"):
   // every card in Urgent counts red, its finished work too
   it("the count check reads Urgent: every card in it counts red, never green", async () => {
-    serve([PLAIN, DAD], [DONE, PRESSED_REVIEW]);
+    serve([PLAIN, DAD], [DONE, PRESSED_REVIEW, ...FILLER]);
     inbox();
     const urgent = await screen.findByTestId("inbox-urgent");
     await waitFor(() => expect(within(urgent).getAllByTestId("urgent-ask")).toHaveLength(1));

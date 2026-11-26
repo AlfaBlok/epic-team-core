@@ -78,6 +78,9 @@ export function UsagePanel({ now = Date.now() }: { now?: number }) {
   return (
     <Card className="mb-4 p-4" data-testid="usage-panel">
       <SeatQuotaStrip />
+      <a href="/seats?focus=capacity#capacity" className="mb-3 inline-block text-xs text-primary hover:underline" data-testid="usage-capacity-link">
+        How full your seats are, per app, and how much more fits →
+      </a>
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span className="text-sm font-medium text-foreground">Usage</span>
         <span className="flex gap-1">

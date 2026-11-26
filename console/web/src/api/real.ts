@@ -451,6 +451,7 @@ export function createRealClient(): ApiClient {
     listTicketsTop: (limit) => call("GET", `/tickets${qs({ limit: limit ? String(limit) : "all" })}`),
     listSeats: () => call("GET", "/seats"),
     getSeatBoard: () => call("GET", "/seats/board"),
+    getSeatCapacity: (world) => call("GET", world ? `/tenants/${encodeURIComponent(world)}/seats/capacity` : "/seats/capacity"),
     // the app start asked /api/me five times at once; concurrent callers now share one request
     getWhatsAppHolder: () => call("GET", "/notify/whatsapp/holder"),
     setWhatsAppHolder: (personaId) => call("PUT", "/notify/whatsapp/holder", { personaId }),

@@ -89,7 +89,7 @@ describe("root L-87: the Inbox holds only the filters on top and the sections wi
   // E948-S132 (the owner, vn_a80780bd: "we've been asking for like an urgent section in the inbox"): a pressing card sits in
   // Urgent, the one section above Blocked on you; the rest keep their order.
   it("the sections keep one order, Urgent then Blocked on you first, when a pressing card waits for review", async () => {
-    const pressing = sampleReview({ id: "rv_pressing", ref: "E900-S5", ownerPriority: { pressing: { why: "said again" } } } as never);
+    const pressing = sampleReview({ id: "rv_pressing", ref: "E900-S5", ownerPriority: { pressing: { why: "said again", said: new Date().toISOString() } } } as never);
     vi.spyOn(api, "listReviewItems").mockImplementation(((q?: { state?: string }) =>
       Promise.resolve(q?.state === "snoozed" ? [sampleReview({ id: "rv_snoozed", ref: "E900-S9", snoozedUntil: "2026-12-01" } as never)] : [pressing, sampleReview({ id: "rv_done", ref: "E900-S4" })])) as never);
     inbox("console");

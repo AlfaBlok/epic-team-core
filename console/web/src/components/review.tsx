@@ -18,7 +18,7 @@ import { KEPT_LINE, onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
 import { reviewQuestion } from "@/lib/pending";
-import { CARD_WORD, countsRed, DECIDE_QUESTION, hisIdeaNote, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
+import { CARD_WORD, choiceDefaults, countsRed, hisIdeaNote, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
 import { LeadLines } from "@/components/readyFirst";
 import { useMinuteClock } from "@/components/deadlineFirst";
 import { cn } from "@/lib/utils";
@@ -136,14 +136,15 @@ export function WaitingForReview({
   // on the Team home (fold set) the same Sort as Blocked on you, remembered per section (the owner
   // 2026-11-12 "I want to be able to do sorting"): Highest priority keeps the server's order, the others by the date it came to review.
   const [sort, setSort] = useSectionSort(fold);
-  const shown = hits ? (cards as Listed[] | undefined)?.filter((i) => hits.has(i.id)) : (cards as Listed[] | undefined);
+  // and only the cards of the goals he shows (the goal labels above the Inbox).
+  const shown = hits || search.goals ? (cards as Listed[] | undefined)?.filter(search.keeps) : (cards as Listed[] | undefined);
   const data = shown && (order ? order(shown) : leadsFirst(sortSection(shown, sort, (i) => i.createdAt || undefined)));
   const snoozedFrom = snoozedList === "all" ? fetchedAll?.filter((i) => project.keep(i.milestoneId)) : fetched;
   const snoozedAll = snoozedList === "none" ? [] : [
     ...(snoozedFrom ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
     ...(fetchedSnoozed ?? []).filter((i) => !back.has(i.id) && !snoozedFrom?.some((x) => x.id === i.id)),
   ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
-  const snoozed = hits ? snoozedAll.filter((i) => hits.has(i.id)) : snoozedAll;
+  const snoozed = hits || search.goals ? snoozedAll.filter(search.keeps) : snoozedAll;
   const items = data ?? [];
   // vn_e00f1134: a card he pressed stays where it was as its green Sent row, after the refetch drops it too
   const rows = useKeepSent(items, (i) => `review:${i.id}`, `review:${fold ?? testId}`);
@@ -294,9 +295,8 @@ export function InboxUrgent() {
   const project = useProject();
   const { entries: snoozes } = useSnoozes();
   const search = useInboxSearch();
-  const hits = search.active ? search.hits : undefined;
   const asks = urgentOrder(
-    (withSnoozes(fetched, snoozes) ?? []).filter((i) => isUrgentAsk(i) && project.keep(i.milestoneId) && (!hits || hits.has(i.id))),
+    (withSnoozes(fetched, snoozes) ?? []).filter((i) => isUrgentAsk(i) && project.keep(i.milestoneId) && search.keeps(i)),
     (i: WaitingItem) => !!i.urgent,
   );
   const open = stillOpen(asks, (i) => `ask:${i.id}`);
@@ -359,7 +359,7 @@ export function InboxSnoozedReviews() {
     ...(from ?? []).filter((i) => snoozing.has(i.id)).map((i) => ({ ...i, snoozedUntil: snoozing.get(i.id)!.until })),
     ...(fetchedSnoozedAll ?? []).filter((i) => project.keep(i.milestoneId) && !back.has(i.id) && !from?.some((x) => x.id === i.id)),
   ].sort((a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? ""));
-  const snoozed = hits ? all.filter((i) => hits.has(i.id)) : all;
+  const snoozed = hits || search.goals ? all.filter(search.keeps) : all;
   if (!snoozed.length) return null;
   return (
     <FoldSection
@@ -663,9 +663,7 @@ export function decisionChoices(face: Pick<CardFace, "decision" | "options" | "n
   const list =
     own.length >= 2
       ? own.slice(0, 4)
-      : DECIDE_QUESTION.test(decision.trim())
-        ? ["Yes: plan it", "No: park it"]
-        : undefined;
+      : choiceDefaults(decision);
   if (!list) return undefined;
   const out = list.map((label) => ({ label, start: !parks(label), sub: subOf(label, !parks(label)), recommended: rec(label) }));
   // the team's recommendation leads (filled); with none named, the first option does
@@ -673,7 +671,7 @@ export function decisionChoices(face: Pick<CardFace, "decision" | "options" | "n
   return [...out.filter((c) => c.recommended), ...out.filter((c) => !c.recommended)];
 }
 
-export { CARD_WORD, FEEDBACK_OPTION, isDecisionCard } from "@/lib/cardKind";
+export { asksChoice, CARD_WORD, FEEDBACK_OPTION, isDecisionCard } from "@/lib/cardKind";
 export const DECISIONS_SECTION = "Decisions waiting on you";
 export const REVIEW_SECTION = "Done, waiting for your review";
 

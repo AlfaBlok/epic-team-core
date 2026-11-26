@@ -38,6 +38,8 @@ const ADEJE = sampleReview({
   },
 } as Partial<ReviewItem>);
 const DONE = sampleReview({ id: "rv_done", ref: "E900-S4" });
+// Urgent holds at most 5 cards or 15 percent of the inbox, so the inbox here is 23 cards
+const FILLER = Array.from({ length: 20 }, (_, n) => sampleReview({ id: `rv_fill${n}`, ref: `E900-S${10 + n}` }));
 const URGENT_ASK = sampleAsk({ id: "wj_urgent", code: "E900-A7", ask: "provide", question: "URGENT: Which day do you fly back?", urgent: true } as Partial<WaitingItem>);
 const pending = (id: string): PendingItem => ({ id, kind: "ask", state: "open", milestoneId: "ms_sample", title: `row of ${id}` });
 const batch = (items: PendingItem[]): StatusBatch => ({ milestones: [], items, needsYou: items.length, at: "2026-11-22T06:00:00Z" });
@@ -83,7 +85,7 @@ describe("a card he called urgent: in Urgent, labelled Urgent, its real title", 
 
   for (const skin of ["console", "social"] as const) {
     it(`${skin}: the Adeje card leads Urgent, says Urgent, never sits under Done`, async () => {
-      serve([URGENT_ASK], [DONE, ADEJE]);
+      serve([URGENT_ASK], [DONE, ADEJE, ...FILLER]);
       inbox(skin);
       const urgent = await screen.findByTestId("inbox-urgent");
       await waitFor(() => expect(within(urgent).getAllByTestId("review-feed-item").map((c) => c.getAttribute("data-inbox-card"))).toEqual(["review:rv_adeje"]));

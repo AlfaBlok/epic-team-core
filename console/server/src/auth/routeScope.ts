@@ -1,4 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { DEFAULT_TENANT, type DB } from "../db.js";
+import { homeRepo } from "../identity.js";
+import { WORKSPACE_DATA_POINTER } from "../workspaceData.js";
 import type { Identity } from "./identity.js";
 import { hasOwnerPower } from "./owner.js";
 
@@ -173,7 +178,7 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/capacity$`)], // its plan's included AI: seats and tokens used (hosted cycle/capacity.ts; the PUT is the platform's)
   ["GET|PUT|DELETE", new RegExp(`^/api/tenants/${ID}/ai$`)], // the workspace's own AI (hosted cycle/worldAi.ts; the PUT is the owner's login only, below)
   ["GET|PUT", new RegExp(`^/api/tenants/${ID}/ai/own$`)], // All included or its own key in its own Bitwarden (hosted cycle/ownKey.ts; PUT owner only, below)
-  ["GET", new RegExp(`^/api/tenants/${ID}/seats$`)], // the workspace's own Claude seats and their headroom (hosted cycle/customerSeats.ts)
+  ["GET", new RegExp(`^/api/tenants/${ID}/seats(/capacity)?$`)], // the workspace's own Claude seats, their headroom and their capacity per campaign (hosted cycle/customerSeats.ts)
   ["POST", new RegExp(`^/api/tenants/${ID}/seats/(signin|signin/finish|check)$`)], // sign-in and check: owner only, below (check too: it opens their vault)
   ["DELETE", new RegExp(`^/api/tenants/${ID}/seats/\\d{1,3}$`)],
   ["GET", new RegExp(`^/api/tenants/${ID}/own-cloud$`)], // its cloud account and the server made there (hosted cycle/ownCloudAccount.ts)
@@ -555,6 +560,48 @@ const isInternalWorldAgent = (db: DB, identity: Identity): boolean => {
     return false;
   }
 };
+/**
+ * the owner's own workspace on a customer site: an owner login (never the door) whose world is connected to the home
+ * world's own data repo (the home checkout's docs/workspace-data.json `repo`). Only a login with write access to that
+ * repo can connect it (tenancy/worldRepo.ts, worldGithub.ts), so this world is the home world's owner in another seat.
+ * Its own calls (the social briefer) run there as the home world (voice/routes.ts mountOwnCall `ownWorld`).
+ */
+const OWN_DATA_WORLD_CALLS: [string, RegExp][] = [
+  ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
+  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
+];
+let dataRepoRead: { at: number; repo?: string } | undefined;
+/** the home world's data repo (owner/name, lower case), read from the home checkout's pointer; undefined without one. */
+export function homeDataRepo(): string | undefined {
+  if (dataRepoRead && Date.now() - dataRepoRead.at < 60_000) return dataRepoRead.repo;
+  let repo: string | undefined;
+  try {
+    const root = (process.env.REPOS_ROOT || "~/github").replace(/^~(?=\/|$)/, os.homedir());
+    const p = JSON.parse(fs.readFileSync(path.join(root, homeRepo(), WORKSPACE_DATA_POINTER), "utf8")) as { repo?: unknown };
+    if (typeof p.repo === "string" && /^[\w.-]+\/[\w.-]+$/.test(p.repo)) repo = p.repo.toLowerCase();
+  } catch {
+    /* no pointer: no world is the owner's own data world */
+  }
+  dataRepoRead = { at: Date.now(), repo };
+  return repo;
+}
+/** is `world` connected to the home world's own data repo? */
+export function isHomeDataWorld(db: DB, world: string | undefined): boolean {
+  const repo = homeDataRepo();
+  if (!world || world === DEFAULT_TENANT || !repo) return false;
+  try {
+    const r = db.prepare("SELECT repo FROM world_repos WHERE world = ?").get(world) as { repo?: string } | undefined;
+    return !!r?.repo && r.repo.toLowerCase() === repo;
+  } catch {
+    return false;
+  }
+}
+/** an owner login (never the door) of the owner's own data world. */
+export const isOwnDataWorldOwner = (db: DB, identity: Identity): boolean =>
+  identity.kind === "session" && identity.role === "owner" && !identity.door && !identity.plain && isHomeDataWorld(db, identity.tenant);
+
 const isOwnersOwnWorld = (db: DB, identity: Identity): boolean => {
   if (identity.kind !== "session" || identity.role !== "owner" || identity.door) return false;
   try {
@@ -628,7 +675,8 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
     !isTenantSafe(method, path) &&
     !(matches(OWNER_WORLD_READS, method === "HEAD" ? "GET" : method, path) && isOwnersOwnWorld(db, identity)) &&
     !(matches(OWNER_WORLD_AGENT_READS, method === "HEAD" ? "GET" : method, path) && isInternalWorldAgent(db, identity)) &&
-    !(matches(CONNECTED_READS, method === "HEAD" ? "GET" : method, path) && isConnectedWorld(db, identity))
+    !(matches(CONNECTED_READS, method === "HEAD" ? "GET" : method, path) && isConnectedWorld(db, identity)) &&
+    !(matches(OWN_DATA_WORLD_CALLS, method === "HEAD" ? "GET" : method, path) && isOwnDataWorldOwner(db, identity))
   )
     return { allow: false, status: 403, reason: "world_scope", message: "this part of the console is not available in this world yet" };
   // owner powers need an owner login or the host owner token; never bare legacy trust or an agent token.

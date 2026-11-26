@@ -12,6 +12,7 @@ import { Empty, ErrorBox, Loading, PageHeader, RelTime, ThreadLink } from "@/com
 import { TicketStatus } from "@/pages/Milestone";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
 import { LimitControl, ListPane, useListLimit } from "@/components/listPane";
+import { SeatCapacityPanel } from "@/components/seatCapacity";
 import { cap, useWords } from "@/lib/skin";
 
 function useMilestoneTitles() {
@@ -256,6 +257,7 @@ export function SeatsPage() {
   return (
     <>
       <PageHeader title="Seats" description="Every AI subscription the team runs on, who is on it, and how loaded it is." />
+      <SeatCapacityPanel />
       {error && <ErrorBox error={error} muted />}
       {loading && <Loading />}
       {data && (

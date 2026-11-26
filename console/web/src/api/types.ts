@@ -575,6 +575,28 @@ export interface SeatBoard {
   readAt?: string;
 }
 
+/** One app's part of the seats: its share of the working seats' capacity this week and at the last days' pace. */
+export interface CapacityApp {
+  app: string;
+  week: number;
+  pace: number;
+  runsPerDay: number;
+}
+/** GET /api/seats/capacity (the home team) or /api/tenants/:id/seats/capacity (a customer's own seats): how full, how much more fits. */
+export interface SeatCapacity {
+  of: string;
+  week: number;
+  pace: number | null;
+  moreFits: number | null;
+  runsPerDay: number;
+  moreRunsPerDay: number | null;
+  apps: CapacityApp[];
+  seats: { all: number; working: number; signedOut: number; limited: number; blocked: number };
+  lost: number;
+  answer: string;
+  at: string;
+}
+
 /** A git checkout under REPOS_ROOT on the main server (GET /api/repos). */
 export interface Repo {
   name: string;
@@ -1026,7 +1048,7 @@ export interface PendingItem {
   detail?: string;
   /** stalled: switched-off personas that could take the ready steps, first = suggested. */
   switchOn?: { assignmentId: string; persona: string }[];
-  /** stalled: the goal's own title, the card's "about" line (E948-S204). */
+  /** stalled: the goal's own title, the card's "about" line. */
   goal?: string;
   /** monitor_alert: a `Monitoring:` item naming a stop / outage or a day overdue; the asks it names; what happens next. */
   monitor?: { why: ("stop" | "overdue")[]; since?: string; nextCheckAt?: string; nextCheck?: string; overdueMs?: number; asks: MonitorAlertAsk[]; next: string };
@@ -1262,7 +1284,7 @@ export interface DeskMessage {
   request?: string;
   /** the ticket rows that hold that request id now: [] = on none yet; unset = not read yet. */
   rows?: { code: string; repo: string; path: string; status?: string; title?: string }[];
-  /** E942-S173: a user-role line the console wrote, not him: the Chat folds it with the desk's short reply to it. */
+  /** a user-role line the console wrote, not him: the Chat folds it with the desk's short reply to it. */
   from?: "console";
 }
 /** what a chat read asks for: the newest `limit` messages, or (with `before`) the page older than that position. */

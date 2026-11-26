@@ -3,6 +3,7 @@ import { z } from "zod";
 import { notJordi } from "../status/mark.js";
 import { VoiceError, type Voice } from "./voice.js";
 import { homeWorld, ownerName } from "../identity.js";
+import { currentAuth, runWithAuth } from "../auth/identity.js";
 
 const usageIn = z.object({ eventId: z.string().min(1).max(120), kind: z.enum(["response", "transcription"]), usage: z.record(z.unknown()) });
 const endIn = z.object({
@@ -126,7 +127,23 @@ export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => strin
  * one of the owner's own calls with its own agent (the objectives coach at /voice/coach, the briefing call at
  * /voice/briefing): the same call routes under its prefix, on its own Voice. The owner's own console only.
  */
-export function mountOwnCall(api: Hono, prefix: string, call: Voice, o: { world: () => string | undefined; onState?: () => void }, what: string) {
+export function mountOwnCall(
+  api: Hono,
+  prefix: string,
+  call: Voice,
+  o: { world: () => string | undefined; onState?: () => void; ownWorld?: (world: string) => boolean },
+  what: string,
+) {
+  // the owner's own workspace on a customer site (`ownWorld`: its world is connected to the home world's data repo, his
+  // owner login, routeScope.ts isOwnDataWorldOwner): its call routes run as the home world, so the call, its record and
+  // his words land exactly where they land from his own console.
+  if (o.ownWorld)
+    api.use(`${prefix}/*`, async (c, next) => {
+      const a = currentAuth();
+      const i = a?.identity;
+      if (!a || !i || i.kind !== "session" || i.role !== "owner" || i.door || i.plain || !o.ownWorld!(i.tenant)) return next();
+      return runWithAuth({ mode: a.mode, identity: { ...i, tenant: VOICE_WORLD }, ...(a.mode === "on" ? { scope: VOICE_WORLD } : {}) }, next);
+    });
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
   api.get(
     `${prefix}/state`,

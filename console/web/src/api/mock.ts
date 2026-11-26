@@ -542,7 +542,7 @@ const mockMail = () => ({
       mockFiles.set(a.id, a);
       return ok({ attachment: a });
     },
-    // E948-S127: the mock reads "the first one, yes" by order (the console's reader also reads codes and asks a model).
+    // the mock reads "the first one, yes" by order (the console's reader also reads codes and asks a model).
     async readSpokenAnswers(words, asks) {
       const order = ["first", "second", "third", "fourth", "fifth", "sixth"];
       return ok({
@@ -807,7 +807,7 @@ const mockMail = () => ({
     async whereWeAre(id: string) {
       return ok({ path: `docs/scorecards/${id}.md`, present: false, open: [], changed: [] });
     },
-    // every goal turns in the sample .
+    // every goal turns in the sample.
     async personaGaps() {
       return ok({ ok: true, gaps: [], checked: { objectives: SAMPLE_PURSUITS.pursuits.length, milestones: 0 }, at: new Date(0).toISOString() });
     },
@@ -1307,6 +1307,28 @@ const mockMail = () => ({
 
     async listSeats() {
       return ok(db.seats);
+    },
+
+    /** a marked sample of the seats' capacity (the real one is read live from the seats and the runs). */
+    async getSeatCapacity(world?: string) {
+      return ok({
+        of: world ?? "team",
+        week: 0.47,
+        pace: 0.82,
+        moreFits: 0.22,
+        runsPerDay: 120,
+        moreRunsPerDay: 26,
+        apps: [
+          { app: "EpicTeam", week: 0.24, pace: 0.42, runsPerDay: 70 },
+          { app: "Social", week: 0.15, pace: 0.26, runsPerDay: 38 },
+          { app: "Research", week: 0.05, pace: 0.09, runsPerDay: 12 },
+          { app: "Not metered", week: 0.03, pace: 0.05, runsPerDay: 0 },
+        ],
+        seats: { all: db.seats.length, working: db.seats.filter((s) => s.status !== "logged_out").length, signedOut: db.seats.filter((s) => s.status === "logged_out").length, limited: 0, blocked: 0 },
+        lost: 0,
+        answer: "Your seats are 47% used this week at 82% pace: about 22% more load fits, about 26 more runs a day.",
+        at: new Date().toISOString(),
+      });
     },
 
     /** the sample seats as the Seats screen reads them: who ran on each from the sample runs, never padded to 20. */

@@ -19,25 +19,69 @@ export function isDecisionCard(face: Pick<CardFace, "decision" | "options" | "ne
   if (!face) return false;
   const own = (face.options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
   if (own.length >= 2) return own.filter((o) => !FEEDBACK_OPTION.test(o.trim())).length >= 2;
-  return DECIDE_QUESTION.test((face.decision ?? "").trim());
+  return asksChoice(face.decision);
 }
+
+/**
+ * (the owner 26 Nov on a tester-names card, "this came as review but was a question??"): a decision that asks him
+ * a real choice, whose answers lead to different work, is a Decision even with no buttons of its own. It asks a choice when
+ * its first sentence
+ *   1. asks what the team does: "Do we / Should we / Shall I …?", or any "Should …?"            (DECIDE_QUESTION, SHOULD)
+ *   2. asks which one or when: "Which mortgage …?", "When do we …?", "What should we …?"          (PICK_QUESTION)
+ *   3. names the step to take: "Greet Ana by name …?", "Buy the phone at 844 euros?"           (an action verb first)
+ *   4. weighs two ways: "… by the name they typed or the Google one?"                              (OR_CHOICE)
+ * A question that only judges finished work ("Is this right?", "Does it read well?", "Keep it?") stays a Review.
+ */
+const SHOULD = /^(?:should|shall)\b[^?]*\?/i;
+export const PICK_QUESTION = /^(?:which|when|where|who|whom|what\b[^?]*\b(?:should|do|shall|will) (?:we|i|the team))\b[^?]*\?/i;
+const OR_CHOICE = /\b\w+,? or (?!not\b|no\b|anything\b|something\b)\w+/i;
+/** first words that open a question about the work, a sentence about a thing, or the follow-ups the card switches on (Start, Switch), never a new step to take. */
+const NOT_A_STEP =
+  /^(?:is|are|was|were|am|be|does|do|did|has|have|had|can|could|will|would|may|might|must|should|shall|how|why|what|which|when|where|who|whom|whose|the|this|these|that|those|a|an|your|our|my|its|their|it|they|you|we|i|he|she|one|all|every|both|each|any|now|so|then|and|or|but|ok|okay|good|right|done|ready|enough|here|there|keep|mark|close|accept|approve|confirm|stay|leave|start|switch|happy|fine|looks?|reads?|\d\S*)$/i;
+/** the decision's first sentence, links reduced to their words. */
+const firstAsk = (decision: string | undefined) => (decision ?? "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim().split(/(?<=[?.!])\s+/)[0] ?? "";
+export function asksChoice(decision: string | undefined): boolean {
+  const q = firstAsk(decision);
+  if (!q.endsWith("?")) return false;
+  if (DECIDE_QUESTION.test(q) || SHOULD.test(q) || PICK_QUESTION.test(q)) return true;
+  const first = q.split(/\s+/)[0]?.replace(/[^\p{L}\d']/gu, "") ?? "";
+  if (first && !NOT_A_STEP.test(first)) return true;
+  return OR_CHOICE.test(q.replace(/\?$/, ""));
+}
+/** the buttons a choice gets when the card names none: Yes: plan it for "Do we …?", Yes: go ahead for any other. */
+export const choiceDefaults = (decision: string | undefined): string[] | undefined =>
+  DECIDE_QUESTION.test(firstAsk(decision)) ? ["Yes: plan it", "No: park it"] : asksChoice(decision) && !PICK_QUESTION.test(firstAsk(decision)) ? ["Yes: go ahead", "No: park it"] : undefined;
 /** the one word each kind of card shows first on its meta line, the same in every section name (docs/review-cards.md). */
 export const CARD_WORD = { decision: "Decision", review: "Review" } as const;
 
 /**
- * (the owner 25 Nov 23:51Z, vn_9ad3d512: "I was excited about some of the ideas that we discussed in the morning
- * ... they didn't come back to me ... I never get to that section because I'm always kind of going from the top to the
- * bottom ... by sections ... if you are in an urgency environment, then you get bumped up into a red type ... All I need is
- * consistency"): one rule says which review card sits in Urgent, and every count reads it (the top bar, each section's
- * pill, the menu, phone and laptop alike). A review card is urgent, red, when
- *   1. he called it urgent or pressed for it (asked for it first, again, or with frustration)          `urgent`
- *   2. it moves one of his top objectives, his first three in his order (docs/pursuits.json)           `top-objective`
- *   3. his own words started it and it reached him the day he said them, or the day after             `his-idea`
- * Everything in Urgent counts red, once; green is only Done, waiting for your review (E948-S178).
+ * One rule says which review card sits in Urgent, and every count reads it (the top bar, each section's pill, the menu,
+ * phone and laptop alike). Round 1 (vn_9ad3d512, 25 Nov: "if you are in an urgency environment, then you get bumped up
+ * into a red type ... All I need is consistency") let cards on his top three objectives and his ideas of the day before
+ * rise too, and Urgent swallowed most of the inbox. Round 2 (his chat 26 Nov: "too much stuff became urgent suddenly -
+ * we cant have 80pct of inbox be urgent.."): a review card may be urgent only when
+ *   1. he labelled it urgent, or it is truly time-bound: a deadline today or tomorrow, an outage, a payment `urgent`
+ *   2. he pushed it himself today: a press of his from today (first, again, frustrated)                    `pressed`
+ *   3. his own words dated today started it                                                                `his-idea`
+ * and Urgent holds at most a handful of them: 5 cards or 15 percent of the inbox, whichever is smaller (`urgentCap`;
+ * the inbox is his open review cards and asks, and an urgent ask already in Urgent takes a place first),
+ * time-bound first, then today's presses, then today's ideas, in his objective order. The rest stay in their own
+ * sections. `stampUrgent` picks them once over the whole inbox (lib/inbox useReviewCards) and every reader reads the
+ * stamp, so a project's pill and the Team inbox agree. Everything in Urgent counts red, once; green is only Done (E948-S178).
  */
-export const TOP_OBJECTIVES = 3;
-export type UrgentWhy = "urgent" | "top-objective" | "his-idea";
-type UrgentInput = { ownerPriority?: OwnerPriority; face?: { ready?: { why?: string } | null; source?: string } | null; inboxSince?: string; createdAt?: string };
+export const URGENT_MAX = 5;
+export const URGENT_SHARE = 0.15;
+export type UrgentWhy = "urgent" | "pressed" | "his-idea";
+type UrgentInput = {
+  id?: string;
+  title?: string;
+  /** set by `stampUrgent`: why it is in Urgent, or null when it is not (absent: the card was never stamped). */
+  urgent?: UrgentWhy | null;
+  ownerPriority?: OwnerPriority;
+  face?: { ready?: { why?: string } | null; source?: string; deadline?: { at: string } | null; title?: string } | null;
+  inboxSince?: string;
+  createdAt?: string;
+};
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAY_MONTH = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i;
@@ -68,33 +112,83 @@ export function sourceDay(source: string | undefined, arrived: number): number |
   return at > arrived + DAY_MS ? Date.UTC(year - 1, month, day) : at;
 }
 
-/** 3: his own words started the card, and it reached his inbox the day he said them or the next. */
-export function isHisIdeaThatDay(i: UrgentInput): boolean {
+/** the UTC day (midnight, ms) of `now`. */
+const dayOf = (ms: number) => Math.floor(ms / DAY_MS) * DAY_MS;
+
+/** the day his own words in the card's source were said, when the source holds his words and a date. */
+function hisWordsDay(i: UrgentInput): number | undefined {
   const source = (i.face?.source ?? "").trim();
   const him = himRe();
-  if (!source || !(HIS_WORDS.test(source) || new RegExp(`^\\W*(?:${him})\\b`, "i").test(source)) || !new RegExp(`\\b(?:${him})\\b`, "i").test(source)) return false;
+  if (!source || !(HIS_WORDS.test(source) || new RegExp(`^\\W*(?:${him})\\b`, "i").test(source)) || !new RegExp(`\\b(?:${him})\\b`, "i").test(source)) return undefined;
   const arrived = Date.parse(i.inboxSince ?? i.createdAt ?? "");
-  if (!Number.isFinite(arrived)) return false;
-  const said = sourceDay(source, arrived);
-  if (said == null) return false;
-  const arrivedDay = Math.floor(arrived / DAY_MS) * DAY_MS;
-  return arrivedDay >= said && arrivedDay - said <= DAY_MS;
+  return sourceDay(source, Number.isFinite(arrived) ? arrived : Date.now());
 }
 
-/** why a review card sits in Urgent (the first that holds), or undefined when it does not. */
-export function urgentWhy(i: UrgentInput): UrgentWhy | undefined {
-  if (i.ownerPriority?.pressing || i.face?.ready?.why === "urgent") return "urgent";
-  const n = i.ownerPriority?.objective?.n;
-  if (n != null && n < TOP_OBJECTIVES) return "top-objective";
-  if (isHisIdeaThatDay(i)) return "his-idea";
+/** 3: his own words dated today started the card. */
+export function isHisIdeaToday(i: UrgentInput, now = Date.now()): boolean {
+  const said = hisWordsDay(i);
+  return said != null && said === dayOf(now);
+}
+
+/** an outage or a payment, read from the card's title. */
+const TIME_BOUND = /\b(?:outage|is down|went down|(?:payment|invoice|bill|renewal|rent|tax)s? (?:is |are )?(?:due|overdue|failed|declined|bounced)|(?:card|payment) (?:was )?declined|expires? (?:today|tomorrow))\b/i;
+/** 1: labelled urgent, a deadline today or tomorrow (a past day's deadline is not), an outage or a payment. */
+export function isTimeBound(i: UrgentInput, now = Date.now()): boolean {
+  if (i.face?.ready?.why === "urgent") return true;
+  const at = Date.parse(i.face?.deadline?.at ?? "");
+  if (Number.isFinite(at) && at >= dayOf(now) && at < dayOf(now) + 2 * DAY_MS) return true;
+  // the card's own title only: a row title holds the brief ("nothing charged"), not what is due
+  return TIME_BOUND.test(i.face?.title ?? i.title ?? "");
+}
+
+/** 2: a press of his from today. */
+export function isPressedToday(i: UrgentInput, now = Date.now()): boolean {
+  const p = i.ownerPriority?.pressing;
+  if (!p) return false;
+  const at = Date.parse(p.said ?? "");
+  return Number.isFinite(at) && dayOf(at) === dayOf(now);
+}
+
+/** why a card could sit in Urgent before the cap (the first that holds), or undefined. */
+export function urgentCandidate(i: UrgentInput, now = Date.now()): UrgentWhy | undefined {
+  if (isTimeBound(i, now)) return "urgent";
+  if (isPressedToday(i, now)) return "pressed";
+  if (isHisIdeaToday(i, now)) return "his-idea";
   return undefined;
 }
 
-/** the words its tag says when it is in Urgent as his idea of that day ("Your idea, 25 Nov"), else undefined. */
+/** how many cards Urgent holds for an inbox of `total`: at most 5 or 15 percent, whichever is smaller (at least 1). */
+export const urgentCap = (total: number) => (total <= 0 ? 0 : Math.min(URGENT_MAX, Math.max(1, Math.floor(total * URGENT_SHARE))));
+
+const RANK: Record<UrgentWhy, number> = { urgent: 0, pressed: 1, "his-idea": 2 };
+/** the ids in Urgent and why: the candidates, best first, cut at the cap over the whole inbox. */
+export function pickUrgent<T extends UrgentInput>(cards: T[], now = Date.now(), o: { asks?: number; urgentAsks?: number } = {}): Map<T, UrgentWhy> {
+  const cand = cards.map((c, k) => ({ c, k, why: urgentCandidate(c, now) })).filter((x): x is { c: T; k: number; why: UrgentWhy } => !!x.why);
+  const due = (c: T) => { const at = Date.parse(c.face?.deadline?.at ?? ""); return Number.isFinite(at) ? at : Number.MAX_SAFE_INTEGER; };
+  const obj = (c: T) => c.ownerPriority?.objective?.n ?? Number.MAX_SAFE_INTEGER;
+  const since = (c: T) => -(Date.parse(c.inboxSince ?? c.createdAt ?? "") || 0);
+  cand.sort((a, b) => RANK[a.why] - RANK[b.why] || due(a.c) - due(b.c) || obj(a.c) - obj(b.c) || since(a.c) - since(b.c) || a.k - b.k);
+  // the cap is over his whole inbox (review cards and open asks), and urgent asks already in Urgent take their places first
+  const room = Math.max(0, urgentCap(cards.length + (o.asks ?? 0)) - (o.urgentAsks ?? 0));
+  return new Map(cand.slice(0, room).map((x) => [x.c, x.why]));
+}
+
+/** every card with its `urgent` stamp, picked once over the whole inbox it is given. */
+export function stampUrgent<T extends UrgentInput>(cards: T[], now = Date.now()): (T & { urgent: UrgentWhy | null })[] {
+  const picked = pickUrgent(cards, now);
+  return cards.map((c) => ({ ...c, urgent: picked.get(c) ?? null }));
+}
+
+/** why a review card sits in Urgent, or undefined when it does not: its stamp; an unstamped card alone is its own inbox of one. */
+export function urgentWhy(i: UrgentInput): UrgentWhy | undefined {
+  if (i.urgent !== undefined) return i.urgent ?? undefined;
+  return urgentCandidate(i);
+}
+
+/** the words its tag says when it is in Urgent as his idea of today ("Your idea, 26 Nov"), else undefined. */
 export function hisIdeaNote(i: UrgentInput): string | undefined {
   if (urgentWhy(i) !== "his-idea") return undefined;
-  const arrived = Date.parse(i.inboxSince ?? i.createdAt ?? "");
-  const said = sourceDay(i.face?.source, arrived);
+  const said = hisWordsDay(i);
   if (said == null) return undefined;
   const d = new Date(said);
   return `Your idea, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].replace(/^./, (c) => c.toUpperCase())}`;

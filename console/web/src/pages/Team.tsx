@@ -59,6 +59,7 @@ import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
+import { InboxGoalLabels } from "@/components/inboxGoals";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
 import { FoldChevron } from "@/components/foldChevron";
 import { lazyPage } from "@/lib/lazyPage";
@@ -512,6 +513,8 @@ export function TeamPage({
               section opens by itself. No section of their own, nothing loose between the sections. */}
           {/* the owner, 2026-11-12 21:17Z: one search box on top filters every section at once. */}
           <InboxSearchBox />
+          {/* (the owner, vn_b5b6f567): one label per goal of the cards the pills count; a tap hides or shows it. */}
+          <InboxGoalLabels />
           {/* E948-S66 (the owner, vn_fe52ef4a): each kind filterable. */}
           <InboxShowFilter show={show} onChange={setShow} />
           <SlotStack name="inbox">

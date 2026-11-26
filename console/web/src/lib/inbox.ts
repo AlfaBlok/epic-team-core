@@ -5,6 +5,7 @@ import { useSnoozes } from "@/lib/snooze";
 import { answeredHere, answeredSlot, applyServerAnswers, useSentVersion } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
 import { foldReviews } from "@/lib/sameTopic";
+import { pickUrgent, type UrgentWhy } from "@/lib/cardKind";
 
 /**
  * every count of what waits
@@ -156,7 +157,21 @@ export function useReviewCards(o: { keep?: Keep } = {}) {
     gone = new Set([...gone].filter((id) => data.some((i) => i.id === id)));
     goneVersion++;
   }, [data]);
-  return { data, error, loading, cards: data && reviewCards(data, { ...o, snoozing: entries, gone: g }) };
+  // round 2 (his chat 26 Nov: "we cant have 80pct of inbox be urgent"): Urgent is picked once over his whole
+  // open inbox, capped (lib/cardKind pickUrgent), and every list and count reads that stamp, phone and laptop alike.
+  const open = data && reviewCards(data, { snoozing: entries, gone: g });
+  const openKey = open?.map((i) => i.id).join(" ");
+  const stamped = useMemo(() => {
+    if (!data || !open) return data;
+    // an open ask counts in his inbox; one labelled urgent or pressing sits in Urgent already (components/waiting isUrgentAsk)
+    const openAsks = (asks ?? []).filter((a) => a.state === "open" && !a.snoozedUntil && !a.macAgent);
+    const picked = pickUrgent(open, Date.now(), { asks: openAsks.length, urgentAsks: openAsks.filter((a) => !!a.urgent || !!a.ownerPriority?.pressing).length });
+    const why = new Map<string, UrgentWhy>();
+    picked.forEach((w, c) => why.set(c.id, w));
+    return data.map((i) => ({ ...i, urgent: why.get(i.id) ?? null }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, openKey, asks]);
+  return { data: stamped, error, loading, cards: stamped && reviewCards(stamped, { ...o, snoozing: entries, gone: g }) };
 }
 
 /** The status a Waiting on you list counts from: the world's batch, one milestone's, or none (an untracked spine). */

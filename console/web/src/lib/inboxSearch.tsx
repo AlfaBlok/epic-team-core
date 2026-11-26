@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type InboxSearchResult, type WaitingItem } from "@/api";
+import { useGoalShown, useShownGoals, type GoalInput } from "@/lib/goalFilter";
 
 /**
  * the owner, 2026-11-12 21:17Z: a search box on top of the Inbox; typing a word filters every section
@@ -26,9 +27,13 @@ export interface InboxSearchState {
   hits?: Set<string>;
   /** done items the Inbox's list does not hold (older than its window), as rows for Answered. */
   rows: WaitingItem[];
+  /** he picked goals with the goal labels above the Inbox (not every goal is on). */
+  goals: boolean;
+  /** a card stays when the search names it (or none is on) and its goal is not hidden: every section reads it. */
+  keeps: (i: { id: string } & GoalInput) => boolean;
 }
 
-const OFF: InboxSearchState = { text: "", setText: () => {}, active: false, q: "", searching: false, rows: [] };
+const OFF: InboxSearchState = { text: "", setText: () => {}, active: false, q: "", searching: false, rows: [], goals: false, keeps: () => true };
 const Ctx = createContext<InboxSearchState>(OFF);
 
 export function useInboxSearch(): InboxSearchState {
@@ -61,6 +66,8 @@ export function InboxSearchProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<Error | undefined>();
   const trimmed = text.trim();
   const active = trimmed.length >= SEARCH_MIN;
+  const shown = useGoalShown();
+  const goals = useShownGoals() !== null;
   useEffect(() => {
     if (!active) {
       setQ("");
@@ -85,6 +92,7 @@ export function InboxSearchProvider({ children }: { children: ReactNode }) {
   const value = useMemo<InboxSearchState>(() => {
     // the last answer stays on screen while the next word is on its way (no flash of every card between letters).
     const r = active ? result : undefined;
+    const hits = r ? new Set(r.hits.map((h) => h.id)) : undefined;
     return {
       text,
       setText,
@@ -93,9 +101,11 @@ export function InboxSearchProvider({ children }: { children: ReactNode }) {
       result: r,
       error: active ? error : undefined,
       searching: active && (!r || r.q !== trimmed),
-      hits: r ? new Set(r.hits.map((h) => h.id)) : undefined,
+      hits,
       rows: r?.rows ?? [],
+      goals,
+      keeps: (i) => (!active || !hits || hits.has(i.id)) && shown(i),
     };
-  }, [text, active, result, error, q, trimmed]);
+  }, [text, active, result, error, q, trimmed, goals, shown]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

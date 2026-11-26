@@ -1852,10 +1852,13 @@ export function WaitingOnYou({
   // plus done items older than this list's window as their rows. Only on the world-wide Inbox (no milestone, no spine).
   const search = useInboxSearch();
   const hits = !milestoneId && !spine && search.active ? search.hits : undefined;
+  // on the world-wide Inbox only the asks of the goals he shows (the goal labels above it).
+  const keeps = !milestoneId && !spine ? search.keeps : undefined;
   const unfiltered = withSnoozes(fetched, snoozes);
   const data = useMemo(() => {
-    if (!hits || !unfiltered) return unfiltered;
-    const kept = unfiltered.filter((i) => hits.has(i.id));
+    if (!unfiltered) return unfiltered;
+    if (!hits) return keeps && search.goals ? unfiltered.filter(keeps) : unfiltered;
+    const kept = unfiltered.filter(keeps ?? ((i) => hits.has(i.id)));
     const have = new Set(unfiltered.map((i) => i.id));
     // the same ask written in two spines of one repo (an epic and its parent) is one line: a row whose repo and code
     // the shown matches (or an earlier row) already hold is left out, so Answered never shows it twice
@@ -1867,7 +1870,7 @@ export function WaitingOnYou({
       return true;
     });
     return [...kept, ...rows];
-  }, [hits, unfiltered, search.rows, narrowed, project]);
+  }, [hits, unfiltered, search.rows, narrowed, project, keeps, search.goals]);
   /** while a search is on, every section shows its matches open. */
   const searching = !!hits;
   const [sendOpen, setSendOpen] = useState(false);
@@ -1920,7 +1923,7 @@ export function WaitingOnYou({
   // entry but no card, a guessed line, was counted and shown nowhere).
   // an open priority ask ("Put X first in your objectives?") leads this section (pinnedFirst), so the rows below leave it out.
   const pinned = !milestoneId && !spine ? new Set((data ?? []).filter((i) => isPinnedPriority(i) || (urgentApart && isUrgentAsk(i))).map((i) => i.id)) : new Set<string>();
-  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && !pinned.has(st.id) && (!hits || hits.has(st.id))) : undefined;
+  const blocked = status ? blockedItems(status, { nodeKey, snoozing: snoozes }).filter((st) => !sameKeyFolded.has(st.id) && !pinned.has(st.id) && (!keeps || keeps(st))) : undefined;
   const blockedIds = blocked && new Set(blocked.map((i) => i.id));
   const isOpen = (i: WaitingItem) => (blockedIds ? blockedIds.has(i.id) : pending(i) && !pinned.has(i.id));
   // a Mark ready item (the owner's ready stamp) is the status row with the stamp button, never a guessed card.
@@ -1957,7 +1960,7 @@ export function WaitingOnYou({
   // a monitor alert whose every ask he snoozed: one quiet line with Unsnooze, never counted. One that names no ask for
   // him (state alarm, the Delivery Manager's) is never in his inbox (the owner: "I can't take action on it so what's it
   // doing there?"): the console hands it back to its team as one desk note (status/alertHandBack.ts).
-  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && i.state === "snoozed" && (!hits || hits.has(i.id))) : [];
+  const quietAlerts = !nodeKey && status ? status.items.filter((i) => i.kind === "monitor_alert" && i.state === "snoozed" && (!keeps || keeps(i))) : [];
   // the number is known as soon as the fast status batch is in (before the cards); unknown while it counts.
   const knownCount = status && !status.loading ? count : data && !status ? count : undefined;
   // Codes are qualified `<repo>/<code>` when the list spans repos (human-asks v2).

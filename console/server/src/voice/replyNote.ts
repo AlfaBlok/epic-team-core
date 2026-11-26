@@ -144,11 +144,11 @@ export function mountListenPage(app: Hono, dir: string) {
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 main{max-width:620px;margin:0 auto;padding:40px 16px 64px}
 h1{font:600 26px/1.25 Georgia,"Times New Roman",serif;margin:0 0 4px}.when{color:var(--soft);font-size:14px;margin:0 0 24px}
-.player{border:1px solid var(--line);border-radius:10px;padding:16px}.player p{margin:0 0 10px;color:var(--green);font-weight:600}
+.player{margin:0;border:1px solid var(--line);border-radius:10px;padding:16px}.player figcaption{margin:0 0 10px;color:var(--green);font-weight:600}
 audio{width:100%}.words{margin-top:28px;color:var(--ink);white-space:pre-wrap}.words h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--soft);margin:0 0 8px}
 </style></head><body><main>
 <h1>${esc(title)}</h1><p class="when">${esc(when)}</p>
-<div class="player" id="listen"><p>Press play to listen</p><audio controls preload="metadata" src="/api/voice/reply-notes/${id}.mp3"></audio></div>
+<figure class="player" id="listen"><figcaption>Press play to listen</figcaption><audio controls preload="metadata" src="/api/voice/reply-notes/${id}.mp3"></audio></figure>
 ${meta.words ? `<section class="words"><h2>What it says</h2>${esc(meta.words)}</section>` : ""}
 </main></body></html>`);
   });

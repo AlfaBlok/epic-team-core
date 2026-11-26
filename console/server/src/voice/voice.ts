@@ -766,6 +766,10 @@ export function createVoice(d: VoiceDeps) {
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
+    // the ElevenLabs call link is asked for while the context is read, not after it (a press once waited
+    // ~60 s on "Connecting...": the context's wait, then the agent's update and the link, one after the other).
+    const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link() : undefined;
+    linkP?.catch(() => undefined); // awaited below; a refusal surfaces there
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
     const [brief, recall, cards, objectives, context, objectiveCards] = await Promise.all([
       briefNow(),
@@ -788,7 +792,7 @@ export function createVoice(d: VoiceDeps) {
     const greeting = focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions);
     if (provider() === "elevenlabs" && d.eleven) {
       // ElevenLabs Agents on the grant: a signed link for one call, the same instructions and greeting per call.
-      const link = await d.eleven.link();
+      const link = await (linkP ?? d.eleven.link());
       const id = `call_${crypto.randomBytes(4).toString("hex")}`;
       const t = iso();
       if (active()) throw new VoiceError(409, "one_call", "A call is already on (one call at a time). Hang it up first.");

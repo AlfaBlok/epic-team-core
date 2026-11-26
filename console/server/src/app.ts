@@ -248,7 +248,7 @@ import { deskNoteLines, serverWheelReader, wheelFaults } from "./cycle/wakeNews.
 import { createNoteCross, type NoteCross } from "./desk/noteCross.js";
 import { citeOf, handImprovement, improvementsOutSection, improvementsTakenSection, resolveImprovementTarget, type WorldRow } from "./inbox/improvement.js";
 import { bookBrief, briefing, treeBrief, type TreeEntry } from "./voice/brief.js";
-import { ownerOfPath } from "./auth/routeScope.js";
+import { isHomeDataWorld, ownerOfPath } from "./auth/routeScope.js";
 import { ensureWorldStamps, milestoneWorld, mountWorldFilters, repoWorlds } from "./tenancy/world.js";
 import { worldClaims } from "./tenancy/repoScope.js";
 import { configureRepoScope, milestoneRepoRefusal } from "./tenancy/repoScope.js";
@@ -3666,8 +3666,10 @@ export function createApp(
       } catch {
         list = [];
       }
+      // unscoped: the read runs inside his request, scoped to his world, where the social
+      // world's repos are not his: a scoped store found no ledgers and the call told him no post went out in 7 days.
       const p = socialArea
-        .callNumbers({ store, world: socialWorld(), homeDir: homeDir ?? resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {}, campaigns: list })
+        .callNumbers({ store: createStore(db), world: socialWorld(), homeDir: homeDir ?? resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {}, campaigns: list })
         .then((text) => ((last = { at: Date.now(), text }), text))
         .catch((e) => `The numbers could not be read for this call: ${(e as Error).message.slice(0, 160)}.`)
         .finally(() => (pending = undefined));
@@ -3686,7 +3688,7 @@ export function createApp(
       throw new VoiceError(409, "marketing_eleven_only", `The ${socialProduct()} briefer runs on ElevenLabs only, and ElevenLabs calls are off on this console.`);
     },
     scope: { world: DEFAULT_TENANT },
-    contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 25_000, // live reads (the Team Browser) take seconds
+    contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 15_000, // the numbers wait 8 s inside it
     instructions: marketingInstructions,
     tools: () => MARKETING_TOOLS as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
@@ -3709,7 +3711,12 @@ export function createApp(
       }
       // the owner asked for posts best and worst, Reddit replies, engagement, views, DMs, tester invites and
       // next steps, read live; the read the page's opening started (under 3 min old) or a fresh one, a part that fails says so.
-      const numbers = await marketingNumbers.read(list, home);
+      // the call goes live after at most MARKETING_NUMBERS_MS for the numbers (a press once waited ~60 s on
+      // "Connecting..."); a read not done by then is named as not read, never guessed, and is ready for the next call.
+      const numbers = await Promise.race([
+        marketingNumbers.read(list, home),
+        new Promise<string>((ok) => setTimeout(() => ok("# The numbers\nStill being read when the call started: if he asks for numbers, say they were not ready at the start of this call and to call again in a minute; never guess a number."), Number(process.env.CONSOLE_MARKETING_NUMBERS_MS) || 8_000).unref()),
+      ]);
       return marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns, numbers });
     },
     walkRule: () => "",
@@ -3734,7 +3741,7 @@ export function createApp(
       return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm() }, `The ${socialProduct()} briefer`);
+  mountOwnCall(api, "/voice/marketing", marketingVoice, { world: () => store.tenant, onState: () => marketingNumbers.warm(), ownWorld: (w) => isHomeDataWorld(db, w) }, `The ${socialProduct()} briefer`);
   // the team product's strategy call (/strategy): its own ElevenLabs agent sets the team product's launch
   // strategy with him from the strategy brief (the launch timeline, what ready waits on, the questions) and its
   // objectives; his words go to the Team desk or the social desk. The marketing call's tools and relay, reused.
