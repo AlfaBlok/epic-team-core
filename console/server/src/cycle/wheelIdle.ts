@@ -110,7 +110,9 @@ export function wheelVerdict(
   const dryRun = [...new Set(heldAsks.filter((h) => heldForDryRun(h.reason)).map((h) => h.code!))];
   const held = [...new Set(heldAsks.map((h) => `${h.code}: ${h.reason.split(/[:(]/)[0].trim()}`))];
   const monitoring = [...new Set(rows.filter((r) => r.state !== "green").flatMap((r) => r.work ?? []).filter((w) => /^monitoring\b/i.test(w.status ?? "")).map((w) => w.code))];
-  const review = [...new Set(n.spines.flatMap((k) => i.spineInfo[k]?.review ?? []))];
+  // a row in review in its own spines, or a ticket of an open key result's work in review in another epic's spine
+  const workInReview = rows.filter((r) => r.state !== "green").flatMap((r) => r.work ?? []).filter((w) => /^review\b/i.test(w.status ?? "")).map((w) => w.code);
+  const review = [...new Set([...n.spines.flatMap((k) => i.spineInfo[k]?.review ?? []), ...workInReview])];
   const out = (idle: boolean, reason: string): WheelIdle => ({ ...base, idle, reason, workers, asks, review, ...(held.length ? { held } : {}), ...(monitoring.length ? { monitoring } : {}) });
   if (n.parked) return out(false, `parked: ${ownerName()} parked it, it waits on purpose`);
   if (n.foldedInto) return out(false, `shown inside ${n.foldedInto}`);
