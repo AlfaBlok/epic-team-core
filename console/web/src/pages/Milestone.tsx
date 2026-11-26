@@ -3,7 +3,7 @@ import { useOwnCall } from "@/voice/OwnCall";
 import { NeverOnBadge } from "@/components/neverOn";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Archive, ArrowLeft, ArrowUp, CheckSquare, ChevronRight, ExternalLink, Info, MessageCircle, Settings2, OctagonX, Pencil, Play, Plus, Send, Square, Trash2, Unlink, X } from "lucide-react";
+import { Archive, ArrowLeft, ArrowUp, CheckSquare, ChevronRight, ExternalLink, Info, MessageCircle, Phone, Settings2, OctagonX, Pencil, Play, Plus, Send, Square, Trash2, Unlink, X } from "lucide-react";
 import { AskKindTag } from "@/components/askKind";
 import { MilestoneArc } from "@/components/arc";
 import { api, needsAnswer, type Assignment, type ChatRead, type Milestone, type MilestoneStatusView, type MilestoneTree, type Persona, type TreeNode, type Repo, type Run, type SpineShape, type WaitingItem } from "@/api";
@@ -450,6 +450,13 @@ function MilestoneScreen() {
                 </Link>
               </Button>
             )}
+            {/* the owner: "a Call button at each level ... with the right context": one tap opens its chat with the call
+                starting, briefed with this campaign's plan, key results, where it stands and what waits on him. */}
+            <Button asChild size="sm" variant="outline" className="border-emerald-600/50 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300">
+              <Link to={withCall(five ? "?tab=chat" : tabHref("chat", node))} data-testid="call-this-level" title={`Call this ${w.milestone}'s briefer`}>
+                <Phone /> Call
+              </Link>
+            </Button>
             <Button asChild size="sm" variant="outline">
               <Link to={five ? "?tab=chat" : tabHref("chat", node)} data-testid="chat-about-this" title={`This ${w.milestone}'s chat with its repo desk`}>
                 <MessageCircle /> Chat about this
@@ -758,6 +765,9 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
 // ---------- Chat tab ----------
 
 /** The milestone's own chat: its repo desk's one long-lived T3 thread (the global Chat page stays the Team desk). */
+/** a chat link that starts the call on arrival (MilestoneChat's ?call=1). */
+const withCall = (href: string) => `${href}${href.includes("?") ? "&" : "?"}call=1`;
+
 function MilestoneChat({ m }: { m: Milestone }) {
   const w = useWords();
   const [thread, setThread] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});

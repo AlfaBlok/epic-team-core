@@ -137,13 +137,7 @@ export function mountOwnCall(
   // the owner's own workspace on a customer site (`ownWorld`: its world is connected to the home world's data repo, or
   // the login is one his own Google signs in as there; his owner login, routeScope.ts isOwnDataWorldOwner): its
   // call routes run as the home world, so the call, its record and his words land exactly where they land from his own console.
-  if (o.ownWorld)
-    api.use(`${prefix}/*`, async (c, next) => {
-      const a = currentAuth();
-      const i = a?.identity;
-      if (!a || !i || i.kind !== "session" || i.role !== "owner" || i.door || i.plain || !o.ownWorld!(i.tenant, i.email)) return next();
-      return runWithAuth({ mode: a.mode, identity: { ...i, tenant: VOICE_WORLD }, ...(a.mode === "on" ? { scope: VOICE_WORLD } : {}) }, next);
-    });
+  if (o.ownWorld) asHomeWorld(api, prefix, o.ownWorld);
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
   // the owner: "why so difficult": where it can run, so a page that cannot call links there instead of a dead greyed Call.
   const elsewhere = o.page ? `${sites().teamUrl.replace(/\/$/, "")}${o.page}` : undefined;
@@ -158,6 +152,40 @@ export function mountOwnCall(
   );
   // another world: a 404 (this call is the home world's own, never part of a customer's console).
   mountCalls(api, prefix, (c) => (inWorld() ? call : c.json({ error: { code: "home_only", message: `${what} is only on ${ownerName()}'s own console` } }, 404)));
+}
+
+/** the owner's own workspace on a customer site runs these call routes as the home world (see mountOwnCall). */
+function asHomeWorld(api: Hono, prefix: string, ownWorld: (world: string, email: string) => boolean) {
+  api.use(`${prefix}/*`, async (c, next) => {
+    const a = currentAuth();
+    const i = a?.identity;
+    if (!a || !i || i.kind !== "session" || i.role !== "owner" || i.door || i.plain || !ownWorld(i.tenant, i.email)) return next();
+    return runWithAuth({ mode: a.mode, identity: { ...i, tenant: VOICE_WORLD }, ...(a.mode === "on" ? { scope: VOICE_WORLD } : {}) }, next);
+  });
+}
+
+/**
+ * one objective's own Call(the owner: "a Call button at each level ... with the right context"): the same call
+ * routes under /objectives/:id/voice, one Voice per objective (`voiceFor`, undefined for an unknown id), briefed with that
+ * objective's key results, where we are, his newest words and its open asks. The owner's own, like the briefer: his own
+ * workspace on a customer site runs as the home world (`ownWorld`); another world gets no call (the page shows no button).
+ */
+export function mountObjectiveVoice(api: Hono, voiceFor: (id: string) => Voice | undefined, o: { world: () => string | undefined; ownWorld?: (world: string, email: string) => boolean }) {
+  const prefix = "/objectives/:id/voice";
+  if (o.ownWorld) asHomeWorld(api, prefix, o.ownWorld);
+  const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
+  const id = (c: Context) => c.req.param("id") ?? "";
+  const unknown = (c: Context) => c.json({ error: { code: "not_found", message: `objective ${id(c)} not found` } }, 404);
+  api.get(
+    `${prefix}/state`,
+    guard((c) => {
+      if (!inWorld())
+        return c.json({ available: false, enabled: false, reason: `An objective's call is only on ${ownerName()}'s own console` });
+      const v = voiceFor(id(c));
+      return v ? c.json(v.state()) : unknown(c);
+    }),
+  );
+  mountCalls(api, prefix, (c) => (inWorld() ? (voiceFor(id(c)) ?? unknown(c)) : c.json({ error: { code: "home_only", message: `An objective's call is only on ${ownerName()}'s own console` } }, 404)));
 }
 
 /** a world team desk's Call: the same call routes under /tenants/:id/desk/voice, on the world's Voice (or a 404). */
@@ -275,6 +303,15 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
       const p = z.object({ desk: z.string().min(1).max(20), words: z.string().min(1).max(8000), note: z.string().max(2000).optional(), objective: z.string().max(300).optional() }).safeParse(await body(c));
       if (!p.success) return bad(c, 'desk ("team" or "social") and words (his words) are required');
       return c.json(await voice.relay(c.req.param("cid") ?? "", p.data), 201);
+    }),
+  );
+  // the briefer's read-only lookups: tester mails, posts per day, replies and DMs, site views, exact rows.
+  api.post(
+    `${prefix}/calls/:cid/lookup`,
+    ownerOnly(async (c, voice) => {
+      const p = z.object({ name: z.string().min(1).max(60), args: z.record(z.unknown()).optional() }).safeParse(await body(c));
+      if (!p.success) return bad(c, "name (string) and args (object) are required");
+      return c.json(await voice.lookup(c.req.param("cid") ?? "", p.data.name, p.data.args ?? {}));
     }),
   );
   api.get(`${prefix}/calls/:cid/ask/:askId`, ownerOnly(async (c, voice) => c.json(await voice.askState(c.req.param("cid") ?? "", c.req.param("askId") ?? ""))));

@@ -1,5 +1,6 @@
 import { execFile } from "./spawnHost.js";
 import fs from "node:fs";
+import path from "node:path";
 import { keyIndexFile } from "./identity.js";
 
 /**
@@ -23,7 +24,7 @@ import { keyIndexFile } from "./identity.js";
 const MISS_MS = 5 * 60_000;
 export const COPY_HOLD_MS = 5 * 60_000;
 const cache = new Map<string, { v: string | undefined; at: number; until?: number }>();
-const inflight = new Map<string, Promise<string | undefined>>();
+const inflight = new Map<string, Promise<Got>>();
 let indexStamp: string | undefined;
 
 const indexFile = () => keyIndexFile();
@@ -40,7 +41,20 @@ function storeStamp(): string {
 export const secretReads = { n: 0 };
 
 /** a first source for a store file's value (app = its folder, name = the file); undefined = it has none. */
-export type SecretSource = { name: string; read(app: string, name: string): Promise<string | undefined>; stats?(): Record<string, unknown> };
+export type SecretSource = {
+  name: string;
+  read(app: string, name: string): Promise<string | undefined>;
+  /** the answer, or undefined when the source could not answer (killed, timed out, backing off). `{ v: undefined }`
+   * = it answered and has no such key. `again`: the one retry after a miss, which may skip a backoff. */
+  lookup?(app: string, name: string, o?: { again?: boolean }): Promise<{ v: string | undefined } | undefined>;
+  stats?(): Record<string, unknown>;
+};
+/** the key exists as far as anyone knows, but its source did not answer twice: "try again", never "no key". */
+export class KeyNotReady extends Error {
+  constructor(readonly label: string) {
+    super(`${label}: the key store did not answer in time`);
+  }
+}
 let source: SecretSource | undefined;
 const SOURCE_WAIT_MS = 90_000;
 const tally = { source: 0, store: 0, storeNames: new Set<string>(), since: new Date().toISOString() };
@@ -103,13 +117,38 @@ const within = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
     p.then((v) => resolve(v), () => resolve(undefined)).finally(() => clearTimeout(t));
   });
 /** the first source, then the copy; counted. `kept: false` = the source answered: not kept here. */
-async function sourceThenCopy(file: string, copy: (file: string) => Promise<string | undefined>): Promise<{ v: string | undefined; kept: boolean; holdMs?: number }> {
+/** the wait for the source, settable by tests. */
+let sourceWaitMs = SOURCE_WAIT_MS;
+export function setSourceWaitMs(ms?: number): void {
+  sourceWaitMs = ms ?? SOURCE_WAIT_MS;
+}
+type Got = { v: string | undefined; kept: boolean; holdMs?: number; unanswered?: boolean };
+/**
+ * the first source, then the copy; counted. `kept: false` = the source answered: not kept here.
+ * A release that stops the console mid-fetch kills the source's run: a source that did not answer is asked once more (a
+ * use joins a fetch still running); when it still has not answered and the copy has nothing, the read is `unanswered`:
+ * never kept as a miss, and `sudoReadOrWait` turns it into KeyNotReady, so a caller says "connecting" and tries again,
+ * never "no key".
+ */
+async function sourceThenCopy(file: string, copy: (file: string) => Promise<string | undefined>): Promise<Got> {
   const k = source ? storeKey(file) : undefined;
+  let unanswered = false;
   if (source && k) {
-    const v = await within(source.read(k.app, k.name), SOURCE_WAIT_MS);
-    if (v) {
-      tally.source++;
-      return { v, kept: false };
+    const lookup = source.lookup?.bind(source);
+    if (lookup) {
+      let a = await within(lookup(k.app, k.name), sourceWaitMs);
+      if (!a) a = await within(lookup(k.app, k.name, { again: true }), sourceWaitMs);
+      if (a?.v) {
+        tally.source++;
+        return { v: a.v, kept: false };
+      }
+      unanswered = !a;
+    } else {
+      const v = await within(source.read(k.app, k.name), sourceWaitMs);
+      if (v) {
+        tally.source++;
+        return { v, kept: false };
+      }
     }
   }
   const v = await copy(file);
@@ -118,6 +157,7 @@ async function sourceThenCopy(file: string, copy: (file: string) => Promise<stri
     tally.storeNames.add(`${k.app}/${k.name}`);
     logCopyFallback(`${k.app}/${k.name}`);
   }
+  if (!v && unanswered) return { v: undefined, kept: false, unanswered: true };
   return source && k ? { v, kept: true, holdMs: COPY_HOLD_MS } : { v, kept: true };
 }
 
@@ -131,8 +171,19 @@ function sudoCat(file: string): Promise<string | undefined> {
 /** A root-only file's value (cached as above); mcp/services.ts sudoRead is this. */
 export const sudoRead = (file: string): Promise<string | undefined> => cachedSudoRead(file);
 
-export function cachedSudoRead(file: string, o: { read?: (file: string) => Promise<string | undefined>; copy?: (file: string) => Promise<string | undefined>; now?: () => number } = {}): Promise<string | undefined> {
-  if (process.env.CONSOLE_NO_SUDO === "1") return Promise.resolve(undefined);
+type ReadOpts = { read?: (file: string) => Promise<string | undefined>; copy?: (file: string) => Promise<string | undefined>; now?: () => number };
+export function cachedSudoRead(file: string, o: ReadOpts = {}): Promise<string | undefined> {
+  return cachedGot(file, o).then((r) => r.v);
+}
+/** like sudoRead, but a key its source did not answer for (twice) throws KeyNotReady instead of reading as missing. */
+export function sudoReadOrWait(file: string, o: ReadOpts = {}): Promise<string | undefined> {
+  return cachedGot(file, o).then((r) => {
+    if (r.unanswered) throw new KeyNotReady(storeKey(file) ? `${storeKey(file)!.app}/${storeKey(file)!.name}` : path.basename(file));
+    return r.v;
+  });
+}
+function cachedGot(file: string, o: ReadOpts): Promise<Got> {
+  if (process.env.CONSOLE_NO_SUDO === "1") return Promise.resolve({ v: undefined, kept: false });
   const now = o.now ?? Date.now;
   const stamp = storeStamp();
   if (stamp !== indexStamp) {
@@ -140,16 +191,15 @@ export function cachedSudoRead(file: string, o: { read?: (file: string) => Promi
     indexStamp = stamp;
   }
   const hit = cache.get(file);
-  if (hit && (hit.v !== undefined ? hit.until === undefined || now() < hit.until : now() - hit.at < MISS_MS)) return Promise.resolve(hit.v);
+  if (hit && (hit.v !== undefined ? hit.until === undefined || now() < hit.until : now() - hit.at < MISS_MS)) return Promise.resolve({ v: hit.v, kept: true });
   const going = inflight.get(file);
   if (going) return going;
-  type Got = { v: string | undefined; kept: boolean; holdMs?: number };
   const p = (o.read ? o.read(file).then((v): Got => ({ v, kept: true })) : sourceThenCopy(file, o.copy ?? sudoCat))
     .catch((): Got => ({ v: undefined, kept: false }))
     .then((r) => {
       if (r.kept) cache.set(file, r.holdMs !== undefined ? { v: r.v, at: now(), until: now() + r.holdMs } : { v: r.v, at: now() });
       else cache.delete(file);
-      return r.v;
+      return r;
     })
     .finally(() => inflight.delete(file));
   inflight.set(file, p);

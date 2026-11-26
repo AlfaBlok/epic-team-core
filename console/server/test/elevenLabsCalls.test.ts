@@ -58,6 +58,31 @@ describe("calls through ElevenLabs Agents", () => {
     expect(some.calls.some((c) => c.url.endsWith("/agents/create"))).toBe(false);
   });
 
+  it("an agent made before a new console tool gets the tools once; one that has them all keeps them", async () => {
+    const run = async (has: string[]) => {
+      const calls: { method: string; url: string; body?: any }[] = [];
+      const f = (async (url: string, init: RequestInit) => {
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        calls.push({ method: init.method ?? "GET", url, body });
+        const u = new URL(url);
+        const ok = (j: unknown) => new Response(JSON.stringify(j), { status: 200 });
+        if (u.pathname === "/v1/convai/agents") return ok({ agents: [{ agent_id: "agent_old", name: ELEVEN_AGENT_NAME }] });
+        if (u.pathname === "/v1/convai/agents/agent_old" && init.method === "GET") return ok({ conversation_config: { agent: { prompt: { tools: has.map((name) => ({ name })) } } } });
+        if (init.method === "PATCH") return ok({});
+        if (u.pathname === "/v1/convai/conversation/get-signed-url") return ok({ signed_url: "wss://el/conv?sig=1" });
+        return new Response("{}", { status: 404 });
+      }) as unknown as typeof fetch;
+      const a = elevenCalls({ key: async () => "k", prompt: () => "p", firstMessage: () => "Hi", tools: () => VOICE_TOOLS as any, f });
+      await a.link();
+      await new Promise((r) => setTimeout(r, 20));
+      return calls.find((c) => c.method === "PATCH")?.body.conversation_config.agent.prompt.tools;
+    };
+    const all = agentBody("p", "Hi", VOICE_TOOLS as any).conversation_config.agent.prompt.tools.map((t: any) => t.name);
+    expect(await run(all)).toBeUndefined();
+    const sent = await run(all.slice(0, 1));
+    expect(sent.map((t: any) => t.name)).toEqual(all);
+  });
+
   it("a call starts on ElevenLabs with the console's instructions, no OpenAI key, and the 22 Nov switch-off does not hold it", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e84s53-"));
     const db = openDb(path.join(dir, "console.db"));

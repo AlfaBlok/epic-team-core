@@ -124,7 +124,7 @@ import type { PostReview } from "./review/postCards.js";
 import { createWebPush, mountWebPush, vapidFromEnv, type PushTransport, type Vapid } from "./notify/webpush.js";
 import { asksFrom, isTestItem, reviewNotices, teamLink, type Sender } from "./notify/notice.js";
 import { addDecisionRow } from "./review/followups.js";
-import { cachedSudoRead as sudoRead, secretSourceHealth } from "./secretCache.js";
+import { cachedSudoRead as sudoRead, secretSourceHealth, sudoReadOrWait } from "./secretCache.js";
 import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteList } from "./plug/memory.js";
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
@@ -223,8 +223,9 @@ import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
-import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
-import { mountCampaignVoice, mountCoachVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
+import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { asksOf, levelKnows, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { mountReplyVoice } from "./voice/speak.js";
@@ -3312,11 +3313,50 @@ export function createApp(
     const fresh = readObjectiveCards();
     return lastObjectiveCards.length ? lastObjectiveCards : fresh;
   };
+  // a Call at each level, briefed with that level's context (voice/levelCall.ts): key results with today's
+  // numbers, the plan, where we are, his newest words in force and what waits on him. A part that cannot be read is left out.
+  const levelWhere = (id: string) => {
+    const w = readWhereWeAre(pursuits.homeDir(), id);
+    return w?.answer ? `${w.answer}${w.open.length ? ` Open questions: ${w.open.slice(0, 3).join("; ")}` : ""}` : undefined;
+  };
+  const levelPlan = (id: string, name: string) => {
+    try {
+      return planSection(pursuits.homeDir(), id, name).replace(/^## The plan: .*$/m, `## The plan: ${name}`).replace(/No plan written yet:.*$/m, "No plan written yet.");
+    } catch {
+      return "";
+    }
+  };
+  const levelCards = async () => (await voiceObjectiveCards()) as LevelCard[];
+  const levelOf = async (level: "desk" | "objective" | "campaign", name: string, cards: LevelCard[], extra: { state?: string[]; asks?: string[]; plan?: string } = {}) => {
+    const inbox = await voiceInbox().catch(() => [] as InboxCard[]);
+    return levelKnows({ level, name, objectives: cards.map((card) => ({ card, where: levelWhere(card.id) })), asks: [...(extra.asks ?? []), ...asksOf(cards, inbox)], ...(extra.state ? { state: extra.state } : {}), ...(extra.plan ? { plan: extra.plan } : {}) });
+  };
+  /** the product desk's level: every objective of the product (its name's `Product:` part). */
+  const productLevel = async (product: string) =>
+    levelOf("desk", `${product} desk`, (await levelCards()).filter((x) => x.name.toLowerCase().startsWith(`${product.toLowerCase()}:`))).catch(() => "");
+  /** a campaign's (or milestone's) level: its spine's state and asks, its objective's key results, plan and where we are. */
+  const campaignLevel = async (id: string) => {
+    const m = store.getMilestone(id);
+    if (!m) return "";
+    const dir = (m.repo ? (worldRepoDir(read.reposRoot, db, milestoneWorld(db, m.id))(m.repo) ?? resolveRepo(read.reposRoot, m.repo)?.path) : undefined);
+    let spine: string | undefined;
+    try {
+      if (dir && m.path) spine = fs.readFileSync(path.join(dir, m.path), "utf8");
+    } catch {
+      /* unreadable spine: the call still has its objective */
+    }
+    const { state, asks } = spineState(spine);
+    const oid = objectiveFor(m).objective;
+    const card = oid ? (await levelCards()).find((c) => c.id === oid) : undefined;
+    return levelOf("campaign", m.title, card ? [card] : [], { state, asks, ...(card ? { plan: levelPlan(card.id, card.name) } : {}) });
+  };
   setTimeout(() => void readObjectiveCards(), 6_000).unref?.();
   setTimeout(() => void readObjectives(), 5_000).unref?.();
   // voice calls are off unless the `calls`
   // setting (PUT /api/voice/settings {calls}) or CONSOLE_VOICE_CALLS=on turns them on; tests keep the old default.
   const callsDefault: "on" | "off" = process.env.CONSOLE_VOICE_CALLS === "on" || (process.env.VITEST && process.env.CONSOLE_VOICE_CALLS !== "off") ? "on" : "off";
+  // ElevenLabs' key, fetched from Bitwarden at each use; a fetch that misses twice says "connecting", never "no key"
+  const elevenKeyOrWait = keyOrWait(async () => process.env.ELEVENLABS_API_KEY || (await sudoReadOrWait(keyFile("ELEVENLABS_API_KEY"))));
   const voiceMint = opts.voice?.mint ?? openAiMinter(async () => process.env.OPENAI_API_KEY || (await sudoRead(openAiStoreFile())));
   // The owner asked for voice calls back on through ElevenLabs: calls go through ElevenLabs Agents on the grant.
   // One agent on the account, its id kept in voice_settings; CONSOLE_VOICE_ELEVEN=off goes back to OpenAI's realtime voice.
@@ -3325,7 +3365,7 @@ export function createApp(
     (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
       ? undefined
       : elevenCalls({
-          key: async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY"))),
+          key: elevenKeyOrWait,
           prompt: voiceInstructions,
           firstMessage: () => OPENING_LINE,
           tools: () => [...VOICE_TOOLS, ...INBOX_TOOLS, PRESS_TOOL, ...OBJECTIVE_TOOLS] as any,
@@ -3507,12 +3547,16 @@ export function createApp(
         ...voiceBase,
         scope: { world, milestoneId: m.id },
         // one of the owner's own milestones (a Team home card's Call) is a milestone, not a campaign.
-        instructions: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(store.getMilestone(m.id)?.title ?? m.title),
+        instructions: () => {
+          const t = store.getMilestone(m.id)?.title ?? m.title;
+          return `${(world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(t)}\n${partnerRule("campaign", t)}`;
+        },
         tools: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).tools(store.getMilestone(m.id)?.title ?? m.title),
         desk: { send: (t, page, crid) => milestoneChats.send(m.id, t, page, crid), view: () => milestoneChats.view(m.id) },
         quickStatus: () => campaignStatus(world, m.id, world === DEFAULT_TENANT ? "milestone" : "campaign"),
         brief: () => milestoneBrief(m.id, world),
-        ...(world === DEFAULT_TENANT ? {} : { context: () => worldCallKnows(world) }),
+        // its own level first (spine state, its objective's key results, plan, where we are, asks), then the world's campaigns.
+        context: async () => [await campaignLevel(m.id).catch(() => ""), world === DEFAULT_TENANT ? "" : worldCallKnows(world)].filter(Boolean).join("\n\n"),
       });
       campaignVoices.set(m.id, v);
     }
@@ -3531,7 +3575,7 @@ export function createApp(
   // Play on a desk reply speaks it in the team's local voice on the worker server (free); down = the browser's best voice.
   mountReplyVoice(api, opts.voice?.speak);
   // the desk's answer to his voice note comes back as a short voice note too (ElevenLabs, the narration voice, the grant).
-  const elevenKey = async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")));
+  const elevenKey = elevenKeyOrWait;
   const replyNotesDir = process.env.CONSOLE_REPLY_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "reply-notes");
   mountReplyNote(api, { key: elevenKey, dir: replyNotesDir, ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
   mountListenPage(app, replyNotesDir, opts.voice?.now); // the briefing's "Listen: <link>": signed, opens with no login
@@ -3647,6 +3691,8 @@ export function createApp(
   // the senior marketing call (/marketing): its own ElevenLabs agent talks the social product's strategy with him (the
   // number one blocker, each campaign's plan) from the marketing brief, its objectives and the campaigns' own plans;
   // his words go to the social desk (campaigns, posts, channels) or the Team desk. The coach's call path, reused.
+  // the briefer's read-only lookups (tester mails, posts per day, replies and DMs, site views) beside its relay.
+  const marketingTools = () => [...MARKETING_TOOLS, ...(socialArea?.callLookupTools ?? [])];
   const marketingEleven: ElevenCalls | undefined =
     opts.voice?.marketingEleven ??
     (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
@@ -3657,7 +3703,7 @@ export function createApp(
           key: elevenKey,
           prompt: marketingInstructions,
           firstMessage: MARKETING_GREETING,
-          tools: () => MARKETING_TOOLS as any,
+          tools: () => marketingTools() as any,
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_marketing_agent_id'").get() as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_marketing_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
@@ -3702,8 +3748,14 @@ export function createApp(
     },
     scope: { world: DEFAULT_TENANT },
     contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 15_000, // the numbers wait 8 s inside it
-    instructions: marketingInstructions,
-    tools: () => MARKETING_TOOLS as any,
+    // the social product's desk partner, an OKR expert, too.
+    instructions: () => `${marketingInstructions()}\n${partnerRule("desk", socialProduct())}`,
+    tools: () => marketingTools() as any,
+    lookup: async (_callId, name, args) => {
+      if (!socialArea?.callLookup) throw new VoiceError(404, "unknown_tool", "no lookups on this console");
+      // unscoped, like the numbers: the social world's repos are read as the console, never through his request's world.
+      return socialArea.callLookup(name, args, { store: createStore(db), world: socialWorld(), homeDir: resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {} });
+    },
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
     context: async () => {
@@ -3730,7 +3782,8 @@ export function createApp(
         marketingNumbers.read(list, home),
         new Promise<string>((ok) => setTimeout(() => ok("# The numbers\nStill being read when the call started: if he asks for numbers, say they were not ready at the start of this call and to call again in a minute; never guess a number."), Number(process.env.CONSOLE_MARKETING_NUMBERS_MS) || 8_000).unref()),
       ]);
-      return marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns, numbers });
+      const level = await productLevel(socialProduct());
+      return [marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns, numbers }), level].filter(Boolean).join("\n\n");
     },
     walkRule: () => "",
     relay: async (callId, args) => {
@@ -3789,7 +3842,8 @@ export function createApp(
       throw new VoiceError(409, "strategy_eleven_only", "The strategy call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
-    instructions: strategyInstructions,
+    // the team product's desk partner, an OKR expert, too.
+    instructions: () => `${strategyInstructions()}\n${partnerRule("desk", teamProduct())}`,
     tools: () => STRATEGY_TOOLS as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
@@ -3801,7 +3855,8 @@ export function createApp(
       } catch {
         /* no brief on this console: the call still has the objectives */
       }
-      return strategyKnows({ brief, objectives: await voiceObjectiveCards() });
+      const level = await productLevel(teamProduct());
+      return [strategyKnows({ brief, objectives: await voiceObjectiveCards() }), level].filter(Boolean).join("\n\n");
     },
     walkRule: () => "",
     relay: async (callId, args) => {
@@ -3824,7 +3879,56 @@ export function createApp(
       return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/strategy", strategyVoice, { world: () => store.tenant }, "The strategy call");
+  mountOwnCall(api, "/voice/strategy", strategyVoice, { world: () => store.tenant, ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email), page: "/strategy" }, "The strategy call");
+  // each objective's own Call (/api/objectives/:id/voice), briefed with that objective's level: its key results
+  // and numbers, plan, where we are, his newest words, its open asks. One Voice per objective on the briefer's ElevenLabs
+  // agent (relay_to_desk and hang_up, the prompt and greeting per call), the home world's month cap; his words go to a desk.
+  const objectiveVoices = new Map<string, Voice>();
+  const objectiveVoice = (id: string): Voice | undefined => {
+    const name = () => pursuits.doc()?.pursuits.find((p) => p.id === id)?.name;
+    if (!name()) return undefined;
+    let v = objectiveVoices.get(id);
+    if (v) return v;
+    let notes = 0;
+    v = createVoice({
+      ...voiceBase,
+      eleven: marketingEleven,
+      mint: async () => {
+        throw new VoiceError(409, "objective_eleven_only", "An objective's call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+      },
+      scope: { world: DEFAULT_TENANT },
+      instructions: () => objectiveCallInstructions(name() ?? id),
+      tools: () => MARKETING_TOOLS as any,
+      desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+      quickStatus: noStatus,
+      context: async () => {
+        const n = name() ?? id;
+        const card = (await levelCards()).find((c) => c.id === id);
+        return levelOf("objective", n, card ? [card] : [], { plan: levelPlan(id, n) });
+      },
+      walkRule: () => "",
+      relay: async (callId, args) => {
+        let r: ReturnType<typeof marketingRelayIn>;
+        try {
+          r = marketingRelayIn(args);
+        } catch (e) {
+          throw new VoiceError(400, "bad_relay", (e as Error).message);
+        }
+        const n = ++notes;
+        const page = `objective call ${id}`;
+        if (r.desk === "social") {
+          const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: page, requestId: `objective-${callId}-${n}` });
+          if (p) return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+        }
+        await desk.send(objectiveNoteText(callId, name() ?? id, r, r.desk === "social"), page, `objective-${callId}-${n}`);
+        console.log(`[voice] ${callId} objective ${id} note ${n} sent to the Team desk`);
+        return { desk: "team", state: "sent", result: "Passed to the Team desk as one request. Tell him in a few words." };
+      },
+    });
+    objectiveVoices.set(id, v);
+    return v;
+  };
+  mountObjectiveVoice(api, objectiveVoice, { world: () => store.tenant, ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email) });
   // the world desk's Call (same call routes and engine); the home world's Call is the Team desk's /api/voice.
   mountWorldDeskVoice(api, (c) => {
     const w = c.req.param("id") ?? "";
@@ -3857,7 +3961,7 @@ export function createApp(
     pickedTranscriber({
       db,
       ours: (m) => localTranscriber(transcribeUrl, () => m),
-      eleven: elevenlabsTranscriber(async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")))),
+      eleven: elevenlabsTranscriber(elevenKeyOrWait),
       paid: geminiTranscriber(async () => process.env.GEMINI_API_KEY || (await sudoRead(keyFile("GEMINI_API_KEY")))),
       onBackup: (why, file) => {
         const text = `Our own transcription failed on ${file}, so the paid backup (Gemini) wrote it out. Why: ${why.slice(0, 200)}`;

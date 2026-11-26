@@ -107,6 +107,9 @@ export interface SocialArea {
   /** the social briefer call's numbers, read live at its start (posts best and worst, views,
    * engagement, Reddit replies, DMs, tester invites, next steps), as one text block. */
   callNumbers?(o: { store: Store; world: string; homeDir?: string; browserUrls: string[]; browserHeaders: (url: string) => Record<string, string>; campaigns: { title: string; spine?: string }[] }): Promise<string>;
+  /** the social briefer's read-only lookups during a call: their tool definitions, and one lookup read now as exact rows. */
+  callLookupTools?: readonly { type: string; name: string; description: string; parameters: Record<string, unknown> }[];
+  callLookup?(name: string, args: Record<string, unknown>, o: { store: Store; world: string; homeDir?: string; browserUrls: string[]; browserHeaders: (url: string) => Record<string, string> }): Promise<string>;
   /**..S27, the social routes and the writer (the wake gate moves late posts with it). */
   mountRoutes(o: { api: Hono; store: Store; skillDir?: string; wake?: (id: string, note: string) => Promise<unknown>; recordAssignments: (s: Store) => any; teamDir: () => string | undefined }): void;
   /** the site numbers and the hourly KPI read, held posts as cards, campaigns, the digest. */

@@ -91,7 +91,14 @@ export function mountReplyNote(api: Hono, o: { key: () => Promise<string | undef
     }
     const u = used();
     if (u.chars + words.length > DAY_CHARS) return err("day_cap", `today's voice replies reached ${DAY_CHARS} characters; the answer is in the text, and Play still reads it`, 429);
-    const key = await o.key();
+    let key: string | undefined;
+    try {
+      key = await o.key();
+    } catch (e) {
+      // Bitwarden slow to give the key (key_wait): the sender tries again, never told the key is missing
+      const x = e as { code?: string; message?: string; status?: number };
+      return err(x.code ?? "key_failed", x.message ?? String(e), x.status ?? 503);
+    }
     if (!key) return err("no_key", "the console has no ELEVENLABS_API_KEY", 503);
     let r: Response;
     try {

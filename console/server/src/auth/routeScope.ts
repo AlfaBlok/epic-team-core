@@ -159,6 +159,11 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
   ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
+  // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
   ["POST", new RegExp(`^/api/milestones/${ID}/(tree/add|chat/dispatch)$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/respond$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/snooze$`)], // same world check as respond
@@ -445,6 +450,11 @@ export const DOOR_SAFE: [string, RegExp][] = [
   ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
   ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
+  // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
 ];
 /**
  * routes the door reaches that a customer world does not have yet. Each handler cuts its answer to the home
@@ -574,6 +584,11 @@ const OWN_DATA_WORLD_CALLS: [string, RegExp][] = [
   ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
   ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
+  // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
 ];
 let dataRepoRead: { at: number; repo?: string } | undefined;
 /** the home world's data repo (owner/name, lower case), read from the home checkout's pointer; undefined without one. */

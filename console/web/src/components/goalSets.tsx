@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ObjectiveName, productText, splitObjectiveName } from "@/components/objectiveName";
+import { useCallDock } from "@/voice/CallPanel";
 import { byRingColour } from "@/lib/ringOrder";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
@@ -1559,6 +1560,28 @@ function TeamsList({ node }: { node: ScorecardNode }) {
   );
 }
 
+/**
+ * (the owner, 26 Nov: "a Call button at each level ... with the right context"): the objective's own Call, one
+ * tap at the top of its page, briefed with its key results and numbers, plan, where we are, his newest words and its open
+ * asks (/api/objectives/:id/voice). Only where it can call: no greyed button. On a call its bar and live lines show here.
+ */
+function ObjectiveCall({ id, name }: { id: string; name: string }) {
+  const call = useCallDock({ base: `/api/objectives/${encodeURIComponent(id)}/voice`, callee: `the ${name} briefer`, label: "Call", where: name, wide: true, hideUnavailable: true, hint: "Key results first, or what is red. In English or Spanish." });
+  if (!call.button && !call.onCall && !call.bar) return null;
+  return (
+    <div className="grid min-w-0 gap-2" data-testid="set-call">
+      {!call.onCall && call.button && (
+        <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+          {call.button}
+          <span>Talk it through with its briefer</span>
+        </span>
+      )}
+      {call.onCall && call.bar}
+      {call.onCall && call.live && <ol className="grid gap-2">{call.live}</ol>}
+    </div>
+  );
+}
+
 export function GoalSetPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -1684,6 +1707,7 @@ export function GoalSetPage() {
                 : the two share one wheel, each with its own key results.
               </p>
             )}
+            {pursuit.id === node.id && <ObjectiveCall key={pursuit.id} id={pursuit.id} name={titleOf(node)} />}
             <span className="inline-flex flex-wrap items-center gap-2">
               <DailyBriefingSwitch id={node.id} />
               <ObjectiveGroupPick id={node.id} />

@@ -82,7 +82,7 @@ export function wheelVerdict(
     spineInfo: Record<string, SpineInfo>;
     /** running workers: the row and the repo of the milestone it runs under. */
     claims: { ticket?: string; repo?: string; summary?: string }[];
-    asks: Pick<WaitingItem, "code" | "repo" | "path" | "state" | "source">[];
+    asks: Pick<WaitingItem, "code" | "repo" | "path" | "state" | "source" | "row">[];
     /** open asks the ask gate holds back from the owner (inbox/askGate.ts). */
     held?: Pick<HeldAsk, "code" | "repo" | "path" | "reason">[];
     ownerName?: string;
@@ -103,8 +103,10 @@ export function wheelVerdict(
   const workers = [
     ...new Set(i.claims.filter((c) => (c.ticket && codes.has(key(c.repo ?? homeRepo, c.ticket))) || forWheel.test(c.summary ?? "")).map((c) => c.ticket ?? `wheel ${n.id}`)),
   ];
-  const ours = (a: { code?: string; repo?: string; path?: string }) =>
-    !!a.code && ((a.repo && codes.has(key(a.repo, a.code))) || (a.repo && a.path && spines.has(`${a.repo}:${a.path.replace(/^\.\//, "")}`)) || (!a.repo && [...codes].some((c) => c.endsWith(`:${a.code}`))));
+  // an ask is the wheel's by its own code, its spine, or its row: an ask filed on a ticket of a key result's work in another
+  // epic's spine waits on the owner too, like a ticket of that work in review
+  const ours = (a: { code?: string; repo?: string; path?: string; row?: string }) =>
+    !!a.code && ((a.repo && codes.has(key(a.repo, a.code))) || (a.repo && a.row && codes.has(key(a.repo, a.row))) || (a.repo && a.path && spines.has(`${a.repo}:${a.path.replace(/^\.\//, "")}`)) || (!a.repo && [...codes].some((c) => c.endsWith(`:${a.code}`))));
   const asks = [...new Set(i.asks.filter((a) => a.source === "ask" && a.state === "open" && ours(a)).map((a) => a.code!))];
   const heldAsks = (i.held ?? []).filter((h) => ours(h) && !asks.includes(h.code!));
   const dryRun = [...new Set(heldAsks.filter((h) => heldForDryRun(h.reason)).map((h) => h.code!))];

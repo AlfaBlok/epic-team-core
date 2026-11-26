@@ -24,7 +24,16 @@ import { deskVoiceBase } from "@/voice/deskBase";
 import { passedHead, passedReply } from "@/lib/passed";
 import { consoleSummary, foldChat } from "@/lib/chatFold";
 import { PassedBubble } from "@/components/PassedBubble";
-import { homeWorld } from "@/lib/identity";
+import { homeWorld, socialProduct } from "@/lib/identity";
+import { MARKETING_BASE } from "@/voice/Marketing";
+import { STRATEGY_BASE } from "@/voice/Strategy";
+
+/**
+ * (the owner, 26 Nov: "a Call button at each level ... with the right context"): each product desk's senior
+ * partner, an OKR expert briefed with the product's objectives, key results, where we are, his words and open asks.
+ * The Team desk calls the team product's partner (its strategy call), a world's desk the social product's (its briefer).
+ */
+export const deskPartner = (team: boolean) => (team ? { base: STRATEGY_BASE, name: "EpicTeam" } : { base: MARKETING_BASE, name: socialProduct() });
 
 /** Poll the transcript while the desk works or a send is in flight, slowly otherwise. */
 export const CHAT_POLL_FAST_MS = 2_500;
@@ -294,6 +303,7 @@ function WorldDesk({ world }: { world: string }) {
   const hint = params.get("page")?.trim() || "";
   return (
     <DeskPage
+      partner={deskPartner(false)}
       description="The team desk: new ideas and which campaign they belong to, answers, and starting, steering or stopping runs. One chat for every campaign."
       who="Team desk"
       callBase={deskVoiceBase(world)}
@@ -335,6 +345,7 @@ function TeamDeskChat() {
   const hint = params.get("page")?.trim() || "";
   return (
     <DeskPage
+      partner={deskPartner(true)}
       description="The Team desk: new ideas and where they fit, answers, and starting, steering or stopping runs. One chat for every repo."
       who="Team desk"
       load={loadDesk}
@@ -363,7 +374,10 @@ export function DeskPage({
   placeholder,
   markSeen = markDeskSeen,
   title = "Chat",
+  partner,
 }: {
+  /** the product desk's senior partner call (its own routes): one more Call in the header, only where it can call. */
+  partner?: { base: string; name: string };
   description: string;
   /** the page's heading (default Chat). */
   title?: string;
@@ -381,6 +395,11 @@ export function DeskPage({
 }) {
   const [threadId, setThreadId] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});
   const call = useCallDock(callBase ? { base: callBase } : {});
+  const mate = useCallDock(
+    partner
+      ? { base: partner.base, callee: `the ${partner.name} partner`, label: "Partner", where: `${partner.name} desk`, wide: true, hideUnavailable: true, hint: "Key results, where we are, what waits on you." }
+      : { base: "/api/voice/none", state: async () => undefined, hideUnavailable: true },
+  );
   // a workspace on its own server and AI calls with the browser's own speech (never our voice key)
   const own = useOwnCall({ load: () => load(), send: (t, page, id) => sendMessage(t, page, id) });
   const ownServer = !!threadId.ownServer;
@@ -414,16 +433,17 @@ export function DeskPage({
           )}
           {push.bell}
           <SpeakRepliesSwitch />
-          {!ownServer && call.button}
+          {!ownServer && !call.onCall && mate.button && <span data-testid="desk-partner-call">{mate.button}</span>}
+          {!ownServer && !mate.onCall && call.button}
         </div>
       </div>
       {push.banner && <div className="mb-2">{push.banner}</div>}
       <ChatView
         panel
         voiceBase={ownServer ? "" : (callBase ?? deskVoiceBase(undefined))}
-        top={ownServer ? own.bar : call.bar}
-        live={ownServer ? undefined : call.live}
-        liveKey={ownServer ? own.phase : call.liveKey}
+        top={ownServer ? own.bar : mate.onCall ? mate.bar : call.bar}
+        live={ownServer ? undefined : mate.onCall ? mate.live : call.live}
+        liveKey={ownServer ? own.phase : mate.onCall ? mate.liveKey : call.liveKey}
         who={who}
         load={load}
         cacheKey={callBase ?? deskVoiceBase(undefined)}

@@ -5,6 +5,7 @@ import { tokensOf } from "./brief.js";
 import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
+import { KeyNotReady } from "../secretCache.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
 import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
@@ -138,6 +139,20 @@ export class VoiceError extends Error {
   ) {
     super(message);
   }
+}
+
+/** what he sees while Bitwarden is slow to give a key that is there: the page keeps connecting and tries again. */
+export const KEY_WAIT_TEXT = "Connecting: the key is still coming from Bitwarden, trying again";
+/** a store key read per use; one its source did not answer for (twice) is a 503 key_wait, never no_key. */
+export function keyOrWait(read: () => Promise<string | undefined>): () => Promise<string | undefined> {
+  return async () => {
+    try {
+      return await read();
+    } catch (e) {
+      if (e instanceof KeyNotReady) throw new VoiceError(503, "key_wait", KEY_WAIT_TEXT);
+      throw e;
+    }
+  };
 }
 
 export function ensureVoiceTables(db: DB): void {
@@ -384,6 +399,8 @@ export interface VoiceDeps {
   walkRule?: (total: number) => string;
   /** the coach's relay_to_desk: his words to the Team desk or the social desk (POST …/calls/:cid/relay). */
   relay?: (callId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** the briefer's read-only lookups during a call: exact rows from one source, as text (POST …/calls/:cid/lookup). */
+  lookup?: (callId: string, name: string, args: Record<string, unknown>) => Promise<string>;
 }
 
 /**
@@ -1098,6 +1115,19 @@ export function createVoice(d: VoiceDeps) {
     }
   }
 
+  /** the briefer's lookup: one read-only source, read now, on a call of this Voice that is still on or just ended. */
+  async function lookup(id: string, name: string, args: Record<string, unknown>): Promise<{ name: string; result: string }> {
+    const c = must(id);
+    if (!d.lookup) throw new VoiceError(404, "unknown_tool", "this call has no lookups");
+    if (c.endedAt && now() - Date.parse(c.endedAt) > 60_000) throw new VoiceError(409, "call_ended", `call ${id} has ended`);
+    try {
+      return { name, result: await d.lookup(id, name, args) };
+    } catch (e) {
+      if (e instanceof VoiceError) throw e;
+      throw new VoiceError(400, "validation_error", (e as Error).message);
+    }
+  }
+
   /** where the walk is (for the page and the tests): the card he is on and how many. */
   function walkState(id: string): { pos: number; total: number } | undefined {
     must(id);
@@ -1127,6 +1157,7 @@ export function createVoice(d: VoiceDeps) {
     askState,
     tool,
     relay,
+    lookup,
     walkState,
     list,
     get,

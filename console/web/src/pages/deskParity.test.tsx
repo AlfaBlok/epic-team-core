@@ -153,7 +153,9 @@ describe("T34-S24 / T58-S4 desk parity: every Team desk feature is on the social
     // Same features, each desk on its own routes: the campaign's chat and Call, never the platform's Team desk or its voice.
     expect(teamCalls.some((c) => c === "POST /api/voice/calls")).toBe(true);
     expect(worldCalls.some((c) => c === "POST /api/tenants/social/desk/voice/calls")).toBe(true);
-    expect(worldCalls.filter((c) => /\/api\/voice\//.test(c) || /\/api\/desk\//.test(c))).toEqual([]);
+    // the one exception is the product desk's senior partner (its own owner-only call routes, the briefer's).
+    const partner = (c: string) => /\/api\/voice\/(marketing|strategy)\//.test(c);
+    expect(worldCalls.filter((c) => (/\/api\/voice\//.test(c) && !partner(c)) || /\/api\/desk\//.test(c))).toEqual([]);
     expect(team.teamDeskLoads).toBeGreaterThan(0);
     expect(world.teamDeskLoads).toBe(0);
     expect(world.worldDeskLoads).toBeGreaterThan(0);

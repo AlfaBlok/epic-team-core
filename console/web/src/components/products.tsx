@@ -2,6 +2,8 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ObjectiveName } from "@/components/objectiveName";
 import { api } from "@/api";
 import type { ProductView, ProductsBody, PursuitKitBody } from "@/api/pursuit-types";
+import type { SiteCount, SiteKpisBody } from "@/api/types";
+import { worldId } from "@/lib/useSocial";
 import { STATE_FILL, TabStrip, titleOf, useGoalSets } from "@/components/goalSets";
 import { SocialKitBody } from "@/components/socialKit";
 import { ChatMarkdown } from "@/lib/chatMarkdown";
@@ -163,6 +165,61 @@ export function CampaignProductWords({ id, name }: { id: string; name: string })
   );
 }
 
+/**
+ * The owner asked on a briefing call how many views the websites get: the product's own website, its views per day for the last 7 days, yesterday first. The same counts as Performance › Every site and the briefer's
+ * site_views (our own counter, one view per visitor and day, no cookie, crawlers and tests left out).
+ */
+export function ProductSiteViews({ name }: { name: string }) {
+  const { data } = useQuery<SiteKpisBody>(async () => api.getSiteKpis(await worldId()), []);
+  const sites = (data?.sites ?? []).filter((s) => s.name === name);
+  if (!data?.today || !sites.length) return null;
+  return (
+    <section className="grid gap-2" data-testid="product-site-views">
+      <h2 className="text-sm font-semibold text-foreground">Website views a day</h2>
+      {sites.map((s) => (
+        <SiteWeek key={s.host} s={s} today={data.today} />
+      ))}
+    </section>
+  );
+}
+
+const dayBack = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
+const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+
+function SiteWeek({ s, today }: { s: SiteCount; today: string }) {
+  const at = (d: string) => s.visits.find((p) => p.date === d)?.value ?? 0;
+  const days = Array.from({ length: 8 }, (_, i) => dayBack(today, i));
+  const yesterday = days[1];
+  const week = days.slice(1).reduce((a, d) => a + at(d), 0);
+  const top = Math.max(1, ...days.map(at));
+  return (
+    <div className="grid gap-2 rounded-xl border bg-card p-3 sm:p-4" data-testid="product-site" data-site={s.host}>
+      <p className="text-[15px] leading-snug text-foreground">
+        <span className="font-semibold tabular-nums" data-testid="product-site-yesterday">
+          {at(yesterday)} {at(yesterday) === 1 ? "view" : "views"}
+        </span>{" "}
+        yesterday on{" "}
+        <a href={s.url} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-4 hover:decoration-foreground">
+          {s.label}
+        </a>
+        <span className="text-muted-foreground"> · {week} in the last 7 days</span>
+      </p>
+      <ul className="grid gap-1 text-xs tabular-nums">
+        {days.map((d) => (
+          <li key={d} className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-2" data-testid="product-site-day" data-day={d}>
+            <span className={cn("text-muted-foreground", d === yesterday && "font-semibold text-foreground")}>{d === today ? "Today so far" : shortDay(d)}</span>
+            <span className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+              <span className={cn("block h-full rounded-full", d === yesterday ? "bg-emerald-700" : "bg-foreground/30")} style={{ width: `${Math.round((at(d) / top) * 100)}%` }} />
+            </span>
+            <span className={cn("text-right", d === yesterday && "font-semibold")}>{at(d)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] leading-snug text-muted-foreground/80">Our own counter on {s.label}: one view per visitor and day, no cookie, crawlers and tests left out.</p>
+    </div>
+  );
+}
+
 /** /products: every defined product, one row each, opening its page. */
 export function ProductsPage() {
   const { data, error, loading } = useQuery<ProductsBody>(() => api.listProducts(), []);
@@ -247,6 +304,7 @@ export function ProductPage() {
           <TabStrip tabs={tabs} tab={tab} label="Product pages" />
           {tab === "table" && (
             <div className="grid gap-4">
+              <ProductSiteViews name={p.name} />
               <ProductParts p={p} />
               <section className="grid gap-2">
                 <h2 className="text-sm font-semibold text-foreground">{SET_NAME.many} on it</h2>

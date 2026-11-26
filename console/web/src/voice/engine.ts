@@ -118,6 +118,8 @@ export interface VoiceApi {
   tool?(id: string, name: string, args: Record<string, unknown>): Promise<unknown>;
   /** the objectives coach's relay: his words to the Team desk or the social desk. */
   relay?(id: string, args: Record<string, unknown>): Promise<{ desk?: string; state?: string; result?: string }>;
+  /** the briefer's read-only lookups: exact rows from one source. */
+  lookup?(id: string, name: string, args: Record<string, unknown>): Promise<{ name?: string; result?: string }>;
 }
 
 /** The media and WebRTC pieces (the browser's by default; tests fake them). */
@@ -202,6 +204,8 @@ export const BYE_MAX_MS = 8_000;
 /** listen mode (call_bfdb5e0f): the tool the voice calls when he wants to give feedback, and every word it says in it. */
 export const LISTEN_TOOL = "listen_for_feedback";
 /** the tools the console answers itself (POST …/calls/:cid/tool): the inbox walk. */
+/** the briefer's lookups the console reads for it (POST …/calls/:cid/lookup): exact rows, read only. */
+export const LOOKUP_TOOLS = ["tester_mails", "posts_by_day", "replies_and_dms", "site_views"];
 export const CONSOLE_TOOLS = new Set(["next_card", "read_card", "press_card", "next_objective", "read_objective", "file_objective_words"]);
 /** his short yes to a read-back ("yes", "yeah, file it"): not part of the words filed. */
 const SHORT_YES = /^\s*(?:yes|yeah|yep|sure|ok(?:ay)?|s[ií]|vale|claro|do it|go ahead|file it|please)\b[\s\w,.!']{0,24}$/i;
@@ -1135,6 +1139,21 @@ export class CallEngine {
           return `Not passed (${(e as Error).message.slice(0, 120)}). Tell him in one line that it did not go through, and that the whole call still lands in his Team desk chat when it ends. Never promise to pass it later yourself.`;
         }
       },
+      ...Object.fromEntries(
+        LOOKUP_TOOLS.map((n) => [
+          n,
+          async (a: Record<string, unknown>) => {
+            if (!this.api.lookup) return "This line cannot look that up. Tell him you have no source for it on this call.";
+            try {
+              const r = await this.api.lookup(id, n, a);
+              this.line("tool", `looked up ${n.replace(/_/g, " ")}`);
+              return r.result ?? "No answer from the source. Tell him you have no source for it.";
+            } catch (e) {
+              return `The lookup failed (${(e as Error).message.slice(0, 120)}). Tell him in one line you could not read it now; never guess a number.`;
+            }
+          },
+        ]),
+      ),
       listen_for_feedback: async () => "Listen mode is not on this line yet: let him talk without interrupting, say only a short Mm-hm in pauses, and when he says done pass all his words to the desk in one ask_the_desk.",
       ...Object.fromEntries([...CONSOLE_TOOLS].map((n) => [n, (a: Record<string, unknown>) => walk(n, a)])),
     };

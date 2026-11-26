@@ -84,6 +84,14 @@ describe("wheelVerdict", () => {
     expect(review).toMatchObject({ idle: false, review: ["E907-S3"] });
     expect(review.reason).toMatch(/review/);
   });
+  it("an open ask filed on a key result's ticket in another epic's spine waits on the owner: not idle", () => {
+    const v = wheelVerdict({
+      ...base,
+      node: node({ keyResults: [{ label: "1 idea is tested", state: "red", value: "0 of 1", kind: "key-result", work: [{ code: "E907-S6", repo: "app", kind: "ticket", status: "done" }] }] }),
+      asks: [{ source: "ask", state: "open", code: "E907-A9", repo: "app", row: "E907-S6" }],
+    });
+    expect(v).toMatchObject({ idle: false, asks: ["E907-A9"] });
+  });
   it("a key result's ticket in review in another epic's spine waits on the owner's review: not idle", () => {
     const v = wheelVerdict({
       ...base,

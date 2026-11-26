@@ -93,6 +93,10 @@ export function useCallDock(
     hint?: string;
     /** what the floating call widget names besides the callee (a milestone's title). */
     where?: string;
+    /** the compact Call shows at every width (a level's own Call beside a page's title), not on a phone only. */
+    wide?: boolean;
+    /** a second Call on a page (the desk's partner): no button and no bar where it cannot call (never a greyed one). */
+    hideUnavailable?: boolean;
   } = {},
 ): CallDock {
   const callee = props.callee ?? "the desk";
@@ -156,6 +160,7 @@ export function useCallDock(
   if (!st || (!st.available && !st.enabled && !st.reason)) return { liveKey, onCall };
   // calls off, no Call button and no bar.
   if (st.callsOff && !onCall) return { liveKey, onCall };
+  if (props.hideUnavailable && !st.available && !onCall) return { liveKey, onCall };
 
   // cannot run here but runs on another page: a live link there (a greyed Call he cannot press is a dead end).
   const away = !st.available && st.elsewhere && !onCall ? st.elsewhere : undefined;
@@ -325,7 +330,7 @@ export function useCallDock(
         asChild
         data-testid="call-elsewhere-compact"
         variant="outline"
-        className="hidden h-11 shrink-0 gap-1.5 rounded-full border-emerald-600/50 px-4 text-emerald-800 hover:bg-emerald-500/10 phone:inline-flex dark:text-emerald-300 [&_svg]:size-[18px]"
+        className={cn("h-11 shrink-0 gap-1.5 rounded-full border-emerald-600/50 px-4 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300 [&_svg]:size-[18px]", props.wide ? "inline-flex" : "hidden phone:inline-flex")}
       >
         <a href={away} aria-label={`Call ${callee} on ${hostOf(away)}`}>
           <Phone /> Call on {hostOf(away)}
@@ -335,7 +340,7 @@ export function useCallDock(
       <Button
         data-testid="call-start-compact"
         variant="outline"
-        className="hidden h-11 shrink-0 gap-1.5 rounded-full border-emerald-600/50 px-4 text-emerald-800 hover:bg-emerald-500/10 phone:inline-flex dark:text-emerald-300 [&_svg]:size-[18px]"
+        className={cn("h-11 shrink-0 gap-1.5 rounded-full border-emerald-600/50 px-4 text-emerald-800 hover:bg-emerald-500/10 dark:text-emerald-300 [&_svg]:size-[18px]", props.wide ? "inline-flex" : "hidden phone:inline-flex")}
         disabled={!st.available || v.phase === "ending"}
         aria-label={`Call ${callee}`}
         title={`Talk to ${callee}, in English or Spanish. This month ${money(month)}${cap ? ` of ${money(cap)}` : ""}.`}

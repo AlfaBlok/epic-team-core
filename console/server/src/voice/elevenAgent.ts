@@ -72,6 +72,12 @@ export function withoutTools(body: ReturnType<typeof agentBody>) {
   return { ...body, conversation_config: { ...body.conversation_config, agent: { ...body.conversation_config.agent, prompt } } };
 }
 
+/** the tool names an agent on the account has (its inline tools, as the GET returns them). */
+export function toolNames(agent: any): string[] {
+  const p = agent?.conversation_config?.agent?.prompt ?? {};
+  return [...(Array.isArray(p.tools) ? p.tools : []).map((t: any) => String(t?.name ?? "")), ...(Array.isArray(p.built_in_tools) ? [] : Object.keys(p.built_in_tools ?? {}).filter((k) => p.built_in_tools[k]))].filter(Boolean);
+}
+
 export interface ElevenLink {
   agentId: string;
   signedUrl: string;
@@ -109,9 +115,19 @@ export function elevenCalls(o: { /** the agent's name on the account (default: t
     // 404 makes it again (link()).
     if (id) {
       const known = id;
-      void api(k, "PATCH", `/v1/convai/agents/${encodeURIComponent(known)}`, withoutTools(body)).catch((e) => {
-        if (!/\(404\)/.test((e as Error).message)) console.warn(`voice: ElevenLabs agent not updated: ${(e as Error).message}`);
-      });
+      // a tool added on the console (the briefer's lookups) reaches an agent made before it: when the agent
+      // lacks one of the console's tool names, the PATCH carries the tools once; else it leaves them as they are.
+      void api(k, "GET", `/v1/convai/agents/${encodeURIComponent(known)}`)
+        .catch(() => undefined)
+        .then((have) => {
+          const names = new Set(toolNames(have));
+          // an agent that could not be read keeps its tools (never a copy of every tool on a failed read)
+          const missing = !!have && body.conversation_config.agent.prompt.tools.some((t) => !names.has(t.name));
+          return api(k, "PATCH", `/v1/convai/agents/${encodeURIComponent(known)}`, missing ? body : withoutTools(body));
+        })
+        .catch((e) => {
+          if (!/\(404\)/.test((e as Error).message)) console.warn(`voice: ElevenLabs agent not updated: ${(e as Error).message}`);
+        });
     }
     id ??= (await api(k, "POST", "/v1/convai/agents/create", body)).agent_id as string | undefined;
     if (!id) throw new VoiceError(502, "elevenlabs_refused", "ElevenLabs made no agent");
