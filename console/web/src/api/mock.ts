@@ -585,6 +585,10 @@ const mockMail = () => ({
     async sendWorldDeskMessage(_t, text, page, crid, attachments) {
       return this.sendDeskMessage(text, page, crid, attachments);
     },
+    // the sample's objectives have no team, so their Chat chapter says so.
+    async objectiveDesk(id: string) {
+      return ok({ id, milestoneId: null });
+    },
     async getMilestoneChat(mid, read?: ChatRead): Promise<DeskChat> {
       find(db.milestones, mid, "milestone");
       return ok(pageOf({ available: true, threadId: `repo-desk-${mid}`, environmentId: "env-mock", session: 1, status: "idle", working: false, sending: 0, messages: repoDesk(mid), hasEarlier: false }, read));

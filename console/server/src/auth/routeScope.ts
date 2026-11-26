@@ -528,7 +528,7 @@ const OWNER_WORLD_READS: [string, RegExp][] = [
   // an objective's Social kit tab on the social site: its kit.json, previews and fonts, read only
   ["GET", new RegExp(`^/api/pursuits/${ID}/kit(/(previews|fonts)/[\\w.-]+)?$`)],
   // an objective's Plan tab, read from the campaign spine it names.
-  ["GET", new RegExp(`^/api/pursuits/${ID}/plan$`)],
+  ["GET", new RegExp(`^/api/pursuits/${ID}/(plan|desk)$`)],
   // the Products section on the social site: each product's words, its kit, previews and fonts, read only
   ["GET", /^\/api\/products$/],
   ["GET", new RegExp(`^/api/products/${ID}(/kit(/(previews|fonts)/[\\w.-]+)?)?$`)],
@@ -546,7 +546,7 @@ const OWNER_WORLD_AGENT_READS: [string, RegExp][] = [
  * a workspace connected to a repo that holds a workspace reads that repo's own objectives and key results
  * (app.ts serves them from the workspace's checkout, never the home world's).
  */
-const CONNECTED_READS: [string, RegExp][] = [["GET", /^\/api\/(scorecards|pursuits)$/]];
+const CONNECTED_READS: [string, RegExp][] = [["GET", /^\/api\/(scorecards|pursuits)$/], ["GET", new RegExp(`^/api/pursuits/${ID}/desk$`)]];
 const isConnectedWorld = (db: DB, identity: Identity): boolean => {
   if ((identity.kind !== "session" && identity.kind !== "token") || identity.tenant === DEFAULT_TENANT || (identity.kind === "session" && identity.door)) return false;
   try {

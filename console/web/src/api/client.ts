@@ -335,6 +335,8 @@ export interface ApiClient {
   /** what his words on a card answer, for each of its asks (read only; the card presses each answer). */
   readSpokenAnswers(words: string, asks: { id: string; code?: string; line: string }[]): Promise<{ reads: SpokenRead[]; judgeError?: string }>;
   /** a milestone's Chat tab, a view on its own repo-desk T3 thread (launched on first open, reused across restarts). */
+  /** the desk an objective's Chat chapter talks to, read fresh: `milestoneId` null only when no team runs it. */
+  objectiveDesk(id: string): Promise<{ id: string; milestoneId: string | null }>;
   getMilestoneChat(milestoneId: string, read?: ChatRead): Promise<DeskChat>;
   /** a world's team desk (the social skin's top-level Chat), one thread across its campaigns: same shape as the Team desk. */
   getWorldDeskChat(tenantId: string, read?: ChatRead): Promise<DeskChat>;

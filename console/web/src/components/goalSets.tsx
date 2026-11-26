@@ -14,6 +14,7 @@ import { DailyBriefingSwitch, InactiveObjectives, ObjectiveGroupPick, ObjectiveO
 import { useStoredFlag } from "@/lib/storedFlag";
 import { kitPursuitOf } from "@/components/socialKit";
 import { useQuery } from "@/lib/data";
+import { useObjectiveDesk } from "@/lib/objectiveDesk";
 import { useBlocked, useReviewCards, useStatusBatch } from "@/lib/inbox";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import {
@@ -1402,7 +1403,9 @@ function SetChat({ node }: { node: ScorecardNode }) {
   const [all, setAll] = useState(false);
   const tag = `${SET_NAME.one} · ${node.name}`;
   const marks = useMemo(() => chatMarks(node), [node]);
-  const id = node.milestoneId;
+  // a scorecards read without the milestone is checked by a fresh read, never shown as "no team".
+  const { desk, retry } = useObjectiveDesk(node.id, node.milestoneId);
+  const id = desk.state === "ready" ? desk.id : undefined;
   const load = useCallback(
     async (read?: ChatRead) => {
       const chat = await api.getMilestoneChat(id!, read);
@@ -1413,7 +1416,27 @@ function SetChat({ node }: { node: ScorecardNode }) {
   // every line he sends here carries the set's name, so this chat finds it again.
   const send = useCallback((text: string, _page?: string, rid?: string, files?: string[]) => (files?.length ? api.sendMilestoneChatMessage(id!, text, tag, rid, files) : api.sendMilestoneChatMessage(id!, text, tag, rid)), [id, tag]);
   const markSeen = useCallback(() => api.markChatSeen({ chat: "milestone", id: id! }), [id]);
-  if (!id) return <p className="text-sm text-muted-foreground">No team runs this {SET_NAME.one.toLowerCase()} yet, so it has no desk to talk to.</p>;
+  if (desk.state === "checking")
+    return (
+      <p className="text-sm text-muted-foreground" role="status" data-testid="set-chat-checking">
+        Finding the desk of the team that runs it…
+      </p>
+    );
+  if (desk.state === "failed")
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="alert" data-testid="set-chat-failed">
+        <span>Could not reach the desk just now.</span>
+        <button type="button" onClick={retry} className="min-h-8 rounded-md border px-2 text-foreground" data-testid="set-chat-retry">
+          Try again
+        </button>
+      </div>
+    );
+  if (!id)
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="set-chat-no-team">
+        No team runs this {SET_NAME.one.toLowerCase()} yet, so it has no desk to talk to.
+      </p>
+    );
   return (
     <div className="grid min-w-0 gap-2" data-testid="set-chat">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

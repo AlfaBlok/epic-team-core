@@ -92,7 +92,7 @@ import { storePersonas, wheelReader } from "./wheel.js";
 import { createProducts } from "./products.js";
 import { createPriorityMode, epicOfRow, PRIORITY_BY, PRIORITY_CODE, type PriorityMode } from "./cycle/priorityMode.js";
 import { mountPriority } from "./cycle/priorityRoutes.js";
-import { mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
+import { deskOfPursuit, mountPursuitWrites, withMilestones } from "./pursuitRoutes.js";
 import { workspaceDataDir } from "./workspaceData.js";
 import { DEFAULT_DM_CADENCE, deliveryManagerOf, isGap, isTestWorld, milestoneGaps, objectiveGaps, type ObjectiveIn } from "./personaGaps.js";
 import { personaRows, standingRow, standingRowSection } from "./status/personaRows.js";
@@ -2227,6 +2227,19 @@ export function createApp(
     const w = connectedWorld();
     const v = readWheelPlan(w ? worldRepoDir(read.reposRoot, db, w)(w) : pursuits.homeDir(), c.req.param("id"));
     return v ? c.json(v) : c.json({ error: { code: "not_found", message: `no objective ${c.req.param("id")}` } }, 404);
+  });
+  // an objective's desk, read fresh: the Chat chapter says "no team runs this objective" only when this
+  // read answers null, never because one scorecards read came back without the milestone or slow.
+  api.get("/pursuits/:id/desk", async (c) => {
+    const id = c.req.param("id");
+    const w = connectedWorld();
+    if (w) {
+      const n = (await worldScorecards(w)).nodes.find((x) => x.id === id);
+      return n ? c.json({ id, milestoneId: n.milestoneId ?? null }) : c.json({ error: { code: "not_found", message: `no objective ${id}` } }, 404);
+    }
+    const p = withMilestones(await pursuits.get(), store, pursuitEffort).pursuits.find((x) => x.id === id);
+    if (!p) return c.json({ error: { code: "not_found", message: `no objective ${id}` } }, 404);
+    return c.json({ id, milestoneId: deskOfPursuit(p) });
   });
   // his objectives as every agent rereads them (the objectives screen's lights and today's count, his words from
   // his words per objective, the Red lines): one block, kept a minute, for every home-world wake, the worker rules and GET /objectives.

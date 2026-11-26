@@ -57,6 +57,12 @@ export function milestoneOfEpic(milestones: Milestone[], repo: string, path: str
   return root ? { m: root, via: "root" } : null;
 }
 
+/** the milestone whose desk an objective's Chat chapter talks to: its first epic's, else its first milestone; null when none. */
+export function deskOfPursuit(p: { epics: object[]; milestones?: { id: string }[] }): string | null {
+  const own = p.epics.map((e) => (e as { milestoneId?: string }).milestoneId).find((id) => !!id);
+  return own ?? p.milestones?.[0]?.id ?? null;
+}
+
 export function withMilestones(
   body: PursuitsBody,
   store: Pick<Store, "listMilestones" | "listAssignments" | "getPersona">,
