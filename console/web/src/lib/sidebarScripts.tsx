@@ -1,5 +1,6 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { lazyPage } from "@/lib/lazyPage";
+import { loadDialogParts } from "@/components/ui/dialog";
 
 /**
  * So the phone downloads less app code before its inbox shows: the
@@ -20,10 +21,16 @@ function keep<M>(load: () => Promise<M>): Kept<M> {
 
 export const loadGoalSets = keep(() => import("@/components/goalSets"));
 export const loadCampaignHome = keep(() => import("@/components/campaignHome"));
+/** the phone's menu dialog (components/mobileMenu) is its own script too, read with these. */
+export const loadMobileMenu = keep(() => import("@/components/mobileMenu"));
 
 /** read the sidebar's scripts ahead (each import is asked once). */
 export function prefetchSidebarScripts(campaigns: boolean) {
   void loadGoalSets().catch(() => undefined);
+  void loadMobileMenu().catch(() => undefined);
+  // the dialog code too, once the inbox is in: a card's first dialog opens at once, and offline (the
+  // service worker keeps every script it served) it still opens
+  void loadDialogParts().catch(() => undefined);
   if (campaigns) void loadCampaignHome().catch(() => undefined);
 }
 

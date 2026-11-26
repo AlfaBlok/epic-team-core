@@ -53,7 +53,12 @@
       // waits on is here (the Inbox draws all its sections at once, so the last list to start sets when it draws).
       try {
         var at = location.pathname, social = /social/i.test(location.hostname);
-        var inbox = ["/waiting-on-owner?includeSuperseded=true&view=list", "/status", "/review-items", "/laptop", "/inbox/team-cards", "/review-items?state=snoozed"];
+        // the Inbox reads its open asks first (14 KB, src/lib/data.ts useWaitingList), so that is the one asked here;
+        // the whole list (120 KB) asked here took the phone's line from the app's code and the open asks waited for the
+        // code. The tiny reads it waits on to draw (who he is, the counts, what he already pressed, the cards sent back,
+        // the connect cards, the threads and worlds its page reads) come along: each under 2 KB, each one round trip
+        // (0.6 s on a phone line) less after the code.
+        var inbox = ["/waiting-on-owner?scope=open&includeSuperseded=true&view=list", "/status", "/review-items", "/laptop", "/inbox/team-cards", "/review-items?state=snoozed", "/me", "/counts", "/presses/answered", "/sent-back-cards", "/connects", "/threads", "/worlds"];
         // Chat (/chat, the console skin) asks its last 20 messages now too: they waited for the app's code and then Chat's
         // own script, ~1.2 s on Slow 4G.
         var paths = at === "/inbox" || (at === "/" && social) ? inbox : at === "/" ? ["/scorecards", "/status", "/laptop"] : at === "/chat" && !social ? ["/desk/messages?limit=20"] : [];

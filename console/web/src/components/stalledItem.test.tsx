@@ -48,7 +48,7 @@ describe("Stalled item", () => {
     const strip = screen.getByTestId("state-strip");
     expect(strip.className).not.toContain("orange"); // one grey frame
     expect(strip.className).not.toContain("red");
-    expect(screen.getByTestId("status-item-question").textContent).toBe("Should a team member work on it?");
+    expect((await screen.findByTestId("status-item-question")).textContent).toBe("Should a team member work on it?");
     expect(screen.getByTestId("stalled-leave-off").textContent).toContain("Leave it off");
     expect(screen.queryByRole("button", { name: /^(?:Yes|No|Answer)\b/ })).toBeNull();
     fireEvent.click(screen.getByTestId("stalled-switch-on"));

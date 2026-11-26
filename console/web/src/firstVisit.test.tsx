@@ -25,8 +25,30 @@ describe("the early reads in index.html", () => {
   it("keeps Home and the Inbox as they were and asks nothing elsewhere or on a social site's chat", () => {
     expect(run("/")).toEqual(["/scorecards", "/status", "/laptop"]);
     expect(run("/inbox")).toContain("/review-items");
+    // the open asks only, never the whole list the Inbox reads after it
+    expect(run("/inbox")).toContain("/waiting-on-owner?scope=open&includeSuperseded=true&view=list");
+    expect(run("/inbox")).not.toContain("/waiting-on-owner?includeSuperseded=true&view=list");
     expect(run("/chat", "social.example.com")).toEqual([]);
     expect(run("/runs")).toEqual([]);
+  });
+});
+
+describe("the Inbox's early reads are the very reads the app makes", () => {
+  it("each /inbox early path is the path the app asks, or the early answer is never taken", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string) => (asked.push(String(u).replace(/^\/api/, "")), new Response("[]", { status: 200, headers: { "content-type": "application/json" } }))));
+    const { createRealClient } = await import("@/api/real");
+    const api = createRealClient();
+    await api.listWaitingOnOwner({ includeSuperseded: true, scope: "open" });
+    await api.getCounts();
+    await api.listAnsweredPresses?.();
+    await api.listSentBackCards?.();
+    await api.listConnects();
+    await api.listThreads();
+    await api.listCompanyWorlds?.();
+    vi.unstubAllGlobals();
+    const early = ["/waiting-on-owner?scope=open&includeSuperseded=true&view=list", "/counts", "/presses/answered", "/sent-back-cards", "/connects", "/threads", "/worlds"];
+    for (const p of early) expect(asked).toContain(p);
   });
 });
 

@@ -77,7 +77,21 @@ function ticketsOf(node: ScorecardNode | undefined): Set<string> {
   return out;
 }
 
-/** the pages one objective (or a set inside it) holds: its row's spine, or its epic's, is in that subtree. */
+/**
+ * Newest first (the owner: "newest first"): by the day the page was registered (`added`), a page with no day after
+ * every dated one; the same day, the higher row, then port. A row code alone never orders them: a row of another repo
+ * with other letters would sort below an older one.
+ */
+export function newestFirst<T extends Pick<PageView, "row" | "port" | "added">>(pages: T[]): T[] {
+  return [...pages].sort(
+    (a, b) => (b.added ?? "").localeCompare(a.added ?? "") || b.row.localeCompare(a.row, undefined, { numeric: true }) || (b.port ?? 0) - (a.port ?? 0),
+  );
+}
+
+/**
+ * the pages one objective (or a set inside it) holds: its row's spine, or its epic's, is in that subtree; or its row,
+ * from any repo (a row of another repo than the objective's own), sits under one of its key results. Newest first.
+ */
 export function pagesOfObjective(pages: PagesBody | undefined, body: ScorecardsBody | undefined, ix: ScorecardIndex, nodeId: string): PageView[] {
   if (!pages) return [];
   const scope = ix.scope.get(nodeId);
@@ -107,7 +121,7 @@ export function pagesOfObjective(pages: PagesBody | undefined, body: ScorecardsB
       // a page no tree holds goes where it names itself (the objective's own tab, not its sets).
       else if (p.objective === nodeId && !inAnyTree(rowSpine, ix) && !inAnyTree(spine, ix)) out.push(p);
     }
-  return out;
+  return newestFirst(out);
 }
 
 const lastPart = (r: string) => r.split("/").pop() ?? r;

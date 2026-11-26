@@ -1,5 +1,9 @@
+import { Suspense, lazy } from "react";
 import type { PendingItem } from "@/api";
-import { StatusItemRow } from "@/components/waiting";
+
+// the inbox's card code (waiting.tsx and all it pulls) loads with the goal page that shows this line, never
+// in the app's main script: common.tsx -> status.tsx -> here was the one static path that put it there.
+const StatusItemRow = lazy(() => import("@/components/waiting").then((m) => ({ default: m.StatusItemRow })));
 
 /**
  * the Stalled line under a goal's header strip: a goal whose team is off. E948-S204 (the owner, closing E948-S200 24 Nov:
@@ -10,7 +14,9 @@ import { StatusItemRow } from "@/components/waiting";
 export function StalledActions({ item }: { item: PendingItem }) {
   return (
     <div className="w-full" data-testid="stalled-item">
-      <StatusItemRow item={item} />
+      <Suspense fallback={null}>
+        <StatusItemRow item={item} />
+      </Suspense>
     </div>
   );
 }

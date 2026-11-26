@@ -1,71 +1,74 @@
-import * as React from "react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Suspense, forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes, type ReactNode } from "react";
+import { reloadForNewBuild } from "@/lib/lazyPage";
 
-export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
-export const DialogClose = DialogPrimitive.Close;
+/**
+ * the dialog library (Radix's dialog, focus trap and scroll lock, about 15 KB compressed) is read the first time
+ * any dialog opens, never with the inbox: a closed dialog draws nothing, so its code waits. The parts (ui/dialogParts)
+ * keep their names and props; once read, every dialog draws at once, open or closed, so closing keeps its animation.
+ */
+type Parts = typeof import("./dialogParts");
+let parts: Parts | undefined;
+let failed = false;
+let asked: Promise<Parts> | undefined;
+export const loadDialogParts = (): Promise<Parts> =>
+  (asked ??= import("./dialogParts").then(
+    (m) => (parts = m),
+    (err: unknown) => {
+      asked = undefined; // the next open asks again
+      throw err;
+    },
+  ));
+/** an open dialog's wait: a failed read reloads once onto a new build (lib/lazyPage), else the dialog stays closed */
+const openParts = (): Promise<Parts> =>
+  loadDialogParts().catch((err: unknown) => {
+    if (reloadForNewBuild()) return new Promise<never>(() => undefined);
+    failed = true; // never asked again in a loop
+    throw err;
+  });
 
-const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className,
-    )}
-    {...props}
-  />
-));
-DialogOverlay.displayName = "DialogOverlay";
+type DialogProps = ComponentPropsWithoutRef<Parts["Dialog"]> & { children?: ReactNode };
+/** the real dialog, or (inside Suspense, fallback nothing) a wait for its parts */
+function Real(props: DialogProps) {
+  if (parts) return <parts.Dialog {...props} />;
+  if (failed) return null;
+  throw openParts();
+}
 
-export const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPrimitive.Portal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPrimitive.Portal>
-));
+export function Dialog(props: DialogProps) {
+  // one shape from the first open on, so an open dialog never remounts (its focus and fields stay)
+  if (!parts && !props.open) return null;
+  return (
+    <Suspense fallback={null}>
+      <Real {...props} />
+    </Suspense>
+  );
+}
+
+// the parts below are drawn only inside an open Dialog, so the library is in by then
+const need = (): Parts => {
+  if (!parts) throw openParts();
+  return parts;
+};
+export const DialogContent = forwardRef<ElementRef<Parts["DialogContent"]>, ComponentPropsWithoutRef<Parts["DialogContent"]>>((props, ref) => {
+  const P = need();
+  return <P.DialogContent ref={ref} {...props} />;
+});
 DialogContent.displayName = "DialogContent";
-
-export const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col space-y-1.5 text-left", className)} {...props} />
-);
-
-export const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />
-);
-
-export const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title ref={ref} className={cn("text-lg font-semibold leading-none tracking-tight", className)} {...props} />
-));
+export const DialogTitle = forwardRef<ElementRef<Parts["DialogTitle"]>, ComponentPropsWithoutRef<Parts["DialogTitle"]>>((props, ref) => {
+  const P = need();
+  return <P.DialogTitle ref={ref} {...props} />;
+});
 DialogTitle.displayName = "DialogTitle";
-
-export const DialogDescription = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
-));
+export const DialogDescription = forwardRef<ElementRef<Parts["DialogDescription"]>, ComponentPropsWithoutRef<Parts["DialogDescription"]>>((props, ref) => {
+  const P = need();
+  return <P.DialogDescription ref={ref} {...props} />;
+});
 DialogDescription.displayName = "DialogDescription";
+export const DialogHeader = (props: HTMLAttributes<HTMLDivElement>) => {
+  const P = need();
+  return <P.DialogHeader {...props} />;
+};
+export const DialogFooter = (props: HTMLAttributes<HTMLDivElement>) => {
+  const P = need();
+  return <P.DialogFooter {...props} />;
+};

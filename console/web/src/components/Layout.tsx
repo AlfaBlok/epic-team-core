@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { BundleButtons, PLAN_WORDS, usePlan } from "./buyPlan";
 import { splitDecisions } from "@/lib/cardKind";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, Building2, Presentation, Bot, Home, Inbox as InboxIcon, LogOut, Mail, Menu, MessageCircle, Moon, Plug, Plus, Radar, Files, Mic, Settings, Sun, ListChecks, Crosshair, Pin, Armchair, Server, KeyRound, Sparkles, Coins, Globe, Phone, Search as SearchIcon } from "lucide-react";
@@ -19,12 +18,11 @@ import { INBOX_PATH } from "@/components/inboxLine";
 import { INBOX_LAND } from "@/lib/inboxPlace";
 import { Button } from "@/components/ui/button";
 import { BackArrow } from "@/components/backArrow";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { MILESTONE_PAGE, milestoneWheelRows, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
 import { statusOf } from "@/lib/status";
 import { lazyPage } from "@/lib/lazyPage";
-import { keptPart, loadCampaignHome, loadGoalSets, prefetchSidebarScripts, useScriptIn } from "@/lib/sidebarScripts";
+import { keptPart, loadCampaignHome, loadGoalSets, loadMobileMenu, prefetchSidebarScripts, useScriptIn } from "@/lib/sidebarScripts";
 import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
@@ -41,7 +39,7 @@ import { PERFORMANCE_PATH, PRODUCT_PATH } from "@/pages/social/nav";
 import { MESSAGES_PATH, useMessages } from "@/lib/messages";
 import { OBJECTIVE_SEARCH_PATH } from "@/lib/objectiveSearch";
 import { CountPill, PILL_TITLES } from "@/components/homeSection";
-import { AfterCloseNote } from "@/components/afterClose";
+import { useClosedNote } from "@/lib/afterClose";
 import { TopBarVoice } from "@/voice/TopBarVoice";
 import { knownWorld } from "@/lib/useSocial";
 import { deskVoiceBase } from "@/voice/deskBase";
@@ -1198,24 +1196,9 @@ export function Reconnecting() {
 export function BillingNote() {
   const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
   const world = me?.billing === "awaiting_payment" ? me?.tenant?.id : undefined;
-  const { data: plan } = usePlan(world);
   if (me?.billing !== "awaiting_payment") return null;
-  const back = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("checkout") === "done";
-  // the seat bundles on sale, the one picked on the product site first
-  return (
-    <div role="status" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-testid="billing-note">
-      {back ? (
-        <p>Thank you. Stripe is confirming your payment. Your team starts as soon as it arrives, refresh in a moment.</p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className="min-w-0">
-            Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid. {PLAN_WORDS}
-          </p>
-          {plan && <BundleButtons plan={plan} size="sm" testid="billing-pay" />}
-        </div>
-      )}
-    </div>
-  );
+  // the plans and their buttons load only for a world that has not paid yet, never in the main script
+  return <PayNote world={world} />;
 }
 
 /** "Open the social product" (or the console skin) with the sibling's mark, for a login that uses both products. */
@@ -1307,13 +1290,11 @@ export function Layout() {
           </NavLink>
           <TopBarPills counts={counts} />
         </header>
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          {/* data-sidebar: the phone's menu is a dialog, and navigation keeps its own look (no link underline, polish.css) */}
-          <SheetContent aria-describedby={undefined} className="overflow-hidden" data-sidebar="">
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
+        {(mobileOpen || loadMobileMenu.now()) && (
+          <MobileMenu open={mobileOpen} onOpenChange={setMobileOpen}>
             <SidebarNav onNavigate={() => setMobileOpen(false)} />
-          </SheetContent>
-        </Sheet>
+          </MobileMenu>
+        )}
 
         {/* min-w-0 + break-words: no page content can widen the column past the viewport. */}
         {/* the Pipeline pages take the screen's width. */}
@@ -1323,7 +1304,7 @@ export function Layout() {
           <Outlet />
         </main>
         {/* after a card closes, on any page: Saved, Add a last thought, Bring it back. */}
-        <AfterCloseNote />
+        <AfterClose />
       </div>
     </div>
     </CountsCtx.Provider>
@@ -1442,3 +1423,12 @@ function SidebarMorePages({ onNavigate, gapFinderOn }: { onNavigate?: () => void
 
 /** the pages that use the screen's width: the Pipeline (every campaign's, and a campaign's Pipeline tab). */
 export const widePage = (path: string, search = "") => /\/pipeline\/?$/.test(path) || new URLSearchParams(search).get("tab") === "pipeline";
+
+// parts most opens never draw, each its own script so the phone's main script stays small
+const PayNote = lazyPage(() => import("@/components/buyPlan"), "PayNote", null);
+const MobileMenu = keptPart(loadMobileMenu, "MobileMenu");
+const AfterCloseNote = lazyPage(() => import("@/components/afterClose"), "AfterCloseNote", null);
+/** after a card closes, on any page: the note's script loads with the first card he closes. */
+function AfterClose() {
+  return useClosedNote() ? <AfterCloseNote /> : null;
+}

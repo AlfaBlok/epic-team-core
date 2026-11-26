@@ -14,6 +14,8 @@ export interface PageView {
   slug?: string;
   /** the unit on the page host that rebuilds it: the pin shows a Refresh button. */
   refresh?: string;
+  /** the day it was registered (YYYY-MM-DD): a wheel's Pages tab lists newest first. */
+  added?: string;
   /** the objective (docs/pursuits.json id) or world it was made for, when its row's spine sits in none. */
   objective?: string;
   /** a world's name (the house) when `objective` names a world, not an objective. */

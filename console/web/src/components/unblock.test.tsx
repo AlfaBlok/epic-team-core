@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Assignment, type NeedsOwner, type Run, type WaitingItem } from "@/api";
-import { BlockedBy, ClampText, GrantWriteDialog, isWriteAsk, Linkified, shorten, waitingAnchor, WriteControl } from "@/components/unblock";
+import { BlockedBy, ClampText, GrantWriteDialog, isWriteAsk, Linkified, shorten, waitingAnchor } from "@/components/unblock";
+import { WriteControl } from "@/components/writeControl";
 import { WaitingCard } from "@/components/waiting";
 
 // Radix Switch measures itself; jsdom has no ResizeObserver.

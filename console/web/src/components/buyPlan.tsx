@@ -228,3 +228,27 @@ export function HomeBuyLine() {
     </div>
   );
 }
+
+/**
+ * the sign-up's world before its plan is paid (Layout's BillingNote): one line and the button that pays (the hosted
+ * checkout, a monthly plan). Back from Stripe it says the payment is on its way.
+ */
+export function PayNote({ world }: { world: string | undefined }) {
+  const { data: plan } = usePlan(world);
+  const back = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("checkout") === "done";
+  // the seat bundles on sale, the one picked on the product site first
+  return (
+    <div role="status" className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-testid="billing-note">
+      {back ? (
+        <p>Thank you. Stripe is confirming your payment. Your team starts as soon as it arrives, refresh in a moment.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="min-w-0">
+            Welcome to EpicTeam. Your account is ready. Your team starts working once your plan is paid. {PLAN_WORDS}
+          </p>
+          {plan && <BundleButtons plan={plan} size="sm" testid="billing-pay" />}
+        </div>
+      )}
+    </div>
+  );
+}

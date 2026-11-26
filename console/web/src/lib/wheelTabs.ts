@@ -72,7 +72,7 @@ export const CHAPTER_RULES: ChapterRules = Object.values(plugs).map((m) => m.HOS
 export const alsoIn = (kind: WheelKind, tab: WheelTab): string[] =>
   WHEEL_TABS[kind].filter((o) => o.id !== tab.id && o.shows.some((n) => tab.shows.includes(n))).map((o) => o.label);
 /** the made-of screen's path: what an objective (or a campaign) is made of, one box per tab. */
-export const MADE_OF_PATH = "made-of";
+export { MADE_OF_PATH } from "@/lib/routePaths";
 
 /** the wheel's tabs as the tab strip takes them: id and label, in the graph file's order. */
 export const wheelTabsOf = (kind: WheelKind): { id: string; label: string; data: boolean }[] => WHEEL_TABS[kind].map(({ id, label, kind: k }) => ({ id, label, data: k === "data" }));

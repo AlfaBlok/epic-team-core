@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { api } from "@/api";
 import type { HomeEntry, HomeTabBody, PagesBody, PageView } from "@/api/pages-types";
 import { useQuery } from "@/lib/data";
-import { homeFileUrl } from "@/lib/wheelPages";
+import { homeFileUrl, newestFirst } from "@/lib/wheelPages";
 import { LimitControl, ListPane, limitList, useListLimit } from "@/components/listPane";
 import { useRoutes } from "@/lib/skin";
 import { PAGES_PATH } from "@/lib/routePaths";
@@ -12,13 +12,13 @@ import { PAGES_PATH } from "@/lib/routePaths";
 export const useWheelPages = () => useQuery<PagesBody>(() => api.listPages(), []);
 
 /**
- * A wheel's Pages tab (the owner, vn_dad96778): the pages made for this objective or milestone, newest row first,
+ * A wheel's Pages tab (the owner, vn_dad96778): the pages made for this objective or milestone, newest first,
  * each opening the page; the global Pages list (one tap away) still holds every page together.
  */
 export function WheelPagesTab({ pages, loading, what, files }: { pages: PageView[]; loading?: boolean; what: string; files?: { entries: HomeEntry[]; loading?: boolean } }) {
   // the global list is a console screen; where the skin hides it, the tab stands alone.
   const all = useRoutes()("book");
-  const sorted = [...pages].sort((a, b) => b.row.localeCompare(a.row, undefined, { numeric: true }) || (b.port ?? 0) - (a.port ?? 0));
+  const sorted = newestFirst(pages);
   return (
     <section className="grid gap-3" data-testid="wheel-pages" data-count={pages.length}>
       <p className="text-sm text-muted-foreground" data-testid="wheel-pages-answer" data-total={pages.length + (files?.entries.length ?? 0)}>

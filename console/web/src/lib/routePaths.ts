@@ -38,3 +38,6 @@ export const MARKETING_PATH = "marketing";
 /** the team product's strategy call: who buys first, the message, the waitlist, the launch timeline. */
 export const STRATEGY_PATH = "strategy";
 export const X_STATS_PATH = "x-stats";
+
+/** the made-of screen's path (here, so the app's main script reads it without the chapters data lib/wheelTabs carries). */
+export const MADE_OF_PATH = "made-of";

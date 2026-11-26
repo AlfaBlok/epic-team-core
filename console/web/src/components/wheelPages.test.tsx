@@ -70,7 +70,7 @@ describe("pages inside their wheel", () => {
   });
 
   it("an objective's Pages tab holds its own tree's pages, a set inside it only its own", () => {
-    expect(pagesOfObjective(PAGES, SETS, ix, "social").map((p) => p.row)).toEqual(["E907-S3", "E907-S5"]);
+    expect(pagesOfObjective(PAGES, SETS, ix, "social").map((p) => p.row)).toEqual(["E907-S5", "E907-S3"]);
     expect(pagesOfObjective(PAGES, SETS, ix, "social~video").map((p) => p.row)).toEqual(["E907-S3"]);
     expect(pagesOfObjective(PAGES, SETS, ix, "testers").map((p) => p.row)).toEqual(["E907-S6"]);
   });
@@ -160,11 +160,38 @@ describe("pages inside their wheel", () => {
     const bix = indexScorecards(body);
     const made = (port: number, row: string) => ({ ...page(port, row, "errands", "errands"), objective: "errands" });
     const research = { total: 3, groups: [{ id: "errands", repo: "errands", epic: "errands", epicTitle: "", pages: [made(9650, "E907-S8"), made(9651, "E907-S9"), made(9645, "E907-S3")] }] } as PagesBody;
-    expect(pagesOfObjective(research, body, bix, "gadget").map((p) => p.port)).toEqual([9650, 9651]);
+    expect(pagesOfObjective(research, body, bix, "gadget").map((p) => p.port)).toEqual([9651, 9650]);
     // still on the objective it names: an item may sit in two chapters, nothing moves off.
-    expect(pagesOfObjective(research, body, bix, "errands").map((p) => p.port)).toEqual([9650, 9651, 9645]);
+    expect(pagesOfObjective(research, body, bix, "errands").map((p) => p.port)).toEqual([9651, 9650, 9645]);
     // a page whose row is under no key result of the objective stays off it.
     expect(pagesOfObjective(research, body, bix, "testers")).toEqual([]);
+  });
+
+  // the owner: "newest first, and make pages from other repos rows count, not only one-offs."
+  it("a row from another repo under a key result brings its page, and the tab lists the newest first", () => {
+    const phone = { ...node("gadget", "Buy a gadget", ["errands:docs/spines/gadget.md"]), keyResults: [{ label: "The gadget is bought", kind: "key-result", work: [{ code: "E907-S9", repo: "errands", kind: "ticket" }, { code: "E907-S8", repo: "errands", kind: "ticket" }, { code: "E907-S27", repo: "funnels", kind: "ticket" }] }] } as unknown as ScorecardNode;
+    const body = { ...SETS, nodes: [...SETS.nodes, phone] } as ScorecardsBody;
+    const bix = indexScorecards(body);
+    const made = (port: number, row: string, added: string) => ({ ...page(port, row, "errands", "errands"), objective: "errands", added });
+    // the funnels page sits below another row's site on the same port, at its own path.
+    const deal = { ...page(9201, "E907-S27", "acme/funnels", "EPIC-901", "Second-hand phones"), url: "http://pages.example:9201/phones/", path: "/phones/", added: "2026-11-26" };
+    const site = { ...page(9201, "E907-S1", "funnels", "EPIC-903", "The full plan"), objective: "testers" };
+    const research = {
+      total: 4,
+      groups: [
+        { id: "errands", repo: "errands", epic: "errands", epicTitle: "", pages: [made(9650, "E907-S8", "2026-11-24"), made(9651, "E907-S9", "2026-11-24")] },
+        { id: "funnels-EPIC-901", repo: "funnels", epic: "EPIC-901", epicTitle: "", pages: [deal] },
+        { id: "funnels-EPIC-903", repo: "funnels", epic: "EPIC-903", epicTitle: "", pages: [site] },
+      ],
+    } as PagesBody;
+    const mine = pagesOfObjective(research, body, bix, "gadget");
+    expect(mine.map((p) => p.row)).toEqual(["E907-S27", "E907-S9", "E907-S8"]);
+    render(
+      <MemoryRouter>
+        <WheelPagesTab pages={mine} what="objective" />
+      </MemoryRouter>,
+    );
+    expect(screen.getAllByTestId("wheel-page")[0].textContent).toContain("Second-hand phones");
   });
 
   it("places a page its tree misses where it names itself, a world after the objectives", () => {

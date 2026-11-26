@@ -26,4 +26,8 @@ import { beforeAll } from "vitest";
 beforeAll(async () => {
   const { callEngineCode, noteEngineCode } = await import("./voice/voiceCode");
   await Promise.all([callEngineCode(), noteEngineCode()]);
+  // the dialog code loads on first open in the app (components/ui/dialog.tsx), and once the inbox is in; a test opens a
+  // dialog and reads it at once, so it is in first. components/ui/dialog.test.tsx checks the load on open itself.
+  const { loadDialogParts } = await import("./components/ui/dialog");
+  await loadDialogParts();
 });

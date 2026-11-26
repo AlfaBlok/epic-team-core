@@ -28,9 +28,6 @@ import { SavedCopyLine } from "@/components/SavedCopyLine";
 import { OtherWorldsWaiting, useOtherWorlds } from "@/components/otherWorlds";
 import { GoalLights } from "@/components/goalLights";
 import { SCORECARDS_PATH } from "@/lib/scorecards";
-import { DeckCards } from "@/components/deckCards";
-import { GoalGraphLinks } from "@/pages/GoalGraph";
-import { LaunchLights } from "@/components/launchBoard";
 import { ChatsWaitingLine } from "@/components/draftsToApprove";
 import { NewApplications } from "@/components/newApplications";
 import { AskedNoRow } from "@/components/askedNoRow";
@@ -42,10 +39,7 @@ import { SyncFooter } from "@/components/freshness";
 import { NextWakeList } from "@/components/planning";
 import { MovingNow } from "@/components/movingNow";
 import { focusHeading, useShows, useSkin, useWords } from "@/lib/skin";
-import { OnboardingScorecard } from "@/components/OnboardingScorecard";
 import { campaignMilestones, campaignsByMilestone, useCampaigns } from "@/lib/campaign";
-import { CampaignGoalBlock } from "@/components/CampaignGoal";
-import { CampaignChannels } from "@/components/CampaignChannels";
 import { ALL_PROJECTS, useProject } from "@/lib/project";
 import type { CampaignCard } from "@/api/campaign-types";
 import { dayLabel, slotLabel } from "@/lib/dayLabel";
@@ -55,7 +49,6 @@ import { LoadMore } from "@/components/loadMore";
 import { useFocusSave } from "@/lib/useFocusSave";
 import { RecentlyClosed } from "@/components/afterClose";
 import { InboxSentBack } from "@/components/sentBack";
-import { BuildingLists } from "@/components/buildingLists";
 import { homeWorld, socialProduct } from "@/lib/identity";
 import { InboxSearchProvider, useInboxSearch } from "@/lib/inboxSearch";
 import { InboxSearchBox } from "@/components/inboxSearch";
@@ -63,6 +56,16 @@ import { InboxGoalLabels } from "@/components/inboxGoals";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
 import { FoldChevron } from "@/components/foldChevron";
 import { lazyPage } from "@/lib/lazyPage";
+
+// parts of Home, the dashboard and the social home that his inbox never draws load with the screen that does,
+// so the phone's inbox reads less code first (each its own small script, nothing drawn until it is in).
+const DeckCards = lazyPage(() => import("@/components/deckCards"), "DeckCards", null);
+const GoalGraphLinks = lazyPage(() => import("@/pages/GoalGraph"), "GoalGraphLinks", null);
+const LaunchLights = lazyPage(() => import("@/components/launchBoard"), "LaunchLights", null);
+const OnboardingScorecard = lazyPage(() => import("@/components/OnboardingScorecard"), "OnboardingScorecard", null);
+const CampaignGoalBlock = lazyPage(() => import("@/components/CampaignGoal"), "CampaignGoalBlock", null);
+const CampaignChannels = lazyPage(() => import("@/components/CampaignChannels"), "CampaignChannels", null);
+const BuildingLists = lazyPage(() => import("@/components/buildingLists"), "BuildingLists", null);
 
 // the new-goal dialog loads its script when opened, so the Inbox downloads less before its first card.
 const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
