@@ -27,6 +27,14 @@ export function cardIds(d: unknown): string[] {
   return out;
 }
 
+/** the items of a list answer that are not open (answered, done, superseded): history, never a new card. */
+function historyIds(d: unknown): Set<string> {
+  const out = new Set<string>();
+  if (Array.isArray(d))
+    for (const x of d) if (x && typeof x === "object" && typeof (x as { id?: unknown }).id === "string" && (x as { state?: unknown }).state !== "open") out.add((x as { id: string }).id);
+  return out;
+}
+
 /** The answer without the cards in `hide` (same shape), for a first answer on Back. */
 export function withoutCards<T>(d: T, hide: Set<string>): T {
   const keep = (a: unknown[]) => a.filter((x) => !(x && typeof x === "object" && hide.has((x as { id?: string }).id as string)));
@@ -105,7 +113,9 @@ export function gateNewCards(key: string, back: boolean): () => void {
   };
 }
 
-export type Source = "first" | "own" | "background";
+/** `rest`: the whole list after the first draw's part: its extra items are history, so only an open card it
+ * brings that the screen never showed waits behind the line. */
+export type Source = "first" | "own" | "background" | "rest";
 
 /**
  * What lib/data does with an answer `d` of an inbox query (`entry` names the query): `show` it (maybe without the cards
@@ -122,7 +132,8 @@ export function gateAnswer<T>(entry: object, d: T, source: Source, tag: "inbox" 
     return { show: d };
   };
   if (!on || source === "own" || (source === "first" && Date.now() >= restoreUntil)) return showAll();
-  const fresh = ids.filter((id) => !known(id));
+  const isHistory = source === "rest" ? historyIds(d) : undefined;
+  const fresh = ids.filter((id) => !known(id) && !isHistory?.has(id));
   if (!fresh.length) return showAll();
   parked.set(entry, {
     apply: () => {

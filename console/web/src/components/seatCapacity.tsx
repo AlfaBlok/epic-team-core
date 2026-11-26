@@ -2,16 +2,17 @@ import { api, type CapacityApp, type SeatCapacity } from "@/api";
 import { useQuery } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { RelTime } from "@/components/common";
+import type { Consumption } from "@/api/totem-types";
 
 /**
  * the seats as a share of their capacity, per app, this week and at the last days' pace, and the one
  * line on how much more load fits. Read live (GET /api/seats/capacity, or a customer's own seats with `world`).
  * Percent only: no dollars, no prices.
  */
-// categorical slots in a fixed order (the dataviz reference palette, as on the page he liked); the rest grey, "Not metered" hatched
+// categorical slots in a fixed order (the dataviz reference palette, as on the page he liked); the rest grey, "Not metered" light grey
 const HUES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"];
 const REST = "#8a8f98";
-const HATCH = "repeating-linear-gradient(45deg, #b8bcc4 0 3px, transparent 3px 6px)";
+const HATCH = "#cdd0d6"; // flat light grey: surfaces stay flat (clean look)
 
 export const pc = (v: number) => (v > 0 && v < 0.095 ? `${(v * 100).toFixed(1)}%` : `${Math.round(v * 100)}%`);
 
@@ -73,10 +74,12 @@ export function SeatCapacityView({ c }: { c: SeatCapacity }) {
       {c.pace != null && <Bar apps={c.apps} k="pace" scale={scale} label="At the last days' pace, of a week's limit" value={c.pace} testId="capacity-pace" />}
       <ul className="divide-y rounded-lg border text-sm" data-testid="capacity-apps">
         {c.apps.map((a) => (
-          <li key={a.app} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2" data-testid="capacity-app">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: hueOf(c.apps, a.app) }} aria-hidden />
-            <span className="min-w-0 flex-1 break-words">{a.app}</span>
-            <span className="ml-auto whitespace-nowrap tabular-nums text-muted-foreground">
+          <li key={a.app} className="flex flex-col gap-0.5 px-3 py-2 sm:flex-row sm:items-center sm:gap-2" data-testid="capacity-app">
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: hueOf(c.apps, a.app) }} aria-hidden />
+              <span className="min-w-0 break-words">{a.app}</span>
+            </span>
+            <span className="whitespace-nowrap pl-[18px] tabular-nums text-muted-foreground sm:pl-0">
               <span className="text-foreground">{pc(a.week)}</span> this week · <span className="text-foreground">{pc(a.pace)}</span> pace
             </span>
           </li>
@@ -93,6 +96,47 @@ export function SeatCapacityView({ c }: { c: SeatCapacity }) {
   );
 }
 
+/** each objective's share of the whole subscription and of what was used this week (the Consumption chapters' file). */
+export function ObjectiveSplit({ c, top = 6 }: { c: Consumption; top?: number }) {
+  const rows = (c.wheels ?? []).filter((w) => w.ofTotal > 0).slice(0, top);
+  if (!rows.length) return null;
+  const max = Math.max(...rows.map((w) => w.ofUsed), 0.0001);
+  return (
+    <div id="objectives" className="scroll-mt-20" data-testid="capacity-objectives">
+      <h3 className="mb-1 text-sm font-medium">Per objective, this week</h3>
+      <p className="mb-2 text-xs text-muted-foreground">
+        Share of what was used, then of your whole subscription. {pc(c.usedOfTotal)} of the whole was used.
+      </p>
+      <ul className="divide-y rounded-lg border text-sm">
+        {rows.map((w) => (
+          <li key={w.key} className="grid gap-1 px-3 py-2" data-testid="capacity-objective">
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+              {w.kind === "objective" ? (
+                <a href={`/sets/${encodeURIComponent(w.key)}?tab=consumption`} className="min-w-0 flex-1 break-words hover:underline">
+                  {w.name}
+                </a>
+              ) : (
+                <span className="min-w-0 flex-1 break-words">{w.name}</span>
+              )}
+              <span className="whitespace-nowrap tabular-nums text-muted-foreground sm:ml-auto">
+                <span className="text-foreground">{pc(w.ofUsed)}</span> of used · <span className="text-foreground">{pc(w.ofTotal)}</span> of all
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-muted" aria-hidden>
+              <div className="h-1.5 rounded-full" style={{ width: `${(w.ofUsed / max) * 100}%`, background: HUES[0] }} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ObjectivesOfTeam() {
+  const { data } = useQuery(() => api.getConsumption("all").catch(() => undefined), []);
+  return data ? <ObjectiveSplit c={data} /> : null;
+}
+
 /** `bare` draws it inside another card (a customer's Your Claude seats card) instead of its own. */
 export function SeatCapacityPanel({ world, bare }: { world?: string; bare?: boolean }) {
   const { data, error } = useQuery(() => api.getSeatCapacity(world), [world]);
@@ -102,6 +146,11 @@ export function SeatCapacityPanel({ world, bare }: { world?: string; bare?: bool
       {error && <p className="text-xs text-muted-foreground">Capacity not read: {error.message}</p>}
       {!data && !error && <p className="text-xs text-muted-foreground">Reading your seats…</p>}
       {data && <SeatCapacityView c={data} />}
+      {data && !world && (
+        <div className="mt-4">
+          <ObjectivesOfTeam />
+        </div>
+      )}
     </>
   );
   return bare ? (

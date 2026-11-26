@@ -107,7 +107,8 @@ describe("the Inbox search box", () => {
     await waitFor(() => expect(screen.getAllByTestId("review-card")).toHaveLength(2));
     expect(screen.getAllByTestId("waiting-card")).toHaveLength(2);
     expect(screen.queryByTestId("inbox-search-line")).toBeNull();
-    expect(screen.queryByTestId("answered-section")).toBeNull();
+    // Answered shows "…" until the whole list is in; with nothing answered it then goes
+    await waitFor(() => expect(screen.queryByTestId("answered-section")).toBeNull(), { timeout: 4000 });
   });
 
   it("nothing matches: one plain line, and each section says nothing here matches", async () => {

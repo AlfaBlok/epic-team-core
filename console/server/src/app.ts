@@ -3521,7 +3521,7 @@ export function createApp(
   const elevenKey = async () => process.env.ELEVENLABS_API_KEY || (await sudoRead(keyFile("ELEVENLABS_API_KEY")));
   const replyNotesDir = process.env.CONSOLE_REPLY_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "reply-notes");
   mountReplyNote(api, { key: elevenKey, dir: replyNotesDir, ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
-  mountListenPage(app, replyNotesDir); // the briefing's "Listen: <link>", a player page behind the login
+  mountListenPage(app, replyNotesDir, opts.voice?.now); // the briefing's "Listen: <link>": signed, opens with no login
   // the objectives coach (/coach): its own ElevenLabs agent, his objectives read only, his words relayed to a desk.
   const coachEleven: ElevenCalls | undefined =
     opts.voice?.coachEleven ??

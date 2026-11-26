@@ -312,6 +312,19 @@ describe("the Inbox's list sends what the screen shows", () => {
     expect(res.status).toBe(200);
     if (JSON.stringify(list).length > 1024) expect(res.headers.get("content-encoding")).toBe("gzip");
   });
+
+  it("?scope=open sends only the open asks (the first draw), the same cards as the whole list holds", async () => {
+    const { call, app } = setup();
+    await seed(call);
+    const whole = (await call("GET", "/api/waiting-on-owner?view=list")).json as any[];
+    const first = await app.request("/api/waiting-on-owner?view=list&scope=open");
+    expect(first.headers.get("x-inbox-scope")).toBe("open");
+    const open = (await first.json()) as any[];
+    expect(whole.some((i) => i.state !== "open")).toBe(true); // the seed has answered asks
+    expect(open.length).toBeGreaterThan(0);
+    expect(open.every((i) => i.state === "open")).toBe(true);
+    expect(open).toEqual(whole.filter((i) => i.state === "open"));
+  });
 });
 
 describe("responses", () => {

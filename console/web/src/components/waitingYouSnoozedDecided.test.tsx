@@ -70,7 +70,8 @@ describe("Waiting on you: Snoozed and Decided for you in the shared pane", () =>
     wrap(<WaitingOnYou milestoneId="ms_1" />);
     const section = await screen.findByTestId("decided-for-you");
     const toggle = within(section).getByTestId("decided-for-you-toggle");
-    expect(toggle.textContent).toContain("Decided for you25");
+    // "…" while only the open asks are in, the number once the whole list follows
+    await waitFor(() => expect(toggle.textContent).toContain("Decided for you25"), { timeout: 4000 });
     expect(within(section).queryByTestId("decided-for-you-pane")).toBeNull();
     fireEvent.click(toggle);
     expect(window.localStorage.getItem("teamHome.section.decided-for-you")).toBe("open");

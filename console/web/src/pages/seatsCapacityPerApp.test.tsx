@@ -40,6 +40,13 @@ describe("Seats screen capacity", () => {
   it("opens with the answer, both readings per app, and what is out", async () => {
     vi.spyOn(api, "getSeatBoard").mockResolvedValue(board);
     const cap = vi.spyOn(api, "getSeatCapacity").mockResolvedValue(full);
+    vi.spyOn(api, "getConsumption").mockResolvedValue({
+      at: "2026-11-26T12:00:00Z", seats: 16, usedOfTotal: 0.47, rank: null, of: 2, wheel: null, file: "x",
+      wheels: [
+        { key: "obj-a", name: "Get the team to understand me", kind: "objective", ofTotal: 0.15, ofUsed: 0.33, runs: 9, outcomes: 3, madeTrue: 0.5, personas: [] },
+        { key: "milestone:ms_1", name: "Spring launch", kind: "campaign", ofTotal: 0.05, ofUsed: 0.1, runs: 2, outcomes: 0, madeTrue: 0, personas: [] },
+      ],
+    } as any);
     render(<MemoryRouter><SeatsPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("capacity-answer").textContent).toMatch(/no more load fits/));
     expect(cap).toHaveBeenCalledWith(undefined);
@@ -52,6 +59,11 @@ describe("Seats screen capacity", () => {
     expect(apps[0]).toMatch(/EpicTeam.*34% this week · 63% pace/);
     expect(apps).toHaveLength(3);
     expect(screen.getByTestId("capacity-seats").textContent).toMatch(/16 seats, 11 working, 1 signed out, 4 limited for days \(27% of the capacity out of use\)/);
+    await waitFor(() => expect(screen.getAllByTestId("capacity-objective")).toHaveLength(2));
+    const objs = screen.getAllByTestId("capacity-objective");
+    expect(objs[0].textContent).toMatch(/Get the team to understand me.*33% of used · 15% of all/);
+    expect(objs[0].querySelector("a")!.getAttribute("href")).toBe("/sets/obj-a?tab=consumption");
+    expect(objs[1].querySelector("a")).toBeNull();
     expect(screen.getByTestId("seat-capacity").textContent).not.toMatch(/\$|€/);
   });
 

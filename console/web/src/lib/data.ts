@@ -147,28 +147,67 @@ export async function mutate<T>(fn: () => Promise<T>, tag?: QueryTag): Promise<T
  * the Team home section each fetched and polled on their own clock, up to 30 s apart: a pill said 1 while the list was
  * already empty. Same refresh rules as useQuery (tag, poll); the entry is dropped when its last reader unmounts.
  */
-type Shared = { data?: unknown; parked?: { d: unknown }; error?: Error; loading: boolean; version: number; seq: number; readers: number; subs: Set<() => void>; stop: () => void; refresh: (source?: Source) => void };
+type Shared = {
+  data?: unknown;
+  parked?: { d: unknown };
+  error?: Error;
+  loading: boolean;
+  /** the data is the first draw's part (`first`); the whole answer is on its way (`loadRest`). */
+  partial: boolean;
+  loadRest: () => void;
+  version: number;
+  seq: number;
+  readers: number;
+  subs: Set<() => void>;
+  stop: () => void;
+  refresh: (source?: Source) => void;
+};
 const shared = new Map<string, Shared>();
 
-function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Shared {
+/**
+ * The owner chose "Yes: trim the asks next" after the slow-phone fix (the phone downloaded all 423 asks, 115 KB, for
+ * about 20 open): how long after the first draw's part lands the whole answer is asked for, so it never competes with
+ * the first screen's other calls on a slow phone line. Opening a folded history section asks for it at once.
+ */
+export const REST_AFTER_MS = 1500;
+
+type SharedOpts = { tag?: QueryTag; first?: () => Promise<unknown> };
+
+function openShared(key: string, fn: () => Promise<unknown>, opts: SharedOpts = {}): Shared {
+  const { tag, first } = opts;
   const found = shared.get(key);
   if (found) return found;
-  const e: Shared = { loading: true, version: 0, seq: 0, readers: 0, subs: new Set(), stop: () => undefined, refresh: () => undefined };
+  const e: Shared = { loading: true, partial: false, loadRest: () => undefined, version: 0, seq: 0, readers: 0, subs: new Set(), stop: () => undefined, refresh: () => undefined };
   const bump = () => {
     e.version++;
     e.subs.forEach((s) => s());
   };
+  let restTimer: ReturnType<typeof setTimeout> | undefined;
+  e.loadRest = () => {
+    if (restTimer) clearTimeout(restTimer);
+    restTimer = undefined;
+    if (e.partial) e.refresh("rest");
+  };
   e.refresh = (source: Source = "background") => {
     const n = ++e.seq;
     let park = false;
-    fn()
+    // the first answer of a query with a `first` part is that part; every later one (a poll, an answer) is whole
+    const part = !!first && e.loading && source === "first";
+    // while the data is only the part, the whole answer's extra items are history already seen, never "N new"
+    const src: Source = e.loading ? "first" : source !== "own" && e.partial ? "rest" : source;
+    (part ? first : fn)()
       .then((d) => {
         if (n !== e.seq) return;
+        const whole = () => {
+          e.partial = part;
+          if (part && !restTimer) restTimer = setTimeout(e.loadRest, REST_AFTER_MS);
+        };
         // the Inbox open: a card he has not seen waits behind the "N new" line (lib/inboxNew), even while a box holds
-        const g = gateAnswer(e, d, e.loading ? "first" : source, tag, () => {
+        const g = gateAnswer(e, d, src, tag, () => {
           e.parked = undefined;
           e.data = d;
           e.error = undefined;
+          whole();
           bump();
         });
         if (g === "park") return void (park = true);
@@ -177,8 +216,14 @@ function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Sh
         e.parked = undefined;
         e.data = g.show;
         e.error = undefined;
+        whole();
       })
-      .catch((err: Error) => n === e.seq && (e.error = err))
+      .catch((err: Error) => {
+        if (n !== e.seq) return;
+        e.error = err;
+        // a part that failed: the whole answer next, at once (an older console without the part answers whole anyway)
+        if (part) setTimeout(() => e.refresh("first"), 0);
+      })
       .finally(() => n === e.seq && !park && ((e.loading = false), bump()));
   };
   const l = { refresh: (source?: Source) => e.refresh(source), tag };
@@ -189,17 +234,21 @@ function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Sh
     const d = e.parked.d;
     e.parked = undefined;
     // what came while a box was in use: new cards still wait behind the line
-    const g = gateAnswer(e, d, "background", tag, () => {
+    // a parked answer is always whole (the first answer, the part, is never held)
+    const g = gateAnswer(e, d, e.partial ? "rest" : "background", tag, () => {
       e.data = d;
       e.error = undefined;
+      e.partial = false;
       bump();
     });
     if (g === "park") return;
     e.data = g.show;
     e.error = undefined;
+    e.partial = false;
     bump();
   });
   e.stop = () => {
+    if (restTimer) clearTimeout(restTimer);
     forgetParked(e);
     listeners.delete(l);
     stopPoll();
@@ -211,13 +260,15 @@ function openShared(key: string, fn: () => Promise<unknown>, tag?: QueryTag): Sh
   return e;
 }
 
-export function useSharedQuery<T>(key: string, fn: () => Promise<T>, opts: { tag?: QueryTag } = {}) {
+export function useSharedQuery<T>(key: string, fn: () => Promise<T>, opts: { tag?: QueryTag; first?: () => Promise<T> } = {}) {
   const fnRef = useRef(fn);
   fnRef.current = fn;
+  const firstRef = useRef(opts.first);
+  firstRef.current = opts.first;
   const [, setVersion] = useState(0);
   const [entry, setEntry] = useState<Shared | undefined>(() => shared.get(key));
   useEffect(() => {
-    const e = openShared(key, () => fnRef.current(), opts.tag);
+    const e = openShared(key, () => fnRef.current(), { tag: opts.tag, ...(opts.first ? { first: () => firstRef.current!() } : {}) });
     e.readers++;
     const sub = () => setVersion(e.version);
     e.subs.add(sub);
@@ -233,7 +284,7 @@ export function useSharedQuery<T>(key: string, fn: () => Promise<T>, opts: { tag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   const e = entry && shared.get(key) === entry ? entry : shared.get(key);
-  return { data: e?.data as T | undefined, error: e?.error, loading: e ? e.loading : true };
+  return { data: e?.data as T | undefined, error: e?.error, loading: e ? e.loading : true, partial: !!e?.partial, loadRest: () => e?.loadRest() };
 }
 
 /**
@@ -242,7 +293,8 @@ export function useSharedQuery<T>(key: string, fn: () => Promise<T>, opts: { tag
  */
 export function useWaitingList(f: Parameters<typeof api.listWaitingOnOwner>[0] = { includeSuperseded: true }) {
   const key = `waiting:${JSON.stringify(f ?? {})}`;
-  const q = useSharedQuery(key, () => api.listWaitingOnOwner(f), { tag: "inbox" });
+  // the open asks first (what the top sections draw), the answered and done ones right after (`partial` till then)
+  const q = useSharedQuery(key, () => api.listWaitingOnOwner(f), { tag: "inbox", first: () => api.listWaitingOnOwner({ ...f, scope: "open" }) });
   // E948-S183: before any ask shows, one on the same ticket, page or topic as an open review card folds into it
   // (the same shared fetch as the review list, lib/inbox.ts useReviewList)
   const reviews = useSharedQuery<ReviewItem[]>("review-items", () => api.listReviewItems(), { tag: "inbox" }).data;
@@ -254,5 +306,5 @@ export function useWaitingList(f: Parameters<typeof api.listWaitingOnOwner>[0] =
 /** E948-S187: the inbox asks as the console sends them, unfolded (the review list folds its cards into older asks with them). */
 export const useRawWaiting = () => {
   const f = { includeSuperseded: true };
-  return useSharedQuery(`waiting:${JSON.stringify(f)}`, () => api.listWaitingOnOwner(f), { tag: "inbox" });
+  return useSharedQuery(`waiting:${JSON.stringify(f)}`, () => api.listWaitingOnOwner(f), { tag: "inbox", first: () => api.listWaitingOnOwner({ ...f, scope: "open" }) });
 };

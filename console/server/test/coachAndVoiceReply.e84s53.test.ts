@@ -121,12 +121,12 @@ describe("a voice note back", () => {
     const j = (await r.json()) as { listen: string; words: string };
     expect(j.words).not.toContain("The rest is in the chat.");
     expect(j.words.length).toBeLessThanOrEqual(900);
-    expect(j.listen).toMatch(/^\/listen\/[0-9a-f]{24}$/);
+    expect(j.listen).toMatch(/^\/listen\/[0-9a-f]{24}\/[0-9a-z]+\/[A-Za-z0-9_-]{32}$/);
     const page = await app.request(j.listen);
     const html = await page.text();
     expect(page.status).toBe(200);
     expect(html).toContain("Your morning briefing");
-    expect(html).toContain(`/api/voice/reply-notes/${j.listen.slice(8)}.mp3`);
+    expect(html).toContain(`${j.listen}/audio.mp3`);
     expect(html).toContain("Do the wheels turn?");
     expect((await app.request("/listen/0123456789abcdef01234567")).status).toBe(404);
     expect((await app.request("/listen/..%2F..%2Fetc")).status).toBe(404);

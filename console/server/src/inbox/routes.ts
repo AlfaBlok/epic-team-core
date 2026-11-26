@@ -1125,7 +1125,12 @@ export function mountInbox(
     // the stored view (never spines.py or git on this request), with when it was last current.
     const read = await itemsIn({ milestoneId, nodeKey, includeSettled: includeSettled(c), includeSuperseded });
     if (read.asOf) c.header("X-Read-Model-As-Of", read.asOf);
-    const items = withResponses(read.items, { milestoneId, nodeKey });
+    // the owner chose "Yes: trim the asks next" after the slow-phone fix: `?scope=open` sends only the open asks, what the
+    // inbox's first draw shows (16 of 423 on 26 Nov, ~8% of the bytes); the app fetches the whole list right after.
+    const openOnly = c.req.query("scope") === "open";
+    const answered = withResponses(read.items, { milestoneId, nodeKey });
+    const items = openOnly ? answered.filter((it) => it.state === "open") : answered;
+    if (openOnly) c.header("X-Inbox-Scope", "open");
     // the card names who an answer wakes ("Wake <persona>"): open and answered items (Change answer), persona decisions (Reverse).
     // an FYI card shows the rubric scores its verdict was judged by (per-ask memory).
     const reads = { ...o.deps, store: requestReads(o.deps.store) }; // one DB read per question for all cards

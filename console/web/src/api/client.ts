@@ -392,7 +392,7 @@ export interface ApiClient {
   supersedeNeedsOwner(id: string, by?: string): Promise<NeedsOwner>;
 
   /** everything blocked on the owner (all milestones, or one milestone's subtree from nodeKey down). */
-  listWaitingOnOwner(f?: { milestoneId?: string; nodeKey?: string; includeSettled?: boolean; includeSuperseded?: boolean } & Partial<SpineRef>): Promise<WaitingItem[]>;
+  listWaitingOnOwner(f?: { milestoneId?: string; nodeKey?: string; includeSettled?: boolean; includeSuperseded?: boolean; /** only the open asks (the first draw) */ scope?: "open" } & Partial<SpineRef>): Promise<WaitingItem[]>;
   /** one item whole (the card behind a folded Answered row, fetched when it opens). */
   getWaitingItem?(id: string, milestoneId?: string): Promise<WaitingItem>;
   /** the search box on top of the Inbox: which items match every word (titles, card text, his notes). */

@@ -174,6 +174,7 @@ export function createUsageCollector(db: DB, o: UsageOptions = {}) {
         `SELECT r.id, r.started_at, r.ended_at, r.thread_id, r.summary, r.outcome, r.usage, ${HOST}
            FROM runs r LEFT JOIN personas p ON p.id = r.persona_id
           WHERE r.ended_at IS NOT NULL AND r.kind = 'wake' AND r.ended_at >= @oldest
+            ${ids ? "AND r.id IN (SELECT value FROM json_each(@ids)) -- a run's own 1- and 5-min reads look it up by key, not a scan of every run" : ""}
             AND ((r.usage IS NULL AND r.ended_at <= @settled
                   AND (r.usage_checked_at IS NULL OR r.usage_checked_at <= @retry
                     -- missing at the 1-min read: look again once the final read is due
@@ -187,8 +188,9 @@ export function createUsageCollector(db: DB, o: UsageOptions = {}) {
         finalOffset: `+${Math.round(finalMs / 1000)} seconds`,
         oldest: iso(t - maxAgeMs),
         retry: iso(t - retryMs),
+        ...(ids ? { ids: JSON.stringify(ids) } : {}),
       }) as PendingRow[];
-    return ids ? rows.filter((r) => ids.includes(r.id)) : rows;
+    return rows;
   };
 
   const setUsage = db.prepare(`UPDATE runs SET usage = @usage, usage_live = NULL, usage_checked_at = @at, usage_note = NULL WHERE id = @id`);

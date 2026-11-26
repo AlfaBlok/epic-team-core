@@ -1832,7 +1832,7 @@ export function WaitingOnYou({
   part?: "all" | "blocked" | "rest";
 }) {
   // one shared fetch for the Blocked part, the rest part and the page around them (same filter, same answer).
-  const { data: fetchedAll, error, loading } = useWaitingList(spine ? { ...spine, nodeKey } : { milestoneId, nodeKey, includeSuperseded: true });
+  const { data: fetchedAll, error, loading, partial, loadRest } = useWaitingList(spine ? { ...spine, nodeKey } : { milestoneId, nodeKey, includeSuperseded: true });
   // the count is the server's open items (the Team badge's list), not this list's own filter; an untracked spine has none.
   // the same fetch the pills read (one per key), so the pill and this list never show two moments.
   const { data: statusAll, loading: statusLoading } = useStatusFor(milestoneId, !!spine);
@@ -1941,6 +1941,13 @@ export function WaitingOnYou({
       ? mergeByPriority(statusOnly, open)
       : [...statusOnly.map((st): PriorityRow => ({ status: st })), ...open.map((card): PriorityRow => ({ card }))];
   const fyi = bySort(items.filter((i) => isStructured(i) && i.decidedBy));
+  // the first draw has only the open asks; until the whole list is in (about 1.5 s later) the history folds
+  // (Decided for you, Answered, Superseded) show "…", never a smaller number, and opening one asks for it at once.
+  const historyComing = partial && !error;
+  const opensHistory = (set: (open: boolean) => void) => (open: boolean) => {
+    if (open && partial) loadRest();
+    set(open);
+  };
   // Answered (collapsed): everything structured that is not open, most recent answer first (the console answer's time,
   // else the ask's date); on a tie answered-pending-work before consumed / done.
   const written = outcomeWritten(status, milestoneId);
@@ -2179,13 +2186,13 @@ export function WaitingOnYou({
           </ListPane>
         </FoldSection>
       )}
-      {fyi.length > 0 && (
+      {(fyi.length > 0 || historyComing) && (
         <FoldSection
           title="Decided for you"
-          count={fyi.length}
+          count={historyComing ? undefined : fyi.length}
           testId="decided-for-you"
           open={fyiOpen || searching}
-          onToggle={setFyiOpen}
+          onToggle={opensHistory(setFyiOpen)}
           actions={<LimitControl limit={fyiLimit} onChange={setFyiLimit} total={fyi.length} testId="decided-for-you" />}
         >
           <ListPane shown={limitList(fyi, fyiLimit).length} total={fyi.length} testId="decided-for-you" className="grid-cols-1 gap-2">
@@ -2213,14 +2220,14 @@ export function WaitingOnYou({
           </ListPane>
         </FoldSection>
       )}
-      {rest.length > 0 && (
+      {(rest.length > 0 || historyComing) && (
         // folded = the one "Answered" line, nothing else; open = one compact line per ask, a click opens that ask's card.
         <FoldSection
           title="Answered"
-          count={rest.length}
+          count={historyComing ? undefined : rest.length}
           testId="answered-section"
           open={answeredOpen || searching}
-          onToggle={setAnsweredOpen}
+          onToggle={opensHistory(setAnsweredOpen)}
           actions={<LimitControl limit={answeredLimit} onChange={setAnsweredLimit} total={rest.length} testId="answered" />}
         >
           <ListPane shown={limitList(rest, answeredLimit).length} total={rest.length} testId="answered" className="grid-cols-1 gap-0.5">
@@ -2233,7 +2240,7 @@ export function WaitingOnYou({
       {superseded.length > 0 && (
         <FoldSection
           title="Superseded"
-          count={superseded.length}
+          count={historyComing ? undefined : superseded.length}
           testId="superseded"
           open={supersededOpen || searching}
           onToggle={setSupersededOpen}

@@ -1082,7 +1082,7 @@ const mockMail = () => ({
           };
         })
         .sort((x, y) => (x.blocksRunId ? 0 : 1) - (y.blocksRunId ? 0 : 1));
-      return ok(items);
+      return ok(f.scope === "open" ? items.filter((i) => i.state === "open") : items);
     },
     async respondToWaiting(itemId, input) {
       if (input.relay) {

@@ -70,15 +70,30 @@ function inAnyTree(spine: string | undefined, ix: ScorecardIndex): boolean {
   return false;
 }
 
+/** "repo:CODE" of every ticket placed under one of the node's key results (their `work` lists). */
+function ticketsOf(node: ScorecardNode | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const kr of node?.keyResults ?? []) for (const w of kr.work ?? []) if (w.kind === "ticket") out.add(`${repoKey(w.repo)}:${w.code}`);
+  return out;
+}
+
 /** the pages one objective (or a set inside it) holds: its row's spine, or its epic's, is in that subtree. */
 export function pagesOfObjective(pages: PagesBody | undefined, body: ScorecardsBody | undefined, ix: ScorecardIndex, nodeId: string): PageView[] {
   if (!pages) return [];
   const scope = ix.scope.get(nodeId);
   if (!scope) return [];
   const epics = epicSpines(body);
+  const tickets = ticketsOf(ix.byId.get(nodeId));
   const out: PageView[] = [];
   for (const g of pages.groups ?? [])
     for (const p of g.pages) {
+      // pages follow their tickets: a row placed under one of this objective's key results brings its
+      // pages here too, wherever else they sit (an item may sit in two chapters), so an objective made from existing
+      // work shows that work's pages from its birth.
+      if (p.row && tickets.has(`${repoKey(p.repo)}:${p.row}`)) {
+        out.push(p);
+        continue;
+      }
       const rowSpine = p.row ? ix.codes.get(`${repoKey(p.repo)}:${p.row}`) : undefined;
       const spine = rowSpine && scope.has(rowSpine) ? rowSpine : epics.get(`${repoKey(p.repo)}:${p.epic}`);
       // a page that names a known objective sits only there: on that objective's tab, or a set inside it that holds its spine.

@@ -16,6 +16,8 @@ const SLOW_MS = 6000;
 const PAGE_SLOW_MS = 8000;
 // a chat transcript is never drawn from a saved copy while the network still might answer: his phone showed the chat from
 // two hours before. The saved copy answers only when the network fails (no connection).
+// pages the console draws on the server, outside the app: never kept as the app shell.
+const SERVER_PAGES = /^\/(listen|login)(\/|$)/;
 const LIVE_ONLY = [/^\/api\/(tenants\/[^/]+\/)?desk\/messages/, /^\/api\/milestones\/[^/]+\/chat\/messages/];
 
 self.addEventListener("install", (e) =>
@@ -83,7 +85,8 @@ self.addEventListener("fetch", (e) => {
 // (one SPA shell). The late answer is kept, and the open app's build watch (components/NewBuild) moves it onto a newer release.
 async function page(q) {
   const live = fetch(q).then(async (res) => {
-    if (res.ok && (res.headers.get("content-type") || "").includes("text/html")) await keep(PAGES, "/", res.clone());
+    // only the app's own shell is kept: a page the server draws itself (a briefing's /listen/<id>) is never kept as the shell.
+    if (res.ok && !SERVER_PAGES.test(new URL(q.url).pathname) && (res.headers.get("content-type") || "").includes("text/html")) await keep(PAGES, "/", res.clone());
     return res;
   });
   const kept = await caches.open(PAGES).then((c) => c.match("/"));

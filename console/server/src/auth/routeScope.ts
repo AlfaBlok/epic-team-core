@@ -53,6 +53,9 @@ const OPEN: [string, RegExp][] = [
   // + the social product's violet set; + the 16/32 px tab icons and the share image (a crawler has no session)
   // + the web app manifest (Add to Home Screen fetches it without the session cookie)
   ["GET", /^\/(favicon(-social)?\.(ico|svg)|favicon-(16|32)(-social)?\.png|icon-(social-)?\d+\.png|apple-touch-icon(-social)?\.png|og-image(-social)?\.png|manifest(-social)?\.webmanifest)$/],
+  // a briefing's Listen link (voice/replyNote.ts): WhatsApp opens it signed in nowhere; the signature in the
+  // path is the credential, that one voice note's page and sound only, for a few days.
+  ["GET", /^\/listen\/[0-9a-f]{24}\/[0-9a-z]{1,10}\/[A-Za-z0-9_-]{32}(\/audio\.mp3)?$/],
   ["GET", /^\/sw\.js$/], // the installed app's service worker (phone notifications); a static script, no data
   // the owner's one-tap Approve or Deny of one password-manager login read (hosted mcp/vaultApprovals.ts); the token in
   // the path is the credential, single-use, 10 minutes.

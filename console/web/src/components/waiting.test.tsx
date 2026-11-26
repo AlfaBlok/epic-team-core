@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, type Assignment, type MilestoneStatusView, type Persona, type WaitingItem } from "@/api";
 import { FyiCard, OwnerActivityList, SendToDialog, WaitingCard, WaitingOnYou } from "@/components/waiting";
@@ -489,7 +489,8 @@ describe("T48-S13 Answered list", () => {
     ]);
     wrap(<WaitingOnYou milestoneId="ms_1" />);
     const section = await screen.findByTestId("answered-section");
-    expect(section.textContent?.trim()).toBe("Answered2");
+    // "…" while only the open asks are in, the number once the whole list follows
+    await waitFor(() => expect(section.textContent?.trim()).toBe("Answered2"), { timeout: 4000 });
     expect(within(section).queryAllByTestId("answered-row")).toHaveLength(0);
     expect(section.hasAttribute("data-fold-section")).toBe(true); // the same box as every other section
     fireEvent.click(within(section).getByTestId("answered-section-toggle"));

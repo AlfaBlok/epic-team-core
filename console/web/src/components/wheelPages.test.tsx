@@ -153,6 +153,20 @@ describe("pages inside their wheel", () => {
     ],
   };
 
+  it("an objective made from existing work shows that work's pages: pages follow the tickets under its key results", () => {
+    // a new objective made from an errand row, whose page names the errands objective; its key result lists the rows.
+    const born = { ...node("gadget", "Buy a gadget", ["errands:docs/spines/gadget.md"]), keyResults: [{ label: "The gadget is bought", kind: "key-result", work: [{ code: "E907-S9", repo: "errands", kind: "ticket" }, { code: "E907-S8", repo: "acme/errands", kind: "ticket" }] }] } as unknown as ScorecardNode;
+    const body = { ...SETS, nodes: [...SETS.nodes, node("errands", "Handle errands", ["errands:docs/spines/root.md"]), born] } as ScorecardsBody;
+    const bix = indexScorecards(body);
+    const made = (port: number, row: string) => ({ ...page(port, row, "errands", "errands"), objective: "errands" });
+    const research = { total: 3, groups: [{ id: "errands", repo: "errands", epic: "errands", epicTitle: "", pages: [made(9650, "E907-S8"), made(9651, "E907-S9"), made(9645, "E907-S3")] }] } as PagesBody;
+    expect(pagesOfObjective(research, body, bix, "gadget").map((p) => p.port)).toEqual([9650, 9651]);
+    // still on the objective it names: an item may sit in two chapters, nothing moves off.
+    expect(pagesOfObjective(research, body, bix, "errands").map((p) => p.port)).toEqual([9650, 9651, 9645]);
+    // a page whose row is under no key result of the objective stays off it.
+    expect(pagesOfObjective(research, body, bix, "testers")).toEqual([]);
+  });
+
   it("places a page its tree misses where it names itself, a world after the objectives", () => {
     const placed = placePages(NAMED, SETS, ix);
     expect(Object.fromEntries(placed.map((p) => [p.row, p.wheel?.id ?? "not placed"]))).toEqual({ "E907-S4": "testers", "E907-S8": "not placed", "E907-S5": "social", "E907-S7": "home" });
