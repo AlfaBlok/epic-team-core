@@ -29,7 +29,7 @@ import { cap, useRoutes, useSkin, useWords } from "@/lib/skin";
 import { MadeOfLink, madeOfHref } from "@/pages/MadeOf";
 import { WHEEL_TABS } from "@/lib/wheelTabs";
 import { DATA_TABS, FIRST_TAB, FIVE_LABELS, FIVE_TABS, FOLDED_PART, fiveTabFromParams, type FiveTab } from "@/lib/totems";
-import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab } from "./social/WheelTabs";
+import { CampaignContextTab, CampaignKeyResultsTab, CampaignPagesTab, ChapterHome } from "./social/WheelTabs";
 import { ChatIntro, HistoryTab, ObservationsTab, PillarsTab, WaitingTab, WorkTab } from "@/pages/social/Totems";
 import { CampaignTrackersTab } from "@/components/trackersTab";
 import { PersonaLogTab } from "@/components/personaLogTab";
@@ -690,6 +690,8 @@ function CampaignFiveTabs({ m, tab, scope, waitingCount, onTab }: { m: Milestone
         <MadeOfLink kind="campaign" />
       </div>
       <div className="mt-4 min-w-0">
+        {/* where this chapter is read from (the list in the social data repo, or the product's social repo). */}
+        <ChapterHome m={m} tab={tab} />
         {tab === "table" && <CampaignKeyResultsTab m={m} />}
         {tab === "plan" && (
           <div className="grid gap-10">
@@ -798,7 +800,7 @@ function MilestoneChat({ m }: { m: Milestone }) {
   const call = useCallDock({
     base: who.base,
     callee: who.callee,
-    name: who.name,
+    name: who.shown,
     where: m.title,
     autoStart: params.get("call") === "1",
     onAutoStart: () =>

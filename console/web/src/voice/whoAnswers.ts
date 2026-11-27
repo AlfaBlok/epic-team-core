@@ -14,12 +14,19 @@ import { socialProduct } from "@/lib/identity";
  *   an objective's page · Call ──▶ <objective> manager (that objective only)                                  /api/objectives/:id/voice
  *   a campaign's chat · Call   ──▶ <campaign> manager  (that campaign only)                                   /api/milestones/:id/voice
  */
-export type WhoAnswers = { base: string; name: string; callee: string };
+/**
+ * `shown` is what the call bar says (the owner: the full objective or campaign name, never cut
+ * short): "manager of Acme: Launch Acme"; `name` stays the short role the voice greets by.
+ */
+export type WhoAnswers = { base: string; name: string; callee: string; shown: string };
 
 /** the words after an objective's product ("Acme: Get 5 testers" → "Get 5 testers"). */
 export const shortName = (s: string) => s.replace(/\s+/g, " ").trim().replace(/^[^:]{1,30}:\s*/, "").slice(0, 80) || s;
 
-const who = (base: string, name: string): WhoAnswers => ({ base, name, callee: `the ${name}` });
+/** the whole name, spaces folded, never clipped ("Acme: Launch Acme"). */
+export const fullName = (s: string) => s.replace(/\s+/g, " ").trim();
+
+const who = (base: string, name: string, shown = name): WhoAnswers => ({ base, name, callee: `the ${name}`, shown });
 
 export const TEAM_DESK_PARTNER = "Team desk partner";
 export const TEAM_DESK_LINE = "Team desk line";
@@ -30,6 +37,6 @@ export const whoAnswers = {
   teamDeskCall: () => who("/api/voice", TEAM_DESK_LINE),
   socialDeskPartner: () => who("/api/voice/marketing", socialPartner()),
   socialDeskCall: (base: string) => who(base, `${socialProduct()} desk line`),
-  objective: (id: string, name: string) => who(`/api/objectives/${encodeURIComponent(id)}/voice`, `${shortName(name)} manager`),
-  campaign: (id: string, title: string) => who(`/api/milestones/${encodeURIComponent(id)}/voice`, `${shortName(title)} manager`),
+  objective: (id: string, name: string) => who(`/api/objectives/${encodeURIComponent(id)}/voice`, `${shortName(name)} manager`, `manager of ${fullName(name) || id}`),
+  campaign: (id: string, title: string) => who(`/api/milestones/${encodeURIComponent(id)}/voice`, `${shortName(title)} manager`, `manager of ${fullName(title) || id}`),
 };

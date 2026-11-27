@@ -155,4 +155,12 @@ export interface CampaignKeyResult {
 export interface CampaignWheel {
   product: string | null;
   wheels: { id: string; name: string; keyResults: CampaignKeyResult[]; where: import("./pursuit-types").WhereWeAre; pages: import("./pages-types").PageView[] }[];
+  /** where the list of campaigns (with their key results) and this campaign's chapters live. */
+  homes?: CampaignHomes | null;
+}
+export interface CampaignHomes {
+  list: { repo: string; path: string; listed: boolean };
+  chapters: { repo: string; folder: string; made: boolean };
+  /** the Plan chapter: the plan of each objective the campaign serves, where it is kept. */
+  plan?: { repo: string; path: string }[];
 }

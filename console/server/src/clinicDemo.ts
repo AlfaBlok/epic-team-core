@@ -10,6 +10,7 @@ import { VoiceError } from "./voice/voice.js";
 import { tracePage, type FollowUp } from "./clinicFollowUp.js";
 import { questionsIn, whoAnswered, type Leads } from "./clinicLeads.js";
 import { activationPage, clinicPlan, ensureClinicPlans, planOn } from "./clinicPlan.js";
+import { INVITE_CALLS_PER_DAY, fromInternet, gated, invitePage, type Invites } from "./clinicInvites.js";
 import {
   CLINIC_SETUP_MAX_S,
   SETUP_CALLS_PER_DAY,
@@ -784,7 +785,13 @@ const toolIn = z.object({ name: z.string().min(1).max(40), args: z.record(z.unkn
 const endIn = z.object({ reason: z.string().max(40).optional(), transcript: z.array(z.object({ who: z.string().max(10), text: z.string().max(4000) })).max(400).optional() });
 
 /** GET /api/public/clinic/<slug> (the page), its call routes (open, routeScope.ts), and the owner's GET /api/clinic-demo/calls. */
-export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
+/**
+ * `invites` puts the demo clinics behind invites for visits from the internet (clinicInvites.ts): the page shows the email
+ * box until its link carries a valid invite (?i=), and a call starts only with that invite or a posted letter's code.
+ */
+export function mountClinicDemo(api: Hono, demo: ClinicDemo, o: { invites?: Invites; letterOk?: (code: string) => boolean } = {}) {
+  const needsInvite = (c: Context, cl: Clinic) => !!o.invites && gated(cl) && fromInternet((h) => c.req.header(h));
+  const letterOk = (code: unknown) => typeof code === "string" && !!code && !!o.letterOk?.(code);
   const hits = new Map<string, number[]>();
   const limited = (c: Context) => {
     const a = clientAddress(peerOf(c), (h) => c.req.header(h));
@@ -818,9 +825,11 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
     "/public/clinic/:slug",
     pub((c, slug) => {
       const cl = demo.clinic(slug);
+      c.header("referrer-policy", "no-referrer");
+      const inv = c.req.query("i");
+      if (needsInvite(c, cl) && !o.invites!.valid(slug, inv) && !letterOk(c.req.query("c"))) return c.html(invitePage(cl, { bad: !!inv }), inv ? 403 : 200);
       demo.scan(slug, c.req.query("c"), clientAddress(peerOf(c), (h) => c.req.header(h)));
       demo.warm(slug);
-      c.header("referrer-policy", "no-referrer");
       return c.html(clinicPage(cl));
     }),
   );
@@ -856,7 +865,20 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
   );
   api.post(
     "/public/clinic/:slug/calls",
-    pub(async (c, slug) => c.json(await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h)), (await body(c)).code), 201)),
+    pub(async (c, slug) => {
+      const b = await body(c);
+      const cl = demo.clinic(slug);
+      let inv: string | undefined;
+      if (needsInvite(c, cl) && !letterOk(b.code)) {
+        const i = o.invites!.valid(slug, b.invite);
+        if (!i) return c.json({ error: { code: "invite_needed", message: "La demo funciona con invitación. Pida la suya con su correo." } }, 403);
+        if (o.invites!.callsToday(i.token) >= INVITE_CALLS_PER_DAY) return c.json({ error: { code: "too_many", message: "Su invitación ya ha hecho todas las llamadas de hoy. Vuelva mañana." } }, 429);
+        inv = i.token;
+      } else if (o.invites?.valid(slug, b.invite)) inv = String(b.invite).toLowerCase();
+      const r = await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h)), b.code);
+      if (inv) o.invites!.mark(r.call, inv);
+      return c.json(r, 201);
+    }),
   );
   // the set-up call (clinicSetup.ts): the clinic's private page and its call start; the key is the credential.
   api.get(
@@ -907,15 +929,22 @@ export const ELEVEN_CLIENT_URL = `https://cdn.jsdelivr.net/npm/${ELEVEN_CLIENT.p
 export function clinicPage(c: Clinic, o: { ring?: boolean; letter?: { code: string; clinic: string }; setup?: string } = {}): string {
   if (o.setup) return setupPage(c, o.setup);
   const s = c.sales;
-  const caller = c.receptionist ?? "Recepción";
+  // a Catalan clinic (set up from the Catalan call, clinicIntake.ts) gets its page in Catalan
+  const ca = c.lang === "ca" && !s && !o.letter;
+  const caller = c.receptionist ?? (ca ? "Recepció" : "Recepción");
   const days = WEEKDAYS.slice(1).concat(WEEKDAYS[0]).filter((d) => (c.hours[d] ?? []).length);
-  const title = s ? `Pruebe la recepcionista por voz · ${s.company}` : `${c.clinic} · Llame a recepción`;
+  const dayName = (d: string) => (ca ? DAYS_CA_OF[d] : `${d[0].toUpperCase()}${d.slice(1)}`);
+  const title = s ? `Pruebe la recepcionista por voz · ${s.company}` : ca ? `${c.clinic} · Truqui a recepció` : `${c.clinic} · Llame a recepción`;
   const punch = s
     ? `Llame a nuestra recepcionista por voz: contesta, informa y reserva cita en español, a cualquier hora. Pregúntele también cuánto cuesta para su clínica.`
-    : `Llame a la recepción de ${c.clinic}: le informa y le reserva cita, a cualquier hora.`;
-  const flow = ["Alguien llama", `${c.receptionist ?? "La recepcionista"} contesta`, "Busca hora libre", "Cita reservada"];
+    : ca
+      ? `Truqui a la recepció de ${c.clinic}: l'informa i li reserva hora, a qualsevol hora, en català.`
+      : `Llame a la recepción de ${c.clinic}: le informa y le reserva cita, a cualquier hora.`;
+  const flow = ca
+    ? ["Algú truca", `${c.receptionist ?? "La recepcionista"} contesta`, "Busca hora lliure", "Hora reservada"]
+    : ["Alguien llama", `${c.receptionist ?? "La recepcionista"} contesta`, "Busca hora libre", "Cita reservada"];
   return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="${ca ? "ca" : "es"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex"><title>${esc(title)}</title>
 <style>
 ${PAGE_CSS}</style></head><body><main>
@@ -935,9 +964,9 @@ ${
 <p class="punch">${esc(punch)}</p>
 <div class="flow" aria-hidden="true">${flow.map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>`
 }
-<button id="call" data-testid="call-start" disabled>${o.ring ? "Contestar" : o.letter ? "Empezar la llamada" : "Llamar a recepción"}</button>
-<button id="hang" data-testid="call-hangup">Colgar</button>
-<p id="status" role="status">Preparando la línea…</p>
+<button id="call" data-testid="call-start" disabled>${o.ring ? (ca ? "Contestar" : "Contestar") : o.letter ? "Empezar la llamada" : ca ? "Trucar a recepció" : "Llamar a recepción"}</button>
+<button id="hang" data-testid="call-hangup">${ca ? "Penjar" : "Colgar"}</button>
+<p id="status" role="status">${ca ? "Preparant la línia…" : "Preparando la línea…"}</p>
 <ul id="lines" aria-live="polite"></ul>
 <p id="trace" class="small" hidden><a data-testid="call-trace" href="#">Su llamada y lo que queda pendiente</a>: esta página es solo suya, guárdela.</p>
 ${
@@ -955,17 +984,21 @@ ${s.priceWhatsappOnly ? `<tr><td>Solo WhatsApp</td><td>${esc(s.priceWhatsappOnly
     : ""
 }
 <section id="clinic"><h2>La clínica</h2>
-<table>${days.map((d) => `<tr><td>${d[0].toUpperCase()}${d.slice(1)}</td><td>${c.hours[d].map((r) => r.replace("-", "–")).join(", ")}</td></tr>`).join("")}</table>
+<table>${days.map((d) => `<tr><td>${dayName(d)}</td><td>${c.hours[d].map((r) => r.replace("-", "–")).join(", ")}</td></tr>`).join("")}</table>
 <table style="margin-top:12px">${c.services.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.price)}</td></tr>`).join("")}</table>
 </section>
-<p class="small" style="margin-top:24px">${c.madeUp ? "Clínica de demostración: pacientes, citas y precios inventados. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. La recepcionista nunca llama a nadie: solo contesta.</p>${
+<p class="small" style="margin-top:24px">${
+  ca
+    ? "Cal micròfon. No guardem l'àudio, només el text de la trucada. La recepcionista no truca mai ningú: només contesta."
+    : `${c.madeUp ? "Clínica de demostración: pacientes, citas y precios inventados. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. La recepcionista nunca llama a nadie: solo contesta.`
+}</p>${
   o.letter
     ? `
 <p class="small" id="privacy">Privacidad: ${esc(s?.company ?? "Nuestro equipo")} tomó la dirección postal de su clínica de su web pública y solo la usa para esta carta. Esta página cuenta cuántas veces se abre su código, sin cookies.${s?.contact ? ` Para que borremos sus datos o no volver a recibir nada, escriba a ${esc(s.contact)}.` : ""}</p>`
     : ""
 }
 </main>
-${callScript(c.slug, "/calls", ["free_slots", "book_appointment", "book_follow_up", "file_ticket", "qualify_lead"], "Recepción", o.letter?.code ?? "")}</body></html>`;
+${callScript(c.slug, "/calls", ["free_slots", "book_appointment", "book_follow_up", "file_ticket", "qualify_lead"], ca ? caller : "Recepción", o.letter?.code ?? "", ca ? { ui: CALL_UI_CA } : {})}</body></html>`;
 }
 
 export const PAGE_CSS = `@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/fonts/inter-400.woff2) format("woff2")}
@@ -1013,6 +1046,21 @@ export const CALL_UI_ES = {
   mic: "Hace falta permiso para el micrófono.",
 };
 export type CallUi = typeof CALL_UI_ES;
+export const CALL_UI_CA: CallUi = {
+  you: "Vostè",
+  failed: "No s'ha pogut: ",
+  again: "Tornar a trucar",
+  endedBye: "Trucada acabada. Gràcies.",
+  ended: "Trucada acabada.",
+  ready: "Premi el botó i parli amb normalitat.",
+  noLoad: "No s'ha pogut carregar la trucada. Torni a carregar la pàgina.",
+  connecting: "Connectant…",
+  live: "En línia. Parli quan vulgui.",
+  error: "Error: ",
+  mic: "Cal permís per al micròfon.",
+};
+/** the config's weekday keys as Catalan names, for a Catalan clinic's page. */
+const DAYS_CA_OF: Record<string, string> = { lunes: "Dilluns", martes: "Dimarts", miércoles: "Dimecres", jueves: "Dijous", viernes: "Divendres", sábado: "Dissabte", domingo: "Diumenge" };
 
 /** the page's call script: one button, a signed link from \`start\`, the agent's client tools answered by the console.
  * A tool answer carrying `link` (the Catalan intake's written agent) shows it in the page's #made box. */
@@ -1021,6 +1069,7 @@ export function callScript(slug: string, start: string, tools: string[], voice: 
   return `<script type="module">
 const SLUG = ${JSON.stringify(slug)};
 const CODE = ${JSON.stringify(code)} || new URLSearchParams(location.search).get("c") || "";
+const INVITE = new URLSearchParams(location.search).get("i") || "";
 const UI = ${JSON.stringify(ui)};
 const base = ${JSON.stringify(o.base ?? "/api/public/clinic/")} + SLUG;
 const $ = (id) => document.getElementById(id);
@@ -1045,7 +1094,7 @@ btn.onclick = async () => {
   btn.disabled = true; ended = false; lines = []; list.textContent = ""; say(UI.connecting);
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().forEach((t) => t.stop()));
-    const s = await post(START, CODE ? { code: CODE } : {});
+    const s = await post(START, Object.assign({}, CODE ? { code: CODE } : {}, INVITE ? { invite: INVITE } : {}));
     callId = s.call; traceUrl = s.trace || null; $("trace").hidden = true;
     conv = await Conversation.startSession({
       signedUrl: s.signedUrl,

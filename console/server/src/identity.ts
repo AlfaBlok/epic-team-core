@@ -222,6 +222,10 @@ export interface Sites {
   pressTest: { spine: string; epic: string; row: string };
   /** the first-party page counter the sign-in page tells its sign-up steps to (a `…/api/public/pv` address, no cookie); none by default */
   pageCounter: string;
+  /** the public address of the demo clinic's call page, the base of the invite links it mails (clinicInvites.ts); none by default */
+  clinicDemoUrl: string;
+  /** who the demo clinic's invite mails come from (a `Name <address>` on a sending domain); none by default = no mail */
+  clinicInviteFrom: string;
 }
 
 export const NEUTRAL_SITES: Sites = {
@@ -229,6 +233,8 @@ export const NEUTRAL_SITES: Sites = {
   socialUrl: "https://social.example.com",
   customerHosts: "",
   pageCounter: "",
+  clinicDemoUrl: "",
+  clinicInviteFrom: "",
   socialMovedTo: "",
   customerLogins: "",
   tailnetNames: {},

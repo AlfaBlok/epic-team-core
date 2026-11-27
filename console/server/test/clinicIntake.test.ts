@@ -123,7 +123,13 @@ describe("the Catalan call-me page", () => {
     expect(clinicPrompt(c)).toMatch(/^# Idioma: parles sempre en català/);
     expect(clinicPrompt(c)).toMatch(/la recepcionista por voz de Clínica Dental Montseny, una clínica dental en Girona/);
     expect(clinicPrompt(c)).toMatch(/No perdre cap trucada a l'hora de dinar/);
-    expect((await app.request("/api/public/clinic/clinica-dental-montseny-girona")).status).toBe(200);
+    const page = await app.request("/api/public/clinic/clinica-dental-montseny-girona");
+    expect(page.status).toBe(200);
+    const ph = await page.text();
+    expect(ph).toContain('<html lang="ca">');
+    expect(ph).toMatch(/Trucar a recepció/);
+    expect(ph).toMatch(/Dilluns/);
+    expect(ph).toContain('"you":"Vostè"');
     const r = await post(app, "/api/public/clinic/clinica-dental-montseny-girona/calls");
     expect(r.status).toBe(201);
     expect(receptionLinks).toEqual(["ca"]);

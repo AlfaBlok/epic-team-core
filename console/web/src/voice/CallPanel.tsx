@@ -121,7 +121,7 @@ export function useCallDock(
 ): CallDock {
   const callee = props.callee ?? "the desk";
   // the owner, 27 Nov (call_910685a3): "on the call, I should see a name of who I'm talking to".
-  const who = props.name ?? callee.replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
+  const who = props.name ?? callee.replace(/^the /, "");
   const [st, setSt] = useState<VoiceState | undefined>();
   // the tab's engine for these routes, owned above the router (a call started here and still on when the page comes
   // back is this one); while this bar is mounted the floating widget leaves the call to it.
@@ -223,9 +223,10 @@ export function useCallDock(
               <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : connectingText(connectingS)}</span>
               <span className="tabular-nums" data-testid="call-cost">{money(v.costUsd)}</span>
               {/* who he is talking to, named on the call itself (the owner: "on the call, I should see a name of who I'm talking to") */}
-              <span className="basis-full truncate font-medium text-foreground" data-testid="call-with">
+              {/* the full name, wrapping on a phone, never cut short */}
+              <span className="min-w-0 basis-full font-medium text-foreground [overflow-wrap:anywhere]" data-testid="call-with">
                 <span data-testid="call-who">
-                  {v.phase === "live" ? "with" : "calling"} {v.speaker ?? who}
+                  {v.phase === "live" ? "with" : "calling"} the {v.speaker ?? who}
                 </span>
               </span>
               {/* the microphone, said plainly (his call_dab66f00: with the screen off the phone stopped it and he talked to himself) */}

@@ -72,6 +72,8 @@ const OPEN: [string, RegExp][] = [
   // the clinic receptionist's demo page and its call routes (clinicDemo.ts): a page per clinic config, its one
   // button a rate-limited call (3 an hour a visitor, a day cap per clinic); the call id is the credential for its tools.
   ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}$/],
+  // the demo clinic's email box (clinicInvites.ts): one invite for the typed email, mailed to it.
+  ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/invitacion$/],
   // the posted letter's code (clinicLetters.ts): the box to type it, and the call page it opens (a scan counted).
   ["GET", /^\/api\/public\/carta(\/[A-Za-z0-9 _.-]{1,20})?$/],
   // the clinic follow-up: the ringing "who calls" page, and a caller's own trace of a call (its key is the credential).

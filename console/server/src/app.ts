@@ -131,6 +131,8 @@ import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { clinicsIn, createClinicDemo, mountClinicDemo } from "./clinicDemo.js";
 import { createClinicIntake, mountClinicIntake } from "./clinicIntake.js";
 import { createLetters, lettersIn, mountLetters } from "./clinicLetters.js";
+import { createInvites, mountInvites } from "./clinicInvites.js";
+import { cloudflareSender } from "./auth/emailAccess.js";
 import { createFollowUp, repoFileWriter } from "./clinicFollowUp.js";
 import { createLeads } from "./clinicLeads.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
@@ -583,6 +585,8 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
+    /** the demo clinic's invite mails (clinicInvites.ts; tests fake it). */
+    clinicInviteMail?: import("./auth/emailAccess.js").MailSender;
     voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; /** a new workspace's onboarding call's door (tests). */ onboardingEleven?: ElevenCalls; /** the clinic receptionist's door per clinic (tests). */ clinicEleven?: (c: import("./clinicDemo.js").Clinic) => ElevenCalls; /** the Catalan intake line's door (tests). */ clinicIntakeEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
@@ -3652,16 +3656,16 @@ export function createApp(
       if (r.desk === "team") {
         await desk.send(teamRelayText(callId, r), COACH_PAGE, `coach-${callId}-${n}`);
         console.log(`[voice] ${callId} coach relayed his words to the Team desk`);
-        return { desk: "team", state: "sent", result: "Passed to the Team desk. Tell him in a few words." };
+        return { desk: "team", state: "sent", requestId: `coach-${callId}-${n}`, result: "Passed to the Team desk. Tell him in a few words." };
       }
       const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: COACH_PAGE, requestId: `coach-${callId}-${n}` });
       if (!p) {
         // no social desk paired on this console: his words still reach the Team desk, which passes them on itself.
         await desk.send(teamRelayText(callId, { ...r, note: `For the social desk: pass only these words of his there (no desk across on this console). ${r.note}`.trim() }), COACH_PAGE, `coach-${callId}-${n}`);
-        return { desk: "team", state: "sent", result: "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." };
+        return { desk: "team", state: "sent", requestId: `coach-${callId}-${n}`, result: "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." };
       }
       console.log(`[voice] ${callId} coach relayed his words to the social desk (${p.state})`);
-      return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+      return { desk: "social", state: p.state, requestId: `coach-${callId}-${n}`, result: "Passed to the social desk, his words only. Tell him in a few words." };
     },
   });
   // the Team desk partner (the coach, voice/coach.ts): the Team desk chat's Partner, also from his own workspace on a customer
@@ -3772,7 +3776,7 @@ export function createApp(
       const n = ++briefingNotes;
       await desk.send(briefingNoteText(callId, { words, note, ...(objective ? { objective } : {}) }), BRIEFING_PAGE, `briefing-${callId}-${n}`);
       console.log(`[voice] ${callId} briefing note ${n} sent to the Team desk${objective ? ` (objective ${objective})` : ""}`);
-      return { desk: "team", state: "sent", result: "Passed to the Team desk as one request. Tell him in a few words." };
+      return { desk: "team", state: "sent", requestId: `briefing-${callId}-${n}`, result: "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
   // his phone: his own console, or his social app login (its own data world), like the briefer.
@@ -3887,13 +3891,13 @@ export function createApp(
         const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: MARKETING_PAGE, requestId: `marketing-${callId}-${n}` });
         if (p) {
           console.log(`[voice] ${callId} marketing note ${n} passed to the social desk (${p.state})`);
-          return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+          return { desk: "social", state: p.state, requestId: `marketing-${callId}-${n}`, result: "Passed to the social desk, his words only. Tell him in a few words." };
         }
       }
       // the Team desk: his note about building, or (no social desk paired here) his words for the social desk.
       await desk.send(marketingNoteText(callId, r, r.desk === "social"), MARKETING_PAGE, `marketing-${callId}-${n}`);
       console.log(`[voice] ${callId} marketing note ${n} sent to the Team desk`);
-      return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
+      return { desk: "team", state: "sent", requestId: `marketing-${callId}-${n}`, result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
   // on the social product's site his own Google signs in as a declared customer login (CONSOLE_CUSTOMER_LOGINS,
@@ -3961,12 +3965,12 @@ export function createApp(
         const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: STRATEGY_PAGE, requestId: `strategy-${callId}-${n}` });
         if (p) {
           console.log(`[voice] ${callId} strategy note ${n} passed to the social desk (${p.state})`);
-          return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+          return { desk: "social", state: p.state, requestId: `strategy-${callId}-${n}`, result: "Passed to the social desk, his words only. Tell him in a few words." };
         }
       }
       await desk.send(strategyNoteText(callId, r, r.desk === "social"), STRATEGY_PAGE, `strategy-${callId}-${n}`);
       console.log(`[voice] ${callId} strategy note ${n} sent to the Team desk`);
-      return { desk: "team", state: "sent", result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
+      return { desk: "team", state: "sent", requestId: `strategy-${callId}-${n}`, result: r.desk === "social" ? "The social desk is not reachable from here: passed to the Team desk, which hands it on. Tell him in a few words." : "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
   mountOwnCall(api, "/voice/strategy", strategyVoice, { world: () => store.tenant, ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email), page: "/strategy" }, "The strategy call");
@@ -4008,11 +4012,11 @@ export function createApp(
         const page = `objective call ${id}`;
         if (r.desk === "social") {
           const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: page, requestId: `objective-${callId}-${n}` });
-          if (p) return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
+          if (p) return { desk: "social", state: p.state, requestId: `objective-${callId}-${n}`, result: "Passed to the social desk, his words only. Tell him in a few words." };
         }
         await desk.send(objectiveNoteText(callId, name() ?? id, r, r.desk === "social"), page, `objective-${callId}-${n}`);
         console.log(`[voice] ${callId} objective ${id} note ${n} sent to the Team desk`);
-        return { desk: "team", state: "sent", result: "Passed to the Team desk as one request. Tell him in a few words." };
+        return { desk: "team", state: "sent", requestId: `objective-${callId}-${n}`, result: "Passed to the Team desk as one request. Tell him in a few words." };
       },
     });
     objectiveVoices.set(id, v);
@@ -4741,7 +4745,10 @@ export function createApp(
     demo: clinicDemo,
     letters: lettersIn(() => { const d = clinicsDir(); return d ? path.join(d, "letters") : undefined; }),
   });
-  mountClinicDemo(api, clinicDemo);
+  // the demo clinic opens from the internet by invite only, each invite one email (clinicInvites.ts).
+  const clinicInvites = createInvites({ db, send: opts.clinicInviteMail ?? cloudflareSender().send, ...(opts.voice?.now ? { now: opts.voice.now } : {}) });
+  mountClinicDemo(api, clinicDemo, { invites: clinicInvites, letterOk: (code) => !!clinicLetters.find(code) });
+  mountInvites(api, clinicInvites, (slug) => clinicDemo.list().find((x) => x.slug === slug));
   // your virtual agent in Catalan (clinicIntake.ts): the Catalan call-me page; its call takes a clinic's requirements and
   // writes them as a new clinic config (docs/clinics/<slug>.json, lang ca), whose own Catalan receptionist answers try calls.
   const clinicIntake = createClinicIntake({

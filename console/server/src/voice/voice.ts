@@ -90,13 +90,35 @@ export const CALL_RECORD_NOTE = "Record only: already handled live. Do not act o
  */
 export { CALL_WHOLE_LEAD };
 export const callWholeNote = () =>
-  `${CALL_WHOLE_LEAD}, for you to place: each point ${ownerName()} made that no call question below already brought you goes where a voice note's point goes (matched first, his words quoted, request <the call id>), the ones relayed live are not filed again.`;
+  `${CALL_WHOLE_LEAD}, for you to place: each point ${ownerName()} made that nothing listed below already brought you goes where a voice note's point goes (matched first, his words quoted, request <the call id>), the call questions and notes passed on live are not filed again.`;
 /** the client request id of a call's whole-call post (one per call: a retry or the catch-up never posts it twice). */
 export const wholeCallRequestId = (callId: string) => `voice-transcript-whole-${callId}`;
 /** where the whole transcript of a call reads on the console (the post links it). */
 export const callTranscriptUrl = (callId: string) => `${sites().teamUrl.replace(/\/+$/, "")}/api/voice/calls/${callId}/transcript`;
 
 export type CallLine = { who: string; text: string; feedback?: string };
+/** One note a call passed on live with its relay tool (his words, short), kept on the call (voice_calls.relays). */
+export type RelayedNote = { n: number; at: string; desk: string; state?: string; requestId?: string; words: string };
+/** the words of a relayed note kept for the whole-call post: enough for the desk to match the point, not the whole note. */
+export const RELAY_WORDS_MAX = 240;
+const relayDeskName = (desk: string) => (desk === "team" ? "the Team desk" : desk === "social" ? "the social desk" : desk === "objective" ? "the workspace's objectives" : `the ${desk} desk`);
+/** the notes this call passed on live (oldest first); none on an older call or one that relayed nothing. */
+export function relayedNotes(db: DB, callId: string): RelayedNote[] {
+  try {
+    const r = db.prepare("SELECT relays FROM voice_calls WHERE id = ?").get(callId) as { relays: string | null } | undefined;
+    const list = JSON.parse(r?.relays ?? "[]");
+    return Array.isArray(list) ? (list as RelayedNote[]) : [];
+  } catch {
+    return [];
+  }
+}
+/** the words a relay passed (his words, else the objective it wrote), cut for the post. */
+export function relayWords(args: Record<string, unknown>): string {
+  const w = [args.words, args.objective, args.quote].find((x) => typeof x === "string" && x.trim()) as string | undefined;
+  const t = (w ?? "").replace(/\s+/g, " ").trim().replace(/"/g, "'");
+  return t.length > RELAY_WORDS_MAX ? `${t.slice(0, RELAY_WORDS_MAX - 1)}…` : t;
+}
+
 /**
  * The whole-call post: one header line (when, how long, what it cost, the call id), the what-to-do line, the link to the
  * whole transcript, then who said what. His listen-mode feedback, already sent as one message, is named, not repeated.
@@ -115,9 +137,12 @@ export function wholeCallText(db: DB, c: { id: string; startedAt: string; second
     body.push(`${isOwnerWho(l.who) ? `${ownerName()}:` : l.who === "tool" ? "·" : "Desk voice:"} ${l.text.replace(/\s+/g, " ").trim()}`);
   }
   const asks = db.prepare("SELECT id, answer, send_error, kind FROM voice_asks WHERE call_id = ? ORDER BY n").all(c.id) as { id: string; answer: string | null; send_error: string | null; kind: string | null }[];
-  const relayed = asks.length
-    ? `Relayed live as call questions: ${asks.map((a) => `${a.id} (${a.kind === "feedback" ? "feedback, " : ""}${a.send_error ? "not delivered" : a.answer ? "answered" : "still open"})`).join(", ")}.`
-    : "No call question reached the desk live during this call.";
+  const notes = relayedNotes(db, c.id);
+  const parts = [
+    ...(asks.length ? [`Relayed live as call questions: ${asks.map((a) => `${a.id} (${a.kind === "feedback" ? "feedback, " : ""}${a.send_error ? "not delivered" : a.answer ? "answered" : "still open"})`).join(", ")}.`] : []),
+    ...(notes.length ? [`Passed on live by the call: ${notes.map((x) => `note ${x.n} to ${relayDeskName(x.desk)}${x.requestId ? ` (request ${x.requestId})` : ""}: "${x.words}"`).join(" ; ")}.`] : []),
+  ];
+  const relayed = parts.length ? parts.join(" ") : "Nothing reached a desk live during this call: no call question, no note passed on.";
   const ended = c.endReason && !["hangup", "bye"].includes(c.endReason) ? ` · ended: ${c.endReason}` : "";
   const head = [`${CALL_TRANSCRIPT_HEAD} · ${when} · ${dur} · ${usd(c.costUsd)} (${c.model})${ended} · ${c.id}`, `${callWholeNote()} ${relayed}`, `Whole transcript: ${callTranscriptUrl(c.id)}`];
   // the desk's message size (TRANSCRIPT_MAX, 30,000): a longer call keeps every one of his lines and cuts the voice's first.
@@ -339,6 +364,9 @@ export function ensureVoiceTables(db: DB): void {
   if (!cols.has("objective_pos")) db.exec("ALTER TABLE voice_calls ADD COLUMN objective_pos INTEGER NOT NULL DEFAULT 0");
   // the cards the call pressed on his yes (JSON array of card ids), so a yes already pressed is never pressed again.
   if (!cols.has("pressed")) db.exec("ALTER TABLE voice_calls ADD COLUMN pressed TEXT");
+  // the notes the call passed on live with its relay tool (JSON array of RelayedNote), so the whole-call post tells the
+  // desk which of his points already reached it and none is handled twice .
+  if (!cols.has("relays")) db.exec("ALTER TABLE voice_calls ADD COLUMN relays TEXT");
 }
 
 /**
@@ -1228,7 +1256,14 @@ export function createVoice(d: VoiceDeps) {
     if (!d.relay) throw new VoiceError(404, "unknown_tool", "this call has no relay");
     if (c.endedAt && now() - Date.parse(c.endedAt) > 60_000) throw new VoiceError(409, "call_ended", `call ${id} has ended`);
     try {
-      return await d.relay(id, args);
+      const out = await d.relay(id, args);
+      // keep what reached a desk live, so the whole-call post lists it and the desk never handles it twice.
+      const list = relayedNotes(db, id);
+      const note: RelayedNote = { n: list.length + 1, at: new Date(now()).toISOString(), desk: String(out?.desk ?? "team"), words: relayWords(args) };
+      if (typeof out?.state === "string") note.state = out.state;
+      if (typeof out?.requestId === "string") note.requestId = out.requestId;
+      db.prepare("UPDATE voice_calls SET relays = ? WHERE id = ?").run(JSON.stringify([...list, note]), id);
+      return out;
     } catch (e) {
       if (e instanceof VoiceError) throw e;
       throw new VoiceError(400, "validation_error", (e as Error).message);

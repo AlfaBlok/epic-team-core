@@ -5,7 +5,7 @@ import type { DB } from "./db.js";
 import { clientAddress } from "./clientAddress.js";
 import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { VoiceError } from "./voice/voice.js";
-import { CALL_UI_ES, PAGE_CSS, WEEKDAYS, callScript, clinicAgentBody, clinicIn, esc, madridToday, type Clinic, type ClinicService } from "./clinicDemo.js";
+import { CALL_UI_CA, CALL_UI_ES, PAGE_CSS, WEEKDAYS, callScript, clinicAgentBody, clinicIn, esc, madridToday, type Clinic, type ClinicService } from "./clinicDemo.js";
 import { objectiveIn, sayObjective, SETUP_OBJECTIVES_MAX, type ClinicObjective } from "./clinicSetup.js";
 
 /**
@@ -526,18 +526,13 @@ export function mountClinicIntake(api: Hono, intake: ClinicIntake) {
 
 // ---------- the page ----------
 
-export const CALL_UI_CA: typeof CALL_UI_ES = {
+/** the intake page speaks to the owner as "tu", as the offer does. */
+export const CALL_UI_TU: typeof CALL_UI_ES = {
+  ...CALL_UI_CA,
   you: "Tu",
-  failed: "No s'ha pogut: ",
-  again: "Tornar a trucar",
-  endedBye: "Trucada acabada. Gràcies.",
-  ended: "Trucada acabada.",
   ready: "Prem el botó i parla amb normalitat.",
   noLoad: "No s'ha pogut carregar la trucada. Torna a carregar la pàgina.",
-  connecting: "Connectant…",
   live: "En línia. Parla quan vulguis.",
-  error: "Error: ",
-  mic: "Cal permís per al micròfon.",
 };
 
 /** the Catalan call-me page: the offer in one line, the flow, one button, and what the call will ask. */
@@ -575,5 +570,5 @@ ${PAGE_CSS}
 </section>
 <p class="small" style="margin-top:24px">Només parlem quan tu ho demanes: ningú no rep trucades sense haver-les demanat. Cal micròfon. No guardem l'àudio, només el text de la trucada.</p>
 </main>
-${callScript("", "/calls", INTAKE_TOOLS.map((t) => t.name), "Núria", "", { base: "/api/public/agent-catala", ui: CALL_UI_CA })}</body></html>`;
+${callScript("", "/calls", INTAKE_TOOLS.map((t) => t.name), "Núria", "", { base: "/api/public/agent-catala", ui: CALL_UI_TU })}</body></html>`;
 }

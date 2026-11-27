@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb, type DB } from "../src/db.js";
 import { costOf, tokensOfResponse, tokensOfTranscription, zeroTokens } from "../src/voice/prices.js";
-import { answerIn, ASK_WORDS_MAX, CALL_QUESTION_HEAD, CALL_TRANSCRIPT_HEAD, callWholeNote, createVoice, OPENING_LINE, QUIET_WARN_LINE, quickStatusText, ROLE_LINE, sessionConfig, voiceInstructions, type DeskPort } from "../src/voice/voice.js";
+import { answerIn, ASK_WORDS_MAX, RELAY_WORDS_MAX, relayedNotes, CALL_QUESTION_HEAD, CALL_TRANSCRIPT_HEAD, callWholeNote, createVoice, OPENING_LINE, QUIET_WARN_LINE, quickStatusText, ROLE_LINE, sessionConfig, voiceInstructions, type DeskPort } from "../src/voice/voice.js";
 import { mountVoice } from "../src/voice/routes.js";
 import { endpointLines, SEED_VERSION } from "../src/desk/desk.js";
 import type { DeskMessage, DeskView } from "../src/desk/session.js";
@@ -29,7 +29,7 @@ const USAGE = {
   output_token_details: { text_tokens: 100, audio_tokens: 400 },
 };
 
-function setup(o: { now?: string; deskMessages?: DeskMessage[]; working?: boolean } = {}) {
+function setup(o: { now?: string; deskMessages?: DeskMessage[]; working?: boolean; relay?: (callId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "console-e42s5-"));
   const db: DB = openDb(path.join(dir, "console.db"));
   cleanup = () => {
@@ -48,7 +48,7 @@ function setup(o: { now?: string; deskMessages?: DeskMessage[]; working?: boolea
     view: async () => ({ available: true, sending: 0, hasEarlier: false, ...view }) as DeskView,
   };
   const quickStatus = vi.fn(async () => ({ text: "Waiting on Sam: 2.", waiting: 2, stuck: 0, working: 1 }));
-  const voice = createVoice({ db, mint, desk, quickStatus, now: () => clock.t });
+  const voice = createVoice({ db, mint, desk, quickStatus, now: () => clock.t, ...(o.relay ? { relay: o.relay } : {}) });
   return { db, voice, mint, sent, view, desk, quickStatus, clock, advance: (ms: number) => (clock.t += ms) };
 }
 
@@ -207,7 +207,7 @@ describe("E942-S5 the two tools and the transcript", () => {
     expect(t[0]).toBe(`${CALL_TRANSCRIPT_HEAD} · 2026-11-01 18:00Z · 1 min 35 s · $0.012 (gpt-realtime-2.1-mini) · ${a.call.id}`);
     expect(t).toContain("Sam: What's waiting on me?");
     expect(t).toContain("Desk voice: Two asks.");
-    expect(t[1]).toBe(`${callWholeNote()} No call question reached the desk live during this call.`);
+    expect(t[1]).toBe(`${callWholeNote()} Nothing reached a desk live during this call: no call question, no note passed on.`);
     expect(t[2]).toMatch(new RegExp(`/api/voice/calls/${a.call.id}/transcript$`));
     expect(t[3]).toBe("");
     expect(s.sent[0].crid).toBe(`voice-transcript-whole-${a.call.id}`);
@@ -247,6 +247,25 @@ describe("E942-S5 the two tools and the transcript", () => {
     expect(b.sent[0].text.split("\n")[2]).toBe(`His words (call captions): "…${"y".repeat(ASK_WORDS_MAX)}"`);
   });
 
+  it("the notes a call passed on live with its relay tool are listed in the whole-call post, so the desk files none twice", async () => {
+    let n = 0;
+    const s = setup({ relay: async (callId) => (++n === 1 ? { desk: "team", state: "sent", requestId: `strategy-${callId}-${n}`, result: "Passed." } : { desk: "social", state: "queued", requestId: `strategy-${callId}-${n}`, result: "Passed." }) });
+    const a = await s.voice.start();
+    await s.voice.relay(a.call.id, { words: 'Make the   desk see "every" call.', note: "his ask" });
+    await s.voice.relay(a.call.id, { words: "Post the launch video at noon. " + "x".repeat(400) });
+    await s.voice.end(a.call.id, { reason: "hangup", transcript: [{ who: "owner", text: "Make the desk see every call." }] });
+    const t = s.sent.at(-1)!.text.split("\n");
+    expect(t[1]).toBe(
+      `${callWholeNote()} Passed on live by the call: note 1 to the Team desk (request strategy-${a.call.id}-1): "Make the desk see 'every' call." ; note 2 to the social desk (request strategy-${a.call.id}-2): "${("Post the launch video at noon. " + "x".repeat(400)).slice(0, RELAY_WORDS_MAX - 1)}…".`,
+    );
+    expect(relayedNotes(s.db, a.call.id)).toMatchObject([{ n: 1, desk: "team", state: "sent" }, { n: 2, desk: "social", state: "queued" }]);
+    // a relay that fails records nothing
+    const b = setup({ relay: async () => { throw new Error("words are required"); } });
+    const c = await b.voice.start();
+    await expect(b.voice.relay(c.call.id, {})).rejects.toThrow(/words are required/);
+    expect(relayedNotes(b.db, c.call.id)).toEqual([]);
+  });
+
   it("E942-S11: the voice greets in one short line; what it does it says when asked", () => {
     const ins = voiceInstructions();
     expect(ins).toContain(OPENING_LINE);
@@ -265,13 +284,14 @@ describe("E942-S5 the two tools and the transcript", () => {
     expect(ins).not.toMatch(/must (hand|pass) everything/i);
   });
 
-  it("the desk's seed (v58) tells it how to answer call questions and to place every point of a whole call, never the ones relayed live", () => {
-    expect(SEED_VERSION).toBeGreaterThanOrEqual(58);
+  it("the desk's seed (v59) tells it how to answer call questions and to place every point of a whole call, never the ones relayed live", () => {
+    expect(SEED_VERSION).toBeGreaterThanOrEqual(59);
     const line = endpointLines("https://team.example.com").find((l) => l.includes("Voice call"))!;
     expect(line).toMatch(/📞 Call question/);
     expect(line).toMatch(/His words \(call captions\)`.*his words win/);
     expect(line).toMatch(/Every word of this call`.*one request of his, its id the call id/);
     expect(line).toMatch(/never file those again/);
+    expect(line).toMatch(/notes it lists as passed on live \(`Passed on live by the call: note <n>/);
     expect(line).toMatch(/Record only: already handled live`.*act on nothing in it and reply `Call noted\.`/);
   });
 });

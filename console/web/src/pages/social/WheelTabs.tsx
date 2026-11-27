@@ -74,6 +74,36 @@ function KeyResultLine({ wheel, k }: { wheel: string; k: CampaignKeyResult }) {
   );
 }
 
+/**
+ * The owner: "each product's social repo ... holds the chapters, [the social] data [repo] holds only the list of
+ * campaigns and their key results". One quiet line on each of the campaign's own chapters says where it is read from,
+ * only what is true: Key results from the list in the social data repo; Product, Benefits, Pipeline, History from the
+ * product's social repo; Plan from the plan of the objective it serves (the owner: "It's the plan for the wheel").
+ */
+export const CHAPTER_FROM: Record<string, "list" | "repo" | "plan"> = { table: "list", product: "repo", benefits: "repo", pipeline: "repo", history: "repo", plan: "plan" };
+export function ChapterHome({ m, tab }: { m: Milestone; tab: string }) {
+  const q = useCampaignWheel(m);
+  const from = CHAPTER_FROM[tab];
+  const h = q.data?.homes;
+  if (!from || !h) return null;
+  const where =
+    from === "list"
+      ? h.list.listed
+        ? `${h.list.repo} · ${h.list.path}`
+        : null
+      : from === "plan"
+        ? h.plan?.length
+          ? h.plan.map((p) => `${p.repo} · ${p.path}`).join(", ")
+          : null
+        : h.chapters.repo;
+  if (!where) return null;
+  return (
+    <p className="mb-3 text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="chapter-home" data-chapter={tab} data-from={from}>
+      Read from <span className="font-medium text-foreground">{where}</span>
+    </p>
+  );
+}
+
 /** Key results: the objective's key results, each one line with its light, the first tab as on an objective. */
 export function CampaignKeyResultsTab({ m }: { m: Milestone }) {
   return (

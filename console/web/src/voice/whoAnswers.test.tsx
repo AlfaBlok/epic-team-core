@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useCallDock, type VoiceState } from "./CallPanel";
 import type { Media, VoiceApi } from "./engine";
 import { whoAnswers } from "./whoAnswers";
+import { CallProvider } from "./CallProvider";
 import { deskPartner } from "@/pages/Chat";
 
 // the owner 27 Nov: "I'm pressing this button when I'm on my chat, and it says
@@ -60,9 +61,8 @@ function fakes() {
   return { voice, media: () => m, state, dc };
 }
 
-function Dock({ f }: { f: ReturnType<typeof fakes> }) {
-  const w = whoAnswers.teamDeskPartner();
-  const d = useCallDock({ api: f.voice, media: f.media, state: f.state, callee: w.callee, name: w.name, label: "Partner", wide: true });
+function Dock({ f, w = whoAnswers.teamDeskPartner() }: { f: ReturnType<typeof fakes>; w?: ReturnType<typeof whoAnswers.teamDeskPartner> }) {
+  const d = useCallDock({ api: f.voice, media: f.media, state: f.state, callee: w.callee, name: w.shown, label: "Partner", wide: true, base: w.base });
   return (
     <>
       <header data-testid="head">{d.button}</header>
@@ -70,6 +70,34 @@ function Dock({ f }: { f: ReturnType<typeof fakes> }) {
     </>
   );
 }
+
+// the owner (27 Nov): "a long objective name is cut short on the call bar". The call bar names
+// the objective or campaign in full, the product too, never clipped or an id, and wraps instead of truncating.
+describe("the call bar shows the full objective or campaign name", () => {
+  const long = "Acme: Launch Acme and Acme Team to the first hundred paying startups before the end of the year with posts every day";
+  it("the label is the whole name, the product included", () => {
+    expect(whoAnswers.objective("pursuit_9", "Acme: Launch Acme").shown).toBe("manager of Acme: Launch Acme");
+    expect(whoAnswers.objective("pursuit_9", long).shown).toBe(`manager of ${long}`);
+    expect(whoAnswers.campaign("ms_9", "  Acme:  Spring\n launch ").shown).toBe("manager of Acme: Spring launch");
+    expect(whoAnswers.objective("pursuit_9", "").shown).toBe("manager of pursuit_9");
+    expect(whoAnswers.socialDeskCall("/api/tenants/t/desk/voice").shown).toBe("SocialApp desk line");
+    expect(whoAnswers.socialDeskPartner().shown).toBe("SocialApp partner");
+  });
+  it("on the call bar, whole and wrapping, never truncated", async () => {
+    const f = fakes();
+    render(
+      <CallProvider>
+        <Dock f={f} w={whoAnswers.objective("pursuit_9", long)} />
+      </CallProvider>,
+    );
+    const b = await screen.findByTestId("call-start-compact");
+    await act(async () => void fireEvent.click(b));
+    await act(async () => void f.dc.onopen());
+    await waitFor(() => expect(screen.getByTestId("call-who").textContent).toBe(`with the manager of ${long}`));
+    expect(screen.getByTestId("call-with").className).not.toMatch(/truncate/);
+    await act(async () => void fireEvent.click(screen.getByTestId("call-hangup")));
+  });
+});
 
 describe("the call screen says who answers", () => {
   it("before (the button and while it connects) and during the call", async () => {
@@ -81,7 +109,8 @@ describe("the call screen says who answers", () => {
     expect(screen.getByTestId("call-who").textContent).toMatch(/Team desk partner/);
     await act(async () => void f.dc.onopen());
     await waitFor(() => expect(screen.getByTestId("call-hangup")).toBeTruthy());
-    await waitFor(() => expect(screen.getByTestId("call-who").textContent).toBe("with Team desk partner"));
+    await waitFor(() => expect(screen.getByTestId("call-who").textContent).toBe("with the Team desk partner"));
     await act(async () => void fireEvent.click(screen.getByTestId("call-hangup")));
   });
 });
+
