@@ -2031,6 +2031,8 @@ export interface PlanState {
   /** how the world's AI is paid now */
   ai?: "own" | "included";
   subscription?: { status: string; since: string; testMode: boolean };
+  /** the product line this workspace is (Epic Leads); none = EpicTeam */
+  line?: "leads";
 }
 
 export interface Credits {

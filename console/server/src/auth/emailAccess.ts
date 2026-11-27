@@ -6,7 +6,7 @@ import { clientAddress } from "../clientAddress.js";
 import { keyFile, sites, socialProduct } from "../identity.js";
 import { AuthError, hashPassword, outsideRequest, PASSWORD_MIN, type Auth } from "./identity.js";
 import { platformBlocked, productOf, requestHost, type Product } from "./gate.js";
-import type { SignupInput } from "./oauth.js";
+import { lineOfNext, type SignupInput } from "./oauth.js";
 
 /**
  * sign-up by email (a confirm link) and password reset on the customer sites (the team site,
@@ -318,7 +318,7 @@ export function mountEmailAccess(api: Hono, o: EmailAccessOptions) {
         if (userByEmail(t.email)) throw new AuthError(400, "account_exists", "this email already has an account: log in, or reset the password");
         const product = o.customers.get(host)!;
         const p = (async () => {
-          const made = await outsideRequest(() => o.signup({ email: t.email, name: t.name ?? "", product, provider: "email", host, ...(t.visit_source ? { visitSource: t.visit_source } : {}) }));
+          const made = await outsideRequest(() => o.signup({ email: t.email, name: t.name ?? "", product, provider: "email", host, ...(t.visit_source ? { visitSource: t.visit_source } : {}), ...(lineOfNext(t.next ?? undefined) ? { line: lineOfNext(t.next ?? undefined) } : {}) }));
           const u = userByEmail(t.email);
           if (!u) throw new AuthError(400, "signup_failed", "your account could not be made: try again in a few minutes");
           db.prepare("UPDATE users SET pw_hash = ? WHERE id = ?").run(t.pw_hash, u.id);

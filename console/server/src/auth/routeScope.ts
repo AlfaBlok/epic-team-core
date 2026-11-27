@@ -301,6 +301,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // New workspace: the owner of the path workspace (its session, owner only below) makes a second one in their own name
   // (hosted testerWorld.ts makeAccountWorkspace; another world's id is a 404).
   ["POST", new RegExp(`^/api/tenants/${ID}/workspaces$`)],
+  // the account's own workspaces of one product line (Epic Leads), for its start page /leads (hosted testerWorld.ts)
+  ["GET", new RegExp(`^/api/tenants/${ID}/lines/${ID}$`)],
   // revise (Change it) and restore (Don't post's Undo) ride the same handle → target as approve and drop.
   // approve (with or without feedback) and the Approve every post switch (`approval`) go through the same
   // social/write.ts `handle` → `target` (worldRepos + forTenant of the path's world); the Publisher / Writer they wake is one

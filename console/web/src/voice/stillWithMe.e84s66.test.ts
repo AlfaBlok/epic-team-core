@@ -89,13 +89,13 @@ function fakes(limits: Limits) {
   return { engine, api, media, sent, tracks, sender, emit, open, run, said };
 }
 
-const LIMITS: Limits = { callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, checkInS: 7, monthCapUsd: 25 };
+const LIMITS: Limits = { callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, checkInS: 5, monthCapUsd: 25 };
 
 describe("a call never leaves him talking to himself", () => {
-  it("he goes quiet: the voice checks in once within 7 seconds, and again only after he has spoken", async () => {
+  it("he goes quiet: the voice checks in once within 5 seconds, and again only after he has spoken", async () => {
     const f = fakes(LIMITS);
     await f.open();
-    await f.run(6_000);
+    await f.run(4_000);
     expect(f.said()).toEqual([]);
     await f.run(2_000);
     expect(f.said()).toEqual([`Say exactly "${STILL_WITH_ME_LINE}" and nothing else.`]);
@@ -106,7 +106,7 @@ describe("a call never leaves him talking to himself", () => {
     await f.emit({ type: "input_audio_buffer.speech_started" });
     await f.emit({ type: "input_audio_buffer.speech_stopped" });
     f.sent.length = 0;
-    await f.run(8_000);
+    await f.run(6_000);
     expect(f.said()).toEqual([`Say exactly "${STILL_WITH_ME_LINE}" and nothing else.`]);
   });
 
@@ -114,7 +114,7 @@ describe("a call never leaves him talking to himself", () => {
     const f = fakes(LIMITS);
     await f.open();
     await f.engine.pageVisible(false);
-    await f.run(8_000);
+    await f.run(6_000);
     expect(f.said()).toEqual([`Say exactly "${STILL_WITH_ME_LINE}" and nothing else.`]);
     await f.run(120_000);
     expect(f.engine.view().phase).toBe("live");

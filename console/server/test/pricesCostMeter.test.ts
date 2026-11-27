@@ -84,7 +84,7 @@ describe("E942-S5 call key, caps and the off switch", () => {
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
     expect(body.session.instructions).toMatch(/Never say something is done/);
     expect(JSON.stringify(r)).not.toMatch(/sk-/);
-    expect(r.limits).toEqual({ callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, checkInS: 7, listenQuietS: 180, listenWarnS: 60, monthCapUsd: 25, historyTokens: 0 });
+    expect(r.limits).toEqual({ callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, checkInS: 5, listenQuietS: 180, listenWarnS: 60, monthCapUsd: 25, historyTokens: 0 });
   });
 
   it("one call at a time; a call the page stopped beating for is closed as lost after 3 minutes", async () => {

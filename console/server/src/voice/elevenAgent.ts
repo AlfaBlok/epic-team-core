@@ -50,8 +50,12 @@ export const langAgentName = (name: string, lang: CallLang) => (lang === "es" ? 
 export const ELEVEN_MODEL_LABEL = "elevenlabs-agents";
 /** a desk answer may take a while: the agent waits this long for a client tool's result. */
 export const ELEVEN_TOOL_WAIT_S = 120;
-/** seconds of his silence before the agent speaks up again (his call_dab66f00; voice.ts CHECK_IN_S, the same 7). */
-export const ELEVEN_TURN_TIMEOUT_S = 7;
+/**
+ * The one setting: seconds of his silence, after the voice has finished, before it speaks up again ("Are you still with
+ * me?"): the ElevenLabs agent's turn timeout and the call page's checkInS (voice.ts limits) both read it. His call_dab66f00
+ * ("interject rapidly"); 5 s by his card note of 27 Nov: "5 sec enough".
+ */
+export const ELEVEN_TURN_TIMEOUT_S = 5;
 
 interface ToolDef {
   name: string;

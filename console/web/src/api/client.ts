@@ -344,7 +344,8 @@ export interface ApiClient {
   /** a paid EpicTeam workspace's one first objective, Get set up, with its key results; 404 no_first_objective elsewhere. */
   getFirstObjective(tenantId: string): Promise<FirstObjective | CleanWorkspace>;
   /** New workspace the owner of `tenantId` makes a second workspace in their own name, waiting for its payment. */
-  newWorkspace?(tenantId: string, name: string): Promise<{ tenantId: string; name: string; made: boolean }>;
+  /** `product: "leads"` makes an Epic Leads workspace on the same engine (none = EpicTeam) */
+  newWorkspace?(tenantId: string, name: string, product?: "leads"): Promise<{ tenantId: string; name: string; made: boolean }>;
   /** the repo an EpicTeam workspace points at (one that already holds a workspace), and pointing it there. */
   getWorldRepo?(tenantId: string): Promise<WorldRepoState>;
   connectWorldRepo?(tenantId: string, repo: string, code: string): Promise<WorldRepoState>;

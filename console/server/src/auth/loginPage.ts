@@ -120,6 +120,14 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   const okNext = (v) => !!v && v[0] === "/" && v[1] !== "/" && ![...v].some((ch) => ch.charCodeAt(0) <= 32 || ch.charCodeAt(0) === 92 || ch.charCodeAt(0) === 127);
   const next = okNext(q.get("next")) ? q.get("next") : "/";
   const $ = (id) => document.getElementById(id);
+  // a start at /leads is the Epic Leads line on this same sign-up (oauth.ts lineOfNext): the page says so before anything else
+  const leads = next === "/leads" || ["/leads/", "/leads?", "/leads#"].some((p) => next.startsWith(p));
+  if (leads) {
+    document.title = "Start Epic Leads";
+    for (const id of ["oauthTitle", "loginTitle"]) if ($(id)) $(id).textContent = "Start Epic Leads";
+    if ($("oauthNote")) { $("oauthNote").textContent = "The whole sales cycle, one person at a time. Log in with your EpicTeam account, or sign up: 49 euros a month."; $("oauthNote").hidden = false; }
+    document.querySelectorAll("[data-brand-name]").forEach((n) => { n.textContent = "Epic Leads"; });
+  }
   // the sign-up steps, told to the first-party page counter when one is set (sites().pageCounter): the step's name and
   // this site's host only, no cookie, nothing about the visitor; ?s=TEST marks a test (kept apart, never counted).
   const PC = ${JSON.stringify(sites().pageCounter)};
@@ -174,7 +182,7 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
       a.append(document.createTextNode("Continue with " + p.name));
       $("oauthButtons").append(a);
     }
-    if (j.signup) {
+    if (j.signup && !leads) {
       $("oauthTitle").textContent = "Sign in or sign up";
       $("oauthNote").textContent = "New here? Continue with Google or GitHub and your " + product + " account is made for you.";
       $("oauthNote").hidden = false;

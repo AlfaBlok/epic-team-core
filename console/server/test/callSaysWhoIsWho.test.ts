@@ -16,11 +16,11 @@ describe("a call says who is who, and checks in when he goes quiet", () => {
     expect(voiceInstructions()).toMatch(/You are the Team desk line .*never call yourself the voice line/);
   });
 
-  it("the check-in: once per silence, in English and Spanish, and the ElevenLabs agent re-engages after 7 s", () => {
+  it("the check-in: once per silence, in English and Spanish, and the ElevenLabs agent re-engages after 5 s (his note: 5 sec enough)", () => {
     expect(STILL_WITH_ME_RULE).toMatch(/"Are you still with me\?".*"¿Sigues conmigo\?".*once/);
     expect(STILL_WITH_ME_RULE).toMatch(/microphone stopped.*"I can't hear you any more\. Are you still with me\?"/);
     expect(agentBody("p", "hi", []).conversation_config.turn).toEqual({ turn_timeout: ELEVEN_TURN_TIMEOUT_S });
-    expect(ELEVEN_TURN_TIMEOUT_S).toBe(7);
+    expect(ELEVEN_TURN_TIMEOUT_S).toBe(5);
     expect(briefingInstructions()).not.toMatch(/never ask whether he is still there/);
   });
 

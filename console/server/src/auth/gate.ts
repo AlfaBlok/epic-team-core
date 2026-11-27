@@ -3,7 +3,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import type { Store } from "../store.js";
 import { AuthError, createAuth, currentAuth, runWithAuth, SESSION_COOKIE, SESSION_DAYS, type Auth, type AuthMode, type Identity } from "./identity.js";
-import { judge } from "./routeScope.js";
+import { judge, ownerOfPath } from "./routeScope.js";
 import { apiPathRefusal } from "./pathGuard.js";
 import { LOGIN_PAGE } from "./loginPage.js";
 import { SOCIAL_HEAD, socialHead, TEAM_HEAD } from "../brand.js";
@@ -196,6 +196,14 @@ export function mountAuth(
   const social = o.socialHosts ?? socialHosts();
   const customers = customerHosts();
   const hostOfReq = (c: Context) => requestHost((n) => c.req.header(n));
+  /** the world a read of another world's id belongs to, when this session's login is a member of it (never the platform world on a customer site). */
+  const otherWorldOf = (i: Identity, method: string, path: string, host: string | undefined): { id: string; name: string } | undefined => {
+    if (i.kind !== "session" || (method !== "GET" && method !== "HEAD")) return undefined;
+    const world = ownerOfPath(o.db, path);
+    if (!world || world === i.tenant || platformBlocked(host, world)) return undefined;
+    const m = auth.memberships(i.userId).find((x) => x.tenantId === world);
+    return m ? { id: m.tenantId, name: m.tenantName || m.tenantId } : undefined;
+  };
   const resolve = (c: Context): Identity => {
     const i = auth.resolve({ header: (n) => c.req.header(n), cookie: getCookie(c, SESSION_COOKIE), peer: peerOf(c) });
     // the home world credential on a customer site is no credential (its open pages still answer, the rest is 401).
@@ -276,6 +284,11 @@ export function mountAuth(
       auth.logEvent({ mode, method: c.req.method, path, status: v.status, reason: v.reason, identity, peer: peerOf(c), agent: looksLikeAgent(header), caller: callerOf(header) });
       if (mode === "on") {
         if (!path.startsWith("/api/") && v.status === 401) return c.redirect(`/login?next=${encodeURIComponent(path)}`, 302);
+        // a link to another world's page this same login belongs to (the owner's Google login on the social site,
+        // a campaign of his social world) names that world, so the page switches there and opens it; anyone else still
+        // gets the plain 404, so no world is revealed to a login outside it.
+        const other = v.reason === "cross_tenant" ? otherWorldOf(identity, c.req.method, path, hostOfReq(c)) : undefined;
+        if (other) return c.json({ error: { code: "other_world", message: `this page is in ${other.name}: opening it there`, world: other.id, worldName: other.name } }, 404);
         return c.json({ error: { code: v.reason, message: v.message } }, v.status);
       }
     }

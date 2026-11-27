@@ -106,7 +106,17 @@ export interface SignupInput {
   host: string;
   /** `TEST` for a test sign-up (`?s=TEST` on start): stored and counted as TEST, never a note to the owner. */
   visitSource?: string;
+  /** the product line picked on this site before sign-up (`leads` = Epic Leads, from a `next` of /leads), else none */
+  line?: SignupLine;
 }
+
+/**
+ * One sign-up for every product line on the engine (the owner: "a customer coming in that gets an Epic Social account or an
+ * Epic Lead account or an Epic Team account ... It's always the same. We're reusing all the same engine"). A visitor who starts at /leads on the EpicTeam site (next=/leads) signs up into an Epic Leads workspace; any other start is
+ * the site's own product as before.
+ */
+export type SignupLine = "leads";
+export const lineOfNext = (next: string | undefined): SignupLine | undefined => (next && /^\/leads(?:[/?#]|$)/.test(next) ? "leads" : undefined);
 
 export interface OAuthOptions {
   db: DB;
@@ -618,6 +628,19 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
   const loginEmail = (userId: string) => (db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as Row | undefined)?.email as string | undefined;
   /** the door is passed by a Google or GitHub sign-in of a login it names (gate.ts throughDoor). */
   const doorKey = (userId: string, via: string): DoorKey => ({ email: loginEmail(userId), via });
+  /** the world of the most recent live session of these logins on this host, when it is one of `worlds` */
+  const lastWorldOn = <W extends { userId: string; tenantId: string }>(host: string, worlds: W[]): W | undefined => {
+    if (worlds.length < 2) return undefined;
+    try {
+      const ids = [...new Set(worlds.map((w) => w.userId))];
+      const r = db
+        .prepare(`SELECT user_id, tenant_id FROM sessions WHERE host = ? AND user_id IN (${ids.map(() => "?").join(",")}) AND expires_at > ? ORDER BY last_seen_at DESC LIMIT 1`)
+        .get(host, ...ids, new Date(now()).toISOString()) as Row | undefined;
+      return r ? worlds.find((w) => w.userId === r.user_id && w.tenantId === r.tenant_id) : undefined;
+    } catch {
+      return undefined; // a db without the sessions' host column: the old choice
+    }
+  };
   const startSession = (c: Context, host: string, userId: string, tenant: string, via?: string) => {
     if (platformBlocked(host, tenant, env, { email: loginEmail(userId), via: via ?? "" })) throw new AuthError(403, PLATFORM_PRIVATE.code, PLATFORM_PRIVATE.message);
     const s = auth.createSession(userId, tenant, { via, host }); // the scorecard's proof of a provider sign-in
@@ -706,7 +729,10 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
         if (all.length && !worlds.length) return back(c, PLATFORM_PRIVATE.code);
         if (worlds.length) {
           const fitting = worlds.filter((w) => fits(w.tenantId, product));
-          const one = fitting.length === 1 ? fitting[0] : worlds.length === 1 ? worlds[0] : undefined;
+          // a person in several worlds lands where they last were on this site (his own workspace stays his landing
+          // after his Google login joined his social world too); never a world this sign-in may not open.
+          const last = lastWorldOn(host, worlds);
+          const one = last ?? (fitting.length === 1 ? fitting[0] : worlds.length === 1 ? worlds[0] : undefined);
           // a declared login is never stored as the link (its revert gives the stored one back); its use is still dated.
           const keep = declaredLogin(p, who, product) ? linkedTo(p, who) : logins[0];
           if (logins.length === 1 && keep) link(p, who, keep);
@@ -727,7 +753,7 @@ export function mountOAuth(api: Hono, o: OAuthOptions) {
       if (signupsToday() >= Math.max(0, Number(env.CONSOLE_SIGNUP_PER_DAY ?? 20) || 0)) return back(c, "signup_full");
       const key = jobKey(product, who.email);
       const job = {
-        p: signupOnce({ email: who.email, name: who.name, product, provider: p, host, ...(st.visitSource ? { visitSource: st.visitSource } : {}) }).then((made) => {
+        p: signupOnce({ email: who.email, name: who.name, product, provider: p, host, ...(st.visitSource ? { visitSource: st.visitSource } : {}), ...(lineOfNext(st.next) ? { line: lineOfNext(st.next) } : {}) }).then((made) => {
           const userId = (db.prepare("SELECT id FROM users WHERE email = ?").get(who.email) as Row | undefined)?.id as string | undefined;
           if (!userId) throw new AuthError(400, "signup_failed", "your account could not be made: try again in a few minutes");
           link(p, who, userId, made.world);

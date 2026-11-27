@@ -11,7 +11,7 @@ import { KeyNotReady } from "../secretCache.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites, socialProduct } from "../identity.js";
 import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
-import { ELEVEN_MODEL_LABEL, type CallLang, type ElevenCalls } from "./elevenAgent.js";
+import { ELEVEN_MODEL_LABEL, ELEVEN_TURN_TIMEOUT_S, type CallLang, type ElevenCalls } from "./elevenAgent.js";
 import { spanishGreeting, spanishInstructions } from "./spanish.js";
 
 /**
@@ -211,8 +211,6 @@ export const QUIET_WARN_LINE = "Still there? I'll hang up in a few seconds.";
  */
 export const STILL_WITH_ME_LINE = "Are you still with me?";
 export const MIC_LOST_LINE = "I can't hear you any more. Are you still with me?";
-/** seconds of his silence, after the voice has finished, before it checks in (also the ElevenLabs agent's turn timeout). */
-export const CHECK_IN_S = 7;
 /**
  * Who is who on his calls (his call_065c7b6e, 27 Nov: "tiene que quedar clarísimo quién eres tú y quién son los demás.
  * Porque si hay más de una voz ... tienes que saber quién existe y qué hace cada uno"; the desk call had called itself the
@@ -783,7 +781,7 @@ export function createVoice(d: VoiceDeps) {
     ...callLength(process.env, callMax),
     quietHangupS: Number(setting("quiet_hangup_s")) || QUIET_HANGUP_S,
     quietWarnS: QUIET_WARN_S,
-    checkInS: CHECK_IN_S,
+    checkInS: ELEVEN_TURN_TIMEOUT_S,
     listenQuietS: LISTEN_QUIET_S,
     listenWarnS: LISTEN_WARN_S,
     monthCapUsd: monthCap(),

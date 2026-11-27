@@ -17,10 +17,15 @@ export class ApiError extends Error {
     public issues?: string[],
     /** a 502/503/504 that did not come from the console itself (a proxy answering while the console restarts). */
     public transient?: boolean,
+    /** 404 other_world: the world (one of this login's) the id lives in, so the page switches there. */
+    public world?: { id: string; name: string },
   ) {
     super(message);
   }
 }
+
+/** a page switching to another world of this login: a call the old session started may answer 401 meanwhile, never a login redirect. */
+export const worldSwitching = { on: false };
 
 /** a call the console has not answered in this long fails (a hung server must not leave a page on "Loading…"). */
 export const CALL_TIMEOUT_MS = 30_000;
@@ -195,19 +200,21 @@ async function send<T>(method: string, path: string, body: unknown, form: boolea
     let code: string | undefined;
     let issues: string[] | undefined;
     let fromConsole = false;
+    let world: { id: string; name: string } | undefined;
     try {
       const j = await res.json();
       fromConsole = !!j?.error;
       if (j?.error) msg = typeof j.error === "string" ? j.error : String(j.error.message ?? j.error.code ?? msg);
       if (typeof j?.error?.code === "string") code = j.error.code;
       if (Array.isArray(j?.error?.issues)) issues = j.error.issues.map(String);
+      if (code === "other_world" && typeof j?.error?.world === "string") world = { id: j.error.world, name: String(j.error.worldName ?? j.error.world) };
     } catch {
       /* not json */
     }
     // with CONSOLE_AUTH=on a lapsed session answers 401 login_required: back to the login page, then here again.
-    if (res.status === 401 && code === "login_required" && typeof window !== "undefined" && window.location.pathname !== "/login")
+    if (res.status === 401 && code === "login_required" && !worldSwitching.on && typeof window !== "undefined" && window.location.pathname !== "/login")
       window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    throw new ApiError(res.status, msg, code, issues, TRANSIENT_STATUS.has(res.status) && !fromConsole);
+    throw new ApiError(res.status, msg, code, issues, TRANSIENT_STATUS.has(res.status) && !fromConsole, world);
   }
   // a read the service worker answered with its saved copy marks the screen until a fresh one lands
   if (method === "GET") noteRead(path, res.headers?.get?.(SAVED_HEADER));
@@ -299,7 +306,7 @@ export function createRealClient(): ApiClient {
     getMilestoneChat: (id, read) => call("GET", `/milestones/${encodeURIComponent(id)}/chat/messages${chatQs(read)}`),
     getWorldDeskChat: (t, read) => call("GET", `/tenants/${encodeURIComponent(t)}/desk/messages${chatQs(read)}`),
     getFirstObjective: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/first-objective`),
-    newWorkspace: (t, name) => call("POST", `/tenants/${encodeURIComponent(t)}/workspaces`, { name }),
+    newWorkspace: (t, name, product) => call("POST", `/tenants/${encodeURIComponent(t)}/workspaces`, { name, ...(product ? { product } : {}) }),
     getWorldRepo: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/repo`),
     connectWorldRepo: (t, repo, code) => call("POST", `/tenants/${encodeURIComponent(t)}/repo/connect`, { repo, code }),
     getWorldGithub: (t) => call("GET", `/tenants/${encodeURIComponent(t)}/github`),

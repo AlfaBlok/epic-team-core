@@ -1,6 +1,7 @@
-import { useState, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { useEffect, useState, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { Check, Clock, Copy } from "lucide-react";
-import type { MilestoneStatus, Run, RunOutcome } from "@/api";
+import { api, type MilestoneStatus, type Run, type RunOutcome } from "@/api";
+import { worldSwitching } from "@/api/real";
 import { RUN_WORD_LABEL, runWord, type RunWord } from "@/lib/status";
 import { useOpenAsks } from "@/components/status";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -404,7 +405,42 @@ export function Loading() {
 }
 
 /** `muted`: for optional read sources (T3, seats) that may be down; shown as a quiet note, not an alarm. */
+/**
+ * a link into another world this login belongs to (his campaign link opened in his own workspace on the social
+ * site) switches to that world once and opens the same page there, instead of a 404 he cannot act on.
+ */
+function OtherWorld({ world }: { world: { id: string; name: string } }) {
+  const [err, setErr] = useState<string>();
+  useEffect(() => {
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    const key = `switched:${world.id}:${here}`;
+    if (worldSwitching.on) return; // another box on this page already switches
+    try {
+      // a switch for this same page under a minute ago did not open it: stop, never loop
+      if (Date.now() - Number(sessionStorage.getItem(key) ?? 0) < 60_000) return setErr("This page did not open after switching. Use Your worlds in the menu.");
+      sessionStorage.setItem(key, String(Date.now()));
+    } catch {
+      /* no storage: switch once anyway */
+    }
+    worldSwitching.on = true;
+    api
+      .switchWorld?.(world.id)
+      .then((r) => window.location.assign(r?.handoff || here))
+      .catch((e: unknown) => {
+        worldSwitching.on = false;
+        setErr((e as Error).message);
+      });
+  }, [world.id]);
+  return (
+    <div className="rounded-lg border p-4 text-sm text-muted-foreground" data-testid="other-world">
+      {err ?? "Opening this page in your other workspace…"}
+    </div>
+  );
+}
+
 export function ErrorBox({ error, muted }: { error: Error; muted?: boolean }) {
+  const world = (error as { code?: string; world?: { id: string; name: string } }).code === "other_world" ? (error as { world?: { id: string; name: string } }).world : undefined;
+  if (world) return <OtherWorld world={world} />;
   if (muted) return <Empty>{error.message}</Empty>;
   return (
     <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">{error.message}</div>
