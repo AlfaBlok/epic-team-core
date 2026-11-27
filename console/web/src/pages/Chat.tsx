@@ -12,7 +12,7 @@ import { ChatMarkdown } from "@/lib/chatMarkdown";
 import { invalidate, pollWhileVisible, useQuery } from "@/lib/data";
 import { SavedCopyLine } from "@/components/SavedCopyLine";
 import { refreshApp } from "@/components/NewBuild";
-import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
+import { knownWorld, worldId } from "@/lib/useSocial";
 import { useCallDock } from "@/voice/CallPanel";
 import { clockOf, parseVoiceNote, useVoiceNote, VoiceNoteBody, type PostingNote } from "@/voice/VoiceNote";
 import { ReplyPlay, ReplyVoiceNote, SpeakingBar, SpeakRepliesSwitch } from "@/voice/ReplyVoice";
@@ -285,8 +285,8 @@ export function ChatPage() {
   if (w === undefined && world.loading) return <Loading />;
   // an unknown world (failing /api/me) is not the home world: show the error (the query retries), not the platform's desk.
   if (w === undefined && world.error) return <ErrorBox error={world.error} />;
-  // through the door (the owner on a customer site) the home world's Chat is its own world desk, as a customer's.
-  return w && (w !== homeWorld() || knownDoor()) ? <WorldDesk world={w} /> : <TeamDeskChat />;
+  // through the door (the owner on a customer site) the home world's Chat is his Team desk, with its history.
+  return w && w !== homeWorld() ? <WorldDesk world={w} /> : <TeamDeskChat />;
 }
 
 /**

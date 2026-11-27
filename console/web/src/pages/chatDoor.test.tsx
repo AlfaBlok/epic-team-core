@@ -14,9 +14,9 @@ globalThis.ResizeObserver ??= class {
 } as unknown as typeof ResizeObserver;
 
 /**
- * through the door (the owner let into the home world on a customer site, /api/me identity.door) the home world's
- * Chat is its own world desk (/api/tenants/<home>/desk/messages), as a customer's; never the private console's Team desk
- * (/api/desk/messages, the platform's one thread). Without the door the home world keeps its Team desk.
+ * through the door (the owner let into the home world on a customer site, /api/me identity.door) the home
+ * world's Chat is his Team desk with its history (/api/desk/messages, answered to the owner's door only, routeScope.ts
+ * DOOR_HOME), the same as on the private console; never an empty world desk. Another world keeps its own world desk.
  */
 const chat = { available: true, messages: [] } as unknown as DeskChat;
 const me = (door: boolean) =>
@@ -44,12 +44,11 @@ async function open(door: boolean) {
   return { teamDesk, worldDesk };
 }
 
-describe("the door's Chat is the home world's own desk", () => {
-  it("a door session opens the home world's world desk, never the Team desk", async () => {
+describe("the door's Chat is his Team desk", () => {
+  it("a door session opens his Team desk with its history, never the empty world desk", async () => {
     const { teamDesk, worldDesk } = await open(true);
-    await waitFor(() => expect(worldDesk).toHaveBeenCalled());
-    expect(worldDesk.mock.calls[0][0]).toBe(homeWorld());
-    expect(teamDesk).not.toHaveBeenCalled();
+    await waitFor(() => expect(teamDesk).toHaveBeenCalled());
+    expect(worldDesk).not.toHaveBeenCalled();
   });
   it("the private console's owner keeps the Team desk", async () => {
     const { teamDesk, worldDesk } = await open(false);

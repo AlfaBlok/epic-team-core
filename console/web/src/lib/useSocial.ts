@@ -40,6 +40,13 @@ let lastDoor: boolean = (() => {
   }
 })();
 export const knownDoor = (): boolean => lastDoor;
+/**
+ * is this the door? Answered once per page load from /api/me (a fresh browser has no remembered answer yet), so a
+ * platform part the door never shows does not ask its private route first.
+ */
+let doorAsked: Promise<boolean> | undefined;
+export const whenDoorKnown = (): Promise<boolean> =>
+  lastDoor ? Promise.resolve(true) : (doorAsked ??= worldId().then(() => lastDoor, () => lastDoor));
 let lastWorld: string | undefined = (() => {
   try {
     return localStorage.getItem(WORLD_KEY) ?? undefined;
@@ -57,6 +64,7 @@ export const knownWorld = (): string | undefined => lastWorld;
 export const forgetWorld = () => {
   lastWorld = undefined;
   lastDoor = false;
+  doorAsked = undefined;
   try {
     localStorage.removeItem(WORLD_KEY);
     localStorage.removeItem(DOOR_KEY);

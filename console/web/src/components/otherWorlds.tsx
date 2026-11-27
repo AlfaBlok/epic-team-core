@@ -5,6 +5,7 @@ import { api } from "@/api";
 import type { WorldInbox, WorldItem } from "@/api/company-types";
 import { useQuery } from "@/lib/data";
 import { FoldSection, useSectionOpen } from "@/components/homeSection";
+import { knownDoor, whenDoorKnown } from "@/lib/useSocial";
 
 /**
  * the owner's social product team lives in its own world (its asks and cards are answered in its own app), so the
@@ -36,9 +37,10 @@ export function worldSummary(items: WorldItem[]): string {
 let shared: { at: number; p: Promise<{ worlds: WorldInbox[] }> } | undefined;
 export const forgetOtherWorlds = () => void (shared = undefined);
 function readWorlds(): Promise<{ worlds: WorldInbox[] }> {
-  if (!api.listCompanyWorlds) return Promise.resolve({ worlds: [] });
+  // the other worlds are the platform's (private console); through the door there are none.
+  if (!api.listCompanyWorlds || knownDoor()) return Promise.resolve({ worlds: [] });
   if (!shared || Date.now() - shared.at > 60_000) {
-    const p = api.listCompanyWorlds().catch(() => ({ worlds: [] as WorldInbox[] }));
+    const p = whenDoorKnown().then((door) => (door ? { worlds: [] as WorldInbox[] } : api.listCompanyWorlds!().catch(() => ({ worlds: [] as WorldInbox[] }))));
     shared = { at: Date.now(), p };
   }
   return shared.p;

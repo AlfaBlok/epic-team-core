@@ -6,6 +6,7 @@ import { oneLine, type SpineWriter } from "../inbox/spineWrite.js";
 import type { OutcomeWord, PendingItem } from "./compute.js";
 import { settleOnMark } from "./autoSettle.js";
 import { currentAuth } from "../auth/identity.js";
+import { isHomeOwnerDoor } from "../auth/routeScope.js";
 import { ownerName, sites } from "../identity.js";
 
 /**
@@ -177,7 +178,8 @@ export function notJordi(header: (name: string) => string | undefined): string |
   // the person is the session. An owner session of the world passes (still from the page);
   // a member does not; a browser on legacy trust (tailnet, no login) is today's the owner on the home world and passes as before.
   const a = currentAuth();
-  if (a?.mode === "on" && a.identity.kind === "session" && a.identity.role !== "owner")
+  // the owner's own login through the door (a member session of the home world on a customer site) is him.
+  if (a?.mode === "on" && a.identity.kind === "session" && a.identity.role !== "owner" && !isHomeOwnerDoor(a.identity))
     return "only the world's owner marks an outcome: this login is a member";
   if (a?.mode === "on" && a.identity.kind !== "session" && a.identity.kind !== "legacy")
     return `only ${ownerName()} marks an outcome, logged in on the console page`;

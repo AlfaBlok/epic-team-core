@@ -56,6 +56,7 @@ import { InboxGoalLabels } from "@/components/inboxGoals";
 import { InboxGoalsToSet, InboxShowFilter, InboxIdeasAndDigests, showKeeps, useInboxShow } from "@/components/teamCards";
 import { FoldChevron } from "@/components/foldChevron";
 import { lazyPage } from "@/lib/lazyPage";
+import { knownDoor, whenDoorKnown } from "@/lib/useSocial";
 
 // parts of Home, the dashboard and the social home that his inbox never draws load with the screen that does,
 // so the phone's inbox reads less code first (each its own small script, nothing drawn until it is in).
@@ -101,7 +102,8 @@ export function TeamPage({
   const projectMs = project.current && ms.data ? ms.data.filter((m) => project.keep(m.id)).map((m) => m.id) : undefined;
   const msKey = projectMs?.join(",");
   const { data: runStats } = useQuery(() => api.getRunStats(msKey === undefined ? undefined : projectMs), [msKey]);
-  const { data: threads = [] } = useQuery(() => api.listThreads(), []);
+  // the T3 threads are the platform's (private console); through the door the cards show without them.
+  const { data: threads = [] } = useQuery(() => (knownDoor() ? Promise.resolve([]) : whenDoorKnown().then((door) => (door ? [] : api.listThreads()))), []);
   const { data: personas = [] } = useQuery(() => api.listPersonas(), []);
   // per-card counts of what waits on the owner (same source as "Waiting on you").
   // the same shared list the inbox sections read (one fetch, not three).

@@ -53,6 +53,7 @@ import { FoldChevron } from "@/components/foldChevron";
 import { GOAL_INBOX_TAB, GoalPills, RING_ARC_ORDER, ringArcs, SetWheel, STATE_FILL, topObjectives, useGoalSets } from "@/components/goalRing";
 export { GOAL_INBOX_TAB, GoalPills, RING_ARC_ORDER, ringArcs, SetWheel, STATE_FILL, topObjectives, useGoalSets };
 import { WhereWeAreBox } from "@/components/whereWeAre";
+import { knownDoor } from "@/lib/useSocial";
 
 // The chat and inbox tabs load their scripts when opened, so Home's first download holds only the goals view.
 const ChatView = lazyPage(() => import("@/pages/Chat"), "ChatView");
@@ -889,7 +890,8 @@ export function NoPersonaPill({ n, testId = "wheel-no-persona" }: { n: Pick<Scor
 
 /** every goal with no persona at all, any world: one line on the objectives screen, nothing when every goal has one. */
 export function PersonaGapsLine() {
-  const { data } = useQuery<PersonaGapsBody>(() => api.personaGaps(), [], { tag: "inbox" });
+  // the persona check reads every world's milestones (the private console's); through the door it shows none.
+  const { data } = useQuery<PersonaGapsBody>(() => (knownDoor() ? Promise.resolve({ gaps: [] } as unknown as PersonaGapsBody) : api.personaGaps()), [], { tag: "inbox" });
   const gaps = (data?.gaps ?? []).filter((g) => g.turner === "none");
   if (!gaps.length) return null;
   const n = gaps.length;

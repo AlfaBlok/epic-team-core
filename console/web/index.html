@@ -61,6 +61,11 @@
         var inbox = ["/waiting-on-owner?scope=open&includeSuperseded=true&view=list", "/status", "/review-items", "/laptop", "/inbox/team-cards", "/review-items?state=snoozed", "/me", "/counts", "/presses/answered", "/sent-back-cards", "/connects", "/threads", "/worlds"];
         // Chat (/chat, the console skin) asks its last 20 messages now too: they waited for the app's code and then Chat's
         // own script, ~1.2 s on Slow 4G.
+        // through the door (the owner on a customer site, remembered from the last /api/me, src/lib/useSocial.ts) the
+        // threads, the worlds and the connects are the private console's: never asked there
+        var door = false;
+        try { door = localStorage.getItem("console.door") === "1"; } catch (e) {}
+        if (door) inbox = inbox.filter(function (p) { return p !== "/connects" && p !== "/threads" && p !== "/worlds"; });
         var paths = at === "/inbox" || (at === "/" && social) ? inbox : at === "/" ? ["/scorecards", "/status", "/laptop"] : at === "/chat" && !social ? ["/desk/messages?limit=20"] : [];
         var early = (window.__earlyGets = {});
         paths.forEach(function (p) {

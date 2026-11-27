@@ -336,7 +336,8 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", /^\/api\/(closed-cards\/comment|review-items\/reopen)$/],
   ["POST", new RegExp(`^/api/(presses|owner-responses)/${ID}/undo$`)],
   // a press's state, so the page can say it landed (or why not); a world reads only its own presses (mount.ts)
-  ["GET", new RegExp(`^/api/presses/${ID}$`)],
+  ["GET", new RegExp(`^/api/presses/(?!answered$)${ID}$`)],
+  ["GET", /^\/api\/presses\/answered$/], // the answered presses, the caller's world only (press/mount.ts), named
   ["GET", /^\/api\/(closed-cards|sent-back-cards)$/],
   // the pills. counts.ts reads the request-scoped store's milestones, its world's status view (viewWorld) and review rows
   // (worldGuard), and only that world's chats (its desk key + its milestones' keys); chat/seen marks the caller's desk or one of
@@ -414,6 +415,9 @@ export const DOOR_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/milestones/${ID}/(tree|status|approvals|claims|run-commits|backlog|freshness)$`)],
   ["GET", new RegExp(`^/api/tenants(/${ID})?$`)],
   ["GET", new RegExp(`^/api/tenants/${ID}/(milestones|personas|assignments|runs)$`)],
+  // the home world's own campaigns, social messages and plan on Home and the inbox (each read through the path
+  // world's own repos or row, social/campaigns.ts world, social/messages.ts worldRepos, stripeTeam.ts planState; rule 3 404s another world)
+  ["GET", new RegExp(`^/api/tenants/${ID}/(campaigns|social/messages|plan)$`)],
   // a milestone's chat (desk/routes.ts: that milestone's own thread; rule 3 404s another world's id) and its attachments
   ["GET|POST", new RegExp(`^/api/milestones/${ID}/chat/messages$`)],
   ["POST", /^\/api\/chat\/(seen|attachments|attachments\/line)$/],
@@ -429,9 +433,12 @@ export const DOOR_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/review-items/${ID}/(recheck|approve|complete|relaunch|deny|snooze)$`)],
   ["GET", new RegExp(`^/api/review-items/${ID}/screenshot$`)],
   ["POST", new RegExp(`^/api/(presses|owner-responses)/${ID}/undo$`)],
-  ["GET", new RegExp(`^/api/presses/${ID}$`)],
+  ["GET", new RegExp(`^/api/presses/(?!answered$)${ID}$`)],
+  ["GET", /^\/api\/presses\/answered$/], // the answered presses, the caller's world only (press/mount.ts), named
   // generic lists with no world data
   ["GET", /^\/api\/(persona-templates|team-skills)$/],
+  // Play on a desk reply (voice/speak.ts): stateless, the words come from the page (TENANT_SAFE too)
+  ["POST", /^\/api\/voice\/speak$/],
   // the home world's top-level Chat through the door is its own world desk (hosted desk/worldDesk.ts: a door session gets
   // the home world's own desk thread `world-desk:<home>`, never the Team desk's platform thread); rule 3 404s another world.
   ["GET|POST", new RegExp(`^/api/tenants/${ID}/desk/messages$`)],
@@ -462,6 +469,49 @@ export const DOOR_ONLY: [string, RegExp][] = [
   ["GET", /^\/api\/(decks|deck-cards)$/],
   ["GET", /^\/api\/deck\/[\w.-]+\/[\w.%-]+$/],
   ["GET", /^\/api\/deck-of\/[\w.%-]+$/],
+];
+/**
+ * the home world's own parts the owner uses every day, reached through the door by the home world's
+ * owner only: a door (or plain) session of the home world whose login is one CONSOLE_PLATFORM_DOOR names (the owner's own,
+ * isHomeOwnerDoor). A customer world, another world's login or a home world member gets 403 as before (these routes are not
+ * TENANT_SAFE, so every other world stays at world_scope). Each handler answers the home world's own data: the Team desk
+ * thread, its voice notes, its objectives (the home checkout's data repo), its pages, pinned pages, Mac list and priority mode.
+ * The platform's own views (threads, worlds, connects, secrets, seats…) stay on the private console. A route joins only with a
+ * check in the hosted door walk test.
+ */
+export const DOOR_HOME: [string, RegExp][] = [
+  // the top bar's voice note to the Team desk (voice/notes.ts mountVoiceNotesRec "/voice": the home world's
+  // Team desk notes; another world's caller gets the handler's world_scope 403 too)
+  ["GET", /^\/api\/voice\/(state|notes)$/],
+  ["POST", /^\/api\/voice\/notes$/],
+  ["POST", new RegExp(`^/api/voice/notes/${ID}/(segments/\\d+|segments/\\d+/early|finish|timing|discard|redo|redeliver)$`)],
+  ["GET", new RegExp(`^/api/voice/notes/${ID}/audio$`)],
+  // his Team desk thread (desk/routes.ts), its Call (voice/routes.ts mountVoice) and the phone notification switch
+  ["GET|POST", /^\/api\/desk\/messages$/],
+  ["GET", /^\/api\/voice\/calls$/],
+  ["POST", /^\/api\/voice\/(calls|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/voice/calls/${ID}/(status|ask/${ID})$`)],
+  ["GET", /^\/api\/push$/],
+  // the desk's own partner call (voice/routes.ts mountOwnCall "/voice/strategy"): ownerOnly, the home world's
+  ["GET", /^\/api\/voice\/strategy\/(state|calls)$/],
+  ["POST", /^\/api\/voice\/strategy\/(calls|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/strategy/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["GET", new RegExp(`^/api/voice/strategy/calls/${ID}/(status|ask/${ID})$`)],
+  ["POST", /^\/api\/push\/(subscribe|unsubscribe)$/],
+  // his objectives (the home checkout's data repo), key results, where-we-are, chapters, plans and pages
+  ["GET", /^\/api\/(pursuits|scorecards|totems|pages|goals|wheels)$/],
+  ["GET", new RegExp(`^/api/scorecards/${ID}/where-we-are$`)],
+  ["GET", new RegExp(`^/api/pursuits/${ID}/(plan|desk|kit)$`)],
+  ["GET", new RegExp(`^/api/totems/${ID}/(?!prompt$)${ID}$`)],
+  ["GET", new RegExp(`^/api/(wheels|trackers)/${ID}$`)],
+  ["GET", new RegExp(`^/api/homes/${ID}/${ID}$`)],
+  ["GET", new RegExp(`^/api/homes/file/${ID}/.+$`)],
+  // his pinned pages, his Mac list and the priority mode, read only
+  ["GET", /^\/api\/(pages\/pinned|laptop|priority-mode|notify\/briefings)$/],
+  ["GET", /^\/api\/pages\/pinned\/\d+\/status$/],
+  // a picture an alert in his briefings log links (hosted notify/whatsapp.ts), read only
+  ["GET", /^\/api\/notify\/lights\/[a-f0-9]{24}\.png$/],
 ];
 
 /**
@@ -632,6 +682,18 @@ export const isTenantSafe = (method: string, path: string) => matches(TENANT_SAF
 export const isDoorSafe = (method: string, path: string) => matches(DOOR_SAFE, method === "HEAD" ? "GET" : method, path);
 /** a door-only route (DOOR_ONLY): the door reaches it, its handler scoped to the home world's own data. */
 export const isDoorOnly = (method: string, path: string) => matches(DOOR_ONLY, method === "HEAD" ? "GET" : method, path);
+/** a route of the home world's owner through the door (DOOR_HOME). */
+export const isDoorHome = (method: string, path: string) => matches(DOOR_HOME, method === "HEAD" ? "GET" : method, path);
+/**
+ * the home world's owner through the door: a door (or plain) session of the home world whose login CONSOLE_PLATFORM_DOOR
+ * names (auth/gate.ts doorLogins: the owner's own login, the only one the door lets in). Never a customer world, never
+ * another login of the home world.
+ */
+export function isHomeOwnerDoor(identity: Identity, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (identity.kind !== "session" || !(identity.door || identity.plain) || identity.tenant !== DEFAULT_TENANT) return false;
+  const logins = (env.CONSOLE_PLATFORM_DOOR ?? "").split(/[\s,]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+$/.test(e));
+  return logins.includes(identity.email.trim().toLowerCase());
+}
 export const isOwnerOnly = (method: string, path: string) => matches(OWNER_ONLY, method === "HEAD" ? "GET" : method, path);
 const ownerPowerFor = (identity: Identity, method: string, path: string) =>
   hasOwnerPower(identity, "on") || (identity.kind === "token" && identity.tenant !== DEFAULT_TENANT && matches(WORLD_AGENT_SECRETS, method, path));
@@ -678,7 +740,8 @@ export function judge(db: DB, identity: Identity, method: string, path: string):
     return { allow: false, status: 404, reason: "cross_tenant", message: `no route or id ${path} in this world` };
   // a door session into the home world (customer site) is judged like a customer world's, and more: only DOOR_SAFE.
   const door = identity.kind === "session" && (!!identity.door || !!identity.plain); // a plain home world login, judged like the door
-  const doorOnly = door && isDoorOnly(method, path);
+  // the home world's owner reaches the home world's own parts through the door (DOOR_HOME), no one else.
+  const doorOnly = door && (isDoorOnly(method, path) || (isDoorHome(method, path) && isHomeOwnerDoor(identity)));
   if (door && path.startsWith("/api/") && !doorOnly && !(isTenantSafe(method, path) && isDoorSafe(method, path)))
     return { allow: false, status: 403, reason: "platform_private", message: "the platform is managed from the private console" };
   if (

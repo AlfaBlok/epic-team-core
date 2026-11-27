@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { CARD_TITLE, CardMeta, CardShell } from "@/components/cardShell";
 import { CardFeedback } from "@/components/cardFeedback";
 import { SentOr } from "@/components/sentRow";
+import { knownDoor, whenDoorKnown } from "@/lib/useSocial";
 
 /**
  * The owner asked for a full description of what to do, in which browser: one button per account the team needs. It opens Google's own consent page in the browser he is in, with the
@@ -30,7 +31,8 @@ export function ConnectCards({ where }: { where: "inbox" | "connections" }) {
  * Connections page all. E948-S78: in the Inbox the search box filters them too.
  */
 export function useConnects(where: "inbox" | "connections", on = true): ConnectItem[] {
-  const { data } = useQuery(() => (on ? api.listConnects() : Promise.resolve(undefined)), [on]);
+  // the platform's account connects stay on the private console; through the door there are none to show.
+  const { data } = useQuery(() => (on && !knownDoor() ? whenDoorKnown().then((door) => (door ? undefined : api.listConnects())) : Promise.resolve(undefined)), [on]);
   const needle = useSearchNeedle();
   return (data?.connects ?? []).filter((c) => (where === "inbox" ? c.inbox && !c.connected && saysNeedle(needle, c.title, c.what, c.account, c.channel?.name, c.channel?.handle, ...c.gives) : true));
 }
