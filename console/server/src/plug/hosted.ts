@@ -49,6 +49,8 @@ export interface HostedContext {
   makeWorld?: (signup: Record<string, any>, payment: "stripe") => Promise<any>;
   /** a paid customer workspace's team (checkout, first project from the buyer's words, personas off). */
   setUpTeam?: (world: string, words?: string) => Promise<{ step: string; state: string }[]>;
+  /** a clinic config by its slug (the clinic checkout sells only a clinic that was set up). */
+  clinic?: (slug: string) => { slug: string; clinic: string; madeUp?: boolean } | undefined;
 }
 
 export interface HostedPlug {

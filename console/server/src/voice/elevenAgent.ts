@@ -42,6 +42,8 @@ export const spanishAgentName = (name: string) => `${name} · Español`;
 export const ELEVEN_MODEL_LABEL = "elevenlabs-agents";
 /** a desk answer may take a while: the agent waits this long for a client tool's result. */
 export const ELEVEN_TOOL_WAIT_S = 120;
+/** seconds of his silence before the agent speaks up again (his call_dab66f00; voice.ts CHECK_IN_S, the same 7). */
+export const ELEVEN_TURN_TIMEOUT_S = 7;
 
 interface ToolDef {
   name: string;
@@ -80,6 +82,8 @@ export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[]
       },
       tts: lang === "es" ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_ES, stability: ELEVEN_STABILITY_ES } : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
       conversation: { max_duration_seconds: 20 * 60 },
+      // his silence for this long and the agent speaks up ("Are you still with me?", the call's own instructions)
+      turn: { turn_timeout: ELEVEN_TURN_TIMEOUT_S },
     },
     platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true } } } },
   };
@@ -226,3 +230,33 @@ function elevenLine(o: ElevenOpts, lang: CallLang) {
 }
 /** the door a voice uses; tests fake `link` alone (warm is the page-open link). */
 export type ElevenCalls = { link(lang?: CallLang): Promise<ElevenLink & { warm?: boolean }>; warm?(lang?: CallLang): Promise<void>; isWarm?(lang?: CallLang): boolean };
+
+/**
+ * A call's transcript as ElevenLabs kept it (the owner on call_33379122: "I want that answer to become yes": every
+ * word of every call reaches the desk). A call whose page died (a drop, a locked phone, a closed tab) never sent its
+ * lines; ElevenLabs keeps the conversation on its side, so the console reads it back: the agent's conversations that started
+ * within a minute of the call's start, the nearest one, then its transcript. Lines as the page sends them (`owner` /
+ * `voice` / `tool`); undefined when none is found or ElevenLabs does not answer (the caller tries again later).
+ */
+export async function elevenTranscript(k: string, agentId: string, startedAt: string, f: typeof fetch = fetch): Promise<{ conversationId: string; lines: { who: string; text: string }[] } | undefined> {
+  const get = async (p: string) => {
+    const r = await f(`https://api.elevenlabs.io${p}`, { headers: { "xi-api-key": k }, signal: AbortSignal.timeout(20_000) });
+    if (!r.ok) throw new VoiceError(502, "elevenlabs_refused", `ElevenLabs refused the transcript read (${r.status})`);
+    return (await r.json()) as any;
+  };
+  const t = Math.floor(Date.parse(startedAt) / 1000);
+  if (!Number.isFinite(t) || !agentId) return undefined;
+  const list = await get(`/v1/convai/conversations?agent_id=${encodeURIComponent(agentId)}&call_start_after_unix=${t - 120}&call_start_before_unix=${t + 120}&page_size=20`);
+  const near = ((list?.conversations ?? []) as any[])
+    .filter((c) => c?.conversation_id && Math.abs(Number(c.start_time_unix_secs) - t) <= 90)
+    .sort((a, b) => Math.abs(Number(a.start_time_unix_secs) - t) - Math.abs(Number(b.start_time_unix_secs) - t))[0];
+  if (!near) return undefined;
+  const conv = await get(`/v1/convai/conversations/${encodeURIComponent(near.conversation_id)}`);
+  const lines: { who: string; text: string }[] = [];
+  for (const m of (conv?.transcript ?? []) as any[]) {
+    const text = typeof m?.message === "string" ? m.message.trim() : "";
+    if (text) lines.push({ who: m.role === "user" ? "owner" : "voice", text });
+    for (const tc of (Array.isArray(m?.tool_calls) ? m.tool_calls : []) as any[]) if (tc?.tool_name) lines.push({ who: "tool", text: `called ${String(tc.tool_name)}` });
+  }
+  return { conversationId: String(near.conversation_id), lines };
+}

@@ -72,7 +72,18 @@ const OPEN: [string, RegExp][] = [
   // the clinic receptionist's demo page and its call routes (clinicDemo.ts): a page per clinic config, its one
   // button a rate-limited call (3 an hour a visitor, a day cap per clinic); the call id is the credential for its tools.
   ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}$/],
+  // the posted letter's code (clinicLetters.ts): the box to type it, and the call page it opens (a scan counted).
+  ["GET", /^\/api\/public\/carta(\/[A-Za-z0-9 _.-]{1,20})?$/],
+  // the clinic follow-up: the ringing "who calls" page, and a caller's own trace of a call (its key is the credential).
+  ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/llamada$/],
+  ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/calls\/cc_[a-f0-9]{24}\/trace$/],
+  // a clinic's activation page and its checkout (the checkout is the hosted billing plug's, stripeClinic.ts)
+  ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/activar$/],
+  ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/checkout$/],
   ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/calls(\/cc_[a-f0-9]{24}\/(tool|end))?$/],
+  // the clinic's set-up call (clinicSetup.ts): its private page and call start, the link's key the credential.
+  ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/puesta-en-marcha$/],
+  ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/setup\/calls$/],
   ["GET", /^\/api\/public\/feedback\/[\w-]{10,40}$/],
   ["POST", /^\/api\/public\/feedback\/[\w-]{10,40}\/notes(\/fbn_[a-f0-9]{8}\/(parts\/\d{1,2}|finish|discard))?$/],
   // a steps page's Done switches (steps/steps.ts): the kit script and style, and the page's ticks by its token

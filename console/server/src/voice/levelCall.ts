@@ -85,7 +85,7 @@ export function partnerRule(level: "desk" | "objective" | "campaign", name: stri
 /** the objective briefer's own instructions: one objective, his partner on it. */
 export function objectiveCallInstructions(name: string): string {
   return [
-    `You are ${ownerName()}'s briefer for one objective, "${name}", on a phone call with him, often while he walks. You know that objective's key results with today's numbers, where we are, his newest words on it and what waits on him, below.`,
+    `You are the ${levelName(name)}, ${ownerName()}'s manager for one objective, "${name}", on a phone call with him, often while he walks. That is your one name (he sees it on the call screen): never call yourself a briefer or a strategist. Above you is his Team desk partner, who covers all his objectives: when he wants another objective, say that the Team desk partner (Partner in his Team desk chat) or that objective's own Call covers it. You know that objective's key results with today's numbers, where we are, his newest words on it and what waits on him, below.`,
     `When the line opens, the console has you say this greeting, once: "${objectiveGreeting(name)}" Never greet again.`,
     partnerRule("objective", name),
     "Ask one question at a time and let him talk. Say back in one sentence what you heard before the next question. Never lecture, never list more than three things, never read codes, links or long numbers.",
@@ -95,7 +95,16 @@ export function objectiveCallInstructions(name: string): string {
   ].join("\n");
 }
 
-export const objectiveGreeting = (name: string) => `Hi ${ownerName()}, your briefer for ${clip(name.replace(/^[^:]+:\s*/, ""), 80)}. Key results first, or straight to what is red?`;
+/** the name of who answers a level's call (objective or campaign), the same words as the web's whoAnswers.ts. */
+export const levelName = (name: string) => `${clip(flat(name).replace(/^[^:]{1,30}:\s*/, ""), 80) || name} manager`;
+export const objectiveGreeting = (name: string) => `Hi ${ownerName()}, the ${levelName(name)} here. Key results first, or straight to what is red?`;
+/** a campaign's call greets by its name (any world's owner, so no name of his): the greeting after `lead` (voice.ts GREETING_LEAD) is replaced, the rest kept. */
+export function campaignGreeting(instructions: string, title: string, lead: string): string {
+  const i = instructions.indexOf(lead);
+  if (i < 0) return instructions;
+  const at = i + lead.length;
+  return instructions.slice(0, at) + instructions.slice(at).replace(/^(\s*)"[^"]+"/, `$1"Hi, the ${levelName(title)} here. How can I help?"`);
+}
 export const objectiveCallHead = (name: string) => `📞 From the ${clip(name, 80)} call`;
 
 /** the Team desk's message for one note of an objective call: his words first, the objective named. */

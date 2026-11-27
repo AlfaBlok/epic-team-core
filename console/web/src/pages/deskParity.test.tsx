@@ -94,9 +94,11 @@ afterEach(() => {
 function features(root: HTMLElement): Set<string> {
   const out = new Set<string>();
   for (const el of root.querySelectorAll("[data-testid]")) out.add(`testid:${el.getAttribute("data-testid")}`);
-  for (const b of within(root).queryAllByRole("button")) out.add(`button:${(b.textContent ?? "").replace(/\s+/g, " ").trim() || b.getAttribute("aria-label")}`);
+  // each desk's own Call names who answers it (the Team desk line, the SocialApp desk line): one feature.
+  const line = (s: string) => s.replace(/the (Team|SocialApp) desk line/g, "the desk");
+  for (const b of within(root).queryAllByRole("button")) out.add(`button:${line((b.textContent ?? "").replace(/\s+/g, " ").trim() || (b.getAttribute("aria-label") ?? ""))}`);
   for (const el of root.querySelectorAll("textarea[aria-label], input[aria-label], section[aria-label], [role=status], [role=alert]"))
-    out.add(`${el.tagName.toLowerCase()}${el.getAttribute("role") ? `[${el.getAttribute("role")}]` : ""}:${(el.getAttribute("aria-label") ?? "").replace(/Team desk|Campaign desk/, "<desk>")}`);
+    out.add(`${el.tagName.toLowerCase()}${el.getAttribute("role") ? `[${el.getAttribute("role")}]` : ""}:${line(el.getAttribute("aria-label") ?? "").replace(/Team desk|Campaign desk/, "<desk>")}`);
   return out;
 }
 
@@ -154,7 +156,7 @@ describe("T34-S24 / T58-S4 desk parity: every Team desk feature is on the social
     expect(teamCalls.some((c) => c === "POST /api/voice/calls")).toBe(true);
     expect(worldCalls.some((c) => c === "POST /api/tenants/social/desk/voice/calls")).toBe(true);
     // the one exception is the product desk's senior partner (its own owner-only call routes, the briefer's).
-    const partner = (c: string) => /\/api\/voice\/(marketing|strategy)\//.test(c);
+    const partner = (c: string) => /\/api\/voice\/(marketing|coach)\//.test(c);
     expect(worldCalls.filter((c) => (/\/api\/voice\//.test(c) && !partner(c)) || /\/api\/desk\//.test(c))).toEqual([]);
     expect(team.teamDeskLoads).toBeGreaterThan(0);
     expect(world.teamDeskLoads).toBe(0);

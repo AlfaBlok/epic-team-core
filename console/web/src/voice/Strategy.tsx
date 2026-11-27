@@ -16,7 +16,7 @@ const STEPS = [
 ];
 
 export function StrategyPage() {
-  const call = useCallDock({ base: STRATEGY_BASE, callee: "strategy", where: "Strategy call", hint: "EpicTeam's launch, in English or Spanish. Try “Who should buy first?”" });
+  const call = useCallDock({ base: STRATEGY_BASE, callee: "the EpicTeam launch strategist", name: "EpicTeam launch strategist", where: "Strategy call", hint: "EpicTeam's launch, in English or Spanish. Try “Who should buy first?”" });
   return (
     <div className="mx-auto w-full max-w-2xl" data-testid="strategy-page">
       <PageHeader title="EpicTeam strategy call" description="Set EpicTeam's launch strategy with a senior strategist." actions={call.button} />

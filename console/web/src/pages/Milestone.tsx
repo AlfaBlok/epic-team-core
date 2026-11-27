@@ -1,3 +1,4 @@
+import { whoAnswers } from "@/voice/whoAnswers";
 import { MilestonePath } from "@/components/bootstrap";
 import { useOwnCall } from "@/voice/OwnCall";
 import { NeverOnBadge } from "@/components/neverOn";
@@ -793,8 +794,11 @@ function MilestoneChat({ m }: { m: Milestone }) {
   const markSeen = useCallback(() => api.markChatSeen({ chat: "milestone", id: m.id }), [m.id]);
   // the same Call as the desk page (the Chat page of a world is this chat on DeskPage), on this milestone's own voice routes.
   // a Team home card's Call opens this tab with ?call=1: the call starts by itself, then the flag leaves the URL.
+  const who = whoAnswers.campaign(m.id, m.title);
   const call = useCallDock({
-    base: `/api/milestones/${encodeURIComponent(m.id)}/voice`,
+    base: who.base,
+    callee: who.callee,
+    name: who.name,
     where: m.title,
     autoStart: params.get("call") === "1",
     onAutoStart: () =>

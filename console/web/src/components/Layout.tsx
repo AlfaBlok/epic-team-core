@@ -491,7 +491,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         {campaigns && shows("chat") && (
           <NavLink to={`/${MARKETING_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-briefer">
             <Phone className="h-4 w-4" />
-            {socialProduct()} briefer
+            {socialProduct()} partner
           </NavLink>
         )}
         {/* Runs high (the owner, 22 Nov: "Runs I would make much higher. That's the one I actually use the most"). */}

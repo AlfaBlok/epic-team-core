@@ -28,7 +28,7 @@ describe("the Call on a card", () => {
       </MemoryRouter>,
     );
     const b = screen.getByTestId("card-call-now");
-    expect(b.textContent).toMatch(/Call the .+ briefer/);
+    expect(b.textContent).toMatch(/Call the .+ partner/);
     expect(b.getAttribute("href")).toBe("/marketing?call=1");
     expect(b.getAttribute("target")).toBeNull();
   });

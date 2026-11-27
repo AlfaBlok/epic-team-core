@@ -33,10 +33,13 @@ export function plainTitle(card: string | undefined, rowTitle: string | undefine
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/** the second line of a call's whole-transcript post (voice/voice.ts wholeCallText): that post is his request. */
+export const CALL_WHOLE_LEAD = "Every word of this call";
 // the console's own lines, the same list as the hosted check (scripts/request_rows.py NOT_HIS): the files notice before his
-// voice note (the note is the request), a sign-up notice, the call record and the after-call check
+// voice note (the note is the request), a sign-up notice, the old call record ("Record only"; a whole-call post, whose second
+// line starts CALL_WHOLE_LEAD, is his request) and the after-call check
 const NOT_HIS =
-  /^\s*(?:↔|🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question|Files for my voice note, which follows|New sign-up on |📞 Call with the desk|📞 After the call|EpicTeam call \(voice call with the desk)/;
+  /^\s*(?:↔|🗂|\[[a-z][a-z -]*\]|From the E\d+-S\d+ worker|❓ Mac ticket question|Files for my voice note, which follows|New sign-up on |📞 Call with the desk(?![^\n]*\nEvery word of this call)|📞 After the call|EpicTeam call \(voice call with the desk)/;
 
 /**
  * a user-role line in his desk chat that the console wrote, not him (E942-S173, the E942-S141 audit: of 778 chat lines in 72 h
@@ -65,6 +68,9 @@ export function requestIdOf(itemId: string | undefined, text = ""): string | und
   if (!before.includes("client")) return undefined; // an agent's send, not from his screen
   if (after.startsWith("desk-cross-") || after.startsWith("desk-send-")) return undefined;
   if (NOT_HIS.test(text)) return undefined;
+  // a call's whole transcript: one request, the call id 
+  const call = /^voice-transcript-whole-(call_[0-9a-f]{8})$/.exec(after);
+  if (call) return call[1];
   const vn = /vn_[0-9a-f]{8}/.exec(after);
   if (vn) return vn[0];
   const e = /\.md-(e-[0-9a-f]{6})$/.exec(after);
@@ -74,7 +80,8 @@ export function requestIdOf(itemId: string | undefined, text = ""): string | und
   return `ch_${createHash("sha1").update(after).digest("hex").slice(0, 8)}`;
 }
 
-const REQ_ID = /\b(vn_[0-9a-f]{8}|ch_[0-9a-f]{8})\b|\^?\b(e-[0-9a-f]{6})\b/g;
+// a call id counts only as `request call_…` (call ids are cited on many rows; the whole call is one request)
+const REQ_ID = /\b(vn_[0-9a-f]{8}|ch_[0-9a-f]{8}|(?<=request )call_[0-9a-f]{8})\b|\^?\b(e-[0-9a-f]{6})\b/g;
 const ROW_CODE = /\b((?:E\d+|EPIC-\d+|ROOT|TAX|M\d+|[A-Z]{1,6}\d*)-(?:S|A|T|G)\d+[a-z]?)\b/g;
 // a ledger row code, the same as the hosted check (LEDGER_CODE): a code with no S, A, T or G before its number counts too
 const ROW_CODE_FULL = /^(?:E\d+|EPIC-\d+|ROOT|TAX|M\d+|[A-Z]{1,6}\d*)-(?:S|A|T|G)?\d+[a-z]?$/;
@@ -307,7 +314,7 @@ export function createRequestRows(o: { reposRoot: () => string | undefined; want
           const rel = path.relative(repoDir, f);
           const fresh: FileGot = { stamp, wantedKey, shRows: new Map(), byWords: new Map() };
           if (bySh.size) wordsIn(text, d.name, rel, bySh, fresh.shRows, fresh.byWords);
-          if (/\b(?:vn_[0-9a-f]{8}|ch_[0-9a-f]{8}|e-[0-9a-f]{6})\b/.test(text)) fresh.req = requestRowsIn(text, d.name, rel);
+          if (/\b(?:vn_[0-9a-f]{8}|ch_[0-9a-f]{8}|call_[0-9a-f]{8}|e-[0-9a-f]{6})\b/.test(text)) fresh.req = requestRowsIn(text, d.name, rel);
           perFile.set(key, (got = fresh));
           await new Promise<void>((r) => setImmediate(r)); // one file's matching at a time: requests answer between two
         }

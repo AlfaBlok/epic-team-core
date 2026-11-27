@@ -38,7 +38,8 @@ const END_WORDS: Record<string, string> = {
   month_cap: "Voice paused until the 1st: the month's cap is reached. Chat still works.",
   voice_off: "Voice was switched off in the console.",
   calls_off: "Calls are off. Send a voice note instead.",
-  line_dropped: "The line dropped. Press Call to reconnect.",
+  // ElevenLabs ends a call when no sound reaches it from his phone for a while (screen off, page hidden, no signal)
+  line_dropped: "The line dropped: no sound reached the voice from your phone (screen off or no signal). Press Call to reconnect.",
   tab_closed: "Call ended.",
   ended_elsewhere: "Hung up from another page.",
 };
@@ -99,6 +100,10 @@ export function useCallDock(
     base?: string;
     /** whom the button calls ("the desk", "the campaign desk"). */
     callee?: string;
+    /** who answers, by name (whoAnswers.ts): shown on the call screen while it connects and while it is on. */
+    name?: string;
+    /** a second Call beside another on the same page: no language pick of its own (the pick is one, shared by every Call). */
+    noLang?: boolean;
     /** the compact (phone) Call button's words, when a page names its call in full ("Call the <product> briefer"); default "Call". */
     label?: string;
     /** start the call by itself once the voice is available (a Team home card's Call); `onAutoStart` runs once it did. */
@@ -115,6 +120,8 @@ export function useCallDock(
   } = {},
 ): CallDock {
   const callee = props.callee ?? "the desk";
+  // the owner, 27 Nov (call_910685a3): "on the call, I should see a name of who I'm talking to".
+  const who = props.name ?? callee.replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
   const [st, setSt] = useState<VoiceState | undefined>();
   // the tab's engine for these routes, owned above the router (a call started here and still on when the page comes
   // back is this one); while this bar is mounted the floating widget leaves the call to it.
@@ -216,9 +223,22 @@ export function useCallDock(
               <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : connectingText(connectingS)}</span>
               <span className="tabular-nums" data-testid="call-cost">{money(v.costUsd)}</span>
               {/* who he is talking to, named on the call itself (the owner: "on the call, I should see a name of who I'm talking to") */}
-              <span className="basis-full truncate text-foreground" data-testid="call-with">
-                with {callee}
+              <span className="basis-full truncate font-medium text-foreground" data-testid="call-with">
+                <span data-testid="call-who">
+                  {v.phase === "live" ? "with" : "calling"} {v.speaker ?? who}
+                </span>
               </span>
+              {/* the microphone, said plainly (his call_dab66f00: with the screen off the phone stopped it and he talked to himself) */}
+              {v.phase === "live" && (
+                <span
+                  data-testid="call-mic"
+                  data-mic={v.muted ? "muted" : v.mic ?? "on"}
+                  className={cn("inline-flex items-center gap-1", v.mic === "lost" || v.muted ? "text-amber-700 dark:text-amber-400" : "text-emerald-800 dark:text-emerald-300")}
+                >
+                  {v.mic === "lost" || v.muted ? <MicOff className="size-3.5" aria-hidden /> : <Mic className="size-3.5" aria-hidden />}
+                  {v.mic === "lost" ? "Mic stopped by the phone: keep the screen on" : v.muted ? "Mic muted" : "Mic on"}
+                </span>
+              )}
               {v.listening ? (
                 <span data-testid="call-listening" className="text-emerald-800 dark:text-emerald-300">
                   · listening: say “done” when finished
@@ -367,7 +387,7 @@ export function useCallDock(
       </Button>
     ) : !onCall && !other ? (
       <span className={cn("shrink-0 items-center gap-1.5", props.wide ? "inline-flex" : "hidden phone:inline-flex")}>
-      <LangPick lang={lang} onPick={setLang} />
+      {!props.noLang && <LangPick lang={lang} onPick={setLang} />}
       <Button
         data-testid="call-start-compact"
         variant="outline"

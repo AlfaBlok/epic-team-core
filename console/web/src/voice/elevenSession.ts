@@ -26,6 +26,8 @@ export interface ElevenHooks {
   onMode(speaking: boolean): void;
   onEnded(reason: string): void;
   onError(message: string): void;
+  /** each microphone stream the ElevenLabs client opens (at start and on a restart), so the page can watch its track. */
+  onMic?(stream: MediaStream): void;
 }
 
 export interface ElevenLine {
@@ -34,11 +36,35 @@ export interface ElevenLine {
   id(): string | undefined;
   /** a note that makes the agent speak now (the call's clock); its own text never shows as his line. */
   say?(note: string): void;
+  /** take the microphone again (a phone stopped it while the screen was off); the new stream reaches onMic. */
+  restartMic(): Promise<void>;
+  /** a note the agent reads without answering it (the microphone stopped or came back). */
+  context(text: string): void;
+}
+
+/**
+ * Every getUserMedia the ElevenLabs client makes while `fn` runs is handed to `seen` (the client keeps its stream to
+ * itself; the page needs the track to see when the phone stops it).
+ */
+export async function catchMic<T>(seen: ((s: MediaStream) => void) | undefined, fn: () => Promise<T>): Promise<T> {
+  const md = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+  const orig = md?.getUserMedia;
+  if (!md || !orig || !seen) return fn();
+  md.getUserMedia = async (c?: MediaStreamConstraints) => {
+    const s = await orig.call(md, c);
+    if (c?.audio) seen(s);
+    return s;
+  };
+  try {
+    return await fn();
+  } finally {
+    md.getUserMedia = orig;
+  }
 }
 
 export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
   let convId: string | undefined;
-  const conv = await Conversation.startSession({
+  const conv = await catchMic(h.onMic, () => Conversation.startSession({
     signedUrl: h.signedUrl,
     connectionType: "websocket",
     overrides: { agent: { ...(h.instructions ? { prompt: { prompt: h.instructions } } : {}), ...(h.greeting ? { firstMessage: h.greeting } : {}) } },
@@ -55,11 +81,19 @@ export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
     onModeChange: ({ mode }) => h.onMode(mode === "speaking"),
     onDisconnect: (d) => h.onEnded(d.reason === "agent" ? "bye" : d.reason === "user" ? "hangup" : "line_dropped"),
     onError: (message) => h.onError(message),
-  });
+  }));
   return {
     end: () => conv.endSession().catch(() => undefined),
     mute: (m) => (conv as { setMicMuted?: (m: boolean) => void }).setMicMuted?.(m),
     id: () => convId ?? conv.getId?.(),
     say: (note) => conv.sendUserMessage(note),
+    restartMic: () => catchMic(h.onMic, () => (conv as { changeInputDevice?: (o: object) => Promise<void> }).changeInputDevice?.({}) ?? Promise.resolve()),
+    context: (text) => {
+      try {
+        conv.sendContextualUpdate(text);
+      } catch {
+        /* the line is closing */
+      }
+    },
   };
 }

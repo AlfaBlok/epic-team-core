@@ -39,7 +39,7 @@ describe("the objectives coach", () => {
     expect(() => relayIn({ desk: "team", words: " " })).toThrow();
     const r = relayIn({ desk: "team", words: "Notes launch is the objective,  testers a key result", note: "make testers a KR", objective: "Notes" });
     const t = teamRelayText("call_1", r);
-    expect(t).toMatch(/^📞 From the objectives coach call \(call_1\)/);
+    expect(t).toMatch(/^📞 From the Team desk partner call \(call_1\)/);
     expect(t).toContain('"Notes launch is the objective, testers a key result"');
     expect(t).toMatch(/without his yes/);
   });
@@ -73,7 +73,7 @@ describe("the objectives coach", () => {
     });
     const s = await v.start();
     expect(made[0].name).toBe(COACH_AGENT_NAME);
-    expect(s.instructions).toContain("objectives coach");
+    expect(s.instructions).toContain("Team desk partner");
     expect(s.instructions).toContain("Notes: Get 5 testers");
     expect(s.instructions).not.toContain("file_objective_words");
     expect(v.tool(s.call.id, "read_objective", { number: 1 })).toMatchObject({ place: "objective 1 of 1" });

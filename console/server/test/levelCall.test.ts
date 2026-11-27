@@ -66,7 +66,7 @@ describe("how each level's call talks", () => {
     expect(partnerRule("desk", "SocialApp")).toMatch(/senior partner and OKR expert for the SocialApp desk/);
     expect(partnerRule("campaign", "Acme testers")).toMatch(/this campaign, "Acme testers"/);
     const i = objectiveCallInstructions(card.name);
-    expect(i).toMatch(/briefer for one objective, "SocialApp: Launch SocialApp"/);
+    expect(i).toMatch(/manager for one objective, "SocialApp: Launch SocialApp"/);
     expect(i).toMatch(/Never invent a number or a key result/);
     expect(i).toMatch(/relay_to_desk/);
     expect(i).toMatch(/hang_up/);
@@ -107,5 +107,33 @@ describe("an objective's Call reaches his own workspace on a customer site, like
     expect(other.available).toBe(false);
     expect(other.elsewhere).toBeUndefined();
     expect((await api.request("/objectives/social-launch/voice/calls", { method: "POST" })).status).toBe(404);
+  });
+});
+
+// the owner 27 Nov: who answers says its one name, the same one
+// the call screen shows (web voice/whoAnswers.ts): the Team desk partner over all his objectives, an objective's manager,
+// a campaign's manager, the social desk's partner.
+import { campaignGreeting as _cg, levelName as _ln, objectiveGreeting as _og, objectiveCallInstructions as _oi } from "../src/voice/levelCall.js";
+import { COACH_GREETING as _coachGreet, coachInstructions as _coachIn, TEAM_DESK_PARTNER as _tdp } from "../src/voice/coach.js";
+import { MARKETING_GREETING as _mg } from "../src/voice/marketing.js";
+import { GREETING_LEAD as _lead, greetingOf as _greetingOf } from "../src/voice/voice.js";
+import { describe as _d, expect as _e, it as _i } from "vitest";
+
+_d("each call says who answers, by name", () => {
+  _i("the Team desk partner covers all his objectives and never calls itself a strategist or coach", () => {
+    _e(_tdp).toBe("Team desk partner");
+    _e(_coachGreet()).toMatch(/Team desk partner here, over all your objectives/);
+    _e(_coachIn()).toMatch(/Team desk partner.*across every one of his objectives/);
+    _e(_coachIn()).toMatch(/never call yourself a coach, a briefer or a strategist/);
+  });
+  _i("an objective's call is its manager; a campaign's call is its manager, in the greeting", () => {
+    _e(_ln("Acme: Get 5 testers")).toBe("Get 5 testers manager");
+    _e(_og("Acme: Launch Acme")).toMatch(/the Launch Acme manager here/);
+    _e(_greetingOf(_oi("Acme: Launch Acme"))).toMatch(/Launch Acme manager/);
+    const base = `You are the desk line.\n${_lead} "Hi, I'm the desk line. How can I help?" Never again.`;
+    _e(_greetingOf(_cg(base, "Spring launch", _lead))).toMatch(/the Spring launch manager here/);
+  });
+  _i("the social desk's partner greets as the partner", () => {
+    _e(_mg()).toMatch(/partner here/);
   });
 });

@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/common";
-import { socialProduct } from "@/lib/identity";
 import { useCallDock } from "./CallPanel";
+import { socialPartner } from "./whoAnswers";
 
 /**
  * The senior marketing call: one link he opens on his phone. One Call, a senior marketing voice that knows the social
@@ -18,8 +18,8 @@ const STEPS = [
   { n: "3", t: "Your decisions land", d: "On the social desk as one request each." },
 ];
 
-/** the briefer's name, as he sees it everywhere ("<product> briefer"). */
-export const brieferName = () => `${socialProduct()} briefer`;
+/** the briefer's name, as he sees and hears it everywhere: the product desk's partner (the owner, 26 Nov: the product desk's senior partner; whoAnswers.ts). */
+export const brieferName = socialPartner;
 
 /**
  * The owner could not find its button ("I don't see the button ... You keep moving it around"): the briefer
@@ -37,6 +37,7 @@ function BrieferPage() {
   const call = useCallDock({
     base: MARKETING_BASE,
     callee: `the ${name}`,
+    name,
     label: `Call the ${name}`,
     where: name,
     hint: "Strategy, in English or Spanish. Try “What is the number one blocker?”",

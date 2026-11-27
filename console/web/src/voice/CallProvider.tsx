@@ -217,10 +217,10 @@ function Floating({ h }: { h: HeldCall }) {
           className="min-w-0 truncate underline-offset-2 hover:underline phone:flex-1 phone:font-semibold phone:underline"
           title="Back to the call"
         >
-          {h.where ? `${h.where} · ` : ""}On call with {h.callee}
+          {h.where ? `${h.where} · ` : ""}On call with {v.speaker ? `the ${v.speaker}` : h.callee}
         </Link>
       ) : (
-        <span className="min-w-0 truncate phone:flex-1 phone:font-semibold">On call with {h.callee}</span>
+        <span className="min-w-0 truncate phone:flex-1 phone:font-semibold">On call with {v.speaker ? `the ${v.speaker}` : h.callee}</span>
       )}
       {/* a section call: the card the voice is on and its evidence, on his screen while they talk about it */}
       {v.onCard && v.phase === "live" && (

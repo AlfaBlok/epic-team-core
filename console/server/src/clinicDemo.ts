@@ -7,6 +7,24 @@ import type { DB } from "./db.js";
 import { clientAddress } from "./clientAddress.js";
 import { agentBody, elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
 import { VoiceError } from "./voice/voice.js";
+import { tracePage, type FollowUp } from "./clinicFollowUp.js";
+import { questionsIn, whoAnswered, type Leads } from "./clinicLeads.js";
+import { activationPage, clinicPlan, ensureClinicPlans, planOn } from "./clinicPlan.js";
+import {
+  CLINIC_SETUP_MAX_S,
+  SETUP_CALLS_PER_DAY,
+  SETUP_OBJECTIVES_MAX,
+  SETUP_TOOLS,
+  objectiveIn,
+  sayObjective,
+  setupAgentName,
+  setupGreeting,
+  setupKey,
+  setupPrompt,
+  validSetupKey,
+  withObjectives,
+  type ClinicObjective,
+} from "./clinicSetup.js";
 
 /**
  * The clinic receptionist (the owner's strategy call, 27 Nov: our own voice agent sells for us first, and that same agent
@@ -17,6 +35,9 @@ import { VoiceError } from "./voice/voice.js";
  *   GET /api/public/clinic/<slug> ── one button ──▶ POST …/calls (rate-limited) ──▶ a signed link for one call
  *        │                                                                     │
  *        └──── the browser talks to the agent; its tools (free slots, book) answer through POST …/calls/<id>/tool
+ *
+ * A call opened from a posted letter carries its code (?c=<code>): the rep qualifies the lead (qualify_lead: who answered,
+ * what they ask and need, their answer) and the call lands as a lead row in the Dental clinics table (clinicLeads.ts).
  *
  * A clinic is one config file: name, hours, services, insurers. A clinic with a `sales` block is our own demo clinic:
  * the same receptionist books a made-up patient and also explains the offer to a clinic owner and books a follow-up.
@@ -38,6 +59,8 @@ export interface ClinicSales {
   setup: string;
   terms?: string;
   followUp: string;
+  /** where a clinic writes to have its data deleted or object (shown in the letter page's privacy note). */
+  contact?: string;
 }
 export interface Clinic {
   slug: string;
@@ -57,6 +80,15 @@ export interface Clinic {
   greeting?: string;
   callsPerDay?: number;
   sales?: ClinicSales;
+  /** working days the clinic promises to answer what the receptionist could not solve (default 1). */
+  followUpDays?: number;
+  /** who gets the follow-up reminders (the Clinic follow-up persona drafts them; nothing is sent). */
+  owner?: { name: string; role?: string };
+  /** what the clinic wants from its receptionist, set on its set-up call (clinicSetup.ts). */
+  objectives?: ClinicObjective[];
+  /** the set-up call that set them (its id in the console's clinic calls). */
+  objectivesFromCall?: string;
+  objectivesAt?: string;
 }
 
 const slugRe = /^[a-z0-9][a-z0-9-]{1,40}$/;
@@ -76,6 +108,14 @@ const clinicIn = z.object({
   voiceId: z.string().max(60).optional(),
   greeting: z.string().max(400).optional(),
   callsPerDay: z.number().int().min(1).max(500).optional(),
+  followUpDays: z.number().int().min(0).max(10).optional(),
+  owner: z.object({ name: z.string().min(2).max(80), role: z.string().max(60).optional() }).optional(),
+  objectives: z
+    .array(z.object({ goal: z.string().min(3).max(200), measure: z.string().max(200).optional(), target: z.string().max(120).optional() }))
+    .max(SETUP_OBJECTIVES_MAX)
+    .optional(),
+  objectivesFromCall: z.string().max(60).optional(),
+  objectivesAt: z.string().max(40).optional(),
   sales: z
     .object({
       company: z.string().min(2).max(60),
@@ -86,6 +126,7 @@ const clinicIn = z.object({
       setup: z.string().max(600),
       terms: z.string().max(400).optional(),
       followUp: z.string().max(200),
+      contact: z.string().max(120).optional(),
     })
     .optional(),
 });
@@ -213,7 +254,7 @@ export function clinicGreeting(c: Clinic): string {
   if (c.greeting) return c.greeting;
   const who = c.receptionist ?? "la recepcionista";
   if (c.sales)
-    return `Hola, gracias por llamar a ${c.clinic}, una clínica de demostración de ${c.sales.company}. Soy ${who}, la recepcionista por voz. ¿Llama como paciente para pedir cita, o quiere saber cómo funcionaría en su clínica?`;
+    return `Hola, soy ${who}, una recepcionista de inteligencia artificial de ${c.sales.company}, y esto es una demostración en directo en ${c.clinic}, una clínica inventada. ¿Llama como paciente para pedir cita, o quiere saber cómo funcionaría en su clínica?`;
   return `Hola, ${c.clinic}, le atiende ${who}. ¿En qué le puedo ayudar?`;
 }
 
@@ -237,6 +278,14 @@ export function clinicPrompt(c: Clinic): string {
     c.insurers?.length ? `Seguros con los que trabajamos: ${c.insurers.join(", ")}.` : "",
     c.dentists?.length ? `Dentistas: ${c.dentists.join(", ")}.` : "",
     ...(c.notes ?? []),
+    ...(c.objectives?.length
+      ? [
+          "",
+          "# Lo que la clínica quiere conseguir contigo (lo dijo en su llamada de puesta en marcha)",
+          ...c.objectives.map((o, i) => `${i + 1}. ${sayObjective(o)}`),
+          "Tenlo presente en cada llamada: es para lo que la clínica te tiene. Nunca lo leas en voz alta ni lo uses para presionar a nadie.",
+        ]
+      : []),
     "",
     "# Cómo atiendes a un paciente",
     "1. Pregunta qué necesita. Si no sabes el tratamiento, ofrece una primera visita.",
@@ -260,18 +309,37 @@ export function clinicPrompt(c: Clinic): string {
       "Di solo lo que hace, nunca resultados: no prometas más pacientes, menos ausencias ni cifras, porque ninguna clínica lo ha usado todavía. Si te piden algo que no está aquí (una integración con su programa de gestión, protección de datos), di que lo verá el equipo en la llamada de seguimiento.",
       `Para seguir: ofrece ${s.followUp}. Pide su nombre, el nombre de su clínica, un teléfono o email y cuándo le viene bien, y llama a book_follow_up. Con su nombre y un teléfono o email basta: si no entiendes un dato, pregúntalo una sola vez y después apunta lo que tengas. Después confirma en una frase que el equipo le llamará.`,
       "Si quiere probar la demo como paciente, cambia al papel de recepcionista y atiéndele como a un paciente.",
+      "",
+      "# Quién te habla y qué necesita (para el equipo)",
+      "Cuando veas que llama por una clínica, pregunta una sola vez y con naturalidad con quién hablas: si es el dueño o director de la clínica, de recepción u otra persona, y de qué clínica y ciudad llama. Escucha qué pregunta y qué le hace falta en su clínica (por ejemplo cubrir la hora de comer, las llamadas perdidas, el WhatsApp, su programa de agenda).",
+      "Antes de despedirte de alguien de una clínica, llama una vez a qualify_lead con quién es, su clínica y ciudad, lo que preguntó, lo que necesita (en sus palabras, corto) y su respuesta: sí, quizá o no. No lo digas en voz alta: es una nota para el equipo. Si no sabes algo, pon \"no lo dijo\".",
     );
   }
   out.push(
     "",
+    "# Lo que no puedes resolver en la llamada",
+    "Si piden algo que no puedes hacer tú (una pregunta cuya respuesta no está arriba, que les llame una persona, cambiar o anular una cita que no reservaste tú, una queja, un presupuesto), nunca lo dejes en el aire: llama a file_ticket con lo que necesitan en una frase, quién es (paciente, clínica u otra persona) y, si lo da, un teléfono o email. Después di exactamente la frase que devuelve: es la promesa de la clínica, nunca prometas otra cosa ni otro día.",
+    "",
     "# Cómo hablas",
     "Una o dos frases por turno. No leas listas largas ni números largos. Nunca interrumpas.",
-    "Cuando la persona se despide (adiós, gracias, eso es todo), despídete en una frase y llama a end_call, aunque falte algún dato: nunca la retengas.",
+    `Cuando la persona se despide (adiós, gracias, eso es todo), despídete en una frase${c.sales ? ", llama a qualify_lead si es de una clínica y no lo has hecho," : ""} y llama a end_call, aunque falte algún dato: nunca la retengas.`,
   );
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 
 export const CLINIC_TOOLS = (c: Clinic) => [
+  {
+    name: "file_ticket",
+    description: "Apunta en la lista de pendientes de la clínica algo que no puedes resolver en la llamada. Devuelve la frase con la promesa que debes decir.",
+    parameters: {
+      properties: {
+        need: { type: "string", description: "lo que necesita la persona, en una frase" },
+        who: { type: "string", description: "paciente, clínica u otra persona" },
+        contact: { type: "string", description: "opcional: su teléfono o email si lo da" },
+      },
+      required: ["need"],
+    },
+  },
   {
     name: "free_slots",
     description: "Las horas libres de la clínica en un día. Pásale el día tal como lo dice la persona (hoy, mañana, el martes, 3 de diciembre) o una fecha AAAA-MM-DD.",
@@ -305,13 +373,28 @@ export const CLINIC_TOOLS = (c: Clinic) => [
             required: ["name", "contact"],
           },
         },
+        {
+          name: "qualify_lead",
+          description: "Nota para el equipo, una vez por llamada con alguien de una clínica: quién es, qué preguntó, qué necesita y su respuesta. No se dice en voz alta.",
+          parameters: {
+            properties: {
+              who: { type: "string", description: "quién contesta: dueño o director, recepcionista, u otra persona con su puesto" },
+              clinic: { type: "string", description: "el nombre de su clínica, si lo dijo" },
+              city: { type: "string", description: "su ciudad, si la dijo" },
+              asks: { type: "string", description: "lo que preguntó, corto" },
+              needs: { type: "string", description: "lo que necesita su clínica, en sus palabras, corto" },
+              answer: { type: "string", description: "sí, quizá o no: si quiere seguir" },
+            },
+            required: ["who", "needs"],
+          },
+        },
       ]
     : []),
 ];
 
 /** the agent as made on the account: Spanish, multilingual voice, end_call only on a goodbye, a short call, no
  * overrides (the public page can never change what it says) and signed links only. */
-export function clinicAgentBody(c: Clinic) {
+export function clinicAgentBody(c: Clinic, maxS: number = CLINIC_CALL_MAX_S) {
   return (prompt: string, firstMessage: string, tools: Parameters<typeof agentBody>[2], name?: string, tags?: string[]) => {
     const b = agentBody(prompt, firstMessage, tools, name, tags, "es");
     const agent = b.conversation_config.agent;
@@ -323,7 +406,7 @@ export function clinicAgentBody(c: Clinic) {
       conversation_config: {
         ...b.conversation_config,
         tts: { ...b.conversation_config.tts, ...(c.voiceId ? { voice_id: c.voiceId } : {}) },
-        conversation: { max_duration_seconds: CLINIC_CALL_MAX_S },
+        conversation: { max_duration_seconds: maxS },
       },
       platform_settings: { auth: { enable_auth: true }, overrides: { conversation_config_override: { agent: { prompt: { prompt: false }, first_message: false, language: false } } } },
     } as unknown as ReturnType<typeof agentBody>;
@@ -340,6 +423,14 @@ export interface ClinicDeps {
   /** tests fake the ElevenLabs door per clinic. */
   eleven?: (c: Clinic) => ElevenCalls;
   now?: () => number;
+  /** what the receptionist cannot solve becomes a ticket on the clinic's task tree (clinicFollowUp.ts). */
+  followUp?: FollowUp;
+  /** each qualified call lands as a lead row in the Dental clinics table (clinicLeads.ts). */
+  leads?: Leads;
+  /** writes the clinic's config file in the repo (commit + push); the set-up call writes its objectives with it. */
+  writeClinic?: (slug: string, make: (cur: string | undefined) => string, msg: string) => Promise<{ state: string; detail?: string }>;
+  /** how long confirm_objectives waits for the write before it answers (tests shorten it). */
+  writeWaitMs?: number;
 }
 
 export function ensureClinicTables(db: DB) {
@@ -355,6 +446,14 @@ export function ensureClinicTables(db: DB) {
       transcript TEXT
     );
     CREATE INDEX IF NOT EXISTS clinic_calls_slug ON clinic_calls (slug, started_at);
+    CREATE TABLE IF NOT EXISTS clinic_setup (
+      call_id TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      at TEXT NOT NULL,
+      PRIMARY KEY (call_id, n)
+    );
     CREATE TABLE IF NOT EXISTS clinic_bookings (
       id TEXT PRIMARY KEY,
       call_id TEXT NOT NULL,
@@ -365,34 +464,63 @@ export function ensureClinicTables(db: DB) {
       data TEXT NOT NULL,
       at TEXT NOT NULL
     );
+    -- each open of a clinic's call page is one scan (a posted letter's code or short link lands here), read
+    -- weekly with the calls by scripts/clinic_reading.py; code is the letter's code (?c=), null for a plain open.
+    CREATE TABLE IF NOT EXISTS clinic_scans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL,
+      code TEXT,
+      visitor TEXT NOT NULL,
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS clinic_scans_slug ON clinic_scans (slug, at);
   `);
+  // the letter's code a call was opened with
+  if (!(db.prepare("PRAGMA table_info(clinic_calls)").all() as { name: string }[]).some((c) => c.name === "code")) db.exec("ALTER TABLE clinic_calls ADD COLUMN code TEXT");
+  // a set-up call (clinicSetup.ts) is a clinic call of kind 'setup'; older rows are the receptionist's.
+  if (!(db.prepare("PRAGMA table_info(clinic_calls)").all() as { name: string }[]).some((c) => c.name === "kind"))
+    db.exec("ALTER TABLE clinic_calls ADD COLUMN kind TEXT NOT NULL DEFAULT 'reception'");
 }
+
+/** a letter's code as the call page passes it: letters, digits and dashes, upper case; anything else is no code. */
+export const letterCode = (v: unknown): string | undefined => {
+  const t = String(v ?? "").trim().toUpperCase();
+  return /^[A-Z0-9][A-Z0-9-]{2,15}$/.test(t) ? t : undefined;
+};
+
+export type ClinicCallKind = "reception" | "setup";
 
 export function createClinicDemo(d: ClinicDeps) {
   const { db } = d;
   ensureClinicTables(db);
+  ensureClinicPlans(db);
   const now = d.now ?? Date.now;
   const doors = new Map<string, ElevenCalls>();
-  const door = (c: Clinic) => {
-    let x = doors.get(c.slug);
+  // one door per clinic and skin; a changed prompt (new objectives) makes a new door, which brings the agent in step.
+  const door = (c: Clinic, kind: ClinicCallKind = "reception") => {
+    const setup = kind === "setup";
+    const prompt = setup ? setupPrompt(c) : clinicPrompt(c);
+    const at = `${c.slug}|${kind}|${crypto.createHash("sha256").update(prompt).digest("hex").slice(0, 12)}`;
+    let x = doors.get(at);
     if (!x) {
-      const k = `eleven_clinic_${c.slug}_agent_id`;
+      const k = setup ? `eleven_clinic_setup_${c.slug}_agent_id` : `eleven_clinic_${c.slug}_agent_id`;
       x =
         d.eleven?.(c) ??
         elevenCalls({
-          name: clinicAgentName(c),
-          tags: ["clinic-receptionist", c.slug],
+          name: setup ? setupAgentName(c) : clinicAgentName(c),
+          tags: [setup ? "clinic-setup" : "clinic-receptionist", c.slug],
           key: d.key,
-          prompt: () => clinicPrompt(c),
-          firstMessage: () => clinicGreeting(c),
-          tools: () => CLINIC_TOOLS(c) as any,
-          body: clinicAgentBody(c),
+          prompt: () => prompt,
+          firstMessage: () => (setup ? setupGreeting(c) : clinicGreeting(c)),
+          tools: () => (setup ? SETUP_TOOLS : CLINIC_TOOLS(c)) as any,
+          body: clinicAgentBody(c, setup ? CLINIC_SETUP_MAX_S : CLINIC_CALL_MAX_S),
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(k) as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, id),
           },
         });
-      doors.set(c.slug, x);
+      for (const key of [...doors.keys()]) if (key.startsWith(`${c.slug}|${kind}|`)) doors.delete(key);
+      doors.set(at, x);
     }
     return x;
   };
@@ -405,37 +533,96 @@ export function createClinicDemo(d: ClinicDeps) {
   const visitorHash = (addr: string) => crypto.createHash("sha256").update(`clinic|${addr}`).digest("hex").slice(0, 16);
   const liveCall = (slug: string, id: string) => {
     const r = db.prepare("SELECT * FROM clinic_calls WHERE id = ? AND slug = ?").get(id, slug) as any;
-    if (!r || r.ended_at || now() - Date.parse(r.started_at) > CALL_LIVE_MS) throw new VoiceError(404, "no_call", "Esta llamada ya terminó.");
+    if (!r || r.ended_at || now() - Date.parse(r.started_at) > (r.kind === "setup" ? CLINIC_SETUP_MAX_S * 1000 + 60_000 : CALL_LIVE_MS)) throw new VoiceError(404, "no_call", "Esta llamada ya terminó.");
     return r;
+  };
+  const secret = () => {
+    const k = "clinic_setup_secret";
+    if (!(db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(k) as { value: string } | undefined))
+      db.prepare("INSERT INTO voice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").run(k, crypto.randomBytes(24).toString("hex"));
+    return (db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(k) as { value: string }).value;
+  };
+  const saved = (id: string): ClinicObjective[] =>
+    (db.prepare("SELECT data FROM clinic_setup WHERE call_id = ? ORDER BY n").all(id) as { data: string }[]).map((r) => JSON.parse(r.data));
+  const setupTool = async (c: Clinic, id: string, name: string, args: Record<string, unknown>): Promise<{ result: string }> => {
+    if (name === "add_objective") {
+      const o = objectiveIn(args);
+      if (!o) return { result: "Falta el objetivo. Pregúntalo y vuelve a llamar a add_objective." };
+      const have = saved(id).length;
+      const asked = Number(String(args.number ?? "").replace(/\D/g, ""));
+      const n = asked >= 1 && asked <= have ? asked : have + 1;
+      if (n > SETUP_OBJECTIVES_MAX) return { result: `Ya hay ${SETUP_OBJECTIVES_MAX} objetivos apuntados, el máximo. Léelos y pregunta si los deja así.` };
+      db.prepare("INSERT INTO clinic_setup (call_id, slug, n, data, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(call_id, n) DO UPDATE SET data = excluded.data, at = excluded.at").run(id, c.slug, n, JSON.stringify(o), iso());
+      return { result: `Apuntado el objetivo ${n}: ${sayObjective(o)}. Si hay más, pregunta por el siguiente; si no, léelos todos y pregunta si los deja así en la ficha.` };
+    }
+    if (name === "confirm_objectives") {
+      const list = saved(id);
+      if (!list.length) return { result: "Aún no hay ningún objetivo apuntado. Pregunta qué quiere conseguir y usa add_objective." };
+      if (!d.writeClinic) return { result: "No puedo escribir en la ficha ahora. Di que el equipo los apuntará y pon un file_ticket con los objetivos." };
+      const at = iso();
+      const w = d
+        .writeClinic(c.slug, (cur) => withObjectives(cur ?? "{}", list, id, at), `Clinic set-up: ${c.slug}'s objectives set on its set-up call ${id} (via console)`)
+        .catch((e) => ({ state: "failed", detail: (e as Error).message }));
+      const done = await Promise.race([w, new Promise<undefined>((r) => setTimeout(() => r(undefined), d.writeWaitMs ?? 12_000))]);
+      if (done && done.state === "failed") return { result: "No se pudo escribir en la ficha. Dilo en una frase y pon un file_ticket con los objetivos para que el equipo los apunte." };
+      return { result: `Escrito: ${list.length} objetivo${list.length === 1 ? "" : "s"} en la ficha de ${c.clinic}. Dilo en una frase: desde ahora ${c.receptionist ?? "la recepcionista"} trabaja con ellos en mente. Después pasa a conectar.` };
+    }
+    if (name === "file_ticket") {
+      if (!d.followUp) return { result: "No puedo apuntar pendientes ahora. Di que el equipo lo verá." };
+      return { result: d.followUp.file(c, id, { need: String(args.need ?? ""), who: String(args.who ?? "clínica") }).result };
+    }
+    return { result: `No conozco la herramienta ${name}.` };
   };
   const taken = (slug: string, date: string) => new Set((db.prepare("SELECT time FROM clinic_bookings WHERE slug = ? AND kind = 'appointment' AND date = ?").all(slug, date) as { time: string }[]).map((r) => r.time));
 
   return {
     clinic,
     list: () => [...d.clinics().values()],
-    /** the page opened: the next call's link is made now (one per clinic, kept 10 minutes). */
-    warm(slug: string) {
-      void door(clinic(slug)).warm?.("es");
+    /** one scan per open of the call page, with the letter's code when the link carries one (?c=). */
+    scan(slug: string, code: string | undefined, addr: string) {
+      clinic(slug);
+      const k = /^[A-Za-z0-9_-]{1,40}$/.test(code ?? "") ? code! : null;
+      db.prepare("INSERT INTO clinic_scans (slug, code, visitor, at) VALUES (?, ?, ?, ?)").run(slug, k, visitorHash(addr), iso());
     },
-    async start(slug: string, addr: string) {
+    /** the page opened: the next call's link is made now (one per clinic, kept 10 minutes). */
+    warm(slug: string, kind: ClinicCallKind = "reception") {
+      void door(clinic(slug), kind).warm?.("es");
+    },
+    /** a real clinic's receptionist answers only while its plan is on; our made-up demo clinics always do. */
+    isOn: (slug: string) => !!clinic(slug).madeUp || planOn(clinicPlan(db, slug)),
+    plan: (slug: string) => clinicPlan(db, slug),
+    /** the clinic's private set-up link (its key is the credential); handed out on the owner's signed-in view. */
+    setupLink: (slug: string) => `/api/public/clinic/${clinic(slug).slug}/puesta-en-marcha?k=${setupKey(secret(), slug)}`,
+    validSetup: (slug: string, k: string) => validSetupKey(secret(), slug, k),
+    /** the objectives a set-up call has noted so far (written to the file only on the owner's yes). */
+    noted: (id: string) => saved(id),
+    async start(slug: string, addr: string, code?: string, kind: ClinicCallKind = "reception", k = "") {
       const c = clinic(slug);
+      if (kind === "setup" && !validSetupKey(secret(), slug, k)) throw new VoiceError(404, "not_found", "Este enlace de puesta en marcha no es válido.");
+      // the set-up call comes before the receptionist is on; only her own calls wait on the plan.
+      if (kind !== "setup" && !c.madeUp && !planOn(clinicPlan(db, slug))) throw new VoiceError(409, "not_on", "La recepcionista de esta clínica aún no está activada.");
       const v = visitorHash(addr);
       const hourAgo = new Date(now() - 3_600_000).toISOString();
       const dayAgo = new Date(now() - 86_400_000).toISOString();
-      const mine = (db.prepare("SELECT COUNT(*) n FROM clinic_calls WHERE visitor = ? AND started_at > ?").get(v, hourAgo) as { n: number }).n;
+      // a set-up call counts only against set-up calls: its link's key and its own day cap bound it.
+      const mine = (db.prepare("SELECT COUNT(*) n FROM clinic_calls WHERE visitor = ? AND started_at > ? AND (kind = 'setup') = ?").get(v, hourAgo, kind === "setup" ? 1 : 0) as { n: number }).n;
       if (mine >= CLINIC_STARTS_PER_HOUR) throw new VoiceError(409, "too_many", "Ha hecho varias llamadas seguidas. Vuelva a probar dentro de una hora.");
       const all = (db.prepare("SELECT COUNT(*) n FROM clinic_calls WHERE slug = ? AND started_at > ?").get(slug, dayAgo) as { n: number }).n;
-      if (all >= (c.callsPerDay ?? 40)) throw new VoiceError(409, "day_full", "La demo ya ha atendido todas las llamadas de hoy. Vuelva a probar mañana.");
-      const link = await door(c).link("es");
+      if (kind === "setup") {
+        const setups = (db.prepare("SELECT COUNT(*) n FROM clinic_calls WHERE slug = ? AND kind = 'setup' AND started_at > ?").get(slug, dayAgo) as { n: number }).n;
+        if (setups >= SETUP_CALLS_PER_DAY) throw new VoiceError(409, "day_full", "Hoy ya se han hecho todas las llamadas de puesta en marcha. Vuelva a probar mañana.");
+      } else if (all >= (c.callsPerDay ?? 40)) throw new VoiceError(409, "day_full", "La demo ya ha atendido todas las llamadas de hoy. Vuelva a probar mañana.");
+      const link = await door(c, kind).link("es");
       const id = `cc_${crypto.randomBytes(12).toString("hex")}`;
-      db.prepare("INSERT INTO clinic_calls (id, slug, started_at, visitor) VALUES (?, ?, ?, ?)").run(id, slug, iso(), v);
-      return { call: id, signedUrl: link.signedUrl };
+      db.prepare("INSERT INTO clinic_calls (id, slug, started_at, visitor, code, kind) VALUES (?, ?, ?, ?, ?, ?)").run(id, slug, iso(), v, letterCode(code) ?? null, kind);
+      return { call: id, signedUrl: link.signedUrl, ...(d.followUp ? { trace: d.followUp.traceUrl(slug, id) } : {}) };
     },
-    tool(slug: string, id: string, name: string, args: Record<string, unknown>): { result: string } {
+    async tool(slug: string, id: string, name: string, args: Record<string, unknown>): Promise<{ result: string }> {
       const c = clinic(slug);
       const r = liveCall(slug, id);
-      if (r.tools >= TOOLS_PER_CALL) return { result: "No puedo hacer más gestiones en esta llamada de demostración." };
+      if (r.tools >= TOOLS_PER_CALL * (r.kind === "setup" ? 2 : 1)) return { result: "No puedo hacer más gestiones en esta llamada." };
       db.prepare("UPDATE clinic_calls SET tools = tools + 1 WHERE id = ?").run(id);
+      if (r.kind === "setup") return setupTool(c, id, name, args);
       const s = (k: string) => String(args[k] ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
       const booked = () => (db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ?").get(id) as { n: number }).n;
       if (name === "free_slots") {
@@ -468,6 +655,18 @@ export function createClinicDemo(d: ClinicDeps) {
         );
         return { result: `Reservado: ${s("service") || "cita"} para ${s("name")}, el ${sayDate(date)} a las ${hm}. Confírmalo en una frase.` };
       }
+      if (name === "file_ticket") {
+        if (!d.followUp) return { result: "No puedo apuntar pendientes ahora. Di que llamen a la clínica en horario de recepción." };
+        return { result: d.followUp.file(c, id, { need: s("need"), who: s("who"), contact: s("contact") }).result };
+      }
+      if (name === "qualify_lead" && c.sales) {
+        if ((db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ? AND kind = 'lead'").get(id) as { n: number }).n)
+          return { result: "Ya está anotado. Sigue la conversación o despídete." };
+        const lead = { who: whoAnswered(s("who")), clinic: s("clinic"), city: s("city"), asks: s("asks"), needs: s("needs"), answer: s("answer"), code: r.code ?? undefined };
+        db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'lead', ?, ?)").run(`cb_${crypto.randomBytes(6).toString("hex")}`, id, slug, JSON.stringify(lead), iso());
+        void d.leads?.land({ call: id, day: madridToday(now()).iso, ...lead });
+        return { result: "Anotado para el equipo. No lo menciones; sigue la conversación o despídete." };
+      }
       if (name === "book_follow_up" && c.sales) {
         if (booked() >= BOOKINGS_PER_CALL) return { result: "Ya está apuntado. Confírmalo y despídete." };
         if (!s("name") || !s("contact")) return { result: "Faltan su nombre o un teléfono o email. Pídelos." };
@@ -488,7 +687,23 @@ export function createClinicDemo(d: ClinicDeps) {
       if (r.ended_at) return { ended: true };
       const t = (b.transcript ?? []).slice(0, 200).map((l) => ({ who: l.who === "voice" ? "voice" : "caller", text: l.text.slice(0, 1000) }));
       db.prepare("UPDATE clinic_calls SET ended_at = ?, reason = ?, transcript = ? WHERE id = ?").run(iso(), (b.reason ?? "ended").slice(0, 40), JSON.stringify(t), id);
+      // a call opened from a letter always lands as a lead: what the caller asked, from the call's text, when the rep
+      // never qualified it (the caller hung up first, the line dropped)
+      const qualified = (db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ? AND kind = 'lead'").get(id) as { n: number }).n > 0;
+      if (r.code && !qualified && d.leads) {
+        const lead = { who: "no lo dijo", asks: questionsIn(t), needs: "", answer: t.some((l) => l.who === "caller") ? `colgó sin decirlo (${(b.reason ?? "ended").slice(0, 20)})` : "no habló", code: r.code as string };
+        db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'lead', ?, ?)").run(`cb_${crypto.randomBytes(6).toString("hex")}`, id, slug, JSON.stringify({ ...lead, fromEnd: true }), iso());
+        void d.leads.land({ call: id, day: madridToday(now()).iso, ...lead });
+      }
       return { ended: true };
+    },
+    /** the caller's trace: the call and its tickets, only with the call's own key. */
+    trace(slug: string, id: string, k: string) {
+      const c = clinic(slug);
+      if (!d.followUp || !d.followUp.validTrace(id, k)) throw new VoiceError(404, "no_call", "No existe esa llamada.");
+      const r = db.prepare("SELECT * FROM clinic_calls WHERE id = ? AND slug = ?").get(id, slug) as any;
+      if (!r) throw new VoiceError(404, "no_call", "No existe esa llamada.");
+      return { clinic: c, call: { startedAt: r.started_at, endedAt: r.ended_at, transcript: r.transcript ? JSON.parse(r.transcript) : [] }, tickets: d.followUp.tickets(slug, id) };
     },
     /** the owner's view: the calls with their text and bookings, newest first. */
     calls(limit = 50) {
@@ -496,11 +711,15 @@ export function createClinicDemo(d: ClinicDeps) {
       return rows.map((r) => ({
         id: r.id,
         slug: r.slug,
+        code: r.code ?? undefined,
         startedAt: r.started_at,
         endedAt: r.ended_at,
         reason: r.reason,
+        kind: r.kind ?? "reception",
+        ...(r.kind === "setup" ? { objectives: saved(r.id) } : {}),
         transcript: r.transcript ? JSON.parse(r.transcript) : [],
         bookings: (db.prepare("SELECT kind, date, time, data, at FROM clinic_bookings WHERE call_id = ? ORDER BY at").all(r.id) as any[]).map((b) => ({ ...b, data: JSON.parse(b.data) })),
+        tickets: d.followUp ? d.followUp.tickets(r.slug, r.id) : [],
       }));
     },
   };
@@ -548,21 +767,67 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
     "/public/clinic/:slug",
     pub((c, slug) => {
       const cl = demo.clinic(slug);
+      demo.scan(slug, c.req.query("c"), clientAddress(peerOf(c), (h) => c.req.header(h)));
       demo.warm(slug);
       c.header("referrer-policy", "no-referrer");
       return c.html(clinicPage(cl));
     }),
   );
+  // the clinic's activation page: the plan (14 days free, then 149 euros a month), one button to the hosted
+  // checkout (POST …/checkout, the billing plug), and whether its receptionist is on.
+  api.get(
+    "/public/clinic/:slug/activar",
+    pub((c, slug) => {
+      const cl = demo.clinic(slug);
+      c.header("referrer-policy", "no-referrer");
+      return c.html(activationPage(cl, demo.plan(slug), { back: c.req.query("pago") }));
+    }),
+  );
+  // the branded instant web call: a link the clinic sends; the page names who calls, one tap answers.
+  api.get(
+    "/public/clinic/:slug/llamada",
+    pub((c, slug) => {
+      const cl = demo.clinic(slug);
+      demo.scan(slug, c.req.query("c"), clientAddress(peerOf(c), (h) => c.req.header(h)));
+      demo.warm(slug);
+      c.header("referrer-policy", "no-referrer");
+      return c.html(clinicPage(cl, { ring: true }));
+    }),
+  );
+  // the caller's own trace of one call: what was said, each promise with its day and its state.
+  api.get(
+    "/public/clinic/:slug/calls/:cid/trace",
+    pub((c, slug) => {
+      const t = demo.trace(slug, c.req.param("cid") ?? "", c.req.query("k") ?? "");
+      c.header("referrer-policy", "no-referrer");
+      return c.html(tracePage(t.clinic, t.call, t.tickets));
+    }),
+  );
   api.post(
     "/public/clinic/:slug/calls",
-    pub(async (c, slug) => c.json(await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h))), 201)),
+    pub(async (c, slug) => c.json(await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h)), (await body(c)).code), 201)),
+  );
+  // the set-up call (clinicSetup.ts): the clinic's private page and its call start; the key is the credential.
+  api.get(
+    "/public/clinic/:slug/puesta-en-marcha",
+    pub((c, slug) => {
+      const k = c.req.query("k") ?? "";
+      if (!demo.validSetup(slug, k)) throw new VoiceError(404, "not_found", "Este enlace de puesta en marcha no es válido.");
+      demo.warm(slug, "setup");
+      c.header("referrer-policy", "no-referrer");
+      return c.html(clinicPage(demo.clinic(slug), { setup: k }));
+    }),
+  );
+  api.post(
+    "/public/clinic/:slug/setup/calls",
+    pub(async (c, slug) => c.json(await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h)), undefined, "setup", c.req.query("k") ?? ""), 201)),
   );
   api.post(
     "/public/clinic/:slug/calls/:cid/tool",
     pub(async (c, slug) => {
       const p = toolIn.safeParse(await body(c));
       if (!p.success) return c.json({ error: { code: "validation_error", message: "name and args" } }, 400);
-      return c.json(demo.tool(slug, c.req.param("cid") ?? "", p.data.name, p.data.args ?? {}));
+      return c.json(await demo.tool(slug, c.req.param("cid") ?? "", p.data.name, p.data.args ?? {}));
     }),
   );
   api.post(
@@ -575,6 +840,10 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
   );
   // the owner's (signed in, not open): every demo call with its text and bookings.
   api.get("/clinic-demo/calls", (c) => c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, sales: !!x.sales })), calls: demo.calls(Number(c.req.query("limit")) || 50) }));
+  // the owner's (signed in): each clinic's private set-up link and the objectives its file holds.
+  api.get("/clinic-demo/setup", (c) =>
+    c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, link: demo.setupLink(x.slug), objectives: x.objectives ?? [], objectivesFromCall: x.objectivesFromCall ?? null })) }),
+  );
 }
 
 // ---------- the page ----------
@@ -584,8 +853,10 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "
 const ELEVEN_CLIENT = { pkg: "@elevenlabs/client", version: "1.36.1" };
 export const ELEVEN_CLIENT_URL = `https://cdn.jsdelivr.net/npm/${ELEVEN_CLIENT.pkg}@${ELEVEN_CLIENT.version}/+esm`;
 
-export function clinicPage(c: Clinic): string {
+export function clinicPage(c: Clinic, o: { ring?: boolean; letter?: { code: string; clinic: string }; setup?: string } = {}): string {
+  if (o.setup) return setupPage(c, o.setup);
   const s = c.sales;
+  const caller = c.receptionist ?? "Recepción";
   const days = WEEKDAYS.slice(1).concat(WEEKDAYS[0]).filter((d) => (c.hours[d] ?? []).length);
   const title = s ? `Pruebe la recepcionista por voz · ${s.company}` : `${c.clinic} · Llame a recepción`;
   const punch = s
@@ -596,7 +867,57 @@ export function clinicPage(c: Clinic): string {
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex"><title>${esc(title)}</title>
 <style>
-@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/fonts/inter-400.woff2) format("woff2")}
+${PAGE_CSS}</style></head><body><main>
+${
+  o.letter
+    ? `<span class="tag">Su carta · código ${esc(o.letter.code)}</span>
+<h1 data-testid="letter-clinic">${esc(o.letter.clinic)}: hable ahora con nuestra recepcionista de IA</h1>
+<p class="punch">Es un agente de inteligencia artificial y esto es una demostración en directo. Pregúntele lo que quiera, como lo haría un paciente o usted mismo.</p>
+<div class="flow" aria-hidden="true">${["Pulse el botón", "Hable con ella", "Pregunte el precio"].map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>`
+    : o.ring
+    ? `<span class="tag">Llamada entrante</span>
+<h1 id="who">${esc(caller)} de ${esc(c.clinic)} le llama</h1>
+<p class="punch">Pulse Contestar y hable. Sin descargar nada y sin WhatsApp. Al colgar, la llamada y lo que quede pendiente quedan en una página solo suya.</p>
+<div class="flow" aria-hidden="true">${["Contestar", "Hablar", "Su página con lo pendiente"].map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>`
+    : `<span class="tag">${s ? `Demo · ${esc(s.company)}` : esc(c.city)}</span>
+<h1>${esc(c.clinic)}</h1>
+<p class="punch">${esc(punch)}</p>
+<div class="flow" aria-hidden="true">${flow.map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>`
+}
+<button id="call" data-testid="call-start" disabled>${o.ring ? "Contestar" : o.letter ? "Empezar la llamada" : "Llamar a recepción"}</button>
+<button id="hang" data-testid="call-hangup">Colgar</button>
+<p id="status" role="status">Preparando la línea…</p>
+<ul id="lines" aria-live="polite"></ul>
+<p id="trace" class="small" hidden><a data-testid="call-trace" href="#">Su llamada y lo que queda pendiente</a>: esta página es solo suya, guárdela.</p>
+${
+  s
+    ? `<section id="offer"><h2>Lo que recibe su clínica</h2>
+<p>${esc(s.what)}</p>
+<p class="price">${esc(s.price.replace(/,.*$/, ""))}</p>
+<table>
+<tr><td>Teléfono y WhatsApp, todas las llamadas</td><td>${esc(s.price.replace(/,.*$/, ""))}</td></tr>
+${s.priceWhatsappOnly ? `<tr><td>Solo WhatsApp</td><td>${esc(s.priceWhatsappOnly.replace(/,.*$/, ""))}</td></tr>` : ""}
+<tr><td>Prueba en su propio número</td><td>${s.trialDays} días gratis</td></tr>
+<tr><td>Puesta en marcha</td><td>una llamada de 45 minutos</td></tr>
+</table>
+<p class="small">${esc(s.terms ?? "")} Pídale a la recepcionista que le llame el equipo.</p></section>`
+    : ""
+}
+<section id="clinic"><h2>La clínica</h2>
+<table>${days.map((d) => `<tr><td>${d[0].toUpperCase()}${d.slice(1)}</td><td>${c.hours[d].map((r) => r.replace("-", "–")).join(", ")}</td></tr>`).join("")}</table>
+<table style="margin-top:12px">${c.services.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.price)}</td></tr>`).join("")}</table>
+</section>
+<p class="small" style="margin-top:24px">${c.madeUp ? "Clínica de demostración: pacientes, citas y precios inventados. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. La recepcionista nunca llama a nadie: solo contesta.</p>${
+  o.letter
+    ? `
+<p class="small" id="privacy">Privacidad: ${esc(s?.company ?? "Nuestro equipo")} tomó la dirección postal de su clínica de su web pública y solo la usa para esta carta. Esta página cuenta cuántas veces se abre su código, sin cookies.${s?.contact ? ` Para que borremos sus datos o no volver a recibir nada, escriba a ${esc(s.contact)}.` : ""}</p>`
+    : ""
+}
+</main>
+${callScript(c.slug, "/calls", ["free_slots", "book_appointment", "book_follow_up", "file_ticket", "qualify_lead"], "Recepción", o.letter?.code ?? "")}</body></html>`;
+}
+
+const PAGE_CSS = `@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/fonts/inter-400.woff2) format("woff2")}
 @font-face{font-family:"Inter";font-weight:600;font-display:swap;src:url(/fonts/inter-600.woff2) format("woff2")}
 :root{--paper:#f6f3ec;--ink:#1d1b17;--muted:#6b665c;--line:#d9d3c5;--green:#1f5c45;--card:#fffdf8}
 *{box-sizing:border-box}
@@ -624,49 +945,27 @@ td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
 td:last-child{text-align:right;white-space:nowrap;padding-left:12px}
 .price{font-size:22px;font-weight:600;color:var(--green)}
 .small{font-size:13px;color:var(--muted)}
-</style></head><body><main>
-<span class="tag">${s ? `Demo · ${esc(s.company)}` : esc(c.city)}</span>
-<h1>${esc(c.clinic)}</h1>
-<p class="punch">${esc(punch)}</p>
-<div class="flow" aria-hidden="true">${flow.map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>
-<button id="call" data-testid="call-start" disabled>Llamar a recepción</button>
-<button id="hang" data-testid="call-hangup">Colgar</button>
-<p id="status" role="status">Preparando la línea…</p>
-<ul id="lines" aria-live="polite"></ul>
-${
-  s
-    ? `<section id="offer"><h2>Lo que recibe su clínica</h2>
-<p>${esc(s.what)}</p>
-<p class="price">${esc(s.price.replace(/,.*$/, ""))}</p>
-<table>
-<tr><td>Teléfono y WhatsApp, todas las llamadas</td><td>${esc(s.price.replace(/,.*$/, ""))}</td></tr>
-${s.priceWhatsappOnly ? `<tr><td>Solo WhatsApp</td><td>${esc(s.priceWhatsappOnly.replace(/,.*$/, ""))}</td></tr>` : ""}
-<tr><td>Prueba en su propio número</td><td>${s.trialDays} días gratis</td></tr>
-<tr><td>Puesta en marcha</td><td>una llamada de 45 minutos</td></tr>
-</table>
-<p class="small">${esc(s.terms ?? "")} Pídale a la recepcionista que le llame el equipo.</p></section>`
-    : ""
-}
-<section id="clinic"><h2>La clínica</h2>
-<table>${days.map((d) => `<tr><td>${d[0].toUpperCase()}${d.slice(1)}</td><td>${c.hours[d].map((r) => r.replace("-", "–")).join(", ")}</td></tr>`).join("")}</table>
-<table style="margin-top:12px">${c.services.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.price)}</td></tr>`).join("")}</table>
-</section>
-<p class="small" style="margin-top:24px">${c.madeUp ? "Clínica de demostración: pacientes, citas y precios inventados. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. La recepcionista nunca llama a nadie: solo contesta.</p>
-</main>
-<script type="module">
-const SLUG = ${JSON.stringify(c.slug)};
+`;
+
+/** the page's call script: one button, a signed link from \`start\`, the agent's client tools answered by the console. */
+function callScript(slug: string, start: string, tools: string[], voice: string, code = ""): string {
+  return `<script type="module">
+const SLUG = ${JSON.stringify(slug)};
+const CODE = ${JSON.stringify(code)} || new URLSearchParams(location.search).get("c") || "";
 const base = "/api/public/clinic/" + SLUG;
 const $ = (id) => document.getElementById(id);
+const START = ${JSON.stringify(start)};
 const btn = $("call"), hang = $("hang"), status = $("status"), list = $("lines");
-let conv = null, callId = null, lines = [], ended = false;
+let conv = null, callId = null, traceUrl = null, lines = [], ended = false;
 const say = (t) => (status.textContent = t);
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b ?? {}) }).then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j?.error?.message || "Error " + r.status); return j; });
-const add = (who, text) => { lines.push({ who, text }); const li = document.createElement("li"); li.className = who; li.innerHTML = "<b></b>"; li.firstChild.textContent = who === "voice" ? "Recepción" : "Usted"; li.append(text); list.append(li); li.scrollIntoView({ block: "nearest" }); };
+const add = (who, text) => { lines.push({ who, text }); const li = document.createElement("li"); li.className = who; li.innerHTML = "<b></b>"; li.firstChild.textContent = who === "voice" ? ${JSON.stringify(voice)} : "Usted"; li.append(text); list.append(li); li.scrollIntoView({ block: "nearest" }); };
 const tool = (name) => async (args) => { try { return (await post("/calls/" + callId + "/tool", { name, args })).result; } catch (e) { return "No se pudo: " + e.message; } };
 function finish(reason) {
   if (ended) return; ended = true;
   if (callId) navigator.sendBeacon(base + "/calls/" + callId + "/end", JSON.stringify({ reason, transcript: lines }));
   hang.style.display = "none"; btn.style.display = "block"; btn.disabled = false; btn.textContent = "Llamar otra vez";
+  if (traceUrl) { const t = $("trace"); t.querySelector("a").href = traceUrl; t.hidden = false; }
   say(reason === "bye" ? "Llamada terminada. Gracias." : "Llamada terminada.");
 }
 let Conversation = null;
@@ -675,12 +974,12 @@ btn.onclick = async () => {
   btn.disabled = true; ended = false; lines = []; list.textContent = ""; say("Conectando…");
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().forEach((t) => t.stop()));
-    const s = await post("/calls");
-    callId = s.call;
+    const s = await post(START, CODE ? { code: CODE } : {});
+    callId = s.call; traceUrl = s.trace || null; $("trace").hidden = true;
     conv = await Conversation.startSession({
       signedUrl: s.signedUrl,
       connectionType: "websocket",
-      clientTools: { free_slots: tool("free_slots"), book_appointment: tool("book_appointment"), book_follow_up: tool("book_follow_up") },
+      clientTools: Object.fromEntries(${JSON.stringify(tools)}.map((n) => [n, tool(n)])),
       onConnect: () => { btn.style.display = "none"; hang.style.display = "block"; say("En línea. Hable cuando quiera."); },
       onMessage: (m) => { if (m.message && m.message.replace(/[.\\s…]/g, "")) add(m.role === "user" ? "caller" : "voice", m.message); },
       onDisconnect: (d) => finish(d && d.reason === "agent" ? "bye" : d && d.reason === "user" ? "hangup" : "line_dropped"),
@@ -690,5 +989,37 @@ btn.onclick = async () => {
 };
 hang.onclick = () => { if (conv) conv.endSession().catch(() => {}); finish("hangup"); };
 addEventListener("pagehide", () => { if (conv && !ended) { conv.endSession().catch(() => {}); finish("left"); } });
-</script></body></html>`;
+</script>`;
+}
+
+/** the clinic's private set-up page (clinicSetup.ts): one button to the set-up assistant, and what its file holds now. */
+function setupPage(c: Clinic, k: string): string {
+  const who = c.receptionist ?? "su recepcionista";
+  const have = c.objectives ?? [];
+  return `<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><title>${esc(`Puesta en marcha · ${c.clinic}`)}</title>
+<style>
+${PAGE_CSS}
+ol.obj{margin:0;padding-left:20px}ol.obj li{margin:0 0 8px}
+</style></head><body><main>
+<span class="tag">Puesta en marcha · solo para su clínica</span>
+<h1>${esc(c.clinic)}: diez minutos para poner en marcha a ${esc(who)}</h1>
+<p class="punch">Una llamada: le contamos cómo trabaja, usted dice qué quiere conseguir con ella y vemos qué falta conectar. Lo que acuerden queda escrito en la ficha de su clínica.</p>
+<div class="flow" aria-hidden="true">${["Aprender", "Sus objetivos", "Conectar"].map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>
+<button id="call" data-testid="call-start" disabled>Empezar la puesta en marcha</button>
+<button id="hang" data-testid="call-hangup">Colgar</button>
+<p id="status" role="status">Preparando la línea…</p>
+<ul id="lines" aria-live="polite"></ul>
+<p id="trace" class="small" hidden><a data-testid="call-trace" href="#">Su llamada y lo que queda pendiente</a>: esta página es solo suya, guárdela.</p>
+<section id="objectives" data-testid="setup-objectives"><h2>Sus objetivos para ${esc(who)}</h2>
+${
+  have.length
+    ? `<ol class="obj">${have.map((o) => `<li>${esc(sayObjective(o))}</li>`).join("")}</ol><p class="small">Escritos en su llamada de puesta en marcha${c.objectivesAt ? ` del ${esc(c.objectivesAt.slice(0, 10))}` : ""}. Llame otra vez para cambiarlos.</p>`
+    : `<p class="small">Aún ninguno: los apunta la llamada.</p>`
+}
+</section>
+<p class="small" style="margin-top:24px">${c.madeUp ? "Clínica de demostración, inventada. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. Este enlace es solo para su clínica: no lo comparta.</p>
+</main>
+${callScript(c.slug, `/setup/calls?k=${encodeURIComponent(k)}`, ["add_objective", "confirm_objectives", "file_ticket"], "Asistente")}</body></html>`;
 }

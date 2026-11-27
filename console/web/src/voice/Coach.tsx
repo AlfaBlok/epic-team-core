@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/common";
 import { useCallDock } from "./CallPanel";
+import { TEAM_DESK_PARTNER } from "./whoAnswers";
 
 /**
  * The objectives coach: one link he opens on his phone while he walks. One Call, a
@@ -10,15 +11,16 @@ export const COACH_BASE = "/api/voice/coach";
 
 const STEPS = [
   { n: "1", t: "You talk", d: "Pick an objective. Say what moved and what blocks it." },
-  { n: "2", t: "The coach asks", d: "Short questions until each key result is clear and measurable." },
+  { n: "2", t: "The partner asks", d: "Short questions until each key result is clear and measurable." },
   { n: "3", t: "Your words go on", d: "To the Team desk, or the social desk for social only. Nothing changes without your yes." },
 ];
 
 export function CoachPage() {
-  const call = useCallDock({ base: COACH_BASE, callee: "your objectives coach", where: "Objectives coach", hint: "Your objectives coach, in English or Spanish. Try “Let’s work on the testers objective.”" });
+  // the coach is the Team desk partner now (one person, one name: whoAnswers.ts), the same call as the Team desk's Partner.
+  const call = useCallDock({ base: COACH_BASE, callee: `the ${TEAM_DESK_PARTNER}`, name: TEAM_DESK_PARTNER, where: TEAM_DESK_PARTNER, hint: "All your objectives, in English or Spanish. Try “What is red?”" });
   return (
     <div className="mx-auto w-full max-w-2xl" data-testid="coach-page">
-      <PageHeader title="Objectives coach" description="Call it while you walk: it asks about your objectives and passes your words to the right desk." actions={call.button} />
+      <PageHeader title={TEAM_DESK_PARTNER} description="Your senior partner over all your objectives. Call it while you walk: it asks about your objectives and passes your words to the right desk." actions={call.button} />
       {call.bar}
       {!call.onCall && (
         <ol className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="How a coach call works" data-testid="coach-steps">

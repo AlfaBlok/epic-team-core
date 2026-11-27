@@ -65,6 +65,15 @@ export function mountVoice(api: Hono, voice: Voice, o: { world: () => string | u
     "/voice/calls",
     guard((c) => (inWorld() ? c.json({ calls: voice.list(Number(c.req.query("limit")) || 50), state: voice.state() }) : c.json({ calls: [] }))),
   );
+  // a call's whole transcript, the link in its whole-call post on the desk : his own console only.
+  api.get(
+    "/voice/calls/:id/transcript",
+    guard((c) => {
+      if (!inWorld()) return c.json({ error: { code: "world_scope", message: "call transcripts are read on the owner's own console" } }, 403);
+      const t = voice.wholeText(c.req.param("id") ?? "");
+      return t ? c.text(t) : c.json({ error: { code: "not_found", message: "no such call" } }, 404);
+    }),
+  );
   api.put(
     "/voice/settings",
     guard(async (c) => {
@@ -121,8 +130,8 @@ export function mountCampaignVoice(api: Hono, voiceFor: (milestoneId: string) =>
  * the objectives coach's call (/coach): the same call routes under /voice/coach, on the coach's own
  * Voice (his objectives read only, his words relayed to a desk). The owner's own console only.
  */
-export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => string | undefined }) {
-  mountOwnCall(api, "/voice/coach", coach, o, "The objectives coach");
+export function mountCoachVoice(api: Hono, coach: Voice, o: { world: () => string | undefined; ownWorld?: (world: string, email: string) => boolean }) {
+  mountOwnCall(api, "/voice/coach", coach, { ...o, page: "/coach" }, "The Team desk partner");
 }
 
 /**

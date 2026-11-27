@@ -20,7 +20,7 @@ describe("the team product's strategy call", () => {
     const names = b.conversation_config.agent.prompt.tools.map((t: any) => t.name);
     expect(names).toEqual(expect.arrayContaining(["relay_to_desk", "end_call"]));
     expect(names).not.toContain("press_card");
-    expect(strategyInstructions()).toMatch(/who buys first/);
+    expect(strategyInstructions()).toMatch(/Settled is settled: a question he has already answered .* is never asked again/);
     expect(strategyInstructions()).toMatch(/never say you did/);
   });
 

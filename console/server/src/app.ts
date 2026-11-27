@@ -129,6 +129,9 @@ import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteL
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { clinicsIn, createClinicDemo, mountClinicDemo } from "./clinicDemo.js";
+import { createLetters, lettersIn, mountLetters } from "./clinicLetters.js";
+import { createFollowUp, repoFileWriter } from "./clinicFollowUp.js";
+import { createLeads } from "./clinicLeads.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
 import { anthropicPairJudge, borderlinePairs, callOf, EPIC_JUDGE_SYSTEM, EPIC_SURE, epicMerged, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
@@ -224,18 +227,21 @@ import { createAttachments, mountAttachments } from "./desk/attachments.js";
 import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, mountVoiceNotes, TRANSCRIPT_MAX, voiceNoteMessage } from "./desk/voiceNotes.js";
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
-import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
+import { createWholeCall } from "./voice/wholeCall.js";
+import { CALL_TRANSCRIPT_HEAD, createVoice, GREETING_LEAD, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOnboardingVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
-import { asksOf, levelKnows, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
+import { SWITCH_TOOL, switchAnswer, switchRule } from "./voice/switchTo.js";
+import { asksOf, campaignGreeting, levelKnows, levelName, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
-import { agentBody, elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
-import { ONBOARDING_CALL_MIN, ONBOARDING_PAGE, ONBOARDING_TOOLS, onboardingGreeting, onboardingInstructions, onboardingKnows, onboardingObjectiveIn } from "./voice/onboarding.js";
+import { agentBody, elevenCalls, elevenTranscript, type ElevenCalls } from "./voice/elevenAgent.js";
+import { RECALL_HOURS } from "./voice/recall.js";
+import { ONBOARDING_CALL_MIN, ONBOARDING_PAGE, ONBOARDING_TOOLS, onboardingGreeting, onboardingInstructions, onboardingKnows, onboardingObjectiveIn, onboardingRoster } from "./voice/onboarding.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { mountListenPage, mountReplyNote } from "./voice/replyNote.js";
 import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_MIN_S, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince, briefingWalkRule, reviewCards, snapshotOf, type ReviewSnapshot } from "./voice/briefing.js";
 import { marketingAgentName, marketingBrief, MARKETING_GREETING, MARKETING_PAGE, MARKETING_TOOLS, marketingInstructions, marketingKnows, marketingNoteText, marketingRelayIn } from "./voice/marketing.js";
 import { strategyAgentName, strategyBrief, STRATEGY_GREETING, STRATEGY_PAGE, STRATEGY_TOOLS, strategyInstructions, strategyKnows, strategyNoteText, teamProduct } from "./voice/teamStrategy.js";
-import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
+import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, TEAM_DESK_PARTNER, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
 import { anthropicSpillJudge, createVoiceSpill, openAiSpillJudge, type SpillAcross, type SpillJudge, type VoiceSpill } from "./voice/spill.js";
 import { anthropicCrossJudge, createDeskCross, openAiCrossJudge, parsePairs, productWork, type CrossJudge, type DeskCross } from "./voice/cross.js";
 import { anthropicTouchConfirm, anthropicTouchJudge, createNoteTouch, isTyped, openAiTouchConfirm, openAiTouchJudge, TOUCH_GRACE_MS, type NoteTouch, type TouchCard, type TouchConfirm, type TouchJudge } from "./voice/touch.js";
@@ -3333,6 +3339,28 @@ export function createApp(
     const inbox = await voiceInbox().catch(() => [] as InboxCard[]);
     return levelKnows({ level, name, objectives: cards.map((card) => ({ card, where: levelWhere(card.id) })), asks: [...(extra.asks ?? []), ...asksOf(cards, inbox)], ...(extra.state ? { state: extra.state } : {}), ...(extra.plan ? { plan: extra.plan } : {}) });
   };
+  // another partner onto the same call (voice/switchTo.ts): the objective he names comes on with its whole
+  // package and its manager's name goes on his screen; "desk" brings the call's own partner back. Never a hang-up.
+  const switchedTo = new Map<string, string>();
+  const switchOn = async (home: string, callId: string, args: Record<string, unknown>, deskPack?: () => Promise<string>) => {
+    const r = await switchAnswer(String(args.to ?? ""), {
+      home,
+      cards: levelCards,
+      pack: async (card) => {
+        const c = card as LevelCard;
+        return levelOf("objective", c.name, [c], { plan: levelPlan(c.id, c.name) });
+      },
+      ...(deskPack ? { deskPack } : {}),
+      objectiveName: levelName,
+    });
+    if (r.objective) switchedTo.set(callId, r.objective);
+    else if (r.name === home) switchedTo.delete(callId);
+    console.log(`[voice] ${callId} switch_to "${String(args.to ?? "").slice(0, 60)}": ${r.name || "not switched"}`);
+    return JSON.stringify(r);
+  };
+  const noLookup = (): never => {
+    throw new VoiceError(404, "unknown_tool", "no lookups on this call");
+  };
   /** the product desk's level: every objective of the product (its name's `Product:` part). */
   const productLevel = async (product: string) =>
     levelOf("desk", `${product} desk`, (await levelCards()).filter((x) => x.name.toLowerCase().startsWith(`${product.toLowerCase()}:`))).catch(() => "");
@@ -3551,7 +3579,8 @@ export function createApp(
         // one of the owner's own milestones (a Team home card's Call) is a milestone, not a campaign.
         instructions: () => {
           const t = store.getMilestone(m.id)?.title ?? m.title;
-          return `${(world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(t)}\n${partnerRule("campaign", t)}`;
+          // who answers, by name (the owner, 27 Nov: "I should see a name of who I'm talking to"): the greeting says it too.
+          return `${campaignGreeting((world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(t), t, GREETING_LEAD)}\n${partnerRule("campaign", t)}`;
         },
         tools: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).tools(store.getMilestone(m.id)?.title ?? m.title),
         desk: { send: (t, page, crid) => milestoneChats.send(m.id, t, page, crid), view: () => milestoneChats.view(m.id) },
@@ -3592,7 +3621,7 @@ export function createApp(
           key: elevenKey,
           prompt: coachInstructions,
           firstMessage: COACH_GREETING,
-          tools: () => COACH_TOOLS as any,
+          tools: () => [...COACH_TOOLS, SWITCH_TOOL] as any,
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_coach_agent_id'").get() as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_coach_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
@@ -3607,8 +3636,9 @@ export function createApp(
       throw new VoiceError(409, "coach_eleven_only", "The objectives coach runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
-    instructions: coachInstructions,
-    tools: () => COACH_TOOLS as any,
+    instructions: () => `${coachInstructions()}\n${switchRule(TEAM_DESK_PARTNER)}`,
+    tools: () => [...COACH_TOOLS, SWITCH_TOOL] as any,
+    lookup: async (callId, name, args) => (name === "switch_to" ? switchOn(TEAM_DESK_PARTNER, callId, args, async () => coachKnows(await voiceObjectiveCards())) : noLookup()),
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
     objectiveCards: voiceObjectiveCards,
@@ -3616,6 +3646,7 @@ export function createApp(
     walkRule: () => "",
     relay: async (callId, args) => {
       const r = relayIn(args);
+      if (!r.objective) r.objective = switchedTo.get(callId) ?? "";
       const n = ++coachRelays;
       if (r.desk === "team") {
         await desk.send(teamRelayText(callId, r), COACH_PAGE, `coach-${callId}-${n}`);
@@ -3632,13 +3663,15 @@ export function createApp(
       return { desk: "social", state: p.state, result: "Passed to the social desk, his words only. Tell him in a few words." };
     },
   });
-  mountCoachVoice(api, coachVoice, { world: () => store.tenant });
+  // the Team desk partner (the coach, voice/coach.ts): the Team desk chat's Partner, also from his own workspace on a customer
+  // site and his social app login (ownWorld, like the strategy call it replaces on that button).
+  mountCoachVoice(api, coachVoice, { world: () => store.tenant, ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email) });
   // the briefing call (/briefing), now his objectives review (his note: "I'm just a manager reviewing a
   // team trying to make their goals"): its own ElevenLabs agent walks his objectives in his order, those that moved or
   // turned red since the last briefing first (red key results with today's numbers, what moved, what waits on him), files
   // his decisions on each objective (file_objective_words), passes what he wants done to the Team desk, and answers exact
   // facts with the briefer's read-only lookups. The daily briefing invite (briefings.py morning) links here.
-  const briefingTools = () => [...BRIEFING_TOOLS, ...(socialArea?.callLookupTools ?? [])];
+  const briefingTools = () => [...BRIEFING_TOOLS, SWITCH_TOOL, ...(socialArea?.callLookupTools ?? [])];
   const briefingEleven: ElevenCalls | undefined =
     opts.voice?.briefingEleven ??
     (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
@@ -3682,6 +3715,7 @@ export function createApp(
     return p;
   };
   let briefingNotes = 0;
+  const BRIEFING_WHO = "Team desk manager";
   const briefingVoice = createVoice({
     ...voiceBase,
     eleven: briefingEleven,
@@ -3700,7 +3734,7 @@ export function createApp(
       throw new VoiceError(409, "briefing_eleven_only", "The briefing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
-    instructions: briefingInstructions,
+    instructions: () => `${briefingInstructions()}\n${switchRule(BRIEFING_WHO)}`,
     tools: () => briefingTools() as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
@@ -3715,7 +3749,8 @@ export function createApp(
       const r = await briefingReview();
       return briefingKnows({ since, now, cards: r.cards, changed: r.changed, first: r.first, shipped, waiting });
     },
-    lookup: async (_callId, name, args) => {
+    lookup: async (callId, name, args) => {
+      if (name === "switch_to") return switchOn(BRIEFING_WHO, callId, args);
       if (!socialArea?.callLookup) throw new VoiceError(404, "unknown_tool", "no lookups on this console");
       return socialArea.callLookup(name, args, { store: createStore(db), world: socialWorld(), homeDir: resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {} });
     },
@@ -3724,8 +3759,9 @@ export function createApp(
       if (!words) throw new VoiceError(400, "no_words", "words (his words, as he said them) are required");
       const note = typeof args.note === "string" ? args.note.trim().slice(0, 600) : "";
       // the objective he is on when he says it (the call keeps its place), so the note lands under it.
-      let objective: string | undefined;
-      try {
+      let objective: string | undefined = switchedTo.get(callId);
+      if (!objective)
+        try {
         const row = db.prepare("SELECT objectives, objective_pos FROM voice_calls WHERE id = ?").get(callId) as { objectives: string | null; objective_pos: number | null } | undefined;
         const list = JSON.parse(row?.objectives ?? "[]") as ObjectiveCard[];
         objective = row?.objective_pos ? list[row.objective_pos - 1]?.name : undefined;
@@ -3880,7 +3916,7 @@ export function createApp(
           key: elevenKey,
           prompt: strategyInstructions,
           firstMessage: STRATEGY_GREETING,
-          tools: () => STRATEGY_TOOLS as any,
+          tools: () => [...STRATEGY_TOOLS, SWITCH_TOOL] as any,
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_strategy_agent_id'").get() as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_strategy_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
@@ -3895,8 +3931,9 @@ export function createApp(
     },
     scope: { world: DEFAULT_TENANT },
     // the team product's desk partner, an OKR expert, too.
-    instructions: () => `${strategyInstructions()}\n${partnerRule("desk", teamProduct())}`,
-    tools: () => STRATEGY_TOOLS as any,
+    instructions: () => `${strategyInstructions()}\n${partnerRule("desk", teamProduct())}\n${switchRule(`${teamProduct()} launch strategist`)}`,
+    tools: () => [...STRATEGY_TOOLS, SWITCH_TOOL] as any,
+    lookup: async (callId, name, args) => (name === "switch_to" ? switchOn(`${teamProduct()} launch strategist`, callId, args, () => productLevel(teamProduct())) : noLookup()),
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
     context: async () => {
@@ -3988,19 +4025,45 @@ export function createApp(
   });
   // each ended call is checked once it settled: what he asked, what the call did (each press and its
   // landing commit, each desk question and its answer), any gap; one line to the desk the call was on, with its memory link (voice/afterCall.ts).
+  const afterCallDeskOf = (c: { tenant_id: string | null; milestone_id: string | null }): DeskPort =>
+    c.milestone_id
+      ? { send: (t, page, crid) => milestoneChats.send(c.milestone_id!, t, page, crid), view: () => milestoneChats.view(c.milestone_id!) }
+      : c.tenant_id && c.tenant_id !== DEFAULT_TENANT
+        ? { send: (t, page, crid) => worldDesks.send(c.tenant_id!, t, page, crid), view: () => worldDesks.view(c.tenant_id!) }
+        : { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() };
   const afterCall = createAfterCall({
     db,
-    deskOf: (c) =>
-      c.milestone_id
-        ? { send: (t, page, crid) => milestoneChats.send(c.milestone_id!, t, page, crid), view: () => milestoneChats.view(c.milestone_id!) }
-        : c.tenant_id && c.tenant_id !== DEFAULT_TENANT
-          ? { send: (t, page, crid) => worldDesks.send(c.tenant_id!, t, page, crid), view: () => worldDesks.view(c.tenant_id!) }
-          : { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
+    deskOf: afterCallDeskOf,
     kept: (id) => memoryForward?.callKept?.(id),
     ...(opts.voice?.now ? { now: opts.voice.now } : {}),
   });
+  // every call's whole transcript lands on its desk once, a dropped or timed-out one too: its kept lines, else
+  // ElevenLabs' own transcript of it (voice/wholeCall.ts). Same desk as the after-call check.
+  const wholeCall = createWholeCall({
+    db,
+    deskOf: afterCallDeskOf,
+    ...(process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? {}
+      : {
+          eleven: async (agentId: string, startedAt: string) => {
+            const k = await elevenKeyOrWait();
+            return k ? elevenTranscript(k, agentId, startedAt) : undefined;
+          },
+        }),
+    onRecovered: (id) => void memoryForward?.enqueueCall(id),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  // one timer: the whole-call catch-up first (a dropped call's transcript is kept, so its check sees it), then the check.
   const afterCallMs = opts.voice?.afterCallTickMs ?? (process.env.VITEST ? 0 : 60_000);
-  if (afterCallMs > 0) setInterval(() => void afterCall.tick().catch((e) => console.error("[voice] after-call check:", e)), afterCallMs).unref();
+  if (afterCallMs > 0)
+    setInterval(
+      () =>
+        void wholeCall
+          .tick()
+          .catch((e) => console.error("[voice] whole-call catch-up:", e))
+          .then(() => afterCall.tick().catch((e) => console.error("[voice] after-call check:", e))),
+      afterCallMs,
+    ).unref();
   // rework (the owner's review): voice notes in every chat (the Team desk, a milestone's or campaign's chat): recorded in
   // segments by the page, transcribed once each (gpt-4o-mini-transcribe), posted as his message; the cost is in the voice budget.
   const notesDir = opts.voice?.notesDir ?? process.env.CONSOLE_VOICE_NOTES_DIR ?? path.join(path.dirname(defaultDbPath()), "voice-notes");
@@ -4644,14 +4707,41 @@ export function createApp(
   });
   // the clinic receptionist (clinicDemo.ts): one public demo page per clinic config (docs/clinics/<slug>.json in the home
   // repo), its one button a rate-limited ElevenLabs call with that clinic's own Spanish agent; it only answers, never dials out.
+  const clinicsDir = () => process.env.CONSOLE_CLINICS_DIR || (resolveRepo(read.reposRoot, homeRepo())?.path ? path.join(resolveRepo(read.reposRoot, homeRepo())!.path, "docs/clinics") : undefined);
+  // what the receptionist cannot solve becomes a ticket on the clinic's own task tree in the repo (clinicFollowUp.ts).
+  const clinicFollowUp = createFollowUp({
+    db,
+    dir: clinicsDir,
+    repoDir: () => (process.env.CONSOLE_CLINICS_DIR ? undefined : resolveRepo(read.reposRoot, homeRepo())?.path),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  // each qualified call lands as a lead row in the voice-clinic objective's Dental clinics table (clinicLeads.ts).
+  const clinicLeads = createLeads({ repoDir: () => (process.env.CONSOLE_CLINICS_DIR ? undefined : resolveRepo(read.reposRoot, homeRepo())?.path) });
+  // the set-up call writes the clinic's objectives into its config file (clinicSetup.ts), one commit, pushed.
+  const clinicWrite = repoFileWriter();
   const clinicDemo = createClinicDemo({
     db,
-    clinics: clinicsIn(() => process.env.CONSOLE_CLINICS_DIR || (resolveRepo(read.reposRoot, homeRepo())?.path ? path.join(resolveRepo(read.reposRoot, homeRepo())!.path, "docs/clinics") : undefined)),
+    followUp: clinicFollowUp,
+    leads: clinicLeads,
+    writeClinic: (slug, make, msg) => {
+      const dir = clinicsDir();
+      if (!dir) return Promise.resolve({ state: "failed", detail: "no clinics folder" });
+      const repo = process.env.CONSOLE_CLINICS_DIR ? dir : (resolveRepo(read.reposRoot, homeRepo())?.path ?? dir);
+      return clinicWrite(repo, path.relative(repo, path.join(dir, `${slug}.json`)), make, msg);
+    },
+    clinics: clinicsIn(clinicsDir),
     key: elevenKey,
     ...(opts.voice?.clinicEleven ? { eleven: opts.voice.clinicEleven } : {}),
     ...(opts.voice?.now ? { now: opts.voice.now } : {}),
   });
+  // the posted letters to clinics: one code per clinic opens the call page, each scan counted per clinic.
+  const clinicLetters = createLetters({
+    db,
+    demo: clinicDemo,
+    letters: lettersIn(() => { const d = clinicsDir(); return d ? path.join(d, "letters") : undefined; }),
+  });
   mountClinicDemo(api, clinicDemo);
+  mountLetters(api, clinicLetters, clinicDemo);
   // steps pages with a Done switch per step (steps/steps.ts): a tick writes the owning spine, tells the desk, wakes the owner.
   const stepsApi = createSteps({
       db,
@@ -4771,6 +4861,7 @@ export function createApp(
     hasTenant: (id) => !!store.getTenant(id),
     makeWorld: testerWorlds?.makeWorld,
     setUpTeam: testerWorlds?.setUpTeamWorld,
+    clinic: (slug) => clinicDemo.list().find((x) => x.slug === slug), // the clinic checkout (hosted stripeClinic.ts)
     notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
   });
   // (his strategy call, call_910685a3: "guide the user towards a button at the beginning"; "Hey, I'm here to assist
@@ -4786,7 +4877,7 @@ export function createApp(
           tags: [teamProduct().toLowerCase(), "onboarding-call"],
           key: elevenKey,
           prompt: () => onboardingInstructions({ owner: "there", product: teamProduct() }),
-          firstMessage: () => onboardingGreeting("there"),
+          firstMessage: () => onboardingGreeting("there", { product: teamProduct() }),
           tools: () => ONBOARDING_TOOLS as any,
           // the agent's own hard stop is the call's hour, not the desk agents' 20 minutes
           body: (...a: Parameters<typeof agentBody>) => {
@@ -4813,6 +4904,9 @@ export function createApp(
       return undefined; // a console with no sign-ups
     }
   };
+  /** an earlier call in this workspace inside the recall window, with words kept: the next one greets as a pick-up. */
+  const calledBefore = (w: string) =>
+    !!db.prepare("SELECT 1 FROM voice_calls WHERE tenant_id = ? AND transcript IS NOT NULL AND started_at >= ? LIMIT 1").get(w, new Date(Date.now() - RECALL_HOURS * 3_600_000).toISOString());
   const onboardingVoices = new Map<string, Voice>();
   const onboardingVoice = (w: string): Voice | undefined => {
     const t = teamWorkspace(w);
@@ -4830,7 +4924,9 @@ export function createApp(
       // on for every new team: its own world switch is the voice the workspace's people use, this one call is the platform's
       worldOn: () => true,
       callMaxMin: ONBOARDING_CALL_MIN,
-      instructions: () => onboardingInstructions({ owner: owner(), product: teamProduct() }),
+      // a second call picks up where the last one left off (its words come back in the call's recall window)
+      instructions: () => onboardingInstructions({ owner: owner(), product: teamProduct(), again: calledBefore(w) }),
+      roster: () => onboardingRoster(teamProduct()),
       tools: () => ONBOARDING_TOOLS as any,
       desk: { send: (t2, page, crid) => worldDesks.send(w, t2, page, crid), view: () => worldDesks.view(w) },
       quickStatus: noStatus,

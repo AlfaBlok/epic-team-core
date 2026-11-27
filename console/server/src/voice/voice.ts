@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 import { DEFAULT_TENANT, type DB } from "../db.js";
 import type { DeskMessage, DeskView } from "../desk/session.js";
+import { CALL_WHOLE_LEAD } from "../desk/requests.js";
 import { tokensOf } from "./brief.js";
+import { TEAM_HEAD } from "../brand.js";
 import { callLines, chatLines, RECALL_HOURS, recallBlock } from "./recall.js";
 import { notesMonthUsd } from "./notes.js";
 import { addTokens, costOf, PRICES, PRICES_CHECKED, TRANSCRIBE_MODEL, TRANSCRIBE_PRICES, tokensOfResponse, tokensOfTranscription, zeroTokens, type Tokens } from "./prices.js";
 import { KeyNotReady } from "../secretCache.js";
-import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
+import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites, socialProduct } from "../identity.js";
 import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
 import { ELEVEN_MODEL_LABEL, type CallLang, type ElevenCalls } from "./elevenAgent.js";
@@ -79,8 +81,55 @@ export const FEEDBACK_WORDS_MAX = 12_000;
 /** listen mode: quiet window (his voice only) and the gentle check before it, in seconds. */
 export const LISTEN_QUIET_S = 180;
 export const LISTEN_WARN_S = 60;
-/** Second line of the transcript post: what the desk must (not) do with it. */
+/** Second line of an older transcript post: a record the desk acted on nothing in (old posts still read this way). */
 export const CALL_RECORD_NOTE = "Record only: already handled live. Do not act on it again.";
+/**
+ * Second line of the whole-call post (the owner on call_33379122: "I want that answer to become yes": every word
+ * of every call reaches the desk). Every call, also one that dropped or timed out, lands here once with all its words, and
+ * the desk places each point of his as it places a voice note's (one request, the call id).
+ */
+export { CALL_WHOLE_LEAD };
+export const callWholeNote = () =>
+  `${CALL_WHOLE_LEAD}, for you to place: each point ${ownerName()} made that no call question below already brought you goes where a voice note's point goes (matched first, his words quoted, request <the call id>), the ones relayed live are not filed again.`;
+/** the client request id of a call's whole-call post (one per call: a retry or the catch-up never posts it twice). */
+export const wholeCallRequestId = (callId: string) => `voice-transcript-whole-${callId}`;
+/** where the whole transcript of a call reads on the console (the post links it). */
+export const callTranscriptUrl = (callId: string) => `${sites().teamUrl.replace(/\/+$/, "")}/api/voice/calls/${callId}/transcript`;
+
+export type CallLine = { who: string; text: string; feedback?: string };
+/**
+ * The whole-call post: one header line (when, how long, what it cost, the call id), the what-to-do line, the link to the
+ * whole transcript, then who said what. His listen-mode feedback, already sent as one message, is named, not repeated.
+ */
+export function wholeCallText(db: DB, c: { id: string; startedAt: string; seconds: number; costUsd: number; model: string; endReason?: string }, lines: CallLine[]): string {
+  const when = `${c.startedAt.slice(0, 10)} ${c.startedAt.slice(11, 16)}Z`;
+  const dur = `${Math.floor(c.seconds / 60)} min ${String(c.seconds % 60).padStart(2, "0")} s`;
+  const body: string[] = [];
+  const folded = new Set<string>();
+  for (const l of lines.filter((x) => x.text?.trim()).slice(0, 600)) {
+    if (l.feedback && isOwnerWho(l.who)) {
+      if (!folded.has(l.feedback)) body.push(`· ${ownerName()}'s feedback: sent live as one message (${l.feedback}), not repeated here`);
+      folded.add(l.feedback);
+      continue;
+    }
+    body.push(`${isOwnerWho(l.who) ? `${ownerName()}:` : l.who === "tool" ? "·" : "Desk voice:"} ${l.text.replace(/\s+/g, " ").trim()}`);
+  }
+  const asks = db.prepare("SELECT id, answer, send_error, kind FROM voice_asks WHERE call_id = ? ORDER BY n").all(c.id) as { id: string; answer: string | null; send_error: string | null; kind: string | null }[];
+  const relayed = asks.length
+    ? `Relayed live as call questions: ${asks.map((a) => `${a.id} (${a.kind === "feedback" ? "feedback, " : ""}${a.send_error ? "not delivered" : a.answer ? "answered" : "still open"})`).join(", ")}.`
+    : "No call question reached the desk live during this call.";
+  const ended = c.endReason && !["hangup", "bye"].includes(c.endReason) ? ` · ended: ${c.endReason}` : "";
+  const head = [`${CALL_TRANSCRIPT_HEAD} · ${when} · ${dur} · ${usd(c.costUsd)} (${c.model})${ended} · ${c.id}`, `${callWholeNote()} ${relayed}`, `Whole transcript: ${callTranscriptUrl(c.id)}`];
+  // the desk's message size (TRANSCRIPT_MAX, 30,000): a longer call keeps every one of his lines and cuts the voice's first.
+  const MAX = 29_000;
+  let out = [...head, "", ...(body.length ? body : ["(nothing was said)"])].join("\n");
+  if (out.length > MAX) {
+    const short = body.map((b) => (b.startsWith("Desk voice:") && b.length > 240 ? `${b.slice(0, 237)}…` : b));
+    out = [...head, "", ...short].join("\n");
+    if (out.length > MAX) out = `${out.slice(0, MAX)}\n[cut here: the rest is in the whole transcript above]`;
+  }
+  return out;
+}
 /**
  * the voice greets in one brief line; what it can do it says only when asked.'s
  * honesty stays: asked, or when it first relays, it says it passes things to the desk and the reply comes back here and in Chat.
@@ -131,7 +180,34 @@ export const DESK_ANSWER_RULE =
   "As soon as it arrives, tell him: the answer first, plainly, in one to three short sentences in the desk's own facts, no ids: what it dispatched and where. If it put questions on his inbox, say they are waiting there; never ask him the desk's question on the call (his voice note vn_3e39996d: the questions come formally through the inbox). If he asks while it is still working, say it's on its way and you'll tell him the moment it lands.";
 /**: the warning before the idle hang-up. The goodbye before hang_up. */
 export const QUIET_WARN_LINE = "Still there? I'll hang up in a few seconds.";
-export const ROLE_LINE = "I'm the voice line in front of the desk. Quick status I answer myself. The rest I pass to the desk, and I tell you its answer as soon as it lands.";
+/**
+ * He goes quiet or his microphone stops (his call_dab66f00, 27 Nov: with the phone screen off the microphone stopped and he
+ * ended up talking to himself; "the agent should speak up quickly"): the voice checks in within seconds, once per silence.
+ */
+export const STILL_WITH_ME_LINE = "Are you still with me?";
+export const MIC_LOST_LINE = "I can't hear you any more. Are you still with me?";
+/** seconds of his silence, after the voice has finished, before it checks in (also the ElevenLabs agent's turn timeout). */
+export const CHECK_IN_S = 7;
+/**
+ * Who is who on his calls (his call_065c7b6e, 27 Nov: "tiene que quedar clarísimo quién eres tú y quién son los demás.
+ * Porque si hay más de una voz ... tienes que saber quién existe y qué hace cada uno"; the desk call had called itself the
+ * voice line). The same names his call screen shows (web voice/whoAnswers.ts); every call's instructions carry it.
+ */
+export function teamRoster(social: string = socialProduct(), team: string = TEAM_HEAD.name): string {
+  return [
+    "Who is who on his team's calls (each its own voice, its name on his call screen):",
+    "- Team desk manager: the objectives review, all his objectives, the senior-most.",
+    "- Team desk partner: his OKR partner across all his objectives.",
+    "- An objective's manager (named after it, like 'Get 5 testers manager'): that one objective only.",
+    "- A campaign's manager: that one campaign only.",
+    `- ${social} partner: ${social}'s campaigns and numbers.`,
+    `- ${team} launch strategist: ${team}'s launch strategy.`,
+    "- Team desk line: quick status, and passes his words to the Team desk.",
+    "Your own name is the one your instructions above give you. In your first reply on this call, after answering him, add one short sentence on who you are and that the others exist (for example: 'I'm your Team desk manager; each objective's manager, the partners and the strategist have their own calls.'), once. Whenever he asks who you are or who else there is, answer from this list, never another name or 'the voice line'.",
+  ].join("\n");
+}
+export const STILL_WITH_ME_RULE = `If he has gone quiet for a few seconds after you finished, or you are asked to go on while he says nothing, say exactly "${STILL_WITH_ME_LINE}" (in Spanish "¿Sigues conmigo?") once, and then wait; never say it twice in a row before he speaks again. If a note says his microphone stopped, the next time you speak say exactly "${MIC_LOST_LINE}" (in Spanish "Ya no te oigo. ¿Sigues conmigo?"). Never say that line otherwise.`;
+export const ROLE_LINE = "I'm your Team desk line. Quick status I answer myself. The rest I pass to the desk, and I tell you its answer as soon as it lands.";
 /** At most this much of the owner's own words goes with a question to the desk. */
 export const ASK_WORDS_MAX = 1500;
 /** The voice gives up waiting for the desk after this long ("the answer will be in Chat") but keeps checking. */
@@ -228,6 +304,8 @@ export function ensureVoiceTables(db: DB): void {
   // the call's own transcript (JSON lines, as the page sent them), for the next call's earlier conversation; and its size.
   if (!cols.has("transcript")) db.exec("ALTER TABLE voice_calls ADD COLUMN transcript TEXT");
   if (!cols.has("recall_tokens")) db.exec("ALTER TABLE voice_calls ADD COLUMN recall_tokens INTEGER");
+  // when the call's whole transcript landed on its desk for placing (; `none: <why>` when it had no words to send).
+  if (!cols.has("whole_posted_at")) db.exec("ALTER TABLE voice_calls ADD COLUMN whole_posted_at TEXT");
   // the owner's own turns of a call with no stored transcript (JSON array of strings), kept the first time they are read
   // from its chat post (or back-filled from his the memory service), so a later resend never depends on reading an old desk session again.
   if (!cols.has("jordi_words")) db.exec("ALTER TABLE voice_calls ADD COLUMN jordi_words TEXT");
@@ -307,6 +385,7 @@ export interface Limits {
   callWarnMin: number;
   quietHangupS: number;
   quietWarnS: number;
+  checkInS: number;
   listenQuietS: number;
   listenWarnS: number;
   monthCapUsd: number;
@@ -373,6 +452,8 @@ export interface VoiceDeps {
   instructions?: () => string;
   /** The voice's tools (default: VOICE_TOOLS, the Team desk's). */
   tools?: () => typeof VOICE_TOOLS;
+  /** who is who on this call (default: teamRoster, his own team's calls); a customer's call names its own. */
+  roster?: () => string;
   mint: Minter;
   desk?: DeskPort;
   quickStatus: () => Promise<QuickStatus>;
@@ -436,7 +517,7 @@ export function voiceInstructions(): string {
   return [
     STYLE_BLOCK,
     "",
-    `You are the voice line in front of ${ownerName()}'s Team desk, on a live call with him (he owns the team). You are not the desk: the desk is the agent with the team's tools. You answer quick status yourself and pass everything else to the desk, so its chat stays clean. Answer in the language he speaks (English or Spanish).`,
+    `You are the Team desk line (the name he sees on the call screen; never call yourself the voice line), in front of ${ownerName()}'s Team desk, on a live call with him (he owns the team). You are not the desk: the desk is the agent with the team's tools. You answer quick status yourself and pass everything else to the desk, so its chat stays clean. Answer in the language he speaks (English or Spanish).`,
     `${GREETING_LEAD} "${OPENING_LINE}" That is the only greeting on this call: never greet him again or say that line again yourself, even if he talks over it or you hear only noise; then just listen, or answer what he said. Do not list what you can do unless he asks.`,
     `If he asks what you are or what you can do: "${ROLE_LINE}"`,
     `Keep it short and warm. ${MINIMAL_RULE} Longer (one to three short sentences) when you pass on the desk's answer, or when he asks for detail. Never repeat back what he said, no lists read aloud, no ids unless he asks. He can interrupt you at any time.`,
@@ -652,6 +733,7 @@ export function createVoice(d: VoiceDeps) {
     ...callLength(process.env, callMax),
     quietHangupS: Number(setting("quiet_hangup_s")) || QUIET_HANGUP_S,
     quietWarnS: QUIET_WARN_S,
+    checkInS: CHECK_IN_S,
     listenQuietS: LISTEN_QUIET_S,
     listenWarnS: LISTEN_WARN_S,
     monthCapUsd: monthCap(),
@@ -840,7 +922,7 @@ export function createVoice(d: VoiceDeps) {
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
     // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
     const briefing = objectiveCards.length ? (d.walkRule ?? briefingRule)(objectiveCards.length) : "";
-    const instructionsEn = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    const instructionsEn = (d.instructions ?? voiceInstructions)() + `\n${STILL_WITH_ME_RULE}\n${(d.roster ?? teamRoster)()}` + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
     const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length && !d.walkRule ? OBJECTIVE_TOOLS : [])];
@@ -930,35 +1012,8 @@ export function createVoice(d: VoiceDeps) {
     return { call: after, monthUsd: month().usd, ...(stop ? { stop } : {}) };
   }
 
-  /** The transcript as it lands in Chat: one header line (when, how long, what it cost), then who said what. */
-  function transcriptText(c: VoiceCall, lines: { who: string; text: string; feedback?: string }[]): string {
-    const when = `${c.startedAt.slice(0, 10)} ${c.startedAt.slice(11, 16)}Z`;
-    const dur = `${Math.floor(c.seconds / 60)} min ${String(c.seconds % 60).padStart(2, "0")} s`;
-    // his words held in listen mode already went to the desk as one feedback message: one line names it, the words
-    // are not repeated here (the record must never be a second copy of the feedback to file).
-    const body: string[] = [];
-    const folded = new Set<string>();
-    for (const l of lines.filter((x) => x.text?.trim()).slice(0, 400)) {
-      if (l.feedback && isOwnerWho(l.who)) {
-        if (!folded.has(l.feedback)) body.push(`· ${ownerName()}'s feedback: sent live as one message (${l.feedback}), not repeated here`);
-        folded.add(l.feedback);
-        continue;
-      }
-      body.push(`${isOwnerWho(l.who) ? `${ownerName()}:` : l.who === "tool" ? "·" : "Desk voice:"} ${l.text.replace(/\s+/g, " ").trim().slice(0, 2000)}`);
-    }
-    // Marked as a record on its second line, with every question the desk already had live listed by id, so the desk
-    // (seed v17) notes it and acts on nothing in it a second time (the owner's review of).
-    const asks = db.prepare("SELECT id, answer, send_error, kind FROM voice_asks WHERE call_id = ? ORDER BY n").all(c.id) as { id: string; answer: string | null; send_error: string | null; kind: string | null }[];
-    const relayed = asks.length
-      ? `Relayed live as call questions: ${asks.map((a) => `${a.id} (${a.kind === "feedback" ? "feedback, " : ""}${a.send_error ? "not delivered" : a.answer ? "answered" : "still open"})`).join(", ")}.`
-      : "No question was relayed to the desk during this call.";
-    return [
-      `${CALL_TRANSCRIPT_HEAD} · ${when} · ${dur} · ${usd(c.costUsd)} (${c.model}) · ${c.id}`,
-      `${CALL_RECORD_NOTE} ${relayed}`,
-      "",
-      ...(body.length ? body : ["(nothing was said)"]),
-    ].join("\n");
-  }
+  /** The whole call as it lands on its desk (wholeCallText). */
+  const transcriptText = (c: VoiceCall, lines: CallLine[]) => wholeCallText(db, c, lines);
 
   async function end(id: string, o: { reason?: string; transcript?: { who: string; text: string; feedback?: string }[] }) {
     const c0 = must(id);
@@ -975,8 +1030,8 @@ export function createVoice(d: VoiceDeps) {
       return { call: c, monthUsd: month().usd };
     }
     try {
-      await d.desk.send(transcriptText(c, lines), CALL_PAGE, `voice-transcript-${id}`);
-      db.prepare("UPDATE voice_calls SET transcript_posted_at = ?, transcript_error = NULL WHERE id = ?").run(iso(), id);
+      await d.desk.send(transcriptText(c, lines), CALL_PAGE, wholeCallRequestId(id));
+      db.prepare("UPDATE voice_calls SET transcript_posted_at = ?, whole_posted_at = COALESCE(whole_posted_at, ?), transcript_error = NULL WHERE id = ?").run(iso(), iso(), id);
     } catch (e) {
       db.prepare("UPDATE voice_calls SET transcript_error = ? WHERE id = ?").run((e as Error).message.slice(0, 300), id);
     }
@@ -1215,6 +1270,18 @@ export function createVoice(d: VoiceDeps) {
     setModel: (m: string) => put("model", m),
     setMonthCap: (v: number) => put(capKey, String(v)),
     scope: { world, ...(ms ? { milestoneId: ms } : {}) } as VoiceScope,
+    /** a call's whole transcript as plain text (the whole-call post's link); any of this console's calls by id. */
+    wholeText: (id: string): string | undefined => {
+      const r = db.prepare("SELECT * FROM voice_calls WHERE id = ?").get(id) as any;
+      if (!r) return undefined;
+      let lines: CallLine[] = [];
+      try {
+        lines = r.transcript ? JSON.parse(r.transcript) : [];
+      } catch {
+        /* unreadable: the header still says which call */
+      }
+      return wholeCallText(db, rowTo(r), lines).split("\n").filter((l, i) => i !== 1 && i !== 2).join("\n");
+    },
     /** 0 = no cap (OpenAI's default); otherwise clamped to HISTORY_TOKENS_MIN..HISTORY_TOKENS_MAX. */
     setHistoryTokens: (t: number) => put("history_tokens", String(t <= 0 ? 0 : Math.round(Math.min(HISTORY_TOKENS_MAX, Math.max(HISTORY_TOKENS_MIN, t))))),
     setQuietHangup: (s: number) => put("quiet_hangup_s", String(Math.round(Math.min(QUIET_HANGUP_MAX_S, Math.max(QUIET_HANGUP_MIN_S, s))))),

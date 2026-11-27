@@ -15,7 +15,7 @@
 import { callMediaSession, stickyWakeLock } from "./keepAwake";
 import { ownerName } from "@/lib/identity";
 import { getCallLang, type CallLang } from "./callLang";
-import { callLimitLine, clockNote, quietLine, spanWords } from "./timeLeft";
+import { CLOCK_MARK, callLimitLine, clockNote, quietLine, spanWords } from "./timeLeft";
 
 export interface Limits {
   callMaxMin: number;
@@ -23,6 +23,8 @@ export interface Limits {
   quietHangupS: number;
   /** Seconds before the idle hang-up that the voice warns (older consoles send none: 10). */
   quietWarnS?: number;
+  /** Seconds of his silence before the voice checks in "Are you still with me?" (older consoles send none: no check-in). */
+  checkInS?: number;
   /** in listen mode the call hangs up only after this long without his voice (default 180), the gentle check this long before (60). */
   listenQuietS?: number;
   listenWarnS?: number;
@@ -78,8 +80,12 @@ export interface EngineView {
   listening?: boolean;
   /** what happened while the phone was locked (line held, reconnected, or ended), said on the call screen. */
   notice?: string;
+  /** the microphone under a live call: on, or stopped by the phone (screen off, page hidden) until it is taken again. */
+  mic?: "on" | "lost";
   /** a section call: the card the voice is on ("card 3 of 14"), its title and its evidence link, shown on his screen. */
   onCard?: { id: string; place: string; title?: string; link?: { label: string; url: string } };
+  /** who is on the line now, when the call switched partner (switch_to): his screen names them instead of the callee. */
+  speaker?: string;
 }
 
 /** The console calls this engine makes (fetch by default; tests fake them). */
@@ -198,6 +204,19 @@ export function startsGreeting(text: string, greeting: string): boolean {
   const n = Math.min(3, g.length);
   return g.length > 0 && t.length >= n && t.slice(0, g.length).every((w, i) => w === g[i]);
 }
+/**
+ * He goes quiet or his microphone stops (his call_dab66f00, 27 Nov: "when the screen goes out of focus the microphone
+ * stops, so I end up talking to myself"; the voice should speak up quickly): after the console's checkInS of his silence, once the voice
+ * has finished, it checks in once; when the phone stops the microphone it says so at once. The console holds the same words
+ * (voice.ts STILL_WITH_ME_RULE); the ElevenLabs agent checks in by its own turn timeout.
+ */
+export const STILL_WITH_ME_LINE = "Are you still with me?";
+export const MIC_LOST_LINE = "I can't hear you any more. Are you still with me?";
+/** the same two lines on a Spanish call. */
+export const STILL_WITH_ME_LINE_ES = "¿Sigues conmigo?";
+export const MIC_LOST_LINE_ES = "Ya no te oigo. ¿Sigues conmigo?";
+export const MIC_LOST_NOTE = "His microphone just stopped (his phone turned the screen off or hid the page): he cannot be heard now.";
+export const MIC_BACK_NOTE = "His microphone is back: he can be heard again.";
 /**: the note that makes the voice say its idle warning (the words live in the session instructions). */
 export const QUIET_NUDGE = "The line has been quiet. Say your quiet warning now, word for word, nothing else.";
 /** After the idle warning, a voice still talking gets this long before the line closes anyway. */
@@ -305,6 +324,10 @@ export class CallEngine {
   /** When the idle warning was given; his voice (or a desk answer) after it cancels the hang-up. */
   private quietWarnAt?: number;
   private lastOwnerAt = 0;
+  /** the voice checked in on this silence ("Are you still with me?"); his voice starts a new one. */
+  private checkedIn = false;
+  /** the microphone track watched for the phone stopping it, and the undo of its listeners. */
+  private unwatchMic?: () => void;
   /** hang_up was called: the line closes when the goodbye has played. */
   private byeAt?: number;
   private nudges: { text: string; instructions?: string; toolChoice?: "none" }[] = [];
@@ -388,10 +411,11 @@ export class CallEngine {
     if (!o.focused && !o.resumed) this.focus = undefined;
     this.set({ onCard: undefined });
     this.droppedAway = this.away = undefined;
-    this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice });
+    this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice, speaker: undefined });
     try {
       // Microphone first: a refused permission costs nothing (no key minted, no call row).
       this.mic = await this.media.microphone();
+      this.watchMic(this.mic);
       const s = this.focus ? await this.api.start({ section: this.focus.section, cards: this.focus.cards }) : await this.api.start();
       this.limits = s.limits;
       this.warned = false;
@@ -473,6 +497,14 @@ export class CallEngine {
       const p = this.yesProbe;
       this.yesProbe = undefined;
       void this.probeYes(p);
+    }
+    // He has gone quiet (or the phone stopped his microphone): the voice checks in once, within seconds, also while the page
+    // is hidden, so he never talks on to a line that cannot hear him.
+    const checkInMs = (this.limits.checkInS ?? 0) * 1000;
+    if (checkInMs > 0 && !this.listen && !this.checkedIn && this.greet?.done !== false && this.quietWarnAt === undefined && !this.nudges.length && !this.userSpeaking && !this.responding && !this.playing && now - this.lastActivity >= checkInMs) {
+      this.checkedIn = true;
+      this.line("tool", "still with me check");
+      this.nudge("He has gone quiet.", sayExactly(this.lang === "es" ? STILL_WITH_ME_LINE_ES : STILL_WITH_ME_LINE), "none");
     }
     // the phone is locked; his silence is the lock. The quiet timers wait for the page to be back.
     if (this.away !== undefined) return;
@@ -570,6 +602,7 @@ export class CallEngine {
     switch (ev.type) {
       case "input_audio_buffer.speech_started":
         this.userSpeaking = true;
+        this.checkedIn = false;
         this.lastActivity = this.lastOwnerAt = now;
         if (ev.item_id) this.pendingItems.add(ev.item_id);
         if (this.listen) {
@@ -1183,6 +1216,22 @@ export class CallEngine {
           },
         ]),
       ),
+      // another partner onto this same call: the console loads its package into the call's context; his
+      // screen names who is on the line now. No hang-up, no second call.
+      switch_to: async (a) => {
+        if (!this.api.lookup) return "This line cannot switch. Stay as you are and tell him in one line.";
+        try {
+          const r = await this.api.lookup(id, "switch_to", a);
+          const x = JSON.parse(r.result ?? "{}") as { name?: string; result?: string };
+          if (x.name) {
+            this.set({ speaker: x.name });
+            this.line("tool", `switched to the ${x.name}`);
+          }
+          return x.result ?? "Not switched. Tell him in one line.";
+        } catch (e) {
+          return `Not switched (${(e as Error).message.slice(0, 120)}). Stay as you are and tell him in one line.`;
+        }
+      },
       listen_for_feedback: async () => "Listen mode is not on this line yet: let him talk without interrupting, say only a short Mm-hm in pauses, and when he says done pass all his words to the desk in one ask_the_desk.",
       ...Object.fromEntries([...CONSOLE_TOOLS].map((n) => [n, (a: Record<string, unknown>) => walk(n, a)])),
     };
@@ -1211,6 +1260,7 @@ export class CallEngine {
         if (this.v.phase === "live" || this.v.phase === "connecting") void this.hangup(reason);
       },
       onError: (message) => this.set({ warn: message.slice(0, 200) }),
+      onMic: (stream) => this.watchMic(stream),
     });
     this.lock = (await this.media.wakeLock?.().catch(() => undefined)) ?? undefined;
     this.unsession = this.media.session?.({ hangup: () => void this.hangup("hangup"), toggleMute: () => this.setMuted(!this.v.muted) }) ?? undefined;
@@ -1257,6 +1307,10 @@ export class CallEngine {
       /* closed */
     }
     for (const t of this.mic?.getTracks() ?? []) t.stop();
+    this.unwatchMic?.();
+    this.unwatchMic = undefined;
+    this.checkedIn = false;
+    if (this.v.mic) this.set({ mic: undefined });
     void this.lock?.release().catch(() => undefined);
     this.unsession?.();
     this.pc = this.dc = this.mic = this.lock = this.unsession = undefined;
@@ -1315,7 +1369,10 @@ export class CallEngine {
     this.away = undefined;
     if (since === undefined && !this.droppedAway) return;
     // an ElevenLabs line holds its own microphone; it ends by itself when it drops (onEnded).
-    if (this.el && this.v.phase === "live" && since !== undefined) return void this.set({ notice: `The phone was locked for ${mmss(now - since)}. The call held; you are back on it.` });
+    if (this.el && this.v.phase === "live" && since !== undefined) {
+      if (this.v.mic === "lost") await this.el.restartMic().catch(() => undefined);
+      return void this.set({ notice: `The phone was locked for ${mmss(now - since)}. The call held; you are back on it.` });
+    }
     if (this.v.phase === "live" && since !== undefined) {
       const st = this.pc?.connectionState;
       if (st === "failed" || st === "disconnected" || st === "closed" || this.dc?.readyState === "closed") {
@@ -1359,6 +1416,54 @@ export class CallEngine {
     await sender?.replaceTrack(t).catch(() => undefined);
     old.stop();
     this.mic = mic;
+    this.watchMic(mic);
+  }
+
+  /**
+   * Watch the microphone's track: the phone stopping it (an iPhone with the screen off, a hidden page) shows on the call
+   * bar at once and the voice says so; it coming back, or a new track, shows it on again. In view, the page takes it again.
+   */
+  private watchMic(stream: MediaStream) {
+    const t = stream.getAudioTracks?.()[0];
+    if (!t) return;
+    this.unwatchMic?.();
+    const lost = () => this.micLost();
+    const back = () => this.micBack();
+    t.addEventListener?.("mute", lost);
+    t.addEventListener?.("ended", lost);
+    t.addEventListener?.("unmute", back);
+    this.unwatchMic = () => {
+      t.removeEventListener?.("mute", lost);
+      t.removeEventListener?.("ended", lost);
+      t.removeEventListener?.("unmute", back);
+    };
+    if (t.readyState === "ended" || t.muted) this.micLost();
+    else this.micBack();
+  }
+
+  private micLost() {
+    if (this.v.mic === "lost" || !busyPhase(this.v.phase) || this.v.phase === "ending") return;
+    this.set({ mic: "lost" });
+    if (this.v.phase !== "live") return;
+    this.line("tool", "microphone stopped by the phone");
+    this.checkedIn = true; // the voice says it now, not a second check later
+    const lostLine = this.lang === "es" ? MIC_LOST_LINE_ES : MIC_LOST_LINE;
+    // ElevenLabs: said at once where the line can (a marked note, never shown as his line), else on its next turn.
+    if (this.el?.say) this.el.say(`${CLOCK_MARK} ${MIC_LOST_NOTE} Not from the caller: say exactly "${lostLine}" and nothing else.`);
+    else if (this.el) this.el.context(`${MIC_LOST_NOTE} The next time you speak, say exactly "${lostLine}"`);
+    else this.nudge(MIC_LOST_NOTE, sayExactly(lostLine), "none");
+    // In view the page can take it again at once; hidden, it waits for the page to come back (pageVisible).
+    if (this.away === undefined && !(typeof document !== "undefined" && document.hidden)) void (this.el ? this.el.restartMic() : this.freshMic()).catch(() => undefined);
+  }
+
+  private micBack() {
+    const was = this.v.mic;
+    if (was === "on") return;
+    this.set({ mic: "on" });
+    if (was === "lost" && this.v.phase === "live") {
+      this.line("tool", "microphone back");
+      this.el?.context(MIC_BACK_NOTE);
+    }
   }
 
   /** forget a failed start's error (the call it collided with was hung up from this page). */

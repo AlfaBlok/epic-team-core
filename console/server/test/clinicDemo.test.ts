@@ -49,7 +49,7 @@ describe("clinic configs", () => {
     const plain = clinicPrompt(all.get("plain-clinic")!);
     expect(plain).toMatch(/Clínica Dental Norte/);
     expect(plain).not.toMatch(/149|book_follow_up/);
-    expect(CLINIC_TOOLS(all.get("plain-clinic")!).map((t) => t.name)).toEqual(["free_slots", "book_appointment"]);
+    expect(CLINIC_TOOLS(all.get("plain-clinic")!).map((t) => t.name)).toEqual(["file_ticket", "free_slots", "book_appointment"]);
     expect(CLINIC_TOOLS(all.get("demo-sales")!).map((t) => t.name)).toContain("book_follow_up");
     // a garbled clinic name never blocks the follow-up: a name and a phone or email are enough
     expect(CLINIC_TOOLS(all.get("demo-sales")!).find((t) => t.name === "book_follow_up")!.parameters.required).toEqual(["name", "contact"]);
@@ -63,7 +63,7 @@ describe("clinic configs", () => {
     expect(b.conversation_config.tts.model_id).toBe("eleven_flash_v2_5");
     expect(b.platform_settings.auth.enable_auth).toBe(true);
     expect(b.platform_settings.overrides.conversation_config_override.agent.prompt.prompt).toBe(false);
-    expect(b.conversation_config.agent.prompt.tools.map((t: any) => t.name)).toEqual(["free_slots", "book_appointment", "book_follow_up", "end_call"]);
+    expect(b.conversation_config.agent.prompt.tools.map((t: any) => t.name)).toEqual(["file_ticket", "free_slots", "book_appointment", "book_follow_up", "qualify_lead", "end_call"]);
   });
 });
 
@@ -102,6 +102,16 @@ describe("the public call", () => {
     expect((await app.request("/api/public/clinic/nope")).status).toBe(404);
     const n = await (await app.request("/api/public/clinic/plain-clinic")).text();
     expect(n).not.toMatch(/149 euros/);
+  });
+
+  it("each open of the call page is one scan with the letter's code; a bad code is kept as none", async () => {
+    const { app, db } = setup();
+    await app.request("/api/public/clinic/demo-sales?c=ES-007", { headers: { "x-real-ip": "5.6.7.8" } });
+    await app.request("/api/public/clinic/demo-sales/llamada?c=<script>");
+    await app.request("/api/public/clinic/nope?c=ES-1");
+    const rows = db.prepare("SELECT slug, code, at FROM clinic_scans ORDER BY id").all() as any[];
+    expect(rows.map((r) => [r.slug, r.code])).toEqual([["demo-sales", "ES-007"], ["demo-sales", null]]);
+    expect(rows[0].at).toBe(new Date(NOW).toISOString());
   });
 
   it("books a patient into a free slot and a clinic owner's follow-up, then keeps the transcript", async () => {

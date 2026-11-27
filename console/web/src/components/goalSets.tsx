@@ -1,3 +1,4 @@
+import { whoAnswers } from "@/voice/whoAnswers";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ObjectiveName, productText, splitObjectiveName } from "@/components/objectiveName";
 import { useCallDock } from "@/voice/CallPanel";
@@ -1568,14 +1569,15 @@ function TeamsList({ node }: { node: ScorecardNode }) {
  * asks (/api/objectives/:id/voice). Only where it can call: no greyed button. On a call its bar and live lines show here.
  */
 function ObjectiveCall({ id, name }: { id: string; name: string }) {
-  const call = useCallDock({ base: `/api/objectives/${encodeURIComponent(id)}/voice`, callee: `the ${name} briefer`, label: "Call", where: name, wide: true, hideUnavailable: true, hint: "Key results first, or what is red. In English or Spanish." });
+  const who = whoAnswers.objective(id, name);
+  const call = useCallDock({ base: who.base, callee: who.callee, name: who.name, label: "Call", where: name, wide: true, hideUnavailable: true, hint: "Key results first, or what is red. In English or Spanish." });
   if (!call.button && !call.onCall && !call.bar) return null;
   return (
     <div className="grid min-w-0 gap-2" data-testid="set-call">
       {!call.onCall && call.button && (
         <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
           {call.button}
-          <span>Talk it through with its briefer</span>
+          <span data-testid="set-call-who">Answers: {who.name}</span>
         </span>
       )}
       {call.onCall && call.bar}

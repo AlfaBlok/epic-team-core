@@ -24,16 +24,16 @@ import { deskVoiceBase } from "@/voice/deskBase";
 import { passedHead, passedReply } from "@/lib/passed";
 import { consoleSummary, foldChat } from "@/lib/chatFold";
 import { PassedBubble } from "@/components/PassedBubble";
-import { homeWorld, socialProduct } from "@/lib/identity";
-import { MARKETING_BASE } from "@/voice/Marketing";
-import { STRATEGY_BASE } from "@/voice/Strategy";
+import { homeWorld } from "@/lib/identity";
+import { whoAnswers, type WhoAnswers } from "@/voice/whoAnswers";
 
 /**
- * (the owner, 26 Nov: "a Call button at each level ... with the right context"): each product desk's senior
- * partner, an OKR expert briefed with the product's objectives, key results, where we are, his words and open asks.
- * The Team desk calls the team product's partner (its strategy call), a world's desk the social product's (its briefer).
+ * (the owner, 26 Nov: "a Call button at each level ... with the right context"; 27 Nov, call_92cffeeb: "I'm pressing
+ * this button when I'm on my chat, and it says Partner. So here, I would expect to be talking to the team desk"): each desk's
+ * Partner is its senior partner. The Team desk's is the Team desk partner over all his objectives (never one objective's
+ * strategist, as the EpicTeam launch call was); a world's desk calls the social product's partner. Who answers: whoAnswers.ts.
  */
-export const deskPartner = (team: boolean) => (team ? { base: STRATEGY_BASE, name: "EpicTeam" } : { base: MARKETING_BASE, name: socialProduct() });
+export const deskPartner = (team: boolean): WhoAnswers => (team ? whoAnswers.teamDeskPartner() : whoAnswers.socialDeskPartner());
 
 /** Poll the transcript while the desk works or a send is in flight, slowly otherwise. */
 export const CHAT_POLL_FAST_MS = 2_500;
@@ -307,6 +307,7 @@ function WorldDesk({ world }: { world: string }) {
       description="The team desk: new ideas and which campaign they belong to, answers, and starting, steering or stopping runs. One chat for every campaign."
       who="Team desk"
       callBase={deskVoiceBase(world)}
+      caller={whoAnswers.socialDeskCall(deskVoiceBase(world))}
       load={load}
       sendMessage={send}
       hint={hint}
@@ -346,6 +347,7 @@ function TeamDeskChat() {
   return (
     <DeskPage
       partner={deskPartner(true)}
+      caller={whoAnswers.teamDeskCall()}
       description="The Team desk: new ideas and where they fit, answers, and starting, steering or stopping runs. One chat for every repo."
       who="Team desk"
       load={loadDesk}
@@ -375,9 +377,12 @@ export function DeskPage({
   markSeen = markDeskSeen,
   title = "Chat",
   partner,
+  caller,
 }: {
   /** the product desk's senior partner call (its own routes): one more Call in the header, only where it can call. */
-  partner?: { base: string; name: string };
+  partner?: WhoAnswers;
+  /** who answers the desk's own Call (its name on the call screen); default "the desk". */
+  caller?: WhoAnswers;
   description: string;
   /** the page's heading (default Chat). */
   title?: string;
@@ -394,10 +399,11 @@ export function DeskPage({
   markSeen?: () => Promise<unknown>;
 }) {
   const [threadId, setThreadId] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});
-  const call = useCallDock(callBase ? { base: callBase } : {});
+  // with a Partner beside it, the desk's own Call takes no second language pick (one pick, shared by both).
+  const call = useCallDock({ ...(callBase ? { base: callBase } : {}), ...(caller ? { callee: caller.callee, name: caller.name } : {}), ...(partner ? { noLang: true } : {}) });
   const mate = useCallDock(
     partner
-      ? { base: partner.base, callee: `the ${partner.name} partner`, label: "Partner", where: `${partner.name} desk`, wide: true, hideUnavailable: true, hint: "Key results, where we are, what waits on you." }
+      ? { base: partner.base, callee: partner.callee, name: partner.name, label: "Partner", where: partner.name, wide: true, hideUnavailable: true, hint: `${partner.name}: key results, where we are, what waits on you.` }
       : { base: "/api/voice/none", state: async () => undefined, hideUnavailable: true },
   );
   // a workspace on its own server and AI calls with the browser's own speech (never our voice key)
@@ -415,12 +421,14 @@ export function DeskPage({
     >
       {/* one header row on a phone too (Chat, Open in T3 as an icon, the compact Call), so the history gets the screen.
           Desktop keeps PageHeader's look: title and description left, the actions right. */}
-      <div className="flex items-center justify-between gap-3 sm:items-start" data-testid="chat-header">
-        <div className="min-w-0">
+      {/* with two Calls (the desk's Partner and its own Call), on a phone the Calls take their own row under the title, so
+          "Chat" never squeezes and no Call falls off the screen. */}
+      <div className={cn("flex items-center justify-between gap-3 sm:items-start", mate.button && !call.onCall && "max-sm:flex-wrap max-sm:gap-y-2")} data-testid="chat-header">
+        <div className="min-w-0 shrink-0">
           <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-2xl">{title}</h1>
           <div className="mt-1 text-sm text-muted-foreground max-sm:hidden">{description}</div>
         </div>
-        <div className="flex shrink-0 items-center gap-1 sm:gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
           {threadId.threadId && (
             <ThreadLink
               threadId={threadId.threadId}
@@ -433,6 +441,8 @@ export function DeskPage({
           )}
           {push.bell}
           <SpeakRepliesSwitch />
+        </div>
+        <div className="flex shrink-0 items-center gap-1 sm:gap-3 max-sm:order-last max-sm:basis-full max-sm:justify-end" data-testid="chat-header-calls">
           {!ownServer && !call.onCall && mate.button && <span data-testid="desk-partner-call">{mate.button}</span>}
           {!ownServer && !mate.onCall && call.button}
         </div>

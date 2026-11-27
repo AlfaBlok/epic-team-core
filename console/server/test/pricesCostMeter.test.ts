@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb, type DB } from "../src/db.js";
 import { costOf, tokensOfResponse, tokensOfTranscription, zeroTokens } from "../src/voice/prices.js";
-import { answerIn, ASK_WORDS_MAX, CALL_QUESTION_HEAD, CALL_RECORD_NOTE, CALL_TRANSCRIPT_HEAD, createVoice, OPENING_LINE, QUIET_WARN_LINE, quickStatusText, ROLE_LINE, sessionConfig, voiceInstructions, type DeskPort } from "../src/voice/voice.js";
+import { answerIn, ASK_WORDS_MAX, CALL_QUESTION_HEAD, CALL_TRANSCRIPT_HEAD, callWholeNote, createVoice, OPENING_LINE, QUIET_WARN_LINE, quickStatusText, ROLE_LINE, sessionConfig, voiceInstructions, type DeskPort } from "../src/voice/voice.js";
 import { mountVoice } from "../src/voice/routes.js";
 import { endpointLines, SEED_VERSION } from "../src/desk/desk.js";
 import type { DeskMessage, DeskView } from "../src/desk/session.js";
@@ -84,7 +84,7 @@ describe("E942-S5 call key, caps and the off switch", () => {
     expect(body.session.audio.input.transcription.model).toBe("gpt-4o-mini-transcribe");
     expect(body.session.instructions).toMatch(/Never say something is done/);
     expect(JSON.stringify(r)).not.toMatch(/sk-/);
-    expect(r.limits).toEqual({ callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, listenQuietS: 180, listenWarnS: 60, monthCapUsd: 25, historyTokens: 0 });
+    expect(r.limits).toEqual({ callMaxMin: 20, callWarnMin: 18, quietHangupS: 60, quietWarnS: 10, checkInS: 7, listenQuietS: 180, listenWarnS: 60, monthCapUsd: 25, historyTokens: 0 });
   });
 
   it("one call at a time; a call the page stopped beating for is closed as lost after 3 minutes", async () => {
@@ -207,9 +207,10 @@ describe("E942-S5 the two tools and the transcript", () => {
     expect(t[0]).toBe(`${CALL_TRANSCRIPT_HEAD} · 2026-11-01 18:00Z · 1 min 35 s · $0.012 (gpt-realtime-2.1-mini) · ${a.call.id}`);
     expect(t).toContain("Sam: What's waiting on me?");
     expect(t).toContain("Desk voice: Two asks.");
-    expect(t[1]).toBe(`${CALL_RECORD_NOTE} No question was relayed to the desk during this call.`);
-    expect(t[2]).toBe("");
-    expect(s.sent[0].crid).toBe(`voice-transcript-${a.call.id}`);
+    expect(t[1]).toBe(`${callWholeNote()} No call question reached the desk live during this call.`);
+    expect(t[2]).toMatch(new RegExp(`/api/voice/calls/${a.call.id}/transcript$`));
+    expect(t[3]).toBe("");
+    expect(s.sent[0].crid).toBe(`voice-transcript-whole-${a.call.id}`);
     expect(s.voice.get(a.call.id)).toMatchObject({ endReason: "hangup", seconds: 95 });
     expect(s.voice.get(a.call.id)!.transcriptPostedAt).toBeTruthy();
   });
@@ -237,7 +238,7 @@ describe("E942-S5 the two tools and the transcript", () => {
     await s.voice.end(a.call.id, { reason: "hangup", transcript: [{ who: "owner", text: "File it." }, { who: "tool", text: `asked the desk (${a.call.id}-q1): file a fix` }] });
     const t = s.sent[2].text.split("\n");
     expect(t[0].startsWith(CALL_TRANSCRIPT_HEAD)).toBe(true);
-    expect(t[1]).toBe(`${CALL_RECORD_NOTE} Relayed live as call questions: ${a.call.id}-q1 (answered), ${a.call.id}-q2 (still open).`);
+    expect(t[1]).toBe(`${callWholeNote()} Relayed live as call questions: ${a.call.id}-q1 (answered), ${a.call.id}-q2 (still open).`);
     expect(t).toContain(`· asked the desk (${a.call.id}-q1): file a fix`);
     // Long speech: only its last part goes, so the question stays readable.
     const b = setup();
@@ -264,14 +265,14 @@ describe("E942-S5 the two tools and the transcript", () => {
     expect(ins).not.toMatch(/must (hand|pass) everything/i);
   });
 
-  it("the desk's seed (v17) tells it how to answer call questions and that a transcript is a record to act on nothing in", () => {
-    expect(SEED_VERSION).toBeGreaterThanOrEqual(17);
+  it("the desk's seed (v58) tells it how to answer call questions and to place every point of a whole call, never the ones relayed live", () => {
+    expect(SEED_VERSION).toBeGreaterThanOrEqual(58);
     const line = endpointLines("https://team.example.com").find((l) => l.includes("Voice call"))!;
     expect(line).toMatch(/📞 Call question/);
-    expect(line).toMatch(/Call noted\./);
     expect(line).toMatch(/His words \(call captions\)`.*his words win/);
-    expect(line).toMatch(/Record only: already handled live`.*Act on nothing in it/);
-    expect(line).toMatch(/even to correct something you did on the call/);
+    expect(line).toMatch(/Every word of this call`.*one request of his, its id the call id/);
+    expect(line).toMatch(/never file those again/);
+    expect(line).toMatch(/Record only: already handled live`.*act on nothing in it and reply `Call noted\.`/);
   });
 });
 

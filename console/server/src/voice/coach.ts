@@ -16,10 +16,18 @@ import type { ObjectiveCard } from "./inbox.js";
  * said, and passes his words on. Any change waits for his yes on the desk that gets them.
  */
 
+/**
+ * The Team desk partner (the owner, 27 Nov, call_910685a3: "the Team desk should be my objectives guy ... the senior-most
+ * person because he owns all the objectives ... and all the scorecards. He's above the objective manager"; call_92cffeeb:
+ * Partner in his chat must reach the Team desk, "not one objective's strategist"). The coach is that person now: the same
+ * call (/coach and the Team desk chat's Partner, one Voice, one ElevenLabs agent), one name everywhere (web whoAnswers.ts).
+ */
+export const TEAM_DESK_PARTNER = "Team desk partner";
+/** the ElevenLabs agent's name on the account (kept: the agent is found again by it). */
 export const COACH_AGENT_NAME = "EpicTeam objectives coach";
-export const COACH_PAGE = "objectives coach call";
-export const COACH_HEAD = "📞 From the objectives coach call";
-export const COACH_GREETING = () => `Hi ${ownerName()}, objectives coach here. Which objective do you want to work on?`;
+export const COACH_PAGE = "Team desk partner call";
+export const COACH_HEAD = "📞 From the Team desk partner call";
+export const COACH_GREETING = () => `Hi ${ownerName()}, your ${TEAM_DESK_PARTNER} here, over all your objectives. What is red first, or one objective?`;
 
 type Desk = "team" | "social";
 
@@ -74,9 +82,10 @@ export function coachKnows(cards: ObjectiveCard[]): string {
 export function coachInstructions(): string {
   const name = ownerName();
   return [
-    `You are ${name}'s objectives coach, on a phone call with him while he walks. Your one job on this call: his objectives and key results become clear and true. Stay on that topic; anything else he raises you note and relay, then bring him back.`,
+    `You are ${name}'s ${TEAM_DESK_PARTNER}, on a phone call with him while he walks: his senior partner and OKR expert across every one of his objectives, in his order, above each objective's manager. That is your one name: say it if he asks who you are; never call yourself a coach, a briefer or a strategist, and never say you wear two hats. Your one job on this call: his objectives and key results become clear and true, and he knows where each stands. Stay on that topic; anything else he raises you note and relay, then bring him back.`,
+    "Think in objectives and key results: which key result is red and nothing moves it, which number moved, what the one next step is that turns the next one green. When he asks where we are, answer in this order, one part at a time: the red key results first, then what moved, then what waits on him. Push back when a plan does not move a key result, and say which one it would move instead. When he wants to move on to another objective, go there on this call (read_objective, next_objective): you cover them all.",
     `${"When the line opens, the console has you say this greeting, once:"} "${COACH_GREETING()}" Never greet again.`,
-    "How you coach: ask, do not tell. One short question at a time, then let him talk. After he answers, say back in one sentence what you heard, then ask the next question. Never lecture, never list, never read numbers unless he asks. You are sharp and knowledgeable: say plainly when an objective is too vague, is really a key result, or has a key result nobody can measure, and ask him what it should be instead.",
+    "How you work: ask, do not tell. One short question at a time, then let him talk. After he answers, say back in one sentence what you heard, then ask the next question. Never lecture, never list, never read numbers unless he asks. You are sharp and knowledgeable: say plainly when an objective is too vague, is really a key result, or has a key result nobody can measure, and ask him what it should be instead.",
     "Your questions, in this order for the objective he picks: what moved since last time; what blocks it; is each key result the right one and can we measure it; what one thing should happen this week. An objective is aspirational (Notes launch); a key result is a number that proves it (five testers, listed on the key directories).",
     "You know his objectives below (read only) and read one in full with read_objective. You cannot change an objective, a key result or a target, and never say you did. If a pass does not go through, say so once and never promise to pass it later. When he wants something changed, added, dropped or done, say back in one line what you will pass and to which desk, and on his yes call relay_to_desk. The desk asks his yes again before anything changes.",
     `Which desk: "team" for objectives, key results, building and anything else; "social" only for his words about ${socialProduct()}'s campaigns, posts and channels, and then only his own sentences, nothing of yours.`,
@@ -99,7 +108,7 @@ export function teamRelayText(callId: string, r: { words: string; note: string; 
   return [
     `${COACH_HEAD} (${callId})${r.objective ? ` · objective: ${r.objective}` : ""}`,
     `${ownerName()}'s words: "${r.words}"`,
-    ...(r.note ? [`Coach's note: ${r.note}`] : []),
+    ...(r.note ? [`Partner's note: ${r.note}`] : []),
     `File it as one request row of his. Nothing changes an objective, key result or target without his yes: ask him on his inbox when it would.`,
   ].join("\n");
 }
