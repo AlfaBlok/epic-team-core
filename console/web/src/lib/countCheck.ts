@@ -37,12 +37,25 @@ const pillOf = (root: ParentNode, testId: string): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * E948-S229 (inbox-count check 27 Nov 16:06Z: a phone at 390 px after answers, pill 3 over 2 cards drawn): an open card
+ * is a Sent row only when it collapsed itself. A counted monitor alert carries its blocking ask's own card; answered on
+ * the phone, that inner card collapses to a Sent row inside the alert, which stays open and counted. A Sent row is the
+ * card's own when no other card (a [data-card-slot] or [data-inbox-card]) sits between it and the [data-inbox-open] mark.
+ */
+export function collapsedToSent(el: Element): boolean {
+  for (const row of el.querySelectorAll('[data-testid="sent-row"]')) {
+    if (row.parentElement?.closest("[data-inbox-open], [data-card-slot], [data-inbox-card]") === el) return true;
+  }
+  return false;
+}
+
 /** the open cards drawn inside one section: each [data-inbox-open] counts 1, or its number (an ask set of n asks). */
 export function openCardsDrawn(section: Element, tone?: "red" | "green"): number {
   let n = 0;
   for (const el of section.querySelectorAll("[data-inbox-open]")) {
     if (el.closest("[data-fold-section]") !== section) continue;
-    if (el.querySelector('[data-testid="sent-row"]')) continue;
+    if (collapsedToSent(el)) continue;
     // E948-S132: the Urgent section holds both kinds; each card says which top bar number it counts in
     if (tone && el.getAttribute("data-inbox-tone") !== tone) continue;
     const v = el.getAttribute("data-inbox-open");
@@ -63,7 +76,7 @@ export function duplicateCards(root: ParentNode = document): string[] {
     const section = root.querySelector(`[data-fold-section][data-testid="${id}"]`);
     if (!section) continue;
     for (const el of section.querySelectorAll("[data-inbox-open]")) {
-      if (el.closest("[data-fold-section]") !== section || el.querySelector('[data-testid="sent-row"]')) continue;
+      if (el.closest("[data-fold-section]") !== section || collapsedToSent(el)) continue;
       const key = el.getAttribute("data-card-key") ?? el.querySelector("[data-card-key]")?.getAttribute("data-card-key");
       if (key) seen.set(key, [...(seen.get(key) ?? []), id]);
     }

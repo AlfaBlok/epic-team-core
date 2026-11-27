@@ -38,6 +38,7 @@ import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js"
 import { contextMissing, readTicketContext } from "./cycle/ticketContext.js";
 import { readWhereWeAre, whereWeAreSection } from "./whereWeAre.js";
 import { keyResultPlanText, planSection, readWheelPlan } from "./wheelPlan.js";
+import { onboardingSection } from "./voice/campaignOnboarding.js";
 import { runStateFor } from "./cycle/runState.js";
 import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
 import { FAILED_WAKES_IN_A_ROW, failedWakesAction, failedWakesQuestion, openFailedWakesAsk, wakeStreak } from "./cycle/failedWakes.js";
@@ -3342,7 +3343,9 @@ export function createApp(
   const levelCards = async () => (await voiceObjectiveCards()) as LevelCard[];
   const levelOf = async (level: "desk" | "objective" | "campaign", name: string, cards: LevelCard[], extra: { state?: string[]; asks?: string[]; plan?: string } = {}) => {
     const inbox = await voiceInbox().catch(() => [] as InboxCard[]);
-    return levelKnows({ level, name, objectives: cards.map((card) => ({ card, where: levelWhere(card.id) })), asks: [...(extra.asks ?? []), ...asksOf(cards, inbox)], ...(extra.state ? { state: extra.state } : {}), ...(extra.plan ? { plan: extra.plan } : {}) });
+    // each objective's campaign onboarding (brief still open, research, the pitch to walk), when it has one
+    const onboarding = onboardingSection(pursuits.homeDir(), cards.map((c) => c.id));
+    return levelKnows({ level, name, objectives: cards.map((card) => ({ card, where: levelWhere(card.id) })), asks: [...(extra.asks ?? []), ...asksOf(cards, inbox)], ...(extra.state ? { state: extra.state } : {}), ...(extra.plan ? { plan: extra.plan } : {}), ...(onboarding ? { onboarding } : {}) });
   };
   // another partner onto the same call (voice/switchTo.ts): the objective he names comes on with its whole
   // package and its manager's name goes on his screen; "desk" brings the call's own partner back. Never a hang-up.

@@ -60,13 +60,14 @@ function objectiveBlock(c: LevelCard, where: string | undefined): string[] {
 }
 
 /** What a level's call knows at its start: the level, its objectives' key results, where we are, his words, the plan, open asks. */
-export function levelKnows(o: { level: "desk" | "objective" | "campaign"; name: string; objectives: { card: LevelCard; where?: string }[]; asks: string[]; state?: string[]; plan?: string }): string {
+export function levelKnows(o: { level: "desk" | "objective" | "campaign"; name: string; objectives: { card: LevelCard; where?: string }[]; asks: string[]; state?: string[]; plan?: string; onboarding?: string }): string {
   const out = [`# This call's level: the ${o.level === "desk" ? "product desk" : o.level} "${o.name}" (read only, as of the call's start)`];
   if (o.state?.length) out.push("", "## Where it stands now (its spine)", ...o.state.map((l) => `- ${l}`));
   out.push("", `## Key results today (${o.objectives.length} objective${o.objectives.length === 1 ? "" : "s"}, his order)`);
   if (!o.objectives.length) out.push("No objective could be read for this call: say so once if he asks about key results.");
   for (const x of o.objectives) out.push(...objectiveBlock(x.card, x.where));
   if (o.plan?.trim()) out.push("", clip(o.plan.trim(), 3500));
+  if (o.onboarding?.trim()) out.push("", clip(o.onboarding.trim(), 9000));
   out.push("", `## Open asks and cards waiting on ${ownerName()} here (${o.asks.length})`);
   out.push(...(o.asks.length ? o.asks.map((a) => `- ${a}`) : ["None waits on him at this level right now."]));
   return out.join("\n");
