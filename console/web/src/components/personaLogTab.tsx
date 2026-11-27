@@ -49,7 +49,7 @@ export function PersonaLogTab({ wheel }: { wheel: string }) {
           {correct} correct step{correct === 1 ? "" : "s"} nobody asked for
         </p>
         <p className="text-sm text-muted-foreground">
-          Last {data.days} days: {steps.length} steps on this wheel, {steps.length - chose.length} on your asks, {chose.length} the team chose. You labelled {correct} correct, {wrong} not correct,{" "}
+          Last {data.days} days: {steps.length} steps in this life cycle, {steps.length - chose.length} on your asks, {chose.length} the team chose. You labelled {correct} correct, {wrong} not correct,{" "}
           {chose.length - correct - wrong} wait for your tap.
         </p>
       </div>
@@ -63,7 +63,7 @@ export function PersonaLogTab({ wheel }: { wheel: string }) {
       </div>
       {failed && <p className="text-sm text-destructive" data-testid="persona-log-failed">Not saved: {failed}</p>}
       {list.length === 0 ? (
-        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">No step logged on this wheel in the last {data.days} days.</p>
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">No step logged in this life cycle in the last {data.days} days.</p>
       ) : (
         <ol className="grid gap-2" data-testid="persona-log-steps">
           {list.map((s) => (

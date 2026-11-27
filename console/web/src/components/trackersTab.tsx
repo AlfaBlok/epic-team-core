@@ -414,7 +414,7 @@ function Table({ t, initial, unfold }: { t: TrackerTable; initial: Filters; unfo
 
 /** how any wheel gets a table: asked for by the team, opened by his yes. */
 export function addLine(tables: number) {
-  return `${tables ? "Another table for this wheel" : "This wheel has no tables yet. A table"} is asked for by the team when its work needs one, and opens with your yes.`;
+  return `${tables ? "Another table for this life cycle" : "This life cycle has no tables yet. A table"} is asked for by the team when its work needs one, and opens with your yes.`;
 }
 
 export function TrackersTab({ wheel }: { wheel: string }) {

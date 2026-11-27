@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useInRouterContext, useLocation } from "react-router-dom";
 import type { EngineView, Media, VoiceApi } from "./engine";
 import { busy, useCallTab } from "./CallProvider";
+import { connectingText, useConnectingSeconds } from "./connecting";
 
 /** GET /api/voice/state: what the button needs before a call. */
 export interface VoiceState {
@@ -40,6 +41,17 @@ const END_WORDS: Record<string, string> = {
   tab_closed: "Call ended.",
   ended_elsewhere: "Hung up from another page.",
 };
+
+/** when each call line last asked for its next link (per tab); the console keeps one for 10 minutes. */
+const warmedAt = new Map<string, number>();
+export const WARM_EVERY_MS = 8 * 60_000;
+export function warmOnce(base: string, api: VoiceApi, now = Date.now()): boolean {
+  const at = warmedAt.get(base);
+  if (!api.warm || (at !== undefined && now - at < WARM_EVERY_MS)) return false;
+  warmedAt.set(base, now);
+  void api.warm().catch(() => undefined);
+  return true;
+}
 
 const loadState = async (base = "/api/voice"): Promise<VoiceState | undefined> => {
   try {
@@ -120,6 +132,11 @@ export function useCallDock(
   const [stray, setStray] = useState<{ busy?: boolean; error?: string }>({});
   const refresh = () => void (props.state ?? (() => loadState(props.base)))().then(setSt);
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // a page that can call asks the console for the next call's link as it opens (at most every few minutes
+  // per call line), so his tap does not wait on the key and ElevenLabs. The call code itself still loads on the tap.
+  useEffect(() => {
+    if (st?.available && !busy(v.phase)) warmOnce(h.base, h.api);
+  }, [st?.available]); // eslint-disable-line react-hooks/exhaustive-deps
   const autoStarted = useRef(false);
   useEffect(() => {
     if (!props.autoStart || autoStarted.current || !st?.available || busy(v.phase)) return;
@@ -138,6 +155,7 @@ export function useCallDock(
   }, [v.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onCall = v.phase === "live" || v.phase === "connecting" || v.phase === "starting";
+  const connectingS = useConnectingSeconds(v.phase);
   const said = v.lines.filter((l) => l.who !== "tool");
   const liveKey = onCall ? `${said.length}|${said.at(-1)?.text.length ?? 0}|${v.hearing.length}|${v.speaking.length}|${v.phase}` : "";
   // the world's call is on, but not on this page's engine: a Hang up for it, never the dead-end "one call at a time".
@@ -191,7 +209,7 @@ export function useCallDock(
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60 motion-reduce:animate-none" />
                 <span className="relative inline-flex size-2 rounded-full bg-emerald-600" />
               </span>
-              <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : "Connecting…"}</span>
+              <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : connectingText(connectingS)}</span>
               <span className="tabular-nums" data-testid="call-cost">{money(v.costUsd)}</span>
               {v.listening ? (
                 <span data-testid="call-listening" className="text-emerald-800 dark:text-emerald-300">
@@ -318,7 +336,7 @@ export function useCallDock(
           {v.hearing && line("owner", v.hearing, "hearing", true)}
           {v.speaking && line("voice", v.speaking, "speaking", true)}
           {!said.length && !v.hearing && !v.speaking && (
-            <li className="text-center text-sm text-muted-foreground">{v.phase === "live" ? "Listening… keep this screen on during the call." : "Connecting…"}</li>
+            <li className="text-center text-sm text-muted-foreground">{v.phase === "live" ? "Listening… keep this screen on during the call." : connectingText(connectingS)}</li>
           )}
         </ol>
       </li>

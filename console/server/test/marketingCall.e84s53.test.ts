@@ -21,6 +21,7 @@ describe("the senior marketing call", () => {
     expect(names).not.toContain("press_card");
     expect(marketingInstructions()).toMatch(/number one blocker/);
     expect(marketingInstructions()).toMatch(/never say you did/);
+    expect(marketingInstructions()).toMatch(/the credits we give.*the credits we get/);
   });
 
   it("knows the brief, only the social product's objectives, and the campaigns' plans", () => {

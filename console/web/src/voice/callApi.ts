@@ -51,5 +51,6 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
     tool: (id, name, args) => call("POST", `/calls/${id}/tool`, { name, args }),
     relay: (id, args) => call("POST", `/calls/${id}/relay`, args),
     lookup: (id, name, args) => call("POST", `/calls/${id}/lookup`, { name, args }),
+    warm: () => call("POST", "/calls/warm"),
   };
 }

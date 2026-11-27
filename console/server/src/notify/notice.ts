@@ -142,4 +142,5 @@ export interface SendImage {
   /** where the owner opens the same picture (behind the console login). */
   url?: string;
 }
-export type Sender = (text: string, o?: { image?: SendImage }) => Promise<SendResult>;
+/** `from`: a desk's own WhatsApp number on the same memory-service account; left out = the default number. */
+export type Sender = (text: string, o?: { image?: SendImage; from?: string }) => Promise<SendResult>;

@@ -140,6 +140,62 @@ function Book({ kind, tabs }: { kind: WheelKind; tabs: readonly WheelTab[] }) {
   );
 }
 
+/** one life cycle drawn as a ring with an arrowhead: it goes round until every key result is green. */
+function Ring({ size, label }: { size: number; label?: string }) {
+  const r = size / 2 - 4;
+  const c = size / 2;
+  // a ring open at the top right, with an arrowhead where it closes
+  const a0 = -Math.PI / 2 + 0.5;
+  const a1 = -Math.PI / 2 + 2 * Math.PI - 0.25;
+  const p = (a: number) => `${(c + r * Math.cos(a)).toFixed(1)} ${(c + r * Math.sin(a)).toFixed(1)}`;
+  const tip = { x: c + r * Math.cos(a1), y: c + r * Math.sin(a1) };
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img" aria-label={label ?? "A life cycle"} className="shrink-0">
+      <path d={`M ${p(a0)} A ${r} ${r} 0 1 1 ${p(a1)}`} fill="none" stroke="currentColor" strokeWidth={2} />
+      <path d={`M ${tip.x.toFixed(1)} ${tip.y.toFixed(1)} l -7 -4 l 1 8 z`} fill="currentColor" transform={`rotate(-10 ${tip.x.toFixed(1)} ${tip.y.toFixed(1)})`} />
+    </svg>
+  );
+}
+
+/**
+ * The owner, WhatsApp 24 Nov 20:37Z: "I'm trying not to use wheel. Now we need a word for the, I think the life
+ * cycle is the word. And we can have multiple life cycles that contribute to like an overarching life cycle." Drawn: each
+ * objective (or campaign) is one life cycle, and they all feed one overarching life cycle.
+ */
+function LifeCycles({ kind }: { kind: WheelKind }) {
+  const cls = WHEEL_CLASS[kind];
+  const objects = useObjects(kind).slice(0, 3);
+  const small = objects.length ? objects : [{ name: `One ${cls.name.toLowerCase()}` }, { name: `Another ${cls.name.toLowerCase()}` }, { name: `A third ${cls.name.toLowerCase()}` }];
+  return (
+    <section className="grid gap-3" data-testid="made-of-life-cycles" id="life-cycles">
+      <h2 className="text-lg font-semibold">Life cycles</h2>
+      <figure className="grid gap-3 rounded-xl border bg-card p-4" data-testid="life-cycles-diagram">
+        <ol className="grid grid-cols-3 gap-2">
+          {small.map((o) => (
+            <li key={o.name} className="grid min-w-0 justify-items-center gap-1.5 text-center" data-testid="life-cycle-small">
+              <span className="text-foreground/70">
+                <Ring size={56} label={`${o.name}: a life cycle`} />
+              </span>
+              <span className="line-clamp-2 text-xs [overflow-wrap:anywhere]">{o.to ? <Link to={o.to} className="hover:underline">{o.name}</Link> : o.name}</span>
+              <span aria-hidden className="text-muted-foreground">↓</span>
+            </li>
+          ))}
+        </ol>
+        <div className="grid justify-items-center gap-1.5 text-center" data-testid="life-cycle-overarching">
+          <span className="text-emerald-700">
+            <Ring size={96} label="The overarching life cycle" />
+          </span>
+          <span className="text-sm font-semibold">One overarching life cycle</span>
+        </div>
+        <figcaption className="text-sm text-muted-foreground">
+          Each {cls.name.toLowerCase()} is one life cycle: its personas wake, read its chapters, act and write back, round and round until every key result is
+          green. Several life cycles feed one overarching life cycle. We used to call a life cycle a wheel.
+        </figcaption>
+      </figure>
+    </section>
+  );
+}
+
 function ChapterBox({ t, n, kind }: { t: WheelTab; n: number; kind: WheelKind }) {
   const also = alsoIn(kind, t);
   return (
@@ -246,6 +302,7 @@ export function MadeOfPage() {
         </p>
       </header>
       <Book kind={kind} tabs={tabs} />
+      <LifeCycles kind={kind} />
       <Products />
       <div className="grid gap-3">
         <h2 className="text-lg font-semibold">Where each chapter lives, who reads and writes it</h2>

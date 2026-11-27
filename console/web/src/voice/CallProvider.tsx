@@ -8,6 +8,7 @@ import type { Media, Phase, VoiceApi } from "./engine";
 import { fetchVoiceApi } from "./callApi";
 import { LazyCall } from "./lazyCall";
 import { callEngineCode, isPromise } from "./voiceCode";
+import { connectingText, useConnectingSeconds } from "./connecting";
 
 /**
  * A call is the tab's, never a page's: leaving
@@ -190,6 +191,7 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2,
 /** One floating call: live dot, whom it is with, the time, Mute, Hang up, and the link back to its page. */
 function Floating({ h }: { h: HeldCall }) {
   const v = h.engine.view();
+  const connectingS = useConnectingSeconds(v.phase);
   const [hanging, setHanging] = useState(false);
   return (
     <div
@@ -230,7 +232,7 @@ function Floating({ h }: { h: HeldCall }) {
         </span>
       )}
       <span className="shrink-0 tabular-nums text-muted-foreground" data-testid="call-widget-time">
-        {v.phase === "live" ? clock(v.elapsedS) : v.phase === "ending" ? "Hanging up…" : "Connecting…"}
+        {v.phase === "live" ? clock(v.elapsedS) : v.phase === "ending" ? "Hanging up…" : connectingText(connectingS)}
       </span>
       {/* on a phone the two controls are 64 px tall with labels, Hang up apart on the right (upright: their own row). */}
       <div className="flex shrink-0 gap-2 phone:grid phone:grid-cols-2 phone:gap-10 phone:sm:[&>*]:min-w-36 max-sm:basis-full">

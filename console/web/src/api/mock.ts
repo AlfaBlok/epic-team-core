@@ -790,7 +790,7 @@ const mockMail = () => ({
         posts: { n: i ? 0 : 3, of: i ? 0 : 5, note: i ? "Nothing slotted for this week in the posts ledger (6 drafts in the backlog)." : "This week's posts in the posts ledger: posted, of the ones slotted for this week." },
         clicks: a.site ? { n: 12, change: 4, note: `Visits to ${a.site} from a link in one of its posts, last 7 days.` } : { n: null, change: null, note: `No product page of ${c?.name} is counted yet, so its clicks cannot be read.` },
       }));
-      return ok({ company: id, week: { from: "2026-11-09", to: "2026-11-15" }, accounts, ...(accounts.length ? {} : { none: `No account feeds ${c?.name ?? id}'s Promo wheel yet.` }) });
+      return ok({ company: id, week: { from: "2026-11-09", to: "2026-11-15" }, accounts, ...(accounts.length ? {} : { none: `No account feeds ${c?.name ?? id}'s Promo life cycle yet.` }) });
     },
     // his four building lists, sample counts.
     async listBuilding() {

@@ -779,13 +779,26 @@ export function createVoice(d: VoiceDeps) {
     return recallBlock(lines, { now: iso() });
   }
 
+  /**
+   * the call page opened: the next call's ElevenLabs link is made now (key fetched, used, dropped), so his
+   * press does not wait on Bitwarden and ElevenLabs. Nothing when calls cannot start or a call is on.
+   */
+  function warm(): { warming: boolean } {
+    if (refusal() || active() || provider() !== "elevenlabs" || !d.eleven?.warm) return { warming: false };
+    void d.eleven.warm();
+    return { warming: true };
+  }
+
   async function start(focus?: InboxFocus): Promise<CallStart> {
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
+    const t0 = Date.now();
     // the ElevenLabs call link is asked for while the context is read, not after it (a press once waited
     // ~60 s on "Connecting...": the context's wait, then the agent's update and the link, one after the other).
-    const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link() : undefined;
+    let linkMs: number | undefined;
+    let ctxMs: number | undefined;
+    const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link().then((l) => ((linkMs = Date.now() - t0), l)) : undefined;
     linkP?.catch(() => undefined); // awaited below; a refusal surfaces there
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
     const [brief, recall, cards, objectives, context, objectiveCards] = await Promise.all([
@@ -796,6 +809,7 @@ export function createVoice(d: VoiceDeps) {
       d.context ? inTime("context", d.context, "", d.contextWaitMs) : "",
       d.objectiveCards ? inTime("objective cards", d.objectiveCards, [] as ObjectiveCard[]) : ([] as ObjectiveCard[]),
     ]);
+    ctxMs = Date.now() - t0;
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
     const walkCards = cards?.slice(0, INBOX_WALK_MAX);
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
@@ -816,7 +830,8 @@ export function createVoice(d: VoiceDeps) {
       db.prepare("INSERT INTO voice_calls (id, started_at, last_beat_at, model, session_id, tenant_id, milestone_id, brief_tokens, recall_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, t, t, ELEVEN_MODEL_LABEL, link.agentId, world, ms, brief ? tokensOf(brief) : null, recall ? tokensOf(recall) : null);
       if (walkCards) db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
       if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
-      console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId})`);
+      // each step's time in the log, so a slow start names its part (key and link, or the context read)
+      console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId}) in ${Date.now() - t0} ms: link ${(link as { warm?: boolean }).warm ? "made when the page opened" : `${linkMs ?? "?"} ms`}, context ${ctxMs} ms`);
       return { call: must(id), clientSecret: "", expiresAt: Math.floor(now() / 1000) + 15 * 60, model: ELEVEN_MODEL_LABEL, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, ...(greeting ? { greeting } : {}), provider: "elevenlabs", signedUrl: link.signedUrl, agentId: link.agentId, instructions };
     }
     const key = await d.mint(cfg);
@@ -1147,6 +1162,7 @@ export function createVoice(d: VoiceDeps) {
 
   return {
     state,
+    warm,
     start,
     beat,
     usage,

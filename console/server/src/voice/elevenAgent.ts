@@ -78,6 +78,10 @@ export function toolNames(agent: any): string[] {
   return [...(Array.isArray(p.tools) ? p.tools : []).map((t: any) => String(t?.name ?? "")), ...(Array.isArray(p.built_in_tools) ? [] : Object.keys(p.built_in_tools ?? {}).filter((k) => p.built_in_tools[k]))].filter(Boolean);
 }
 
+/** how long a link made when the call page opened waits for its press (ElevenLabs lets a signed link start a
+ * conversation within 15 minutes; 10 keeps a margin). */
+export const READY_LINK_MS = 10 * 60_000;
+
 export interface ElevenLink {
   agentId: string;
   signedUrl: string;
@@ -135,24 +139,55 @@ export function elevenCalls(o: { /** the agent's name on the account (default: t
     o.known?.set(id);
     return id;
   }
+  // a call took 30 s or more to connect (the owner, said again: "find whether it is ElevenLabs or our side ... fix it"): a link
+  // asked for when the call page opens (`warm`), kept here for one call: the next press takes it instead of waiting on
+  // the key and ElevenLabs. Only the signed link is kept (one conversation, ElevenLabs lets it start within 15 minutes),
+  // never the key: the key is fetched for that one ask and dropped, as on every call.
+  let ready: { link: ElevenLink; at: number } | undefined;
+  let warming: Promise<void> | undefined;
+  const fresh = () => !!ready && Date.now() - ready.at < READY_LINK_MS;
+  async function fetchLink(): Promise<ElevenLink> {
+    const k = await o.key();
+    if (!k) throw new VoiceError(503, "no_key", "the console has no ELEVENLABS_API_KEY (secret store agent-team-console/ELEVENLABS_API_KEY)");
+    const id = await agent(k);
+    try {
+      const j = await api(k, "GET", `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`);
+      return { agentId: id, signedUrl: j.signed_url };
+    } catch (e) {
+      // the agent was deleted on the account: make it again once.
+      if (!/\(404\)/.test((e as Error).message)) throw e;
+      agentId = undefined;
+      o.known?.set("");
+      const again = await agent(k);
+      const j = await api(k, "GET", `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(again)}`);
+      return { agentId: again, signedUrl: j.signed_url };
+    }
+  }
   return {
-    async link(): Promise<ElevenLink> {
-      const k = await o.key();
-      if (!k) throw new VoiceError(503, "no_key", "the console has no ELEVENLABS_API_KEY (secret store agent-team-console/ELEVENLABS_API_KEY)");
-      const id = await agent(k);
-      try {
-        const j = await api(k, "GET", `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`);
-        return { agentId: id, signedUrl: j.signed_url };
-      } catch (e) {
-        // the agent was deleted on the account: make it again once.
-        if (!/\(404\)/.test((e as Error).message)) throw e;
-        agentId = undefined;
-        o.known?.set("");
-        const again = await agent(k);
-        const j = await api(k, "GET", `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(again)}`);
-        return { agentId: again, signedUrl: j.signed_url };
+    /** a link for one call: the one made when the page opened when it is still fresh (taken once), else a new one. */
+    async link(): Promise<ElevenLink & { warm?: boolean }> {
+      // a press while the page's link is still coming waits for that one (never a second key fetch beside it)
+      if (warming) await warming;
+      if (fresh()) {
+        const l = ready!.link;
+        ready = undefined;
+        return { ...l, warm: true };
       }
+      ready = undefined;
+      return fetchLink();
     },
+    /** the call page opened: make the next call's link now (one at a time; a fresh one is kept, never a second). */
+    warm(): Promise<void> {
+      if (fresh()) return Promise.resolve();
+      warming ??= fetchLink()
+        .then((link) => void (ready = { link, at: Date.now() }))
+        .catch(() => undefined)
+        .finally(() => (warming = undefined));
+      return warming;
+    },
+    /** a link is waiting for the next call (tests, the state route). */
+    isWarm: () => fresh(),
   };
 }
-export type ElevenCalls = ReturnType<typeof elevenCalls>;
+/** the door a voice uses; tests fake `link` alone (warm is the page-open link). */
+export type ElevenCalls = { link(): Promise<ElevenLink & { warm?: boolean }>; warm?(): Promise<void>; isWarm?(): boolean };

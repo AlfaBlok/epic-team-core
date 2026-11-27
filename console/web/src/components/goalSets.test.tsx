@@ -618,8 +618,8 @@ describe("the key-result table of every wheel", () => {
     vi.spyOn(api, "personaGaps").mockResolvedValue({
       ok: false,
       gaps: [
-        { kind: "objective", id: "vault", title: "Vault", world: "home", turner: "none", why: "No persona: this wheel does not turn", milestoneId: "ms_9" },
-        { kind: "milestone", id: "ms_8", title: "Company and accountant", world: "home", turner: "off", why: "Its personas are switched off: it turns once one is switched on", milestoneId: "ms_8" },
+        { kind: "objective", id: "vault", title: "Vault", world: "home", turner: "none", why: "No persona: this life cycle does not move", milestoneId: "ms_9" },
+        { kind: "milestone", id: "ms_8", title: "Company and accountant", world: "home", turner: "off", why: "Its personas are switched off: it moves once one is switched on", milestoneId: "ms_8" },
       ],
       checked: { objectives: 2, milestones: 9 },
       at: "2026-11-15T04:00:00Z",
@@ -633,12 +633,12 @@ describe("the key-result table of every wheel", () => {
       </MemoryRouter>,
     );
     const line = await screen.findByTestId("persona-gaps");
-    expect(line.textContent).toContain("1 goal has no persona. A wheel without a persona does not turn.");
+    expect(line.textContent).toContain("1 goal has no persona. A life cycle without a persona does not move.");
     expect(within(line).getAllByTestId("persona-gap").map((li) => li.textContent)).toEqual(["Vaultobjective"]);
     const vault = (await screen.findAllByTestId("all-sets-row")).find((r) => r.getAttribute("data-set") === "vault")!;
     const pill = within(vault).getByTestId("wheel-no-persona");
     expect(pill.textContent).toBe("no persona");
-    expect(pill.getAttribute("title")).toBe("No persona: this wheel does not turn.");
+    expect(pill.getAttribute("title")).toBe("No persona: this life cycle does not move.");
     const launch = screen.getAllByTestId("all-sets-row").find((r) => r.getAttribute("data-set") === "launch")!;
     expect(within(launch).getByTestId("wheel-no-persona").textContent).toBe("persona off");
   });

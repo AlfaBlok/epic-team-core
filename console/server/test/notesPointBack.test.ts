@@ -42,6 +42,8 @@ describe("notes that point back", () => {
     expect(seed).toContain("Notes that point back (root L-64");
     expect(seed).toContain("file nothing until he answers");
     expect(seed).toContain("testers =");
+    expect(seed).toContain("credits we get");
+    expect(updateMessage("https://c.test")).toContain("credits we give");
     expect(updateMessage("https://c.test")).toContain("find_source.py");
     expect(SEED_VERSION).toBeGreaterThanOrEqual(35);
   });

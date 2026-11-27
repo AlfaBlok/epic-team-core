@@ -120,6 +120,8 @@ export interface VoiceApi {
   relay?(id: string, args: Record<string, unknown>): Promise<{ desk?: string; state?: string; result?: string }>;
   /** the briefer's read-only lookups: exact rows from one source. */
   lookup?(id: string, name: string, args: Record<string, unknown>): Promise<{ name?: string; result?: string }>;
+  /** the call page opened: the console makes the next call's link now, so the press does not wait on it. */
+  warm?(): Promise<unknown>;
 }
 
 /** The media and WebRTC pieces (the browser's by default; tests fake them). */

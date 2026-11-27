@@ -878,7 +878,7 @@ export function IdlePill({ n, testId = "wheel-idle" }: { n: Pick<ScorecardNode, 
 }
 
 /** (the owner: "a wheel without a persona is not going to turn"): no persona on it, or all of them switched off. */
-export const NO_PERSONA_TITLE = { none: "No persona: this wheel does not turn.", off: "Its personas are switched off: it turns once one is switched on." } as const;
+export const NO_PERSONA_TITLE = { none: "No persona: this life cycle does not move.", off: "Its personas are switched off: it moves once one is switched on." } as const;
 export function NoPersonaPill({ n, testId = "wheel-no-persona" }: { n: Pick<ScorecardNode, "noPersona">; testId?: string }) {
   if (!n.noPersona) return null;
   return (
@@ -898,7 +898,7 @@ export function PersonaGapsLine() {
   return (
     <div className="rounded-xl border border-[hsl(0_72%_51%)] bg-card px-3 py-2.5 text-sm" data-testid="persona-gaps">
       <p className="font-medium text-foreground">
-        {n} {n === 1 ? "goal has" : "goals have"} no persona. A wheel without a persona does not turn.
+        {n} {n === 1 ? "goal has" : "goals have"} no persona. A life cycle without a persona does not move.
       </p>
       <ul className="mt-1 grid gap-0.5">
         {gaps.map((g) => (
@@ -1706,7 +1706,7 @@ export function GoalSetPage() {
                 <Link to={`/sets/${encodeURIComponent(node.foldedInto)}`} className="font-medium text-foreground underline underline-offset-4">
                   {titleOf(inbox.ix.byId.get(node.foldedInto)!)}
                 </Link>
-                : the two share one wheel, each with its own key results.
+                : the two share one life cycle, each with its own key results.
               </p>
             )}
             {pursuit.id === node.id && <ObjectiveCall key={pursuit.id} id={pursuit.id} name={titleOf(node)} />}

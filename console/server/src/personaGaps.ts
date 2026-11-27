@@ -10,8 +10,8 @@ import type { Assignment, Milestone, Persona } from "./store.js";
  */
 
 /** the one sentence every place says (a wheel without a persona does not turn). */
-export const NO_TURNER = "No persona: this wheel does not turn";
-export const TURNER_OFF = "Its personas are switched off: it turns once one is switched on";
+export const NO_TURNER = "No persona: this life cycle does not move";
+export const TURNER_OFF = "Its personas are switched off: it moves once one is switched on";
 
 /** on: a persona wakes on it (switched on, or auto-parked with nothing to do); off: personas assigned, all switched off; none: no persona at all. */
 export type Turner = "on" | "off" | "none";

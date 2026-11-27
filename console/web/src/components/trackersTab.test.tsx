@@ -55,8 +55,8 @@ describe("filters", () => {
 // The owner (vn_578b0feb): "a table capability in every wheel": every wheel says how a table is added.
 describe("addLine", () => {
   it("says how a wheel gets a table, with or without tables", () => {
-    expect(addLine(0)).toMatch(/^This wheel has no tables yet\. A table is asked for by the team .* your yes\.$/);
-    expect(addLine(2)).toMatch(/^Another table for this wheel is asked for/);
+    expect(addLine(0)).toMatch(/^This life cycle has no tables yet\. A table is asked for by the team .* your yes\.$/);
+    expect(addLine(2)).toMatch(/^Another table for this life cycle is asked for/);
   });
 });
 

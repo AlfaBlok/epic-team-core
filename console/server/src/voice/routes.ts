@@ -252,6 +252,8 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
       return c.json(await voice.start(p.data.focus), 201);
     }),
   );
+  // the call page opened: the next call's link is made now, so his press does not wait on the key (owner only)
+  api.post(`${prefix}/calls/warm`, ownerOnly((c, voice) => c.json(voice.warm(), 202)));
   api.post(`${prefix}/calls/:cid/beat`, ownerOnly((c, voice) => c.json(voice.beat(c.req.param("cid") ?? ""))));
   api.post(
     `${prefix}/calls/:cid/usage`,
