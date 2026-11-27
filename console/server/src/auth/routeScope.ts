@@ -189,9 +189,6 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["GET", new RegExp(`^/api/tenants/${ID}/seats(/capacity)?$`)], // the workspace's own Claude seats, their headroom and their capacity per campaign (hosted cycle/customerSeats.ts)
   ["POST", new RegExp(`^/api/tenants/${ID}/seats/(signin|signin/finish|check)$`)], // sign-in and check: owner only, below (check too: it opens their vault)
   ["DELETE", new RegExp(`^/api/tenants/${ID}/seats/\\d{1,3}$`)],
-  ["GET", new RegExp(`^/api/tenants/${ID}/own-cloud$`)], // its cloud account and the server made there (hosted cycle/ownCloudAccount.ts)
-  ["POST|DELETE", new RegExp(`^/api/tenants/${ID}/own-cloud/(account|server)$`)], // owner only, below
-  ["POST", new RegExp(`^/api/tenants/${ID}/own-cloud/quote$`)],
   ["GET|DELETE", new RegExp(`^/api/tenants/${ID}/server$`)], // a server it already has and its last test (hosted cycle/ownServer.ts; DELETE owner only, below)
   ["POST", new RegExp(`^/api/tenants/${ID}/server/(key|test)$`)], // its key into their vault and the test wake: owner only, below
   // the world's own lists by path (app.ts: a store for the path's tenant in every auth mode, rule 3 404s another
@@ -507,8 +504,6 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["PUT", new RegExp(`^/api/tenants/${ID}/ai/own$`)], // how the team pays for its AI, the owner's login only
   ["POST", new RegExp(`^/api/tenants/${ID}/seats/(signin|signin/finish|check)$`)], // a seat's tokens into their vault: the owner's login, never an agent token
   ["DELETE", new RegExp(`^/api/tenants/${ID}/seats/\\d{1,3}$`)],
-  ["POST|DELETE", new RegExp(`^/api/tenants/${ID}/own-cloud/(account|server)$`)], // a cloud token into their vault, a server billed to them: the owner's login only
-  ["POST", new RegExp(`^/api/tenants/${ID}/own-cloud/quote$`)], // opens their vault: the owner's login only
   ["POST", new RegExp(`^/api/tenants/${ID}/server/(key|test)$`)], // the server's key into their vault and the test wake: the owner's login only
   ["DELETE", new RegExp(`^/api/tenants/${ID}/server$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/repo/connect$`)], // which repo the workspace's team writes, owner login only

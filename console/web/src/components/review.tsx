@@ -18,7 +18,7 @@ import { KEPT_LINE, onPress, PressUndone } from "@/lib/press";
 import { showClosed, useClosedNote, type BackResult } from "@/lib/afterClose";
 import { cardBody, cardHeading } from "@/lib/askLead";
 import { reviewQuestion } from "@/lib/pending";
-import { CARD_WORD, choiceDefaults, countsRed, hisIdeaNote, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
+import { CARD_WORD, choiceDefaults, countsRed, FEEDBACK_OPTION, hisIdeaNote, isDecisionCard, isUrgentReview, leadsFirst, leadsSection } from "@/lib/cardKind";
 import { LeadLines } from "@/components/readyFirst";
 import { useMinuteClock } from "@/components/deadlineFirst";
 import { cn } from "@/lib/utils";
@@ -958,6 +958,14 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   /** More (opened by the heading), a Give feedback pressed with no words. */
   const [open, setOpen] = useState(false);
   const [needWords, setNeedWords] = useState(false);
+  /**
+   * (the owner 26 Nov 01:14Z, after pressing it: "the button no say what to cahgne didn't work"): an option that asks for
+   * his words ("No: say what to change") opens the words box and writes nothing; the card stays open until he sends, and
+   * his words then go to the team as changes wanted, with the option he chose.
+   */
+  const [wordsFor, setWordsFor] = useState<string>();
+  const withChoice = (words: string) => (wordsFor ? `You chose "${wordsFor}": ${words}` : words);
+  const sendKey = wordsFor ? `choice:${wordsFor}` : "changes";
   const files = useChatAttach({ enabled: true, disabled: busy });
   // a spoken note goes back as feedback, with what is typed before it
   const voice = useAnswerVoice({
@@ -966,7 +974,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
     page: cardPage(item.ref ?? item.id, item.face?.title ?? item.title),
     typed: feedback,
     ...withCard(item),
-    deliver: (reply) => act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, reply, files.ids) : api.relaunchReviewItem(item.id, reply))).then((ok) => (ok ? (setFeedback(""), files.clear()) : refused())),
+    deliver: (reply) => act(sendKey, () => (files.ids.length ? api.relaunchReviewItem(item.id, withChoice(reply), files.ids) : api.relaunchReviewItem(item.id, withChoice(reply)))).then((ok) => (ok ? (setFeedback(""), files.clear()) : refused())),
     disabled: busy,
     big: true,
   });
@@ -993,6 +1001,13 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   const choices = decisionChoices(face);
   // E948-S69: a decision button answers the decision: Yes-like starts every next step (planned first), No-like parks them
   const choose = (c: DecisionChoice) => {
+    if (FEEDBACK_OPTION.test(c.label.trim())) {
+      setWordsFor(c.label);
+      setNeedWords(false);
+      // the box opens with the cursor in it (after this render shows it)
+      setTimeout(() => document.getElementById(`note-review-${item.id}`)?.querySelector("textarea")?.focus(), 0);
+      return;
+    }
     const idx = next.map((_, i) => i);
     const plain = (face.decision ?? "").split("?")[0].replace(/^(?:do|should|shall|will|can|would) (?:we|the team|i)\s+/i, "").trim();
     const plan = !next.length && c.start && plain ? `${/:\s*plan\b/i.test(c.label) ? "Plan" : "Do"}: ${plain}` : undefined;
@@ -1018,7 +1033,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
   const feedbackSend = () => {
     const words = feedback.trim();
     if (!words && !files.ids.length) return setNeedWords(true);
-    void act("changes", () => (files.ids.length ? api.relaunchReviewItem(item.id, words, files.ids) : api.relaunchReviewItem(item.id, words))).then((ok) => ok && (setFeedback(""), files.clear()));
+    void act(sendKey, () => (files.ids.length ? api.relaunchReviewItem(item.id, withChoice(words), files.ids) : api.relaunchReviewItem(item.id, withChoice(words)))).then((ok) => ok && (setFeedback(""), files.clear()));
   };
   return (
     <article className={CARD_FRAME} data-card-shell="review" data-testid="review-card" data-review-id={item.id} data-row={item.ref}>
@@ -1284,7 +1299,7 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
             <div className="contents" data-testid="review-buttons" data-card-buttons={choices ? "decision" : "review"}>
         {choices ? (
           choices.map((c) => (
-            <CardButton key={c.label} variant={c.recommended ? "default" : "outline"} className="h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]" {...props(`choice:${c.label}`)} onClick={() => choose(c)} title={c.sub} data-testid="review-choice" data-start={c.start ? "yes" : "no"}>
+            <CardButton key={c.label} variant={c.recommended ? "default" : "outline"} className="h-auto min-h-8 shrink whitespace-normal py-1.5 text-left [overflow-wrap:anywhere]" {...props(`choice:${c.label}`)} onClick={() => choose(c)} title={FEEDBACK_OPTION.test(c.label.trim()) ? "Opens the box for your words. Nothing is sent until you press Send." : c.sub} data-testid="review-choice" data-start={c.start ? "yes" : "no"} data-words={FEEDBACK_OPTION.test(c.label.trim()) ? "yes" : undefined} aria-pressed={wordsFor === c.label ? true : undefined}>
               {c.label}
             </CardButton>
           ))
@@ -1330,11 +1345,12 @@ function ReviewCardBody({ closedRefs, ...card }: CardProps & { closedRefs?: Set<
           onChange={(v) => (setFeedback(v), setNeedWords(false))}
           files={files}
           voice={voice}
-          sending={pressing?.key === "changes" && pressing.phase === "sending"}
+          sending={pressing?.key === sendKey && pressing.phase === "sending"}
           disabled={busy}
           onSend={feedbackSend}
           className="mt-0"
-          note={needWords ? "Say what should change: write, paste a screenshot, or speak, then press Send." : undefined}
+          open={!!wordsFor}
+          note={wordsFor ? `You chose ${wordsFor}. Say what should change: write, paste a screenshot, or speak, then press Send.` : needWords ? "Say what should change: write, paste a screenshot, or speak, then press Send." : undefined}
         />
       </div>
       </div>

@@ -382,6 +382,28 @@ export const CARD_TYPES: CardType[] = [
       />
     ),
   },
+  {
+    id: "review-words-option",
+    kind: "review",
+    buttons: "Yes: keep it. No: say what to change opens the box, nothing sent until Send. Park. Snooze. Voice · Text.",
+    name: "Review: a No that asks for your words",
+    where: "Inbox, Waiting for your review",
+    component: "ReviewCard",
+    render: () => (
+      <ReviewCard
+        item={sampleReview({
+          id: "sample_words_option",
+          face: {
+            ...FACE,
+            title: "The console made a test customer's server in its own cloud account.",
+            next: [],
+            decision: "Is making the server in their account at that price right? We recommend yes.",
+            options: ["Yes: keep it", "No: say what to change"],
+          },
+        } as Partial<ReviewItem>)}
+      />
+    ),
+  },
   { id: "review-old", kind: "review", buttons: "Open it. Park. Voice · Text.", name: "Review from an older release (no card face)", where: "Inbox, Waiting for your review", component: "OldCard", render: () => <ReviewCard item={sampleReview({ id: "sample_old", face: undefined })} /> },
   { id: "held-post", kind: "review", buttons: "Schedule · Changes wanted · Decline.", name: "SocialApp: a held post waiting for you", where: "Inbox, Waiting for your review (both skins)", component: "PostReviewCard", render: () => <PostReviewCard item={samplePost()} /> },
   { id: "held-reply", kind: "review", buttons: "Schedule this reply · Changes wanted · Decline.", name: "SocialApp: a reply in a thread waiting for you", where: "Inbox, Waiting for your review (both skins)", component: "PostReviewCard", render: () => <PostReviewCard item={samplePost("outreach")} /> },
