@@ -69,6 +69,10 @@ const OPEN: [string, RegExp][] = [
   ["GET", /^\/api\/public\/stripe\/team\/probe\/[a-f0-9]{32}$/], // the team's €1 probe link of the plan checkout (token-checked in stripeTeam.ts)
   // a recipient's voice feedback link: the page and its record/send calls; the token in the path is the credential
   // (voiceFeedback.ts). Public through Traefik on our site only after the owner's yes.
+  // the clinic receptionist's demo page and its call routes (clinicDemo.ts): a page per clinic config, its one
+  // button a rate-limited call (3 an hour a visitor, a day cap per clinic); the call id is the credential for its tools.
+  ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}$/],
+  ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/calls(\/cc_[a-f0-9]{24}\/(tool|end))?$/],
   ["GET", /^\/api\/public\/feedback\/[\w-]{10,40}$/],
   ["POST", /^\/api\/public\/feedback\/[\w-]{10,40}\/notes(\/fbn_[a-f0-9]{8}\/(parts\/\d{1,2}|finish|discard))?$/],
   // a steps page's Done switches (steps/steps.ts): the kit script and style, and the page's ticks by its token
@@ -151,6 +155,13 @@ export const TENANT_SAFE: [string, RegExp][] = [
   ["POST", new RegExp(`^/api/tenants/${ID}/desk/voice/calls$`)],
   ["POST", new RegExp(`^/api/tenants/${ID}/desk/voice/calls/${ID}/(beat|usage|end|ask)$`)],
   ["GET", new RegExp(`^/api/tenants/${ID}/desk/voice/calls/${ID}/(status|ask/${ID})$`)],
+  // a new workspace's onboarding call (voice/routes.ts mountOnboardingVoice): one Voice per path world, which must
+  // be the caller's (the request-scoped store's getTenant, another world a 404); every call route is its owner's own
+  // (ownerOnly), its relay writes the objective in that world only (app.ts).
+  ["GET", new RegExp(`^/api/tenants/${ID}/onboarding/voice/(state|calls)$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/onboarding/voice/(calls|calls/warm|active/end)$`)],
+  ["POST", new RegExp(`^/api/tenants/${ID}/onboarding/voice/calls/${ID}/(beat|usage|end|relay)$`)],
+  ["GET", new RegExp(`^/api/tenants/${ID}/onboarding/voice/calls/${ID}/status$`)],
   // the social briefer's Call (/marketing, voice/routes.ts mountOwnCall "/voice/marketing"): the owner opens it on the
   // social product's customer site through the door. Every call route is ownerOnly (the owner's session, from the
   // page) and answers only the home world (another world gets a 404). Off this list the state read was 403, so his

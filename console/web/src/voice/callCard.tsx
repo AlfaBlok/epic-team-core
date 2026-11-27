@@ -31,7 +31,7 @@ export function callPathOf(href: string | undefined): string | undefined {
 /** the button's words for a call page ("Call the <social product> briefer" for /marketing). */
 export function callLabel(path: string): string {
   if (path === MARKETING_PATH) return `Call the ${socialProduct()} briefer`;
-  if (path === BRIEFING_PATH) return "Call the briefing";
+  if (path === BRIEFING_PATH) return "Call your objectives review";
   if (path === STRATEGY_PATH) return "Call the strategy call";
   return "Call the coach";
 }

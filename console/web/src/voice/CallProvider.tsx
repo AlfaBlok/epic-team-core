@@ -108,6 +108,11 @@ export class CallTab {
         file: async (p) => (await hands()).file!(p),
       };
     }
+    // the objectives review call files his decisions on each objective, like the Team desk's walk; it presses nothing.
+    if (base === "/api/voice/briefing" && !o.api) {
+      const hands = () => import("./SectionCall").then((m) => m.inboxHands());
+      h.engine.hands = { file: async (p) => (await hands()).file!(p) };
+    }
     h.engine.subscribe(() => this.changed());
     this.held.set(base, h); // no change event: this runs while a page renders, and nothing floats until a call starts
     return h;

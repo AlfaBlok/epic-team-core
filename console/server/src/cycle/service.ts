@@ -11,7 +11,7 @@ import type { WakeLink, WakeSkills } from "../teamSkills.js";
 import { ruleBrokenSection } from "./gateCore.js";
 import type { ChildEpic } from "./children.js";
 import { isCredentialRefusal, ROTATE_HINT } from "../t3/tokenWatch.js";
-import { T3BusyError, busyKind, errorText, isThreadBusy, matchProject, sendFailureText, type T3Client, type T3Project, type T3ScheduledTask } from "../t3/client.js";
+import { T3BusyError, busyKind, errorText, isT3Unavailable, isThreadBusy, matchProject, sendFailureText, type T3Client, type T3Project, type T3ScheduledTask } from "../t3/client.js";
 import type { Dispatcher } from "../t3/dispatcher.js";
 import { roomLine, type Room } from "./workerRoom.js";
 import { pickerFor } from "../t3/hostDispatcher.js";
@@ -2684,6 +2684,12 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       }
       // the worker server starting or unreachable: a queued row waits for it (never the main server instead)
       if (queue && e instanceof CycleError && e.code === "vps3_unavailable") return defer(e.message, { kind: "unreachable", text: e.message, reason: e.message, retryable: true });
+      // T3 on the worker server refused or dropped the call (the tunnel blinked: a console release restarts it):
+      // the row stays queued and starts on the next tick T3 answers, never failed and restarted by a wake 27 min later.
+      if (queue && isT3Unavailable(e)) {
+        const reason = `${host} unavailable: T3 did not answer the launch (${errorText(e)})`;
+        return defer(reason, { kind: "unreachable", text: reason, reason, retryable: true });
+      }
       return { run: store.updateRun(runId, { outcome: "failed", endedAt: iso(), summary: `${spec.ticket} worker launch on ${host} failed: ${errorText(e)}` })! };
     }
   }

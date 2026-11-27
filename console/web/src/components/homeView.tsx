@@ -14,11 +14,14 @@ import { useQuery } from "@/lib/data";
 import { homeWorld } from "@/lib/identity";
 import { knownDoor, knownWorld, worldId } from "@/lib/useSocial";
 import { Loading } from "@/components/common";
+import { useOnboardingLeads } from "@/lib/onboardingLeads";
 
 // The Inbox page (and Home in a world with no goal sets) loads its script when shown.
 const TeamPage = lazyPage(() => import("@/pages/Team"), "TeamPage");
 const GettingGoingChat = lazyPage(() => import("@/pages/Chat"), "GettingGoingChat");
 const MilestoneDialog = lazyPage(() => import("@/components/dialogs"), "MilestoneDialog", null);
+// the onboarding call loads its call code only on a customer workspace's Home (never in the main script)
+const OnboardingCall = lazyPage(() => import("@/components/onboardingCall"), "OnboardingCall", null);
 
 export { INBOX_PATH };
 
@@ -35,14 +38,25 @@ export function HomePage() {
   const shows = useShows();
   const campaigns = !!useSkin().campaigns;
   const fallback = campaigns ? <TeamPage only="goals" /> : <TeamPage />;
+  const w = useCustomerWorld();
+  const leads = useOnboardingLeads();
+  // an onboarding call that wrote the first objective reads Home again at its end
+  const [ended, setEnded] = useState(0);
   // a customer world that can buy the paid plan sees one line with the Buy button on top of Home
   return (
     <>
+      {/* (call_910685a3: "guide the user towards a button at the beginning"): a new EpicTeam workspace's first screen
+          leads to one Call, its onboarding helper, until it has an objective of its own; the rest waits under it */}
+      {!campaigns && w && (
+        <div className="mb-6 max-w-3xl empty:hidden">
+          <OnboardingCall world={w} onWritten={() => setEnded((n) => n + 1)} />
+        </div>
+      )}
       <HomeBuyLine />
-      <HomeRepoLine />
+      {!leads && <HomeRepoLine />}
       {/* the same page in both skins (L-62): the console skin's All objectives with its objectives, the social skin's with his
           pinned campaigns as the objectives (the owner 13 Nov: "look at what we did in epicteam"). */}
-      {campaigns ? <CampaignsHomeOr fallback={fallback} /> : <ChatHomeOr fallback={shows("goalSets") ? <GoalsHome fallback={fallback} /> : fallback} />}
+      {campaigns ? <CampaignsHomeOr fallback={fallback} /> : <ChatHomeOr ended={ended} fallback={shows("goalSets") ? <GoalsHome fallback={fallback} /> : fallback} />}
     </>
   );
 }
@@ -55,12 +69,20 @@ export function HomePage() {
  * its chat under it in one column (the owner 22 Nov, step note on the four steps: "hate this 2 col design for this home"), which works them green. Every other world (ours, an unpaid workspace, through
  * the door) keeps what it had.
  */
-function ChatHomeOr({ fallback }: { fallback: JSX.Element }) {
+/** the caller's world when it is a customer's (not ours, not through the door), else undefined. */
+function useCustomerWorld(): string | undefined {
+  const [known] = useState(knownWorld);
+  const world = useQuery(() => worldId(), []);
+  const w = world.data ?? known;
+  return !!w && w !== homeWorld() && !knownDoor() ? w : undefined;
+}
+
+function ChatHomeOr({ fallback, ended = 0 }: { fallback: JSX.Element; ended?: number }) {
   const [known] = useState(knownWorld);
   const world = useQuery(() => worldId(), []);
   const w = world.data ?? known;
   const customer = !!w && w !== homeWorld() && !knownDoor();
-  const objective = useQuery(() => (customer ? api.getFirstObjective(w) : Promise.resolve(undefined)), [customer, w]);
+  const objective = useQuery(() => (customer ? api.getFirstObjective(w) : Promise.resolve(undefined)), [customer, w, ended]);
   if (!customer) return world.loading && w === undefined ? <Loading /> : fallback;
   if (objective.loading && !objective.data) return <Loading />;
   if (!objective.data) return fallback;

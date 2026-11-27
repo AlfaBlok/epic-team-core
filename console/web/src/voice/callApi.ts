@@ -1,4 +1,5 @@
 import type { VoiceApi } from "./engine";
+import { getCallLang } from "./callLang";
 
 /**
  * the console's call routes, apart from the call engine (engine.ts), so a page can hold a call's api (Hang up
@@ -30,7 +31,7 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
       // before the key is in hand, so a start again never makes two calls.
       for (let i = 0; ; i++) {
         try {
-          return await call("POST", "/calls", focus ? { focus } : undefined);
+          return await call("POST", "/calls", { ...(focus ? { focus } : {}), lang: getCallLang() });
         } catch (e) {
           if (!startAgain(e)) throw e;
           if (i >= START_AGAIN_MS.length) throw (e as { code?: string }).code === "key_wait" ? new Error(KEY_LATE_TEXT) : e;
@@ -51,6 +52,6 @@ export function fetchVoiceApi(f: typeof fetch = (...a) => fetch(...a), base = "/
     tool: (id, name, args) => call("POST", `/calls/${id}/tool`, { name, args }),
     relay: (id, args) => call("POST", `/calls/${id}/relay`, args),
     lookup: (id, name, args) => call("POST", `/calls/${id}/lookup`, { name, args }),
-    warm: () => call("POST", "/calls/warm"),
+    warm: () => call("POST", "/calls/warm", { lang: getCallLang() }),
   };
 }

@@ -11,6 +11,7 @@
  * Loaded only when a call starts on ElevenLabs (engine.ts imports it then), so the first page stays light.
  */
 import { Conversation } from "@elevenlabs/client";
+import { CLOCK_MARK } from "./timeLeft";
 
 /** how long a desk question may hold the agent's turn (its tool waits up to 120 s). */
 export const ELEVEN_ASK_WAIT_MS = 100_000;
@@ -31,6 +32,8 @@ export interface ElevenLine {
   end(): Promise<void>;
   mute(m: boolean): void;
   id(): string | undefined;
+  /** a note that makes the agent speak now (the call's clock); its own text never shows as his line. */
+  say?(note: string): void;
 }
 
 export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
@@ -46,6 +49,7 @@ export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
     },
     onMessage: (m) => {
       // ElevenLabs writes his silence as "...": not a line of the transcript.
+      if (m.message?.startsWith(CLOCK_MARK)) return;
       if (m.message?.replace(/[.\s…]/g, "")) h.onLine(m.role === "user" ? "owner" : "voice", m.message);
     },
     onModeChange: ({ mode }) => h.onMode(mode === "speaking"),
@@ -56,5 +60,6 @@ export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
     end: () => conv.endSession().catch(() => undefined),
     mute: (m) => (conv as { setMicMuted?: (m: boolean) => void }).setMicMuted?.(m),
     id: () => convId ?? conv.getId?.(),
+    say: (note) => conv.sendUserMessage(note),
   };
 }

@@ -236,17 +236,32 @@ describe("T42-S5 call engine", () => {
     expect(f.engine.view().lines.map((l) => l.text)).toEqual(["asked the desk (call_1-q1): start the WhatsApp row", "desk answered (call_1-q1): Started run_9."]);
   });
 
-  it("a nudge waits while Sam is talking", async () => {
+  it("the time left is said out loud, word for word, never into his sentence", async () => {
     const f = fakes();
     await f.open();
     await f.emit({ type: "input_audio_buffer.speech_started" });
     await f.run(18 * 60_000); // the 18-minute warning comes due mid-sentence
-    expect(f.sent.some((e) => e.item?.role === "system")).toBe(false);
-    expect(f.engine.view().warn).toMatch(/2 minutes left/);
+    expect(f.sent.some((e) => e.type === "response.create")).toBe(false);
+    expect(f.engine.view().warn).toBe("Heads up: about two minutes left on this call. You can call again after.");
     await f.emit({ type: "input_audio_buffer.speech_stopped" });
-    expect(f.sent.some((e) => e.item?.role === "system")).toBe(false); // not into his breath
+    expect(f.sent.some((e) => e.type === "response.create")).toBe(false); // not into his breath
     await f.run(2_000);
-    expect(f.sent.find((e) => e.item?.role === "system")?.item.content[0].text).toMatch(/two minutes left/);
+    expect(f.sent.find((e) => e.type === "response.create")?.response.instructions).toBe('Say exactly "Heads up: about two minutes left on this call. You can call again after." and nothing else.');
+    expect(f.engine.view().lines.map((l) => l.text)).toContain("time left: two minutes");
+  });
+
+  it("a short TEST limit says its own time left, in Spanish on a Spanish call", async () => {
+    globalThis.localStorage?.setItem("call-lang", "es");
+    const { setCallLang } = await import("./callLang");
+    setCallLang("es");
+    try {
+      const f = fakes({ callMaxMin: 1.5, callWarnMin: 1, quietHangupS: 600, monthCapUsd: 25 });
+      await f.open();
+      await f.run(60_000);
+      expect(f.sent.find((e) => e.type === "response.create")?.response.instructions).toBe('Say exactly "Aviso: quedan 30 segundos de llamada. Luego puedes volver a llamar." and nothing else.');
+    } finally {
+      setCallLang("en");
+    }
   });
 
   it("hangs up after the quiet time (warning first) and hands the transcript to the console", async () => {
@@ -393,7 +408,7 @@ describe("PLAN-56 call cost guard", () => {
     await f.run(1_000);
     expect(f.sent).toEqual([
       { type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text: QUIET_NUDGE }] } },
-      { type: "response.create", response: { tool_choice: "none" } },
+      { type: "response.create", response: { instructions: 'Say exactly "Still there? I\'ll hang up in ten seconds." and nothing else.', tool_choice: "none" } },
     ]);
     await say(f, "resp_warn", "Still there? I'll hang up in a few seconds.");
     await f.run(3_000);

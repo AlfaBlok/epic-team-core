@@ -20,6 +20,25 @@ export const ELEVEN_AGENT_NAME = "EpicTeam Team desk call";
 export const ELEVEN_VOICE_ID = "cgSgspJ2msm6clMCkdW9";
 /** the model the call's voice speaks with: low delay (ElevenLabs asks an English agent for turbo or flash v2). */
 export const ELEVEN_TTS_MODEL = "eleven_flash_v2";
+/**
+ * A call in Spanish (the owner on call_f5516a60, 26 Nov: "creo que estás en la voz inglesa y estás hablando español desde
+ * el preset inglés ... estaría bueno si cuando sale ya la llamada puedo escoger el idioma"): its own agent on the account,
+ * a native Spain-Spanish voice (Sara Martin 3, the library's conversational Castilian voice), never the English voice
+ * reading Spanish. ElevenLabs speaks a non-English agent with a v2.5 model.
+ */
+export const ELEVEN_VOICE_ID_ES = "gD1IexrzCvsXPHUuT0s3";
+export const ELEVEN_TTS_MODEL_ES = "eleven_flash_v2_5";
+/**
+ * How steady the Spanish voice speaks (0 to 1). The owner on call_065c7b6e (27 Nov): the call voice "sounds like a TV
+ * actress in a film, not a normal person". ElevenLabs' default 0.5 lets the voice act; 0.8 keeps it even and plain.
+ * The console's PATCH leaves a value it does not send, so the live agents were set once by hand to the same.
+ */
+export const ELEVEN_STABILITY_ES = 0.8;
+/** the call's language, picked on the call screen (English by default). */
+export type CallLang = "en" | "es";
+export const callLang = (v: unknown): CallLang => (v === "es" ? "es" : "en");
+/** the Spanish agent's name on the account: the English one's, marked. */
+export const spanishAgentName = (name: string) => `${name} · Español`;
 export const ELEVEN_MODEL_LABEL = "elevenlabs-agents";
 /** a desk answer may take a while: the agent waits this long for a client tool's result. */
 export const ELEVEN_TOOL_WAIT_S = 120;
@@ -46,20 +65,20 @@ export function clientTool(t: ToolDef) {
 }
 
 /** the agent as made on the account: the base prompt is replaced per call by the console's own instructions. */
-export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[], name: string = ELEVEN_AGENT_NAME, tags: string[] = ["epicteam", "team-desk"]) {
+export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[], name: string = ELEVEN_AGENT_NAME, tags: string[] = ["epicteam", "team-desk"], lang: CallLang = "en") {
   return {
     name,
     tags,
     conversation_config: {
       agent: {
         first_message: firstMessage,
-        language: "en",
+        language: lang,
         prompt: {
           prompt,
           tools: [...tools.filter((t) => t.name !== "hang_up").map(clientTool), { type: "system", name: "end_call", description: "End the call when he clearly says he is done, after one short goodbye.", params: { system_tool_type: "end_call" } }],
         },
       },
-      tts: { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
+      tts: lang === "es" ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_ES, stability: ELEVEN_STABILITY_ES } : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
       conversation: { max_duration_seconds: 20 * 60 },
     },
     platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true } } } },
@@ -91,9 +110,25 @@ export interface ElevenLink {
  * The console's door to ElevenLabs Agents: `link()` finds (or makes, once) the desk agent and returns a signed link
  * for one call. `key` reads agent-team-console/ELEVENLABS_API_KEY per call, held in memory only.
  */
-export function elevenCalls(o: { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void } }) {
+type ElevenOpts = { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void }; /** the agent as made on the account (default agentBody); the public clinic receptionist (clinicDemo.ts) takes no overrides. */ body?: typeof agentBody };
+
+/** one door per language: English is the agent as before, Spanish its own agent (a Spanish voice), found again by its name. */
+export function elevenCalls(o: ElevenOpts) {
+  const en = elevenLine(o, "en");
+  let es: ReturnType<typeof elevenLine> | undefined;
+  const of = (lang?: CallLang) => (lang === "es" ? (es ??= elevenLine({ ...o, known: undefined }, "es")) : en);
+  return {
+    /** a link for one call in this language (English by default). */
+    link: (lang?: CallLang) => of(lang).link(),
+    /** the call page opened: make the next call's link in this language now. */
+    warm: (lang?: CallLang) => of(lang).warm(),
+    isWarm: (lang?: CallLang) => of(lang).isWarm(),
+  };
+}
+
+function elevenLine(o: ElevenOpts, lang: CallLang) {
   const f = o.f ?? fetch;
-  const agentName = o.name ?? ELEVEN_AGENT_NAME;
+  const agentName = lang === "es" ? spanishAgentName(o.name ?? ELEVEN_AGENT_NAME) : (o.name ?? ELEVEN_AGENT_NAME);
   let agentId: string | undefined;
   const api = async (k: string, method: string, path: string, body?: unknown) => {
     let r: Response;
@@ -113,7 +148,7 @@ export function elevenCalls(o: { /** the agent's name on the account (default: t
       const found = await api(k, "GET", `/v1/convai/agents?search=${encodeURIComponent(agentName)}&page_size=30`);
       id = (found.agents ?? []).find((a: any) => a.name === agentName)?.agent_id;
     }
-    const body = agentBody(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags);
+    const body = (o.body ?? agentBody)(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags, lang);
     // found: brought in step with this console's greeting once per start, in the background (the call
     // never waits on it; each call overrides the prompt and greeting anyway); gone from the account: the signed link's
     // 404 makes it again (link()).
@@ -190,4 +225,4 @@ export function elevenCalls(o: { /** the agent's name on the account (default: t
   };
 }
 /** the door a voice uses; tests fake `link` alone (warm is the page-open link). */
-export type ElevenCalls = { link(): Promise<ElevenLink & { warm?: boolean }>; warm?(): Promise<void>; isWarm?(): boolean };
+export type ElevenCalls = { link(lang?: CallLang): Promise<ElevenLink & { warm?: boolean }>; warm?(lang?: CallLang): Promise<void>; isWarm?(lang?: CallLang): boolean };

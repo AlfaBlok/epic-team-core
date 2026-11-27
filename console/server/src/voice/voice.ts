@@ -9,7 +9,8 @@ import { KeyNotReady } from "../secretCache.js";
 import { homeWorld, hostOf, isOwnerWho, keyFile, ownerName, sites } from "../identity.js";
 import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inboxPack, isInboxTool, isObjectiveTool, objectiveStep, pressStep, walk, yesCheck, type InboxCard, type InboxFocus, type ObjectiveCard, type ObjectiveStep, type PressStep, type WalkStep } from "./inbox.js";
 import type { CallCheck } from "./afterCall.js";
-import { ELEVEN_MODEL_LABEL, type ElevenCalls } from "./elevenAgent.js";
+import { ELEVEN_MODEL_LABEL, type CallLang, type ElevenCalls } from "./elevenAgent.js";
+import { spanishGreeting, spanishInstructions } from "./spanish.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -29,6 +30,21 @@ export const MONTH_CAP_USD = 25;
 export const WORLD_MONTH_CAP_USD = 5;
 export const CALL_MAX_MIN = 20;
 export const CALL_WARN_MIN = 18;
+/**
+ * the call's length and when the voice says the time left. A TEST console may shorten both
+ * (CONSOLE_CALL_MAX_MIN, CONSOLE_CALL_WARN_MIN, minutes, decimals allowed, never longer than the default) to hear the
+ * spoken warning in a short call; production sets neither.
+ */
+export function callLength(env: Record<string, string | undefined> = process.env, base = CALL_MAX_MIN): { callMaxMin: number; callWarnMin: number } {
+  const max = Number(env.CONSOLE_CALL_MAX_MIN);
+  // `base`: the voice's own length (the onboarding call's hour); a TEST console shortens it the same way
+  const callMaxMin = Number.isFinite(max) && max > 0 && max < base ? max : base;
+  const warn = Number(env.CONSOLE_CALL_WARN_MIN);
+  const callWarnMin = Number.isFinite(warn) && warn > 0 && warn < callMaxMin ? warn : Math.max(callMaxMin - (CALL_MAX_MIN - CALL_WARN_MIN), callMaxMin / 2);
+  return { callMaxMin, callWarnMin };
+}
+/** the longest call any voice runs (the onboarding call: "10 minutes or as long as they like", within an hour). */
+export const LONGEST_CALL_MIN = 60;
 /**: a call with nobody speaking for this long ends by itself (setting `quiet_hangup_s`). */
 export const QUIET_HANGUP_S = 60;
 /** The voice warns this many seconds before the idle hang-up ("Still there? …"). */
@@ -401,6 +417,13 @@ export interface VoiceDeps {
   relay?: (callId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   /** the briefer's read-only lookups during a call: exact rows from one source, as text (POST …/calls/:cid/lookup). */
   lookup?: (callId: string, name: string, args: Record<string, unknown>) => Promise<string>;
+  /**
+   * this voice's own per-call limit in minutes (default CALL_MAX_MIN); the onboarding call runs up to an hour
+   * ("10 minutes or as long as they like"), its warning two minutes before.
+   */
+  callMaxMin?: number;
+  /** this voice's own world switch in place of the `enabled:<world>` setting (the onboarding call is on for every new team). */
+  worldOn?: () => boolean;
 }
 
 /**
@@ -610,7 +633,8 @@ export function createVoice(d: VoiceDeps) {
   // a world other than the home world has voice (calls and notes) only when its own switch is on: the owner turns it on for his
   // worlds (a social world repo), every other world's people stay without voice unless their setting says so.
   const worldKey = world === DEFAULT_TENANT ? undefined : `enabled:${world}`;
-  const worldOn = () => !worldKey || setting(worldKey) === "on";
+  const worldOn = () => (d.worldOn ? d.worldOn() : !worldKey || setting(worldKey) === "on");
+  const callMax = d.callMaxMin ?? CALL_MAX_MIN;
   const enabled = () => platformOn() && worldOn();
   /** calls are the platform's own switch (every world), off unless set on; notes never read it. */
   const provider = (): "elevenlabs" | "openai" => (d.eleven && setting("call_provider") !== "openai" ? "elevenlabs" : "openai");
@@ -625,8 +649,7 @@ export function createVoice(d: VoiceDeps) {
   const capKey = world === DEFAULT_TENANT ? "month_cap_usd" : `month_cap_usd:${world}`;
   const monthCap = () => Number(setting(capKey)) || (world === DEFAULT_TENANT ? MONTH_CAP_USD : WORLD_MONTH_CAP_USD);
   const limits = (): Limits => ({
-    callMaxMin: CALL_MAX_MIN,
-    callWarnMin: CALL_WARN_MIN,
+    ...callLength(process.env, callMax),
     quietHangupS: Number(setting("quiet_hangup_s")) || QUIET_HANGUP_S,
     quietWarnS: QUIET_WARN_S,
     listenQuietS: LISTEN_QUIET_S,
@@ -684,7 +707,8 @@ export function createVoice(d: VoiceDeps) {
   /** Calls the page stopped beating for (tab closed, phone locked) or past the hard limit are over. */
   function closeLost() {
     const lostBefore = iso(now() - LOST_AFTER_MS);
-    const tooOld = iso(now() - (CALL_MAX_MIN + 2) * 60_000);
+    // the longest any voice of this world may run the onboarding call's hour), so a short voice never closes a long one
+    const tooOld = iso(now() - (Math.max(callMax, LONGEST_CALL_MIN) + 2) * 60_000);
     for (const r of db.prepare(`SELECT id, last_beat_at FROM voice_calls WHERE ended_at IS NULL AND (last_beat_at < @l OR started_at < @o) AND ${inWorld}`).all({ l: lostBefore, o: tooOld, w: world }) as any[])
       db.prepare("UPDATE voice_calls SET ended_at = ?, end_reason = 'lost' WHERE id = ? AND ended_at IS NULL").run(r.last_beat_at, r.id);
   }
@@ -783,13 +807,14 @@ export function createVoice(d: VoiceDeps) {
    * the call page opened: the next call's ElevenLabs link is made now (key fetched, used, dropped), so his
    * press does not wait on Bitwarden and ElevenLabs. Nothing when calls cannot start or a call is on.
    */
-  function warm(): { warming: boolean } {
+  function warm(lang: CallLang = "en"): { warming: boolean } {
     if (refusal() || active() || provider() !== "elevenlabs" || !d.eleven?.warm) return { warming: false };
-    void d.eleven.warm();
+    void d.eleven.warm(lang);
     return { warming: true };
   }
 
-  async function start(focus?: InboxFocus): Promise<CallStart> {
+  /** `lang`: the language he picked on the call screen: Spanish runs on the Spanish agent and voice. */
+  async function start(focus?: InboxFocus, lang: CallLang = "en"): Promise<CallStart> {
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
@@ -798,7 +823,7 @@ export function createVoice(d: VoiceDeps) {
     // ~60 s on "Connecting...": the context's wait, then the agent's update and the link, one after the other).
     let linkMs: number | undefined;
     let ctxMs: number | undefined;
-    const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link().then((l) => ((linkMs = Date.now() - t0), l)) : undefined;
+    const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link(lang).then((l) => ((linkMs = Date.now() - t0), l)) : undefined;
     linkP?.catch(() => undefined); // awaited below; a refusal surfaces there
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
     const [brief, recall, cards, objectives, context, objectiveCards] = await Promise.all([
@@ -815,15 +840,18 @@ export function createVoice(d: VoiceDeps) {
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
     // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
     const briefing = objectiveCards.length ? (d.walkRule ?? briefingRule)(objectiveCards.length) : "";
-    const instructions = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    const instructionsEn = (d.instructions ?? voiceInstructions)() + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
     const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length && !d.walkRule ? OBJECTIVE_TOOLS : [])];
+    const greetingEn = focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructionsEn);
+    // a Spanish call: its greeting in Spanish, its prompt led by the Spanish rule (the same facts and tools below it)
+    const greeting = lang === "es" ? spanishGreeting(greetingEn) : greetingEn;
+    const instructions = lang === "es" ? spanishInstructions(instructionsEn, greetingEn, greeting!) : instructionsEn;
     const cfg = sessionConfig(mdl, instructions, [...tools, ...walkTools] as unknown as typeof VOICE_TOOLS, historyTokens());
-    const greeting = focus && walkCards ? focusGreeting({ section: focus.section, cards: walkCards }) : greetingOf(instructions);
     if (provider() === "elevenlabs" && d.eleven) {
       // ElevenLabs Agents on the grant: a signed link for one call, the same instructions and greeting per call.
-      const link = await (linkP ?? d.eleven.link());
+      const link = await (linkP ?? d.eleven.link(lang));
       const id = `call_${crypto.randomBytes(4).toString("hex")}`;
       const t = iso();
       if (active()) throw new VoiceError(409, "one_call", "A call is already on (one call at a time). Hang it up first.");
@@ -831,7 +859,7 @@ export function createVoice(d: VoiceDeps) {
       if (walkCards) db.prepare("UPDATE voice_calls SET inbox = ? WHERE id = ?").run(JSON.stringify(walkCards), id);
       if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
       // each step's time in the log, so a slow start names its part (key and link, or the context read)
-      console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId}) in ${Date.now() - t0} ms: link ${(link as { warm?: boolean }).warm ? "made when the page opened" : `${linkMs ?? "?"} ms`}, context ${ctxMs} ms`);
+      console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId}${lang === "es" ? ", Spanish" : ""}) in ${Date.now() - t0} ms: link ${(link as { warm?: boolean }).warm ? "made when the page opened" : `${linkMs ?? "?"} ms`}, context ${ctxMs} ms`);
       return { call: must(id), clientSecret: "", expiresAt: Math.floor(now() / 1000) + 15 * 60, model: ELEVEN_MODEL_LABEL, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, ...(greeting ? { greeting } : {}), provider: "elevenlabs", signedUrl: link.signedUrl, agentId: link.agentId, instructions };
     }
     const key = await d.mint(cfg);
@@ -872,7 +900,7 @@ export function createVoice(d: VoiceDeps) {
   function stopWhy(c: VoiceCall): string | undefined {
     if (!enabled()) return "voice_off";
     if (!callsOn()) return "calls_off";
-    if (c.seconds >= CALL_MAX_MIN * 60) return "call_limit";
+    if (c.seconds >= callMax * 60) return "call_limit";
     if (month().usd >= limits().monthCapUsd) return "month_cap";
     return undefined;
   }

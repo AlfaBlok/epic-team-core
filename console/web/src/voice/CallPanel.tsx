@@ -7,6 +7,7 @@ import { useInRouterContext, useLocation } from "react-router-dom";
 import type { EngineView, Media, VoiceApi } from "./engine";
 import { busy, useCallTab } from "./CallProvider";
 import { connectingText, useConnectingSeconds } from "./connecting";
+import { getCallLang, useCallLang, type CallLang } from "./callLang";
 
 /** GET /api/voice/state: what the button needs before a call. */
 export interface VoiceState {
@@ -45,10 +46,12 @@ const END_WORDS: Record<string, string> = {
 /** when each call line last asked for its next link (per tab); the console keeps one for 10 minutes. */
 const warmedAt = new Map<string, number>();
 export const WARM_EVERY_MS = 8 * 60_000;
-export function warmOnce(base: string, api: VoiceApi, now = Date.now()): boolean {
-  const at = warmedAt.get(base);
+export function warmOnce(base: string, api: VoiceApi, now = Date.now(), lang: CallLang = getCallLang()): boolean {
+  // one link per language: a pick of Español makes the Spanish call's link (its own agent and voice)
+  const key = `${base}|${lang}`;
+  const at = warmedAt.get(key);
   if (!api.warm || (at !== undefined && now - at < WARM_EVERY_MS)) return false;
-  warmedAt.set(base, now);
+  warmedAt.set(key, now);
   void api.warm().catch(() => undefined);
   return true;
 }
@@ -134,9 +137,10 @@ export function useCallDock(
   useEffect(refresh, []); // eslint-disable-line react-hooks/exhaustive-deps
   // a page that can call asks the console for the next call's link as it opens (at most every few minutes
   // per call line), so his tap does not wait on the key and ElevenLabs. The call code itself still loads on the tap.
+  const [lang, setLang] = useCallLang();
   useEffect(() => {
-    if (st?.available && !busy(v.phase)) warmOnce(h.base, h.api);
-  }, [st?.available]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (st?.available && !busy(v.phase)) warmOnce(h.base, h.api, Date.now(), lang);
+  }, [st?.available, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const autoStarted = useRef(false);
   useEffect(() => {
     if (!props.autoStart || autoStarted.current || !st?.available || busy(v.phase)) return;
@@ -211,6 +215,10 @@ export function useCallDock(
               </span>
               <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : connectingText(connectingS)}</span>
               <span className="tabular-nums" data-testid="call-cost">{money(v.costUsd)}</span>
+              {/* who he is talking to, named on the call itself (the owner: "on the call, I should see a name of who I'm talking to") */}
+              <span className="basis-full truncate text-foreground" data-testid="call-with">
+                with {callee}
+              </span>
               {v.listening ? (
                 <span data-testid="call-listening" className="text-emerald-800 dark:text-emerald-300">
                   · listening: say “done” when finished
@@ -246,6 +254,8 @@ export function useCallDock(
             </a>
           </Button>
         ) : !onCall ? (
+          <div className="flex shrink-0 items-center gap-2 phone:hidden">
+          <LangPick lang={lang} onPick={setLang} />
           <Button
             data-testid="call-start"
             variant="outline"
@@ -261,6 +271,7 @@ export function useCallDock(
           >
             <Phone /> Call {callee}
           </Button>
+          </div>
         ) : (
           <div className="flex shrink-0 gap-2 phone:grid phone:grid-cols-2 phone:gap-10 phone:sm:[&>*]:min-w-36" data-testid="call-controls">
             <Button
@@ -355,6 +366,8 @@ export function useCallDock(
         </a>
       </Button>
     ) : !onCall && !other ? (
+      <span className={cn("shrink-0 items-center gap-1.5", props.wide ? "inline-flex" : "hidden phone:inline-flex")}>
+      <LangPick lang={lang} onPick={setLang} />
       <Button
         data-testid="call-start-compact"
         variant="outline"
@@ -366,8 +379,38 @@ export function useCallDock(
       >
         <Phone /> {props.label ?? "Call"}
       </Button>
+      </span>
     ) : undefined;
   return { bar, button, live, liveKey, onCall };
+}
+
+/**
+ * the call's language, one tap: English or Español, kept on this device; every call screen shows it beside its
+ * Call. Español calls on a native Spain-Spanish voice.
+ */
+export function LangPick({ lang, onPick }: { lang: CallLang; onPick: (l: CallLang) => void }) {
+  const opt = (l: CallLang, short: string, name: string) => (
+    <button
+      type="button"
+      data-testid={`call-lang-${l}`}
+      aria-pressed={lang === l}
+      aria-label={`Call in ${name}`}
+      title={`Call in ${name}`}
+      onClick={() => onPick(l)}
+      className={cn(
+        "h-11 min-w-11 px-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        lang === l ? "bg-emerald-700 text-white dark:bg-emerald-600" : "bg-transparent text-foreground hover:bg-muted",
+      )}
+    >
+      {short}
+    </button>
+  );
+  return (
+    <span role="group" aria-label="Call language" data-testid="call-lang" className="inline-flex shrink-0 overflow-hidden rounded-full border border-emerald-600/50">
+      {opt("en", "EN", "English")}
+      {opt("es", "ES", "Español")}
+    </span>
+  );
 }
 
 /** Where this page is (path + query), for the widget's link back; a page outside a router (a test) reads the window's. */

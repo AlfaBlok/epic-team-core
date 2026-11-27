@@ -28,7 +28,9 @@ const cardIn = z.object({
   recommend: z.string().max(600).optional(),
   buttons: z.array(z.string().min(1).max(120)).max(10).optional(),
 });
-const startIn = z.object({ focus: z.object({ section: z.string().trim().min(1).max(120), cards: z.array(cardIn).max(60) }).optional() });
+/** `lang`: the call's language from the call screen's pick, English when absent. */
+const langIn = z.enum(["en", "es"]).optional();
+const startIn = z.object({ focus: z.object({ section: z.string().trim().min(1).max(120), cards: z.array(cardIn).max(60) }).optional(), lang: langIn });
 const toolIn = z.object({ name: z.string().min(1).max(60), args: z.record(z.unknown()).optional() });
 const settingsIn = z.object({
   enabled: z.boolean().optional(),
@@ -201,6 +203,26 @@ export function mountWorldDeskVoice(api: Hono, voiceFor: (c: Context) => Voice |
   mountCalls(api, "/tenants/:id/desk/voice", pick);
 }
 
+/**
+ * a new workspace's onboarding call, under /tenants/:id/onboarding/voice: the same call routes and engine, one
+ * Voice per workspace (`voiceFor`: undefined for a world that has none, a 404). `due` says whether its Home leads to it
+ * (no objective of its own yet); the state read carries it so the page shows the one Call button only then. Every call
+ * route is the workspace owner's own (mountCalls' ownerOnly: a member's login is refused).
+ */
+export function mountOnboardingVoice(api: Hono, voiceFor: (c: Context) => Voice | undefined, due: (c: Context) => boolean) {
+  const pick = (c: Context) => voiceFor(c) ?? c.json({ error: { code: "not_found", message: `no onboarding call for world ${c.req.param("id")}` } }, 404);
+  api.get(
+    "/tenants/:id/onboarding/voice/state",
+    guard((c) => {
+      const v = pick(c);
+      return v instanceof Response ? v : c.json({ ...v.state(), due: due(c) });
+    }),
+  );
+  // a workspace that has its first objective starts no new onboarding call (a call already on runs to its end).
+  api.post("/tenants/:id/onboarding/voice/calls", async (c, next) => (due(c) ? next() : c.json({ error: { code: "onboarding_done", message: "Your first objective is written: call from your team desk instead." } }, 409)));
+  mountCalls(api, "/tenants/:id/onboarding/voice", pick);
+}
+
 function guard(fn: (c: Context) => Promise<Response> | Response) {
   return async (c: Context) => {
     try {
@@ -249,11 +271,17 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
     ownerOnly(async (c, voice) => {
       const p = startIn.safeParse((await body(c)) ?? {});
       if (!p.success) return bad(c, "focus is optional: { section, cards: [{ kind, id, title, … }] } (at most 60 cards)");
-      return c.json(await voice.start(p.data.focus), 201);
+      return c.json(await voice.start(p.data.focus, p.data.lang), 201);
     }),
   );
   // the call page opened: the next call's link is made now, so his press does not wait on the key (owner only)
-  api.post(`${prefix}/calls/warm`, ownerOnly((c, voice) => c.json(voice.warm(), 202)));
+  api.post(
+    `${prefix}/calls/warm`,
+    ownerOnly(async (c, voice) => {
+      const p = z.object({ lang: langIn }).safeParse((await body(c)) ?? {});
+      return c.json(voice.warm(p.success ? p.data.lang : undefined), 202);
+    }),
+  );
   api.post(`${prefix}/calls/:cid/beat`, ownerOnly((c, voice) => c.json(voice.beat(c.req.param("cid") ?? ""))));
   api.post(
     `${prefix}/calls/:cid/usage`,

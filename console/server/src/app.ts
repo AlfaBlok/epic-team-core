@@ -128,6 +128,7 @@ import { cachedSudoRead as sudoRead, secretSourceHealth, sudoReadOrWait } from "
 import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteList } from "./plug/memory.js";
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
+import { clinicsIn, createClinicDemo, mountClinicDemo } from "./clinicDemo.js";
 import { anthropicStructurer, createFeedback, mountFeedback, openAiStructurer, STRUCTURE_MODEL, type Structurer } from "./voiceFeedback.js";
 import { anthropicJudge, openAiJudge, type Judge } from "./inbox/settles.js";
 import { anthropicPairJudge, borderlinePairs, callOf, EPIC_JUDGE_SYSTEM, EPIC_SURE, epicMerged, judgePairs, MEANING_BORDER, MEANING_SURE, mergedPairs, startSameMeaningJudge, type PairJudge } from "./inbox/sameMeaning.js";
@@ -224,13 +225,14 @@ import { createVoiceNoteRelay, defaultMemoryHookSecretFile, mountVoiceHook, moun
 import { byMilestonePriority, byObjective, storeRanks, worldRanks } from "./inbox/priority.js";
 import { createAfterCall } from "./voice/afterCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
-import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
+import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOnboardingVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { asksOf, levelKnows, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
-import { elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
+import { agentBody, elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
+import { ONBOARDING_CALL_MIN, ONBOARDING_PAGE, ONBOARDING_TOOLS, onboardingGreeting, onboardingInstructions, onboardingKnows, onboardingObjectiveIn } from "./voice/onboarding.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { mountListenPage, mountReplyNote } from "./voice/replyNote.js";
-import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince } from "./voice/briefing.js";
+import { BRIEFING_AGENT_NAME, BRIEFING_GREETING, BRIEFING_MIN_S, BRIEFING_PAGE, BRIEFING_TOOLS, briefingInstructions, briefingKnows, briefingNoteText, briefingSince, briefingWalkRule, reviewCards, snapshotOf, type ReviewSnapshot } from "./voice/briefing.js";
 import { marketingAgentName, marketingBrief, MARKETING_GREETING, MARKETING_PAGE, MARKETING_TOOLS, marketingInstructions, marketingKnows, marketingNoteText, marketingRelayIn } from "./voice/marketing.js";
 import { strategyAgentName, strategyBrief, STRATEGY_GREETING, STRATEGY_PAGE, STRATEGY_TOOLS, strategyInstructions, strategyKnows, strategyNoteText, teamProduct } from "./voice/teamStrategy.js";
 import { COACH_AGENT_NAME, COACH_GREETING, COACH_PAGE, COACH_TOOLS, coachInstructions, coachKnows, relayIn, teamRelayText } from "./voice/coach.js";
@@ -574,7 +576,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; /** a new workspace's onboarding call's door (tests). */ onboardingEleven?: ElevenCalls; /** the clinic receptionist's door per clinic (tests). */ clinicEleven?: (c: import("./clinicDemo.js").Clinic) => ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -3631,8 +3633,12 @@ export function createApp(
     },
   });
   mountCoachVoice(api, coachVoice, { world: () => store.tenant });
-  // the briefing call (/briefing): its own ElevenLabs agent tells him the desk's news since his last briefing (what
-  // shipped, what waits on him) and takes his notes, each one request on the Team desk. The coach's call path, reused.
+  // the briefing call (/briefing), now his objectives review (his note: "I'm just a manager reviewing a
+  // team trying to make their goals"): its own ElevenLabs agent walks his objectives in his order, those that moved or
+  // turned red since the last briefing first (red key results with today's numbers, what moved, what waits on him), files
+  // his decisions on each objective (file_objective_words), passes what he wants done to the Team desk, and answers exact
+  // facts with the briefer's read-only lookups. The daily briefing invite (briefings.py morning) links here.
+  const briefingTools = () => [...BRIEFING_TOOLS, ...(socialArea?.callLookupTools ?? [])];
   const briefingEleven: ElevenCalls | undefined =
     opts.voice?.briefingEleven ??
     (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
@@ -3643,51 +3649,97 @@ export function createApp(
           key: elevenKey,
           prompt: briefingInstructions,
           firstMessage: BRIEFING_GREETING,
-          tools: () => BRIEFING_TOOLS as any,
+          tools: () => briefingTools() as any,
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_briefing_agent_id'").get() as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_briefing_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
           },
         }));
-  const briefingLast = () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'briefing_last_at'").get() as { value: string } | undefined)?.value;
+  const setting = (key: string) => (db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+  const setSetting = (key: string, value: string) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  const briefingLast = () => setting("briefing_last_at");
+  // what he saw at the last briefing (each objective's and key result's light and number): a cache of the repo's
+  // objectives, so "since the last briefing" can say what moved; lost, the next review walks every objective again.
+  const briefingSnapshot = (): ReviewSnapshot | undefined => {
+    try {
+      const s = JSON.parse(setting("briefing_snapshot") ?? "null") as ReviewSnapshot | null;
+      return s && typeof s.at === "string" && s.objectives ? s : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  // one read per call start, shared by its context and its objectives walk (both are read at the same moment).
+  let briefingRead: { at: number; p: Promise<{ cards: ObjectiveCard[]; changed: number; first: boolean; snapshot: ReviewSnapshot }> } | undefined;
+  const briefingReview = () => {
+    if (briefingRead && Date.now() - briefingRead.at < 5_000) return briefingRead.p;
+    const p = (async () => {
+      const all = await voiceObjectiveCards();
+      const inbox = await voiceInbox().catch(() => [] as InboxCard[]);
+      const r = reviewCards(all, { ...(briefingSnapshot() ? { last: briefingSnapshot()! } : {}), waits: (c) => asksOf([c as LevelCard], inbox) });
+      return { ...r, snapshot: snapshotOf(all, new Date(opts.voice?.now?.() ?? Date.now()).toISOString()) };
+    })();
+    briefingRead = { at: Date.now(), p };
+    return p;
+  };
   let briefingNotes = 0;
   const briefingVoice = createVoice({
     ...voiceBase,
     eleven: briefingEleven,
-    // where the next briefing starts: this call's start, once it ended with words in it.
+    // where the next briefing starts: this call's start and what it showed, once the call lasted a minute (a press
+    // he hung up at once does not hide what moved).
     onEnded: (id: string) => {
       voiceBase.onEnded(id);
-      const r = db.prepare("SELECT started_at FROM voice_calls WHERE id = ?").get(id) as { started_at: string } | undefined;
-      if (r) db.prepare("INSERT INTO voice_settings (key, value) VALUES ('briefing_last_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(r.started_at);
+      const r = db.prepare("SELECT started_at, ended_at FROM voice_calls WHERE id = ?").get(id) as { started_at: string; ended_at: string | null } | undefined;
+      if (!r) return;
+      const secs = (Date.parse(r.ended_at ?? new Date().toISOString()) - Date.parse(r.started_at)) / 1000;
+      if (!(secs >= BRIEFING_MIN_S)) return;
+      setSetting("briefing_last_at", r.started_at);
+      void briefingRead?.p.then((x) => setSetting("briefing_snapshot", JSON.stringify(x.snapshot))).catch(() => undefined);
     },
     mint: async () => {
       throw new VoiceError(409, "briefing_eleven_only", "The briefing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
     instructions: briefingInstructions,
-    tools: () => BRIEFING_TOOLS as any,
+    tools: () => briefingTools() as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
+    objectiveCards: async () => (await briefingReview()).cards,
+    walkRule: briefingWalkRule,
     context: async () => {
       const now = opts.voice?.now?.() ?? Date.now();
       const since = briefingSince(briefingLast(), now);
       const home = (mid?: string) => !mid || (store.worldOfMilestone?.(mid) ?? DEFAULT_TENANT) === DEFAULT_TENANT;
       const shipped = outcomes.all().filter((x) => x.at >= since && home(x.milestoneId));
       const waiting = await voiceInbox().catch(() => [] as InboxCard[]);
-      return briefingKnows({ since, now, shipped, waiting });
+      const r = await briefingReview();
+      return briefingKnows({ since, now, cards: r.cards, changed: r.changed, first: r.first, shipped, waiting });
     },
-    walkRule: () => "",
+    lookup: async (_callId, name, args) => {
+      if (!socialArea?.callLookup) throw new VoiceError(404, "unknown_tool", "no lookups on this console");
+      return socialArea.callLookup(name, args, { store: createStore(db), world: socialWorld(), homeDir: resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {} });
+    },
     relay: async (callId, args) => {
       const words = typeof args.words === "string" ? args.words.replace(/\s+/g, " ").trim().slice(0, 6000) : "";
       if (!words) throw new VoiceError(400, "no_words", "words (his words, as he said them) are required");
       const note = typeof args.note === "string" ? args.note.trim().slice(0, 600) : "";
+      // the objective he is on when he says it (the call keeps its place), so the note lands under it.
+      let objective: string | undefined;
+      try {
+        const row = db.prepare("SELECT objectives, objective_pos FROM voice_calls WHERE id = ?").get(callId) as { objectives: string | null; objective_pos: number | null } | undefined;
+        const list = JSON.parse(row?.objectives ?? "[]") as ObjectiveCard[];
+        objective = row?.objective_pos ? list[row.objective_pos - 1]?.name : undefined;
+      } catch {
+        /* no objective known: the note still lands */
+      }
       const n = ++briefingNotes;
-      await desk.send(briefingNoteText(callId, { words, note }), BRIEFING_PAGE, `briefing-${callId}-${n}`);
-      console.log(`[voice] ${callId} briefing note ${n} sent to the Team desk`);
+      await desk.send(briefingNoteText(callId, { words, note, ...(objective ? { objective } : {}) }), BRIEFING_PAGE, `briefing-${callId}-${n}`);
+      console.log(`[voice] ${callId} briefing note ${n} sent to the Team desk${objective ? ` (objective ${objective})` : ""}`);
       return { desk: "team", state: "sent", result: "Passed to the Team desk as one request. Tell him in a few words." };
     },
   });
-  mountOwnCall(api, "/voice/briefing", briefingVoice, { world: () => store.tenant }, "The briefing call");
+  // his phone: his own console, or his social app login (its own data world), like the briefer.
+  mountOwnCall(api, "/voice/briefing", briefingVoice, { world: () => store.tenant, ownWorld: (w, email) => isHomeDataWorld(db, w) || isOwnerCustomerLogin(email), page: "/briefing" }, "The objectives review call");
   // the senior marketing call (/marketing): its own ElevenLabs agent talks the social product's strategy with him (the
   // number one blocker, each campaign's plan) from the marketing brief, its objectives and the campaigns' own plans;
   // his words go to the social desk (campaigns, posts, channels) or the Team desk. The coach's call path, reused.
@@ -4514,13 +4566,13 @@ export function createApp(
   // the hosted layer may raise a decide ask in a spine of one of its checkouts and read its answer back from the file
   // (the spine is the record; the console's one writer commits it).
   const spineAsks = {
-    raise: async (o: { repo: string; path: string; question: string; row?: string; askedBy: string }) => {
+    raise: async (o: { repo: string; path: string; question: string; row?: string; askedBy: string; kind?: "decide" | "approve"; about?: string }) => {
       const home = resolveRepo(read.reposRoot, o.repo);
       if (!home) return { error: `no ${o.repo} checkout` };
       const ms = store.listMilestones().filter((m) => resolveRepo(read.reposRoot, m.repo)?.path === home.path);
       const m = ms.find((x) => x.path.replace(/^\.\//, "") === o.path) ?? ms.find((x) => /(?:^|\/)root\.md$/.test(x.path)) ?? ms[0];
       if (!m) return { error: `no milestone in ${o.repo} to raise the ask in` };
-      const r = await raiseAsk(raiseDeps(), m, { question: o.question, askedBy: o.askedBy, row: o.row, kind: "decide" }, o.path);
+      const r = await raiseAsk(raiseDeps(), m, { question: o.question, askedBy: o.askedBy, row: o.row, kind: o.kind ?? "decide", ...(o.about ? { about: o.about } : {}) }, o.path);
       return r.status === "written" ? { code: r.code } : { error: r.reason };
     },
     read: (o: { repo: string; path: string; code: string }) => {
@@ -4535,6 +4587,22 @@ export function createApp(
       if (new RegExp(`\\[superseded\\s+${o.code}\\b`).test(text)) return { state: "superseded" as const };
       const a = parseAsks(text).find((x) => x.code === o.code);
       return a ? { state: a.state === "open" ? ("open" as const) : ("answered" as const), answer: a.answer ?? undefined } : undefined;
+    },
+    // one standing ask (a reply template the hosted layer waits on) found by its row and words, so the console never
+    // keeps its code: a superseded line counts as gone, the newest one wins.
+    find: (o: { repo: string; path: string; row: string; words: string }) => {
+      const home = resolveRepo(read.reposRoot, o.repo);
+      if (!home) return undefined;
+      let text = "";
+      try {
+        text = fs.readFileSync(path.join(home.path, o.path), "utf8");
+      } catch {
+        return undefined;
+      }
+      const want = o.words.toLowerCase();
+      const hits = parseAsks(text).filter((x) => x.code && x.row === o.row && x.question.toLowerCase().includes(want) && !new RegExp(`\\[superseded\\s+${x.code}\\b`).test(text));
+      const a = hits.sort((x, y) => Number(/\d+$/.exec(y.code!)?.[0] ?? 0) - Number(/\d+$/.exec(x.code!)?.[0] ?? 0))[0];
+      return a ? { code: a.code!, state: a.state === "open" ? ("open" as const) : ("answered" as const), answer: a.answer ?? undefined } : undefined;
     },
   };
   tenancy?.mountTesters({ api, db, notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined, spineAsks });
@@ -4574,6 +4642,16 @@ export function createApp(
     repoOf: (w) => (w === DEFAULT_TENANT ? resolveRepo(read.reposRoot, homeRepo())?.path : worldRepo(w)),
     ...(process.env.CONSOLE_FEEDBACK_URL ? { linkBase: process.env.CONSOLE_FEEDBACK_URL } : {}),
   });
+  // the clinic receptionist (clinicDemo.ts): one public demo page per clinic config (docs/clinics/<slug>.json in the home
+  // repo), its one button a rate-limited ElevenLabs call with that clinic's own Spanish agent; it only answers, never dials out.
+  const clinicDemo = createClinicDemo({
+    db,
+    clinics: clinicsIn(() => process.env.CONSOLE_CLINICS_DIR || (resolveRepo(read.reposRoot, homeRepo())?.path ? path.join(resolveRepo(read.reposRoot, homeRepo())!.path, "docs/clinics") : undefined)),
+    key: elevenKey,
+    ...(opts.voice?.clinicEleven ? { eleven: opts.voice.clinicEleven } : {}),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  mountClinicDemo(api, clinicDemo);
   // steps pages with a Done switch per step (steps/steps.ts): a tick writes the owning spine, tells the desk, wakes the owner.
   const stepsApi = createSteps({
       db,
@@ -4695,6 +4773,102 @@ export function createApp(
     setUpTeam: testerWorlds?.setUpTeamWorld,
     notify: cycleOpts.enabled ? (text, id) => desk.tell(text, id) : undefined,
   });
+  // (his strategy call, call_910685a3: "guide the user towards a button at the beginning"; "Hey, I'm here to assist
+  // you on your onboarding ... if you have, like, 10 minutes or so"): a new EpicTeam workspace's Home leads to one Call, the
+  // onboarding helper, which asks for their one objective and writes it with its first key result (the workspace's own Add
+  // job; an unpaid workspace gets its checkout first, its team still switched off). Up to an hour a call, its own agent.
+  const onboardingEleven: ElevenCalls | undefined =
+    opts.voice?.onboardingEleven ??
+    (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
+      ? undefined
+      : elevenCalls({
+          name: `${teamProduct()} onboarding helper`,
+          tags: [teamProduct().toLowerCase(), "onboarding-call"],
+          key: elevenKey,
+          prompt: () => onboardingInstructions({ owner: "there", product: teamProduct() }),
+          firstMessage: () => onboardingGreeting("there"),
+          tools: () => ONBOARDING_TOOLS as any,
+          // the agent's own hard stop is the call's hour, not the desk agents' 20 minutes
+          body: (...a: Parameters<typeof agentBody>) => {
+            const b = agentBody(...a);
+            return { ...b, conversation_config: { ...b.conversation_config, conversation: { max_duration_seconds: ONBOARDING_CALL_MIN * 60 } } };
+          },
+          known: {
+            get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_onboarding_agent_id'").get() as { value: string } | undefined)?.value,
+            set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_onboarding_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
+          },
+        }));
+  /** an EpicTeam customer workspace (never ours, never a social world): the only worlds with an onboarding call. */
+  const teamWorkspace = (w: string) => {
+    if (!w || w === DEFAULT_TENANT || !w.startsWith("et-")) return undefined;
+    return db.prepare("SELECT name, owner_name, owner_handle FROM tenants WHERE id = ? AND COALESCE(skin, '') <> 'social'").get(w) as { name?: string; owner_name?: string; owner_handle?: string } | undefined;
+  };
+  const ONBOARDING_ROOT = "docs/spines/root.md";
+  /** the workspace's own objectives: its goals other than the root spine's Get set up. */
+  const workspaceObjectives = (w: string) => forTenant(db, w).listMilestones().filter((m) => !(m.repo === w && m.path === ONBOARDING_ROOT)).map((m) => m.title);
+  const signupWords = (w: string) => {
+    try {
+      return (db.prepare("SELECT use_case FROM tester_signups WHERE world_id = ?").get(w) as { use_case?: string } | undefined)?.use_case || undefined;
+    } catch {
+      return undefined; // a console with no sign-ups
+    }
+  };
+  const onboardingVoices = new Map<string, Voice>();
+  const onboardingVoice = (w: string): Voice | undefined => {
+    const t = teamWorkspace(w);
+    if (!t) return undefined;
+    let v = onboardingVoices.get(w);
+    if (v) return v;
+    const owner = () => String(teamWorkspace(w)?.owner_name || teamWorkspace(w)?.owner_handle || "there");
+    v = createVoice({
+      ...voiceBase,
+      eleven: onboardingEleven,
+      mint: async () => {
+        throw new VoiceError(409, "onboarding_eleven_only", "The onboarding call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
+      },
+      scope: { world: w },
+      // on for every new team: its own world switch is the voice the workspace's people use, this one call is the platform's
+      worldOn: () => true,
+      callMaxMin: ONBOARDING_CALL_MIN,
+      instructions: () => onboardingInstructions({ owner: owner(), product: teamProduct() }),
+      tools: () => ONBOARDING_TOOLS as any,
+      desk: { send: (t2, page, crid) => worldDesks.send(w, t2, page, crid), view: () => worldDesks.view(w) },
+      quickStatus: noStatus,
+      context: () => onboardingKnows({ workspace: String(teamWorkspace(w)?.name || w), owner: owner(), words: signupWords(w), objectives: workspaceObjectives(w) }),
+      walkRule: () => "",
+      relay: async (callId, args) => {
+        let r: ReturnType<typeof onboardingObjectiveIn>;
+        try {
+          r = onboardingObjectiveIn(args);
+        } catch (e) {
+          throw new VoiceError(400, "bad_objective", (e as Error).message);
+        }
+        const addJob = (campaigns as { addJob?: (tenant: string, b: { repo: string; title: string; doneMeans: string[] }) => Promise<{ milestoneId: string; path: string; commit: string }> } | undefined)?.addJob;
+        if (!addJob) throw new VoiceError(503, "no_workspace_writer", "this console cannot write a workspace's objective");
+        // an unpaid workspace has no checkout yet: it gets it now (Get set up, its team switched off until its own server)
+        if (!forTenant(db, w).listMilestones({ includeSettled: true }).some((m) => m.repo === w && m.path === ONBOARDING_ROOT)) {
+          if (!testerWorlds?.setUpTeamWorld) throw new VoiceError(503, "no_workspace_writer", "this console cannot set up a workspace");
+          await testerWorlds.setUpTeamWorld(w, r.words ?? r.objective);
+        }
+        const job = await addJob(w, { repo: w, title: r.objective, doneMeans: [r.keyResult] });
+        console.log(`[voice] ${callId} onboarding wrote ${w}'s first objective ${job.milestoneId} (${job.commit.slice(0, 7)})`);
+        return { desk: "objective", state: "written", milestoneId: job.milestoneId, result: `Written on their Home: "${r.objective}", first key result "${r.keyResult}". Tell them in one line.` };
+      },
+    });
+    onboardingVoices.set(w, v);
+    return v;
+  };
+  mountOnboardingVoice(
+    api,
+    (c) => {
+      const w = c.req.param("id") ?? "";
+      return store.getTenant(w) ? onboardingVoice(w) : undefined;
+    },
+    (c) => {
+      const w = c.req.param("id") ?? "";
+      return !!teamWorkspace(w) && !!store.getTenant(w) && !workspaceObjectives(w).length;
+    },
+  );
   // templates for the New persona picker; a customer workspace reads them with its owner's name (tenancy/workspaceText.ts)
   api.get("/persona-templates", (c) => {
     const owner = workspaceOwner(db, store.tenant);

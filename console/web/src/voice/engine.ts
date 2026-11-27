@@ -14,6 +14,8 @@
 
 import { callMediaSession, stickyWakeLock } from "./keepAwake";
 import { ownerName } from "@/lib/identity";
+import { getCallLang, type CallLang } from "./callLang";
+import { callLimitLine, clockNote, quietLine, spanWords } from "./timeLeft";
 
 export interface Limits {
   callMaxMin: number;
@@ -288,6 +290,12 @@ export class CallEngine {
   private lastActivity = 0;
   private limits?: Limits;
   private warned = false;
+  /** the call's language (picked on the call screen when it started): the time-left words are said in it. */
+  private lang: CallLang = "en";
+  /** the ElevenLabs agent is talking now (its mode). */
+  private elevenSpeaking = false;
+  /** the time left, to be said out loud as soon as nobody is talking. */
+  private timeLine?: string;
   private responding = false;
   private userSpeaking = false;
   /** The voice's audio is playing on the owner's side (output_audio_buffer.started … stopped). */
@@ -386,6 +394,9 @@ export class CallEngine {
       this.mic = await this.media.microphone();
       const s = this.focus ? await this.api.start({ section: this.focus.section, cards: this.focus.cards }) : await this.api.start();
       this.limits = s.limits;
+      this.warned = false;
+      this.timeLine = undefined;
+      this.lang = getCallLang();
       this.turnDetection = s.turnDetection ?? NORMAL_TURN;
       this.greeting = o.resumed ? RESUME_GREETING : s.greeting?.trim() || undefined;
       this.set({ callId: s.call.id, phase: "connecting" });
@@ -444,14 +455,18 @@ export class CallEngine {
     this.set({ elapsedS });
     if (this.greet && !this.greet.done && now - this.greet.at >= GREETING_MAX_MS) this.greeted();
     if (elapsedS >= this.limits.callMaxMin * 60) return void this.hangup("call_limit");
-    if (!this.warned && elapsedS >= this.limits.callWarnMin * 60) {
-      this.warned = true;
-      this.set({ warn: `${this.limits.callMaxMin - this.limits.callWarnMin} minutes left on this call. You can call again after.` });
-      this.nudge(`Time is nearly up: two minutes left on this call. Tell ${ownerName()} in one short sentence; he can call again.`);
-    }
+    this.timeLeftDue(elapsedS);
     if (this.byeAt !== undefined) {
       if ((!this.responding && !this.playing) || now - this.byeAt >= BYE_MAX_MS) void this.hangup("bye");
       return;
+    }
+    // the time left is said by voice, in listen mode too, never over him (he may not be looking at the screen).
+    if (this.timeLine && !this.responding && !this.userSpeaking && now - this.lastOwnerAt >= HOLD_AFTER_HIM_MS) {
+      const l = this.timeLine;
+      this.timeLine = undefined;
+      this.quietWarnAt = undefined;
+      this.lastActivity = now;
+      this.speak(l, undefined, true);
     }
     if (this.nudges.length && !this.responding) this.flush();
     if (this.yesProbe && !this.responding && !this.userSpeaking && !this.listen && now - this.yesProbe.at >= YES_PROBE_MS) {
@@ -498,7 +513,7 @@ export class CallEngine {
     if (warnMs > 0 && now - this.lastActivity >= quietMs - warnMs) {
       this.quietWarnAt = now;
       this.line("tool", "quiet warning");
-      this.nudge(QUIET_NUDGE, undefined, "none");
+      this.nudge(QUIET_NUDGE, sayExactly(quietLine(warnMs / 1000, this.lang)), "none");
     }
   }
 
@@ -1141,6 +1156,18 @@ export class CallEngine {
           return `Not passed (${(e as Error).message.slice(0, 120)}). Tell him in one line that it did not go through, and that the whole call still lands in his Team desk chat when it ends. Never promise to pass it later yourself.`;
         }
       },
+      // the onboarding helper writes the new team's first objective (its call's relay, desk "objective").
+      write_objective: async (a) => {
+        if (!this.api.relay) return "This line cannot write it. Tell them in one line that the chat on their Home can add it.";
+        const objective = String(a.objective ?? "").trim();
+        try {
+          const r = await this.api.relay(id, { desk: "objective", objective: objective.slice(0, 300), note: String(a.key_result ?? "").trim(), words: String(a.words ?? "").trim() || objective });
+          this.line("tool", `wrote the objective: ${objective}`);
+          return r.result ?? "Written.";
+        } catch (e) {
+          return `Not written (${(e as Error).message.slice(0, 120)}). Tell them in one line that it did not go through and that the chat on their Home can add it. Never say it is written.`;
+        }
+      },
       ...Object.fromEntries(
         LOOKUP_TOOLS.map((n) => [
           n,
@@ -1172,10 +1199,14 @@ export class CallEngine {
       },
       onLine: (who, text) => {
         this.lastActivity = this.clock.now();
+        if (who === "owner") this.lastOwnerAt = this.lastActivity;
         this.line(who, text);
         this.set(who === "owner" ? { hearing: "" } : { speaking: "" });
       },
-      onMode: (speaking) => this.set({ speaking: speaking ? "…" : "" }),
+      onMode: (speaking) => {
+        this.elevenSpeaking = speaking;
+        this.set({ speaking: speaking ? "…" : "" });
+      },
       onEnded: (reason) => {
         if (this.v.phase === "live" || this.v.phase === "connecting") void this.hangup(reason);
       },
@@ -1191,10 +1222,23 @@ export class CallEngine {
     const elapsedS = Math.floor((this.clock.now() - this.startedAt) / 1000);
     this.set({ elapsedS });
     if (elapsedS >= this.limits.callMaxMin * 60) return void this.hangup("call_limit");
-    if (!this.warned && elapsedS >= this.limits.callWarnMin * 60) {
-      this.warned = true;
-      this.set({ warn: `${this.limits.callMaxMin - this.limits.callWarnMin} minutes left on this call. You can call again after.` });
+    this.timeLeftDue(elapsedS);
+    // said by the agent as soon as it is not talking and he has not just spoken
+    if (this.timeLine && !this.elevenSpeaking && this.clock.now() - this.lastOwnerAt >= HOLD_AFTER_HIM_MS && this.el?.say) {
+      const l = this.timeLine;
+      this.timeLine = undefined;
+      this.el.say(clockNote(l));
     }
+  }
+
+  /** once per call, the call's length limit comes near: the words go on screen and are queued to be said. */
+  private timeLeftDue(elapsedS: number) {
+    if (this.warned || !this.limits || elapsedS < this.limits.callWarnMin * 60) return;
+    this.warned = true;
+    const left = Math.max(1, this.limits.callMaxMin * 60 - elapsedS);
+    this.timeLine = callLimitLine(left, this.lang);
+    this.set({ warn: this.timeLine });
+    this.line("tool", `time left: ${spanWords(left)}`);
   }
 
   private cleanupMedia() {
@@ -1216,8 +1260,8 @@ export class CallEngine {
     void this.lock?.release().catch(() => undefined);
     this.unsession?.();
     this.pc = this.dc = this.mic = this.lock = this.unsession = undefined;
-    this.responding = this.userSpeaking = this.playing = this.spoke = false;
-    this.quietWarnAt = this.byeAt = undefined;
+    this.responding = this.userSpeaking = this.playing = this.spoke = this.elevenSpeaking = false;
+    this.quietWarnAt = this.byeAt = this.timeLine = undefined;
     this.lastOwnerAt = 0;
     this.nudges = [];
     this.pendingCalls = [];

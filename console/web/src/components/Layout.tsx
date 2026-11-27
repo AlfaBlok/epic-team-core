@@ -10,6 +10,7 @@ import { blockedItems, milestoneInbox, reviewCards, useBlocked, useReviewCards, 
 import { useGoalShown } from "@/lib/goalFilter";
 import { useSnoozes } from "@/lib/snooze";
 import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real";
+import { useOnboardingLeads } from "@/lib/onboardingLeads";
 import { cn } from "@/lib/utils";
 import { GOAL_INBOX_TAB, GoalPills, SetWheel, topObjectives, useGoalSets } from "@/components/goalRing";
 import { isVoiceNotesPin, useFold, useStoredFlag } from "@/lib/storedFlag";
@@ -1195,6 +1196,9 @@ export function Reconnecting() {
  */
 export function BillingNote() {
   const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
+  // while the onboarding call leads Home (one button first), the pay note waits: it comes back once their objective is written
+  const leads = useOnboardingLeads();
+  if (leads) return null;
   const world = me?.billing === "awaiting_payment" ? me?.tenant?.id : undefined;
   if (me?.billing !== "awaiting_payment") return null;
   // the plans and their buttons load only for a world that has not paid yet, never in the main script

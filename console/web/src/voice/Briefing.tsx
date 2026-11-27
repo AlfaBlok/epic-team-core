@@ -2,26 +2,28 @@ import { PageHeader } from "@/components/common";
 import { useCallDock } from "./CallPanel";
 
 /**
- * The briefing call: one link he opens on his phone. One Call, a voice that knows the desk's news since his last
- * briefing (what shipped, what waits on him), tells it in under a minute, and takes his notes: each note lands on the
- * Team desk as one request, like a chat line of his. It tells, it does not decide. Same call path as the coach.
+ * The briefing call, now his objectives review (his note: "I'm just a manager reviewing a team trying
+ * to make their goals"): one link he opens on his phone, and the daily briefing invite on WhatsApp links here. One Call
+ * walks his objectives in his order, those that moved or turned red since the last briefing first: each one's red key
+ * results with today's numbers, what moved, what waits on him. His decisions are filed on that objective; what he wants
+ * done lands on the Team desk as one request. Same call path as the coach.
  */
 export const BRIEFING_BASE = "/api/voice/briefing";
 
 const STEPS = [
-  { n: "1", t: "It briefs you", d: "What shipped since your last briefing, and what waits on you." },
-  { n: "2", t: "You give notes", d: "Say what the team should do, know or answer." },
-  { n: "3", t: "Each note lands", d: "On the Team desk as one request, like a chat line." },
+  { n: "1", t: "Objective by objective", d: "In your order. What moved since your last briefing comes first." },
+  { n: "2", t: "Red and exact", d: "Each red key result with its number, and what waits on you." },
+  { n: "3", t: "Your decisions land", d: "Filed on that objective. To-dos go to the Team desk." },
 ];
 
 export function BriefingPage() {
-  const call = useCallDock({ base: BRIEFING_BASE, callee: "your briefing", where: "Briefing call", hint: "Your briefing, in English or Spanish. Try “What happened yesterday?”" });
+  const call = useCallDock({ base: BRIEFING_BASE, callee: "your Team desk manager", where: "Objectives review", hint: "Your objectives, one by one, in English or Spanish. Say “Ready” to start." });
   return (
     <div className="mx-auto w-full max-w-2xl" data-testid="briefing-page">
-      <PageHeader title="Briefing call" description="Call it for what happened since your last briefing, then leave your notes for the team." actions={call.button} />
+      <PageHeader title="Objectives review" description="Review your team objective by objective, then give your decisions." actions={call.button} />
       {call.bar}
       {!call.onCall && (
-        <ol className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="How a briefing call works" data-testid="briefing-steps">
+        <ol className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="How the objectives review works" data-testid="briefing-steps">
           {STEPS.map((s) => (
             <li key={s.n} className="rounded-md border bg-card px-3 py-2.5">
               <p className="flex items-center gap-2 text-sm font-medium">

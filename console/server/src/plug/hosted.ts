@@ -268,8 +268,10 @@ export interface TenancyArea {
     db: DB;
     notify?: (text: string, id: string) => Promise<true | string>;
     spineAsks?: {
-      raise(o: { repo: string; path: string; question: string; row?: string; askedBy: string }): Promise<{ code?: string; error?: string }>;
+      raise(o: { repo: string; path: string; question: string; row?: string; askedBy: string; kind?: "decide" | "approve"; about?: string }): Promise<{ code?: string; error?: string }>;
       read(o: { repo: string; path: string; code: string }): { state: "open" | "answered" | "superseded"; answer?: string } | undefined;
+      /** the newest ask of `row` in that spine whose words hold `words`, open or answered (the repo is the record). */
+      find?(o: { repo: string; path: string; row: string; words: string }): { code: string; state: "open" | "answered" | "superseded"; answer?: string } | undefined;
     };
   }): void;
   /** a signup made a working world. */
