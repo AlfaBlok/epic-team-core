@@ -514,6 +514,8 @@ export interface ApiClient {
   markTestersSeen(): Promise<{ ok: boolean; marked: number }>;
   /** turn a signup into a working world (idempotent; a fresh setup link while no password is set). */
   makeTesterWorld(signupId: string, payment?: TesterPayment): Promise<TesterWorldResult>;
+  /** accept an application for the credits given; it gets its one onboarding-call invite on the weekly pass. */
+  acceptTeamApplicant(signupId: string): Promise<{ ok: boolean; acceptedAt: string; invited: string | null }>;
   /** remove a tester's world (confirm = its id). */
   removeTesterWorld(signupId: string, confirm: string): Promise<{ worldId: string; removed: Record<string, number>; repo?: string }>;
   /** the owner switches one persona's access to one service. */

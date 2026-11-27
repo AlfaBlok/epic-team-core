@@ -81,6 +81,10 @@ const OPEN: [string, RegExp][] = [
   ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/activar$/],
   ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/checkout$/],
   ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/calls(\/cc_[a-f0-9]{24}\/(tool|end))?$/],
+  // the Catalan call-me page (clinicIntake.ts): one button, a rate-limited call with the Catalan agent that takes a
+  // clinic's requirements and writes its config; the call id is the credential for its tools.
+  ["GET", /^\/api\/public\/agent-catala$/],
+  ["POST", /^\/api\/public\/agent-catala\/calls(\/ci_[a-f0-9]{24}\/(tool|end))?$/],
   // the clinic's set-up call (clinicSetup.ts): its private page and call start, the link's key the credential.
   ["GET", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/puesta-en-marcha$/],
   ["POST", /^\/api\/public\/clinic\/[a-z0-9-]{2,41}\/setup\/calls$/],
@@ -566,6 +570,7 @@ const OWNER_ONLY: [string, RegExp][] = [
   ["GET", /^\/api\/connections\/memory\/callback$/],
   ["POST|DELETE", new RegExp(`^/api/testers/${ID}/world$`)],
   ["DELETE", new RegExp(`^/api/testers/${ID}$`)],
+  ["POST", new RegExp(`^/api/testers/${ID}/accept$`)], // accepting an applicant is the owner's press, never an agent token
   ["POST", /^\/api\/platform\/credits\/grant$/],
   ["PUT", /^\/api\/platform\/credits\/(gate|plan)$/],
   ["POST", new RegExp(`^/api/tenants/${ID}/credits/grant$`)],

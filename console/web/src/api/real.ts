@@ -477,6 +477,7 @@ export function createRealClient(): ApiClient {
     revokeFeedbackLink: (id) => call("POST", `/feedback/links/${encodeURIComponent(id)}/revoke`),
     markTestersSeen: () => call("POST", "/testers/seen"),
     makeTesterWorld: (id, payment) => call("POST", `/testers/${encodeURIComponent(id)}/world`, payment ? { payment } : {}),
+    acceptTeamApplicant: (id) => call("POST", `/testers/${encodeURIComponent(id)}/accept`, {}),
     removeTesterWorld: (id, confirm) => call("DELETE", `/testers/${encodeURIComponent(id)}/world`, { confirm }),
     listTeamServices: (refresh, world) => call("GET", `/mcp/services${qs({ ...(refresh ? { refresh: "1" } : {}), ...(world ? { world } : {}) })}`),
     addTeamService: (input, world) => call("POST", `/mcp/services${qs(world ? { world } : {})}`, input),

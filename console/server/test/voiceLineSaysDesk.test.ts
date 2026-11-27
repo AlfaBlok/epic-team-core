@@ -19,8 +19,8 @@ describe("E942-S33 the voice line: says the desk's answer at once, short but war
   });
 
   it("tone examples are warm: each bad turn from call_37f96758 has a friendly good one", () => {
-    expect(STYLE_BLOCK).toMatch(/Bad: 'Noted\.' Good: 'Sure, Sam\. I'll get the desk on that\.'/);
-    expect(STYLE_BLOCK).toMatch(/Bad: 'I don't know\.' Good: 'The desk is on it\. I'll tell you as soon as it answers\.'/);
+    expect(STYLE_BLOCK).toMatch(/Bad: 'Noted\.' Good: 'Sure, Sam\. On it\.'/);
+    expect(STYLE_BLOCK).toMatch(/Bad: 'I don't know\.' Good: 'It's coming\. I'll tell you as soon as it lands\.'/);
     expect(STYLE_BLOCK).toMatch(/Bad: 'It's locked\. Next\?' Good: 'Sorry, Sam, the desk can't post there\. You can add it at social\.example\.com\.'/);
     // Every good example is a whole, friendly sentence: no bare one-word reply.
     for (const good of STYLE_BLOCK.matchAll(/Good: '([^']+(?:'[a-z][^']*)*)'/g)) expect(good[1].split(/\s+/).length).toBeGreaterThanOrEqual(3);
@@ -47,12 +47,12 @@ describe("E942-S33 the voice line: says the desk's answer at once, short but war
     expect(STYLE_BLOCK).toMatch(/Never describe how you talk .* never repeat back what he said/);
     expect(STYLE_BLOCK).toMatch(/Bad: 'Here's a warm, brief update: .*' Good: 'Sure, Sam\. Let's just talk\.'/);
     expect(STYLE_BLOCK).toMatch(/If the desk already answered it on this call, answer again from that at once, kindly, without asking the desk again/);
-    expect(HANDOFF_RULE).toMatch(/say so once per question/);
+    expect(HANDOFF_RULE).toMatch(/at most one short warm line/);
   });
 
   it("one short warm line when it hands over, no progress chatter, no 'Noted.'", () => {
     expect(ins).toContain(HANDOFF_RULE);
-    expect(HANDOFF_RULE).toMatch(/say so once per question, in one short warm line \('Sure, I'll get the desk on that\.'/);
+    expect(HANDOFF_RULE).toMatch(/never that you pass it to the desk/);
     expect(HANDOFF_RULE).toMatch(/No progress updates while it works/);
     expect(ins).not.toMatch(/at most one word \('Noted\.'\)/);
     const ask = VOICE_TOOLS.find((t) => t.name === "ask_the_desk")!;

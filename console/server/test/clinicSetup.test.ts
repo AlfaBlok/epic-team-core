@@ -134,6 +134,7 @@ describe("the set-up call", () => {
     expect(p).toMatch(/2\. Objetivos/);
     expect(p).toMatch(/3\. Conectar/);
     expect(p).toMatch(/Solo con su sí, llama a confirm_objectives/);
+    expect(p).toMatch(/Nunca digas que lo apuntas sin llamar a add_objective/);
     expect(SETUP_TOOLS.map((t) => t.name)).toEqual(["add_objective", "confirm_objectives", "file_ticket"]);
     // the file write keeps unknown fields and ends in a newline
     const out = withObjectives(JSON.stringify({ slug: "x", extra: 1 }), [{ goal: "Una cosa" }], "cc_1", "t");

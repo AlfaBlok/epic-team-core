@@ -9,7 +9,7 @@ import { openDb, type DB } from "../src/db.js";
 import { createStore } from "../src/store.js";
 import type { ReadConfig } from "../src/routes/read.js";
 import { bookBrief, briefing, treeBrief, tokensOf } from "../src/voice/brief.js";
-import { BRIEF_WAIT_MS, createVoice, STILL_WITH_ME_RULE, teamRoster, voiceInstructions } from "../src/voice/voice.js";
+import { BRIEF_WAIT_MS, CALL_FLOW_RULE, createVoice, teamRoster, voiceInstructions } from "../src/voice/voice.js";
 // this file checks the text with our own owner's name (src/identity.ts; the suite's owner is neutral, hostedSetup.ts)
 vi.hoisted(async () => (await import("../src/identity.js")).setIdentity({ owner: "Sam" }));
 
@@ -142,7 +142,7 @@ describe("E942-S14 a call starts briefed", () => {
     const bad = voice(() => Promise.reject(new Error("book not built")));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const c1 = await bad.v.start();
-    expect(bad.minted[0].session.instructions).toBe(`${voiceInstructions()}\n${STILL_WITH_ME_RULE}\n${teamRoster()}`);
+    expect(bad.minted[0].session.instructions).toBe(`${voiceInstructions()}\n${CALL_FLOW_RULE}\n${teamRoster()}`);
     expect(c1.call.briefTokens).toBeUndefined();
     warn.mockRestore();
     await bad.v.end(c1.call.id, { reason: "hangup" });
@@ -152,7 +152,7 @@ describe("E942-S14 a call starts briefed", () => {
     const p = slow.v.start();
     await vi.advanceTimersByTimeAsync(BRIEF_WAIT_MS + 10);
     await p;
-    expect(slow.minted[0].session.instructions).toBe(`${voiceInstructions()}\n${STILL_WITH_ME_RULE}\n${teamRoster()}`);
+    expect(slow.minted[0].session.instructions).toBe(`${voiceInstructions()}\n${CALL_FLOW_RULE}\n${teamRoster()}`);
   });
 });
 

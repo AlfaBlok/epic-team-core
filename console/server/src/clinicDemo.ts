@@ -5,7 +5,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type { DB } from "./db.js";
 import { clientAddress } from "./clientAddress.js";
-import { agentBody, elevenCalls, type ElevenCalls } from "./voice/elevenAgent.js";
+import { agentBody, elevenCalls, type CallLang, type ElevenCalls } from "./voice/elevenAgent.js";
 import { VoiceError } from "./voice/voice.js";
 import { tracePage, type FollowUp } from "./clinicFollowUp.js";
 import { questionsIn, whoAnswered, type Leads } from "./clinicLeads.js";
@@ -89,11 +89,19 @@ export interface Clinic {
   /** the set-up call that set them (its id in the console's clinic calls). */
   objectivesFromCall?: string;
   objectivesAt?: string;
+  /** the language its receptionist speaks (default Spanish); a Catalan one runs on its own agent (clinicIntake.ts). */
+  lang?: "es" | "ca";
+  /** what kind of practice it is, in its own words (default: una clínica dental). */
+  kind?: string;
+  /** a clinic set up from a Catalan call answers its own try calls until this day, before any plan (clinicIntake.ts). */
+  tryUntil?: string;
+  /** the Catalan call that wrote this file (its id in the console's clinic calls). */
+  fromCall?: string;
 }
 
 const slugRe = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const range = z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/);
-const clinicIn = z.object({
+export const clinicIn = z.object({
   slug: z.string().regex(slugRe),
   clinic: z.string().min(2).max(120),
   city: z.string().min(2).max(80),
@@ -116,6 +124,10 @@ const clinicIn = z.object({
     .optional(),
   objectivesFromCall: z.string().max(60).optional(),
   objectivesAt: z.string().max(40).optional(),
+  lang: z.enum(["es", "ca"]).optional(),
+  kind: z.string().min(3).max(80).optional(),
+  tryUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  fromCall: z.string().max(60).optional(),
   sales: z
     .object({
       company: z.string().min(2).max(60),
@@ -189,8 +201,36 @@ const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T12:00:00
 const plain = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 
 /** a day said on the phone (hoy, mañana, el martes, 3 de diciembre, 2026-12-03) as a date, from Madrid's today. */
+/** Catalan day and month words as the Spanish ones parseDay reads (a Catalan receptionist passes the day as said). */
+const CA_WORDS: [RegExp, string][] = [
+  [/\bdema passat\b/g, "pasado manana"],
+  [/\bdema\b/g, "manana"],
+  [/\bavui\b/g, "hoy"],
+  [/\bdilluns\b/g, "lunes"],
+  [/\bdimarts\b/g, "martes"],
+  [/\bdimecres\b/g, "miercoles"],
+  [/\bdijous\b/g, "jueves"],
+  [/\bdivendres\b/g, "viernes"],
+  [/\bdissabte\b/g, "sabado"],
+  [/\bdiumenge\b/g, "domingo"],
+  [/\bvinent\b/g, "que viene"],
+  [/\bd'/g, "de "],
+  [/\bgener\b/g, "enero"],
+  [/\bfebrer\b/g, "febrero"],
+  [/\bmarc\b/g, "marzo"],
+  [/\bmaig\b/g, "mayo"],
+  [/\bjuny\b/g, "junio"],
+  [/\bjuliol\b/g, "julio"],
+  [/\bagost\b/g, "agosto"],
+  [/\bsetembre\b/g, "septiembre"],
+  [/\boctubre\b/g, "octubre"],
+  [/\bnovembre\b/g, "noviembre"],
+  [/\bdesembre\b/g, "diciembre"],
+];
+const fromCatalan = (t: string) => CA_WORDS.reduce((x, [re, to]) => x.replace(re, to), t);
+
 export function parseDay(said: string, now: number): string | undefined {
-  const t = plain(said);
+  const t = fromCatalan(plain(said));
   const today = madridToday(now);
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
   if (/pasado manana/.test(t)) return addDays(today.iso, 2);
@@ -255,8 +295,14 @@ export function clinicGreeting(c: Clinic): string {
   const who = c.receptionist ?? "la recepcionista";
   if (c.sales)
     return `Hola, soy ${who}, una recepcionista de inteligencia artificial de ${c.sales.company}, y esto es una demostración en directo en ${c.clinic}, una clínica inventada. ¿Llama como paciente para pedir cita, o quiere saber cómo funcionaría en su clínica?`;
+  if (c.lang === "ca") return `Hola, ${c.clinic}, l'atén ${c.receptionist ?? "la recepcionista"}. En què el puc ajudar?`;
   return `Hola, ${c.clinic}, le atiende ${who}. ¿En qué le puedo ayudar?`;
 }
+
+/** the language a clinic's receptionist speaks. */
+export const clinicLang = (c: Clinic): "es" | "ca" => (c.lang === "ca" ? "ca" : "es");
+/** a clinic set up from a Catalan call answers its try calls until its tryUntil day (Madrid's date). */
+export const inTry = (c: Clinic, now: number) => !!c.tryUntil && madridToday(now).iso <= c.tryUntil;
 
 /** the receptionist's instructions, in Spanish, made from the clinic's config only. */
 export function clinicPrompt(c: Clinic): string {
@@ -267,7 +313,10 @@ export function clinicPrompt(c: Clinic): string {
     .join("\n");
   const services = c.services.map((s) => `- ${s.name}: ${s.price}${s.minutes ? ` (${s.minutes} minutos)` : ""}`).join("\n");
   const out = [
-    `Eres ${who}, la recepcionista por voz de ${c.clinic}, una clínica dental en ${c.city}${c.address ? ` (${c.address})` : ""}. Hablas español de España, con frases cortas, cálida y profesional. Tratas siempre de usted. Si te hablan en inglés, contestas en inglés.`,
+    c.lang === "ca"
+      ? `# Idioma: parles sempre en català, amb frases curtes, càlida i professional. Tractes de vostè. Si et parlen en castellà, contestes en castellà; en anglès, en anglès. Les instruccions d'aquí sota són en castellà, però tu parles en català.\n`
+      : "",
+    `Eres ${who}, la recepcionista por voz de ${c.clinic}, ${c.kind ? `${/^(una?|el|la)\s/i.test(c.kind) ? "" : "una "}${c.kind}` : "una clínica dental"} en ${c.city}${c.address ? ` (${c.address})` : ""}. ${c.lang === "ca" ? "Hablas catalán" : "Hablas español de España"}, con frases cortas, cálida y profesional. Tratas siempre de usted. Si te hablan en inglés, contestas en inglés.`,
     c.madeUp ? "Esta clínica es una demostración: sus pacientes, citas y precios son inventados. Si te lo preguntan, lo dices con naturalidad." : "",
     "",
     "# Lo que sabes de la clínica (solo esto)",
@@ -394,12 +443,12 @@ export const CLINIC_TOOLS = (c: Clinic) => [
 
 /** the agent as made on the account: Spanish, multilingual voice, end_call only on a goodbye, a short call, no
  * overrides (the public page can never change what it says) and signed links only. */
-export function clinicAgentBody(c: Clinic, maxS: number = CLINIC_CALL_MAX_S) {
-  return (prompt: string, firstMessage: string, tools: Parameters<typeof agentBody>[2], name?: string, tags?: string[]) => {
-    const b = agentBody(prompt, firstMessage, tools, name, tags, "es");
+export function clinicAgentBody(c: Pick<Clinic, "voiceId">, maxS: number = CLINIC_CALL_MAX_S, endCall = "Termina la llamada cuando la persona se despide, después de una despedida corta.") {
+  return (prompt: string, firstMessage: string, tools: Parameters<typeof agentBody>[2], name?: string, tags?: string[], lang: CallLang = "es") => {
+    const b = agentBody(prompt, firstMessage, tools, name, tags, lang === "en" ? "es" : lang);
     const agent = b.conversation_config.agent;
     agent.prompt.tools = agent.prompt.tools.map((t: any) =>
-      t.type === "system" ? { ...t, description: "Termina la llamada cuando la persona se despide, después de una despedida corta." } : { ...t, response_timeout_secs: 20 },
+      t.type === "system" ? { ...t, description: endCall } : { ...t, response_timeout_secs: 20 },
     ) as typeof agent.prompt.tools;
     return {
       ...b,
@@ -569,7 +618,8 @@ export function createClinicDemo(d: ClinicDeps) {
     }
     if (name === "file_ticket") {
       if (!d.followUp) return { result: "No puedo apuntar pendientes ahora. Di que el equipo lo verá." };
-      return { result: d.followUp.file(c, id, { need: String(args.need ?? ""), who: String(args.who ?? "clínica") }).result };
+      // on a set-up call the promise is ours to the clinic, never the clinic's to itself
+      return { result: d.followUp.file({ ...c, clinic: `El equipo de ${c.sales?.company ?? "puesta en marcha"}` }, id, { need: String(args.need ?? ""), who: String(args.who ?? "clínica") }).result };
     }
     return { result: `No conozco la herramienta ${name}.` };
   };
@@ -586,10 +636,11 @@ export function createClinicDemo(d: ClinicDeps) {
     },
     /** the page opened: the next call's link is made now (one per clinic, kept 10 minutes). */
     warm(slug: string, kind: ClinicCallKind = "reception") {
-      void door(clinic(slug), kind).warm?.("es");
+      const c = clinic(slug);
+      void door(c, kind).warm?.(clinicLang(c));
     },
     /** a real clinic's receptionist answers only while its plan is on; our made-up demo clinics always do. */
-    isOn: (slug: string) => !!clinic(slug).madeUp || planOn(clinicPlan(db, slug)),
+    isOn: (slug: string) => !!clinic(slug).madeUp || inTry(clinic(slug), now()) || planOn(clinicPlan(db, slug)),
     plan: (slug: string) => clinicPlan(db, slug),
     /** the clinic's private set-up link (its key is the credential); handed out on the owner's signed-in view. */
     setupLink: (slug: string) => `/api/public/clinic/${clinic(slug).slug}/puesta-en-marcha?k=${setupKey(secret(), slug)}`,
@@ -600,7 +651,7 @@ export function createClinicDemo(d: ClinicDeps) {
       const c = clinic(slug);
       if (kind === "setup" && !validSetupKey(secret(), slug, k)) throw new VoiceError(404, "not_found", "Este enlace de puesta en marcha no es válido.");
       // the set-up call comes before the receptionist is on; only her own calls wait on the plan.
-      if (kind !== "setup" && !c.madeUp && !planOn(clinicPlan(db, slug))) throw new VoiceError(409, "not_on", "La recepcionista de esta clínica aún no está activada.");
+      if (kind !== "setup" && !c.madeUp && !inTry(c, now()) && !planOn(clinicPlan(db, slug))) throw new VoiceError(409, "not_on", "La recepcionista de esta clínica aún no está activada.");
       const v = visitorHash(addr);
       const hourAgo = new Date(now() - 3_600_000).toISOString();
       const dayAgo = new Date(now() - 86_400_000).toISOString();
@@ -612,7 +663,7 @@ export function createClinicDemo(d: ClinicDeps) {
         const setups = (db.prepare("SELECT COUNT(*) n FROM clinic_calls WHERE slug = ? AND kind = 'setup' AND started_at > ?").get(slug, dayAgo) as { n: number }).n;
         if (setups >= SETUP_CALLS_PER_DAY) throw new VoiceError(409, "day_full", "Hoy ya se han hecho todas las llamadas de puesta en marcha. Vuelva a probar mañana.");
       } else if (all >= (c.callsPerDay ?? 40)) throw new VoiceError(409, "day_full", "La demo ya ha atendido todas las llamadas de hoy. Vuelva a probar mañana.");
-      const link = await door(c, kind).link("es");
+      const link = await door(c, kind).link(clinicLang(c));
       const id = `cc_${crypto.randomBytes(12).toString("hex")}`;
       db.prepare("INSERT INTO clinic_calls (id, slug, started_at, visitor, code, kind) VALUES (?, ?, ?, ?, ?, ?)").run(id, slug, iso(), v, letterCode(code) ?? null, kind);
       return { call: id, signedUrl: link.signedUrl, ...(d.followUp ? { trace: d.followUp.traceUrl(slug, id) } : {}) };
@@ -848,7 +899,7 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo) {
 
 // ---------- the page ----------
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 /** the ElevenLabs browser client, pinned (the console's web app uses the same version). */
 const ELEVEN_CLIENT = { pkg: "@elevenlabs/client", version: "1.36.1" };
 export const ELEVEN_CLIENT_URL = `https://cdn.jsdelivr.net/npm/${ELEVEN_CLIENT.pkg}@${ELEVEN_CLIENT.version}/+esm`;
@@ -917,7 +968,7 @@ ${s.priceWhatsappOnly ? `<tr><td>Solo WhatsApp</td><td>${esc(s.priceWhatsappOnly
 ${callScript(c.slug, "/calls", ["free_slots", "book_appointment", "book_follow_up", "file_ticket", "qualify_lead"], "Recepción", o.letter?.code ?? "")}</body></html>`;
 }
 
-const PAGE_CSS = `@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/fonts/inter-400.woff2) format("woff2")}
+export const PAGE_CSS = `@font-face{font-family:"Inter";font-weight:400;font-display:swap;src:url(/fonts/inter-400.woff2) format("woff2")}
 @font-face{font-family:"Inter";font-weight:600;font-display:swap;src:url(/fonts/inter-600.woff2) format("woff2")}
 :root{--paper:#f6f3ec;--ink:#1d1b17;--muted:#6b665c;--line:#d9d3c5;--green:#1f5c45;--card:#fffdf8}
 *{box-sizing:border-box}
@@ -947,31 +998,51 @@ td:last-child{text-align:right;white-space:nowrap;padding-left:12px}
 .small{font-size:13px;color:var(--muted)}
 `;
 
-/** the page's call script: one button, a signed link from \`start\`, the agent's client tools answered by the console. */
-function callScript(slug: string, start: string, tools: string[], voice: string, code = ""): string {
+/** the call page's words (Spanish by default; the Catalan intake page passes its own). */
+export const CALL_UI_ES = {
+  you: "Usted",
+  failed: "No se pudo: ",
+  again: "Llamar otra vez",
+  endedBye: "Llamada terminada. Gracias.",
+  ended: "Llamada terminada.",
+  ready: "Pulse el botón y hable con normalidad.",
+  noLoad: "No se pudo cargar la llamada. Recargue la página.",
+  connecting: "Conectando…",
+  live: "En línea. Hable cuando quiera.",
+  error: "Error: ",
+  mic: "Hace falta permiso para el micrófono.",
+};
+export type CallUi = typeof CALL_UI_ES;
+
+/** the page's call script: one button, a signed link from \`start\`, the agent's client tools answered by the console.
+ * A tool answer carrying `link` (the Catalan intake's written agent) shows it in the page's #made box. */
+export function callScript(slug: string, start: string, tools: string[], voice: string, code = "", o: { base?: string; ui?: CallUi } = {}): string {
+  const ui = o.ui ?? CALL_UI_ES;
   return `<script type="module">
 const SLUG = ${JSON.stringify(slug)};
 const CODE = ${JSON.stringify(code)} || new URLSearchParams(location.search).get("c") || "";
-const base = "/api/public/clinic/" + SLUG;
+const UI = ${JSON.stringify(ui)};
+const base = ${JSON.stringify(o.base ?? "/api/public/clinic/")} + SLUG;
 const $ = (id) => document.getElementById(id);
 const START = ${JSON.stringify(start)};
 const btn = $("call"), hang = $("hang"), status = $("status"), list = $("lines");
 let conv = null, callId = null, traceUrl = null, lines = [], ended = false;
 const say = (t) => (status.textContent = t);
 const post = (p, b) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b ?? {}) }).then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j?.error?.message || "Error " + r.status); return j; });
-const add = (who, text) => { lines.push({ who, text }); const li = document.createElement("li"); li.className = who; li.innerHTML = "<b></b>"; li.firstChild.textContent = who === "voice" ? ${JSON.stringify(voice)} : "Usted"; li.append(text); list.append(li); li.scrollIntoView({ block: "nearest" }); };
-const tool = (name) => async (args) => { try { return (await post("/calls/" + callId + "/tool", { name, args })).result; } catch (e) { return "No se pudo: " + e.message; } };
+const add = (who, text) => { lines.push({ who, text }); const li = document.createElement("li"); li.className = who; li.innerHTML = "<b></b>"; li.firstChild.textContent = who === "voice" ? ${JSON.stringify(voice)} : UI.you; li.append(text); list.append(li); li.scrollIntoView({ block: "nearest" }); };
+const made = (l) => { const m = $("made"); if (!m || !l) return; const a = m.querySelector("a"); a.href = l; m.hidden = false; };
+const tool = (name) => async (args) => { try { const j = await post("/calls/" + callId + "/tool", { name, args }); made(j.link); return j.result; } catch (e) { return UI.failed + e.message; } };
 function finish(reason) {
   if (ended) return; ended = true;
   if (callId) navigator.sendBeacon(base + "/calls/" + callId + "/end", JSON.stringify({ reason, transcript: lines }));
-  hang.style.display = "none"; btn.style.display = "block"; btn.disabled = false; btn.textContent = "Llamar otra vez";
+  hang.style.display = "none"; btn.style.display = "block"; btn.disabled = false; btn.textContent = UI.again;
   if (traceUrl) { const t = $("trace"); t.querySelector("a").href = traceUrl; t.hidden = false; }
-  say(reason === "bye" ? "Llamada terminada. Gracias." : "Llamada terminada.");
+  say(reason === "bye" ? UI.endedBye : UI.ended);
 }
 let Conversation = null;
-import(${JSON.stringify(ELEVEN_CLIENT_URL)}).then((m) => { Conversation = m.Conversation; btn.disabled = false; say("Pulse el botón y hable con normalidad."); }).catch(() => say("No se pudo cargar la llamada. Recargue la página."));
+import(${JSON.stringify(ELEVEN_CLIENT_URL)}).then((m) => { Conversation = m.Conversation; btn.disabled = false; say(UI.ready); }).catch(() => say(UI.noLoad));
 btn.onclick = async () => {
-  btn.disabled = true; ended = false; lines = []; list.textContent = ""; say("Conectando…");
+  btn.disabled = true; ended = false; lines = []; list.textContent = ""; say(UI.connecting);
   try {
     await navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().forEach((t) => t.stop()));
     const s = await post(START, CODE ? { code: CODE } : {});
@@ -980,12 +1051,12 @@ btn.onclick = async () => {
       signedUrl: s.signedUrl,
       connectionType: "websocket",
       clientTools: Object.fromEntries(${JSON.stringify(tools)}.map((n) => [n, tool(n)])),
-      onConnect: () => { btn.style.display = "none"; hang.style.display = "block"; say("En línea. Hable cuando quiera."); },
-      onMessage: (m) => { if (m.message && m.message.replace(/[.\\s…]/g, "")) add(m.role === "user" ? "caller" : "voice", m.message); },
+      onConnect: () => { btn.style.display = "none"; hang.style.display = "block"; say(UI.live); },
+      onMessage: (m) => { const t = (m.message || "").replace(/\\[[a-z ]{2,20}\\]\\s*/g, "").trim(); if (t.replace(/[.\\s…]/g, "")) add(m.role === "user" ? "caller" : "voice", t); },
       onDisconnect: (d) => finish(d && d.reason === "agent" ? "bye" : d && d.reason === "user" ? "hangup" : "line_dropped"),
-      onError: (m) => say("Error: " + m),
+      onError: (m) => say(UI.error + m),
     });
-  } catch (e) { say(e.message && /Permission|NotAllowed/i.test(e.name + e.message) ? "Hace falta permiso para el micrófono." : e.message); btn.disabled = false; }
+  } catch (e) { say(e.message && /Permission|NotAllowed/i.test(e.name + e.message) ? UI.mic : e.message); btn.disabled = false; }
 };
 hang.onclick = () => { if (conv) conv.endSession().catch(() => {}); finish("hangup"); };
 addEventListener("pagehide", () => { if (conv && !ended) { conv.endSession().catch(() => {}); finish("left"); } });

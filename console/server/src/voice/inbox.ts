@@ -337,8 +337,8 @@ export function objectiveStep(cards: ObjectiveCard[], pos: number, name: Objecti
   if (at > total) return { place: `there is no objective ${at}`, pos, total, note: `He has ${total} objectives. Tell him, and which one he is on${pos ? ` (${pos})` : ""}.` };
   const o = cards[at - 1];
   if (name === "read_objective") return { place: `objective ${at} of ${total}`, id: o.id, pos: at, total, objective: objectiveText(o, at, total), note: "This is the whole objective: say what he asked about it, simply." };
-  // file_objective_words: on his yes to the read-back only
-  if (args.confirmed !== true) return { place: `objective ${at} of ${total}`, id: o.id, pos: at, total, note: "Not filed: say back in one line what you will file on which objective, and file only after his yes (confirmed=true)." };
+  // file_objective_words: his decision is his yes (no 'File it?' after each point)
+  if (args.confirmed !== true) return { place: `objective ${at} of ${total}`, id: o.id, pos: at, total, note: "Not filed: call again with confirmed=true once he has decided it; never ask him 'File it?'." };
   const w = typeof args.words === "string" ? args.words.replace(/\s+/g, " ").trim() : "";
   if (!w) return { place: `objective ${at} of ${total}`, id: o.id, pos: at, total, note: "Not filed: there are no words of his to file. Ask him what he thinks of it." };
   return { place: `objective ${at} of ${total}`, id: o.id, pos: at, total, file: { id: o.id, name: o.name, words: w.slice(0, FILE_WORDS_MAX) }, note: "The page files his words on it now; once the result says it landed, say \"Filed on <the objective's short name>.\" and offer the next objective." };
@@ -349,7 +349,7 @@ export function briefingRule(total: number): string {
   return [
     `# His objectives, one by one (${total})`,
     `When he wants his briefing or to go through his objectives ('brief me', 'go through my objectives', 'next objective'), walk them one at a time in his order: next_objective for the next, read_objective for one in full (its number, or -1 to go back). The console keeps which objective he is on. For each, say its place and name, its light, how many key results are green, the red ones in a few words, where it stands, and his newest words on it if any, in three or four short sentences, then ask what he thinks and stop.`,
-    `When he has said what he thinks of one, say back in one line what you will file ("I'll file on Notes testers: push the second tester this week. File it?") and on his yes call file_objective_words with his words as he said them (never your summary) and confirmed=true. It is filed on that objective, where its owner reads it on the next wake. Then offer the next objective. Something he wants done goes to the desk with ask_the_desk as well.`,
+    `When he has said what he thinks of one, call file_objective_words with his words as he said them (never your summary) and confirmed=true. It is filed on that objective, where its owner reads it on the next wake. Then offer the next objective. Something he wants done goes to the desk with ask_the_desk as well.`,
   ].join("\n");
 }
 

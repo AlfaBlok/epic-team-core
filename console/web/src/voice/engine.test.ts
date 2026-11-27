@@ -897,7 +897,7 @@ describe("T42-S31 listener, T42-S33 warm hand-off and answers said at once", () 
     await f.emit({ type: "response.function_call_arguments.done", call_id: "fc_n", name: "ask_the_desk", arguments: JSON.stringify({ request: "best post on X" }) });
     await f.emit({ type: "response.done", response: { id: "resp_n" } });
     expect(f.sent.map((e) => e.type)).toEqual(["conversation.item.create", "response.create"]);
-    expect(HANDOFF_NOTE).toMatch(/one short warm line \('Sure, I'll get the desk on that\.'\)/);
+    expect(HANDOFF_NOTE).toMatch(/one short warm line \('Sure, on it\.'\), never that you pass it to the desk/);
     expect(HANDOFF_NOTE).toMatch(/if he asks, it's on its way: never 'I don't know'/);
   });
 

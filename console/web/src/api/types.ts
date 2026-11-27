@@ -2289,6 +2289,9 @@ export interface TesterSignup {
   cancelledAt?: string | null;
   /** when the owner first opened /testers with this row on it (null = new). */
   seenAt?: string | null;
+  /** when the owner accepted a credits application, and its one onboarding-call invite (`sent …` or `held …: why`). */
+  teamAccepted?: string | null;
+  teamInvited?: string | null;
 }
 /** rework (server testerApplication.ts): one yes/no per requirement, and the real-life case study question. */
 export interface TesterAnswers {

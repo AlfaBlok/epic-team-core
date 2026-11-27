@@ -129,6 +129,7 @@ import { readyAndReviewRows, type AskContext, type MemoryLookup, type VoiceNoteL
 import { companyPathStaysOff, companyViewOn } from "./plug/companyView.js";
 import { ensurePeople, mountPeople, mountPersonGate } from "./people/routes.js";
 import { clinicsIn, createClinicDemo, mountClinicDemo } from "./clinicDemo.js";
+import { createClinicIntake, mountClinicIntake } from "./clinicIntake.js";
 import { createLetters, lettersIn, mountLetters } from "./clinicLetters.js";
 import { createFollowUp, repoFileWriter } from "./clinicFollowUp.js";
 import { createLeads } from "./clinicLeads.js";
@@ -582,7 +583,7 @@ export function createApp(
     /** who words the memory service helper's answer (a hosted services module): true = the small model on the console's OpenAI key; a worder for tests; absent = the plain answer. */
     memoryAsk?: { worder?: AskWorderShape | true };
     /** Call the desk: the OpenAI client-key minter and the clock (tests fake both). */
-    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; /** a new workspace's onboarding call's door (tests). */ onboardingEleven?: ElevenCalls; /** the clinic receptionist's door per clinic (tests). */ clinicEleven?: (c: import("./clinicDemo.js").Clinic) => ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
+    voice?: { mint?: Minter; /** the ElevenLabs Agents door (tests fake it; off in tests unless given). */ eleven?: ElevenCalls; /** the objectives coach's door (tests). */ coachEleven?: ElevenCalls; /** the briefing call's door (tests). */ briefingEleven?: ElevenCalls; /** the senior marketing call's door (tests). */ marketingEleven?: ElevenCalls; /** the team product's strategy call's door (tests). */ strategyEleven?: ElevenCalls; /** a new workspace's onboarding call's door (tests). */ onboardingEleven?: ElevenCalls; /** the clinic receptionist's door per clinic (tests). */ clinicEleven?: (c: import("./clinicDemo.js").Clinic) => ElevenCalls; /** the Catalan intake line's door (tests). */ clinicIntakeEleven?: ElevenCalls; now?: () => number; /** how often ended calls are checked (0 = only by tests' tick). */ afterCallTickMs?: number; /** how often accepted voice notes not yet posted are finished again (0 = off; tests). */ resumeNotesMs?: number; /** rework: voice notes' transcriber and audio folder (tests). */ transcribe?: Transcriber; notesDir?: string; /** voice feedback's structurer (tests). */ structure?: Structurer; /** the reply voice (tests). */ speak?: Parameters<typeof mountReplyVoice>[1] };
     /** where chat attachments are kept (tests). */
     chatAttachmentsDir?: string;
     /**
@@ -4741,6 +4742,22 @@ export function createApp(
     letters: lettersIn(() => { const d = clinicsDir(); return d ? path.join(d, "letters") : undefined; }),
   });
   mountClinicDemo(api, clinicDemo);
+  // your virtual agent in Catalan (clinicIntake.ts): the Catalan call-me page; its call takes a clinic's requirements and
+  // writes them as a new clinic config (docs/clinics/<slug>.json, lang ca), whose own Catalan receptionist answers try calls.
+  const clinicIntake = createClinicIntake({
+    db,
+    key: elevenKey,
+    clinics: clinicsIn(clinicsDir),
+    writeClinic: (slug, make, msg) => {
+      const dir = clinicsDir();
+      if (!dir) return Promise.resolve({ state: "failed", detail: "no clinics folder" });
+      const repo = process.env.CONSOLE_CLINICS_DIR ? dir : (resolveRepo(read.reposRoot, homeRepo())?.path ?? dir);
+      return clinicWrite(repo, path.relative(repo, path.join(dir, `${slug}.json`)), make, msg);
+    },
+    ...(opts.voice?.clinicIntakeEleven ? { eleven: opts.voice.clinicIntakeEleven } : {}),
+    ...(opts.voice?.now ? { now: opts.voice.now } : {}),
+  });
+  mountClinicIntake(api, clinicIntake);
   mountLetters(api, clinicLetters, clinicDemo);
   // steps pages with a Done switch per step (steps/steps.ts): a tick writes the owning spine, tells the desk, wakes the owner.
   const stepsApi = createSteps({

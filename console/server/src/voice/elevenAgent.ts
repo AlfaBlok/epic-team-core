@@ -34,11 +34,19 @@ export const ELEVEN_TTS_MODEL_ES = "eleven_flash_v2_5";
  * The console's PATCH leaves a value it does not send, so the live agents were set once by hand to the same.
  */
 export const ELEVEN_STABILITY_ES = 0.8;
-/** the call's language, picked on the call screen (English by default). */
-export type CallLang = "en" | "es";
+/**
+ * A call in Catalan (the owner on call_065c7b6e, 27 Nov: does ElevenLabs speak Catalan? if so, a Catalan offer). The voice
+ * check found it: Catalan is listed for Eleven v4 Turbo and v3, a TEST agent set to `ca` was accepted on v4 Turbo and
+ * refused on Flash v2.5. The same steady Spanish voice speaks it (the check's TEST sentence), on v4 Turbo.
+ */
+export const ELEVEN_TTS_MODEL_CA = "eleven_v4_turbo";
+/** the call's language: English or Spanish picked on the call screen (English by default); Catalan for a Catalan line. */
+export type CallLang = "en" | "es" | "ca";
 export const callLang = (v: unknown): CallLang => (v === "es" ? "es" : "en");
 /** the Spanish agent's name on the account: the English one's, marked. */
 export const spanishAgentName = (name: string) => `${name} · Español`;
+/** the agent's name on the account per language (English is the plain name). */
+export const langAgentName = (name: string, lang: CallLang) => (lang === "es" ? spanishAgentName(name) : lang === "ca" ? `${name} · Català` : name);
 export const ELEVEN_MODEL_LABEL = "elevenlabs-agents";
 /** a desk answer may take a while: the agent waits this long for a client tool's result. */
 export const ELEVEN_TOOL_WAIT_S = 120;
@@ -80,7 +88,12 @@ export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[]
           tools: [...tools.filter((t) => t.name !== "hang_up").map(clientTool), { type: "system", name: "end_call", description: "End the call when he clearly says he is done, after one short goodbye.", params: { system_tool_type: "end_call" } }],
         },
       },
-      tts: lang === "es" ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_ES, stability: ELEVEN_STABILITY_ES } : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
+      tts:
+        lang === "es"
+          ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_ES, stability: ELEVEN_STABILITY_ES }
+          : lang === "ca"
+            ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_CA, stability: ELEVEN_STABILITY_ES }
+            : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
       conversation: { max_duration_seconds: 20 * 60 },
       // his silence for this long and the agent speaks up ("Are you still with me?", the call's own instructions)
       turn: { turn_timeout: ELEVEN_TURN_TIMEOUT_S },
@@ -116,11 +129,16 @@ export interface ElevenLink {
  */
 type ElevenOpts = { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void }; /** the agent as made on the account (default agentBody); the public clinic receptionist (clinicDemo.ts) takes no overrides. */ body?: typeof agentBody };
 
-/** one door per language: English is the agent as before, Spanish its own agent (a Spanish voice), found again by its name. */
-export function elevenCalls(o: ElevenOpts) {
-  const en = elevenLine(o, "en");
-  let es: ReturnType<typeof elevenLine> | undefined;
-  const of = (lang?: CallLang) => (lang === "es" ? (es ??= elevenLine({ ...o, known: undefined }, "es")) : en);
+/** one door per language: English is the agent as before, Spanish and Catalan each its own agent, found again by its
+ * name. `known` (the agent id kept in the console) belongs to the door's own language: `knownLang` (default English). */
+export function elevenCalls(o: ElevenOpts & { knownLang?: CallLang }) {
+  const own = o.knownLang ?? "en";
+  const lines = new Map<CallLang, ReturnType<typeof elevenLine>>();
+  const of = (lang: CallLang = "en") => {
+    let l = lines.get(lang);
+    if (!l) lines.set(lang, (l = elevenLine(lang === own ? o : { ...o, known: undefined }, lang)));
+    return l;
+  };
   return {
     /** a link for one call in this language (English by default). */
     link: (lang?: CallLang) => of(lang).link(),
@@ -132,7 +150,7 @@ export function elevenCalls(o: ElevenOpts) {
 
 function elevenLine(o: ElevenOpts, lang: CallLang) {
   const f = o.f ?? fetch;
-  const agentName = lang === "es" ? spanishAgentName(o.name ?? ELEVEN_AGENT_NAME) : (o.name ?? ELEVEN_AGENT_NAME);
+  const agentName = langAgentName(o.name ?? ELEVEN_AGENT_NAME, lang);
   let agentId: string | undefined;
   const api = async (k: string, method: string, path: string, body?: unknown) => {
     let r: Response;

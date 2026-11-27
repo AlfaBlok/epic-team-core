@@ -1905,6 +1905,9 @@ const mockMail = () => ({
     async makeTesterWorld(signupId: string, payment?: TesterPayment) {
       return ok({ signupId, worldId: "es-mock-0000", payment: payment ?? "comped", steps: [] } as TesterWorldResult);
     },
+    async acceptTeamApplicant(_id: string) {
+      return ok({ ok: true, acceptedAt: new Date().toISOString(), invited: null });
+    },
     async removeTesterWorld(_id: string, confirm: string) {
       return ok({ worldId: confirm, removed: {} });
     },

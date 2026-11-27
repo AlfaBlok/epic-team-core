@@ -174,7 +174,7 @@ export const ASK_GIVE_UP_MS = 10 * 60_000;
  */
 /** What ask_the_desk returns to the model: the desk has it; one warm line if nothing was said yet, then listen. */
 export const HANDOFF_NOTE =
-  "The desk has it; do not send it again. If you have not said so yet, tell him in one short warm line ('Sure, I'll get the desk on that.'), then keep listening. When its answer comes, you tell him at once. Until then, if he asks, it's on its way: never 'I don't know'.";
+  "The desk has it; do not send it again. If you have not said so yet, tell him in one short warm line ('Sure, on it.'), never that you pass it to the desk, then keep listening. When its answer comes, you tell him at once. Until then, if he asks, it's on its way: never 'I don't know'.";
 export function deskReplyNote(short: string, answer: string): string {
   return `The desk replied to "${short}":\n${answer}\nTell him now, warmly and simply, in one to three short sentences: the answer first, in the desk's facts, no ids, no lists. Then let him talk.`;
 }
