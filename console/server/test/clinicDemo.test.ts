@@ -52,7 +52,7 @@ describe("clinic configs", () => {
     expect(CLINIC_TOOLS(all.get("plain-clinic")!).map((t) => t.name)).toEqual(["file_ticket", "free_slots", "book_appointment"]);
     expect(CLINIC_TOOLS(all.get("demo-sales")!).map((t) => t.name)).toContain("book_follow_up");
     // a garbled clinic name never blocks the follow-up: a name and a phone or email are enough
-    expect(CLINIC_TOOLS(all.get("demo-sales")!).find((t) => t.name === "book_follow_up")!.parameters.required).toEqual(["name", "contact"]);
+    expect(CLINIC_TOOLS(all.get("demo-sales")!).find((t) => t.name === "book_follow_up")!.parameters.required).toEqual(["name", "contact", "needs"]);
     expect(sales).toMatch(/nunca la retengas/i);
   });
 
@@ -146,7 +146,8 @@ describe("the public call", () => {
     expect(await tool("book_appointment", { name: "Luis", service: "Revisión", date: "2026-12-01", time: first })).toMatch(/no están libres/);
     // a follow-up with no contact never makes the rep ask after goodbye
     expect(await tool("book_follow_up", { name: "Dra. Pérez", clinic: "Clínica Pérez" })).toMatch(/Si ya se ha despedido, no lo pidas: despídete en una frase y llama a end_call/);
-    expect(await tool("book_follow_up", { name: "Dra. Pérez", clinic: "Clínica Pérez", contact: "600000000", when: "el lunes por la tarde" })).toMatch(/^Apuntado/);
+    // a follow-up without what the clinic needs is noted, and the rep asks the need once
+    expect(await tool("book_follow_up", { name: "Dra. Pérez", clinic: "Clínica Pérez", contact: "600000000", when: "el lunes por la tarde" })).toMatch(/^Apuntado.*qué le gustaría resolver en su clínica.*qualify_lead/);
     await post(app, `/api/public/clinic/demo-sales/calls/${s.call}/end`, { reason: "bye", transcript: [{ who: "voice", text: "Hola" }, { who: "owner", text: "Adiós" }] });
     const [c] = demo.calls();
     expect(c.reason).toBe("bye");

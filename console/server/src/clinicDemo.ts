@@ -395,14 +395,14 @@ export function clinicPrompt(c: Clinic): string {
     out.push(
       "",
       `# Si quien llama tiene o dirige una clínica (la demostración de ${s.company})`,
-      `Tú misma eres el producto: lo que acaba de oír es lo que tendría su clínica. En tu primera respuesta di en una frase qué es y en otra el precio y la prueba gratis; nunca preguntes si quiere saber el precio, dilo. Después contesta lo que pregunte, de una cosa en una:`,
+      `Tú misma eres el producto: lo que acaba de oír es lo que tendría su clínica. En tu primera respuesta di en una frase qué es y en otra el precio y la prueba gratis; nunca preguntes si quiere saber el precio, dilo. Si aún no ha dicho qué le hace falta, acaba esa primera respuesta con una sola pregunta: qué le gustaría resolver en su clínica (por ejemplo la hora de comer, las llamadas perdidas por la tarde o el WhatsApp). Después contesta lo que pregunte, de una cosa en una:`,
       `- Qué es: ${s.what}`,
       `- Precio: ${s.price}.${s.priceWhatsappOnly ? ` Solo WhatsApp: ${s.priceWhatsappOnly}.` : ""}`,
       `- Prueba: ${s.trialDays} días gratis en su propio número.`,
       `- Puesta en marcha: ${s.setup}`,
       s.terms ? `- ${s.terms}` : "",
       "Di solo lo que hace, nunca resultados: no prometas más pacientes, menos ausencias ni cifras, porque ninguna clínica lo ha usado todavía. Si te piden algo que no está aquí (una integración con su programa de gestión, protección de datos), di que lo verá el equipo en la llamada de seguimiento.",
-      `Para seguir: ofrece ${s.followUp} en la misma respuesta en que das el precio, y ahí pide su nombre, el nombre de su clínica, un teléfono o email y cuándo le viene bien, y llama a book_follow_up. Con su nombre y un teléfono o email basta: si no entiendes un dato, pregúntalo una sola vez y después apunta lo que tengas. Después confirma en una frase que el equipo le llamará. Si se despide sin darlos, aunque en la misma frase diga que le interesa, no los vuelvas a pedir: lo que preguntó ya queda en la nota de qualify_lead.`,
+      `Para seguir: ofrece ${s.followUp} en tu siguiente respuesta (o en la misma en que das el precio si ya sabes qué le hace falta), y ahí pide su nombre, el nombre de su clínica, un teléfono o email y cuándo le viene bien, y llama a book_follow_up con eso y con lo que necesita su clínica, en sus palabras. Con su nombre y un teléfono o email basta: si no entiendes un dato, pregúntalo una sola vez y después apunta lo que tengas. Después confirma en una frase que el equipo le llamará. Si se despide sin darlos, aunque en la misma frase diga que le interesa, no los vuelvas a pedir: lo que preguntó ya queda en la nota de qualify_lead.`,
       "Si quiere probar la demo como paciente, cambia al papel de recepcionista y atiéndele como a un paciente.",
       "",
       "# Quién te habla y qué necesita (para el equipo)",
@@ -465,14 +465,14 @@ export function clinicPromptEn(c: Clinic): string {
     out.push(
       "",
       `# If the caller owns or runs a clinic (the ${s.company} demo)`,
-      `You are the product: what they just heard is what their clinic would have. You become the clinic's phone line: you pick up every call, turn each into a booking, a lead or a task for the staff, and put the calls that matter through to their people. In your first answer say what it is in one sentence and the price and free trial in another; never ask whether they want the price, say it. Then answer what they ask, one thing at a time:`,
+      `You are the product: what they just heard is what their clinic would have. You become the clinic's phone line: you pick up every call, turn each into a booking, a lead or a task for the staff, and put the calls that matter through to their people. In your first answer say what it is in one sentence and the price and free trial in another; never ask whether they want the price, say it. If they have not yet said what they need, end that first answer with one question: what they would like to sort out at their clinic (for example lunchtime cover, missed calls in the afternoon or WhatsApp). Then answer what they ask, one thing at a time:`,
       `- What it is: ${s.what}`,
       `- Price: ${s.price}.${s.priceWhatsappOnly ? ` WhatsApp only: ${s.priceWhatsappOnly}.` : ""}`,
       `- Trial: ${s.trialDays} days free on their own number.`,
       `- Setting up: ${s.setup}`,
       s.terms ? `- ${s.terms}` : "",
       "Say only what it does, never results: never promise more patients, fewer no-shows or any figure, because no clinic has used it yet. If they ask for something not here (their practice software, data protection), say the team will cover it on the follow-up call.",
-      `To follow up: offer ${s.followUp} in the same answer where you give the price, and there ask their name, their clinic, a phone or email and when suits, and call book_follow_up. A name and a phone or email is enough: if you miss a detail, ask once, then note what you have. Then confirm in one sentence that the team will be in touch. If they say goodbye without giving them, even if in the same sentence they say they are interested, do not ask again: what they asked is already in the qualify_lead note.`,
+      `To follow up: offer ${s.followUp} in your next answer (or in the same answer as the price if you already know what they need), and there ask their name, their clinic, a phone or email and when suits, and call book_follow_up with those and what their clinic needs, in their words. A name and a phone or email is enough: if you miss a detail, ask once, then note what you have. Then confirm in one sentence that the team will be in touch. If they say goodbye without giving them, even if in the same sentence they say they are interested, do not ask again: what they asked is already in the qualify_lead note.`,
       "If they want to try it as a patient, switch to the receptionist role and look after them as a patient.",
       "",
       "# Who is calling and what they need (for the team)",
@@ -517,7 +517,7 @@ const CLINIC_TOOLS_EN = (c: Clinic) => [
         {
           name: "book_follow_up",
           description: "Notes the follow-up call with the team for an interested clinic.",
-          parameters: { properties: { name: { type: "string", description: "the person's name" }, clinic: { type: "string", description: "their clinic" }, contact: { type: "string", description: "their phone or email" }, when: { type: "string", description: "when suits for the call" } }, required: ["name", "contact"] },
+          parameters: { properties: { name: { type: "string", description: "the person's name" }, clinic: { type: "string", description: "their clinic" }, contact: { type: "string", description: "their phone or email" }, when: { type: "string", description: "when suits for the call" }, needs: { type: "string", description: "what their clinic needs to sort out, in their words, short" } }, required: ["name", "contact", "needs"] },
         },
         {
           name: "qualify_lead",
@@ -581,8 +581,9 @@ const CLINIC_TOOLS_ES = (c: Clinic) => [
               clinic: { type: "string", description: "nombre de su clínica" },
               contact: { type: "string", description: "su teléfono o email" },
               when: { type: "string", description: "cuándo le viene bien la llamada" },
+              needs: { type: "string", description: "lo que necesita resolver su clínica, en sus palabras, corto" },
             },
-            required: ["name", "contact"],
+            required: ["name", "contact", "needs"],
           },
         },
         {
@@ -917,9 +918,12 @@ export function createClinicDemo(d: ClinicDeps) {
           `cb_${crypto.randomBytes(6).toString("hex")}`,
           id,
           slug,
-          JSON.stringify({ name: s("name"), clinic: s("clinic"), contact: s("contact"), when: s("when") }),
+          JSON.stringify({ name: s("name"), clinic: s("clinic"), contact: s("contact"), when: s("when"), needs: s("needs") }),
           iso(),
         );
+        // a follow-up without what the clinic needs leaves the team guessing: ask it once, note it in qualify_lead
+        if (!s("needs"))
+          return { result: L(`Apuntado: el equipo de ${c.sales.company} llamará a ${s("name")}. Confírmalo en una frase. Falta lo que necesita su clínica: si ya te lo dijo, anótalo ya con qualify_lead sin preguntar; si no y la persona sigue en la conversación, pregúntale una sola vez qué le gustaría resolver en su clínica y con su respuesta llama a qualify_lead. Si ya se ha despedido, no preguntes: despídete y llama a end_call.`, `Noted: the ${c.sales.company} team will be in touch with ${s("name")}. Confirm it in one sentence. What their clinic needs is missing: if they already said it, note it now with qualify_lead without asking; if not and they are still talking with you, ask once what they would like to sort out at their clinic and with their answer call qualify_lead. If they have said goodbye, do not ask: say goodbye and call end_call.`) };
         return { result: L(`Apuntado: el equipo de ${c.sales.company} llamará a ${s("name")} (${s("clinic")})${s("when") ? `, ${s("when")}` : ""}. Confírmalo en una frase.`, `Noted: the ${c.sales.company} team will be in touch with ${s("name")} (${s("clinic")})${s("when") ? `, ${s("when")}` : ""}. Confirm it in one sentence.`) };
       }
       return { result: `No conozco la herramienta ${name}.` };
