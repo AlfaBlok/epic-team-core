@@ -7,6 +7,27 @@ import { TEST_REPO, TEST_ROW } from "../review/rows.js";
  */
 export const teamLink = (): string => sites().teamUrl;
 
+/**
+ * The owner's pages that already open on the customer site too (CONSOLE_LINK_URL, e.g. the cloud address of the same
+ * console): home, the inbox, chat and the objectives. A message's link to one of them goes to that site; every other
+ * link (settings, admin screens, the API) stays on the team site, which keeps working. Unset: every link as before.
+ */
+export const LINK_SITE_PAGES = /^\/(?:inbox|chat|sets(?:\/[^/?#]+)?)?\/?(?=[?#]|$)/;
+
+/** every team-site link in `text` to a page of LINK_SITE_PAGES, pointed at CONSOLE_LINK_URL (unchanged when unset). */
+export function linkSite(text: string, env: NodeJS.ProcessEnv = process.env): string {
+  const to = (env.CONSOLE_LINK_URL ?? "").trim().replace(/\/+$/, "");
+  const from = sites().teamUrl.replace(/\/+$/, "");
+  if (!to || !/^https:\/\/[^/\s]+$/.test(to) || to === from || !text) return text;
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`${esc}(?![\\w.-]*[\\w-])(/[^\\s<>"'\\])]*)?`, "g"), (whole, p: string | undefined) => {
+    const raw = p ?? "";
+    const tail = raw.match(/[.,;:!?]+$/)?.[0] ?? "";
+    const path = raw.slice(0, raw.length - tail.length);
+    return LINK_SITE_PAGES.test(path || "/") ? `${to}${path}${tail}` : whole;
+  });
+}
+
 /** `application` = a tester application the owner has not opened on /testers yet. */
 export type NoticeKind = "ask" | "review" | "application";
 export interface Notifiable {

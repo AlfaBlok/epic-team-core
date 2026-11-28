@@ -31,7 +31,9 @@ import { whoAnswers, type WhoAnswers } from "@/voice/whoAnswers";
  * (the owner, 26 Nov: "a Call button at each level ... with the right context"; 27 Nov, call_92cffeeb: "I'm pressing
  * this button when I'm on my chat, and it says Partner. So here, I would expect to be talking to the team desk"): each desk's
  * Partner is its senior partner. The Team desk's is the Team desk partner over all his objectives (never one objective's
- * strategist, as the EpicTeam launch call was); a world's desk calls the social product's partner. Who answers: whoAnswers.ts.
+ * strategist, as the EpicTeam launch call was). A world's desk (its title says Team desk too) calls the same Team desk partner
+ * (the owner 28 Nov, on its Partner: "You're not specific to [the social product's] campaign. You're multi-campaign, all the
+ * objectives inside a workspace"): never the social product's partner from a desk. Who answers: whoAnswers.ts.
  */
 export const deskPartner = (team: boolean): WhoAnswers => (team ? whoAnswers.teamDeskPartner() : whoAnswers.socialDeskPartner());
 
@@ -303,7 +305,7 @@ function WorldDesk({ world }: { world: string }) {
   const hint = params.get("page")?.trim() || "";
   return (
     <DeskPage
-      partner={deskPartner(false)}
+      partner={deskPartner(true)}
       description="The team desk: new ideas and which campaign they belong to, answers, and starting, steering or stopping runs. One chat for every campaign."
       who="Team desk"
       callBase={deskVoiceBase(world)}

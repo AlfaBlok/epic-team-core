@@ -228,7 +228,7 @@ export const BYE_MAX_MS = 8_000;
 export const LISTEN_TOOL = "listen_for_feedback";
 /** the tools the console answers itself (POST …/calls/:cid/tool): the inbox walk. */
 /** the briefer's lookups the console reads for it (POST …/calls/:cid/lookup): exact rows, read only. */
-export const LOOKUP_TOOLS = ["tester_mails", "posts_by_day", "replies_and_dms", "site_views"];
+export const LOOKUP_TOOLS = ["tester_mails", "posts_by_day", "posts_board", "replies_and_dms", "site_views"];
 export const CONSOLE_TOOLS = new Set(["next_card", "read_card", "press_card", "next_objective", "read_objective", "file_objective_words"]);
 /** his short yes to a read-back ("yes", "yeah, file it"): not part of the words filed. */
 const SHORT_YES = /^\s*(?:yes|yeah|yep|sure|ok(?:ay)?|s[ií]|vale|claro|do it|go ahead|file it|please)\b[\s\w,.!']{0,24}$/i;

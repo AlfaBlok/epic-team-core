@@ -121,6 +121,14 @@ const OPEN: [string, RegExp][] = [
 
 const ID = "[^/]+";
 /**
+ * Every POST a live call's page sends on its call (voice/routes.ts mountVoice/mountOwnCall `${prefix}/calls/:cid/<one of
+ * these>`), one list for every call door below. `lookup` was once missing from each door, so from the owner's login on
+ * the social site every lookup (and switch_to) came back 403 world_scope and the voice said it could not read the
+ * posts ledger. A new call route goes here once; test/callRoutesScope.test.ts fails when routes.ts mounts one this
+ * list lacks. The page-open link (`calls/warm`) sits beside `calls` on each door, for the same reason.
+ */
+export const CALL_POSTS = "beat|usage|end|ask|tool|relay|lookup";
+/**
  * the words that name a route under a collection (GET /api/runs/stats, POST /api/needs-owner/carry), never a
  * record's id. ROW_ID is an id under milestones, personas, assignments, runs and needs-owner that is none of them, so a
  * `/<collection>/${ROW_ID}` rule never lets a named route through by accident (a plain /runs/:id once let /runs/active,
@@ -184,13 +192,13 @@ export const TENANT_SAFE: [string, RegExp][] = [
   // page) and answers only the home world (another world gets a 404). Off this list the state read was 403, so his
   // page drew no Call button at all.
   ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
-  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
-  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", /^\/api\/voice\/marketing\/(calls|calls\/warm|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
   // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|calls/warm|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
   ["POST", new RegExp(`^/api/milestones/${ID}/(tree/add|chat/dispatch)$`)],
   ["POST", new RegExp(`^/api/waiting-on-owner/${ID}/respond$`)],
@@ -481,13 +489,13 @@ export const DOOR_SAFE: [string, RegExp][] = [
   // page) and answers only the home world (another world gets a 404). Off this list the state read was 403, so his
   // page drew no Call button at all.
   ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
-  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
-  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", /^\/api\/voice\/marketing\/(calls|calls\/warm|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
   // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|calls/warm|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
 ];
 /**
@@ -519,14 +527,14 @@ export const DOOR_HOME: [string, RegExp][] = [
   // his Team desk thread (desk/routes.ts), its Call (voice/routes.ts mountVoice) and the phone notification switch
   ["GET|POST", /^\/api\/desk\/messages$/],
   ["GET", /^\/api\/voice\/calls$/],
-  ["POST", /^\/api\/voice\/(calls|active\/end)$/],
-  ["POST", new RegExp(`^/api/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", /^\/api\/voice\/(calls|calls\/warm|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/voice/calls/${ID}/(status|ask/${ID})$`)],
   ["GET", /^\/api\/push$/],
   // the desk's own partner call (voice/routes.ts mountOwnCall "/voice/strategy"): ownerOnly, the home world's
   ["GET", /^\/api\/voice\/strategy\/(state|calls)$/],
-  ["POST", /^\/api\/voice\/strategy\/(calls|active\/end)$/],
-  ["POST", new RegExp(`^/api/voice/strategy/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", /^\/api\/voice\/strategy\/(calls|calls\/warm|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/strategy/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/voice/strategy/calls/${ID}/(status|ask/${ID})$`)],
   ["POST", /^\/api\/push\/(subscribe|unsubscribe)$/],
   // his objectives (the home checkout's data repo), key results, where-we-are, chapters, plans and pages
@@ -657,13 +665,13 @@ const isInternalWorldAgent = (db: DB, identity: Identity): boolean => {
  */
 const OWN_DATA_WORLD_CALLS: [string, RegExp][] = [
   ["GET", /^\/api\/voice\/marketing\/(state|calls)$/],
-  ["POST", /^\/api\/voice\/marketing\/(calls|active\/end)$/],
-  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", /^\/api\/voice\/marketing\/(calls|calls\/warm|active\/end)$/],
+  ["POST", new RegExp(`^/api/voice/marketing/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/voice/marketing/calls/${ID}/(status|ask/${ID})$`)],
   // an objective's own Call (voice/routes.ts mountObjectiveVoice), the briefer's rule: ownerOnly, home world only.
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/(state|calls)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|active/end)$`)],
-  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(beat|usage|end|ask|tool|relay)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/(calls|calls/warm|active/end)$`)],
+  ["POST", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(${CALL_POSTS})$`)],
   ["GET", new RegExp(`^/api/objectives/${ID}/voice/calls/${ID}/(status|ask/${ID})$`)],
 ];
 let dataRepoRead: { at: number; repo?: string } | undefined;

@@ -18,6 +18,7 @@ describe("the social briefer's Call reaches the door", () => {
       ["POST", "/api/voice/marketing/calls/vc_1/ask"],
       ["POST", "/api/voice/marketing/calls/vc_1/tool"],
       ["POST", "/api/voice/marketing/calls/vc_1/relay"],
+      ["POST", "/api/voice/marketing/calls/vc_1/lookup"],
       ["GET", "/api/voice/marketing/calls/vc_1/status"],
       ["GET", "/api/voice/marketing/calls/vc_1/ask/a_1"],
     ])
@@ -57,6 +58,8 @@ describe("the social briefer's Call in the owner's own workspace on a customer s
       ["GET", "/api/voice/marketing/state"],
       ["POST", "/api/voice/marketing/calls"],
       ["POST", "/api/voice/marketing/calls/vc_1/relay"],
+      // the partner's lookups (a live call once got 403 world_scope on its posts lookup from here)
+      ["POST", "/api/voice/marketing/calls/vc_1/lookup"],
     ])
       expect(judge(db as any, session("w-own"), m, p).allow, `${m} ${p}`).toBe(true);
     // only the briefer: his other screens there keep their own rules

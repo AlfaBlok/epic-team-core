@@ -35,6 +35,13 @@ describe("who answers each Call, by where he presses it", () => {
     ]);
   });
 
+  it("Partner on a workspace's desk reaches the Team desk partner over every objective, never the social product's partner", async () => {
+    const src = (await import("../pages/Chat.tsx?raw")).default as string;
+    const world = src.slice(src.indexOf("function WorldDesk"), src.indexOf("function TeamDeskChat"));
+    expect(world).toContain("partner={deskPartner(true)}");
+    expect(world).not.toContain("deskPartner(false)");
+  });
+
   it("Partner in his Team desk chat never reaches the product launch strategist (one objective's call)", () => {
     expect(deskPartner(true).base).not.toBe("/api/voice/strategy");
     expect(deskPartner(true).name).toBe("Team desk partner");

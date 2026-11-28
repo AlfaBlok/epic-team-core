@@ -32,6 +32,9 @@ describe("campaign onboarding on the objective's call", () => {
     expect(s).toContain("# Acme Voice");
     expect(s).toContain("one slide at a time");
     expect(s).toContain("do we run it for a week");
+    expect(s).toContain("lead with the plays we propose");
+    expect(s).toContain("Never ask him back what the brief already settled");
+    expect(s).toContain("we agree on this call, we do it for seven days, we measure");
   });
 
   it("says nothing when no objective has a file, or the id is not an objective id", () => {

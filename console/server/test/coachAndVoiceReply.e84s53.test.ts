@@ -34,6 +34,24 @@ describe("the objectives coach", () => {
     expect(k).not.toMatch(/Not green:[^.]*Listed/);
   });
 
+  it("briefed on the whole workspace, every key result with now and target, each blocker, OKR practice, never the social partner", () => {
+    const k = coachKnows([
+      { ...card("Acme: Launch Acme"), keyResults: [{ label: "Signed-up testers sent a voice note", state: "red", value: "0%", target: "50%" }, { label: "Listed", state: "green", value: "2", target: "2" }], stands: "waits on the first tester's voice note" },
+      card("Notes: Launch Notes"),
+    ]);
+    expect(k).toMatch(/2 objectives in his order across 2 products \(Acme, Notes\)/);
+    expect(k).toContain("- Signed-up testers sent a voice note (red, now 0%, target 50%)");
+    expect(k).toContain("- Listed (green, now 2, target 2)");
+    expect(k).toContain("Blocker or next step: waits on the first tester's voice note");
+    expect(k).toMatch(/2\. Notes: Launch Notes: red/);
+    const i = coachInstructions();
+    expect(i).toMatch(/desk of his whole workspace/);
+    expect(i).toMatch(/three to five in focus/);
+    expect(i).toMatch(/measure named in the key result/);
+    expect(i).toMatch(/weekly check-in/i);
+    expect(i).toMatch(/never call yourself the \S+ partner/);
+  });
+
   it("relay: team or social only, his words required, the Team desk told no objective changes without his yes", () => {
     expect(() => relayIn({ desk: "x", words: "a" })).toThrow();
     expect(() => relayIn({ desk: "team", words: " " })).toThrow();

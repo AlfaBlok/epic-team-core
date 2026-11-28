@@ -1392,7 +1392,7 @@ function WaitingCardBody({
           {heading}
         </button>
         {/* a card that opens a call page carries the Call itself, at the top of its face */}
-        {item.state === "open" && <CardCallButton hrefs={[go?.href]} />}
+        {item.state === "open" && <CardCallButton hrefs={[go?.href, ...faceLinks(item)]} />}
         {body && (
           <p className="mt-1 text-sm leading-relaxed text-foreground/85" data-testid="ask-question">
             <LinkedText text={body} />

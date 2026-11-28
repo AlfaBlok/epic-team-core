@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CardCallButton } from "@/voice/callCard";
+import { faceLinks } from "@/lib/faceLink";
 import { aboutFrom } from "@/lib/about";
 import { goLink, SnoozeDropdown } from "@/components/waiting";
 import { PARK, PARK_DAYS, ParkButton } from "@/components/parkButton";
@@ -284,7 +285,7 @@ function SetRow({
       <div className="min-w-0">
         <p className="leading-relaxed text-foreground/85">{setLine(i)}</p>
         {/* an ask that opens a call page carries the Call itself */}
-        {i.state === "open" && <CardCallButton hrefs={[go?.href]} />}
+        {i.state === "open" && <CardCallButton hrefs={[go?.href, ...faceLinks(i)]} />}
         {/* E948-S129: the page the ask opens with is a link he taps, as on its own card */}
         {go && (
           <a className="text-[13px] font-medium underline underline-offset-2" href={go.href} target="_blank" rel="noreferrer" data-testid="ask-set-open">

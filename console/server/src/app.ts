@@ -239,6 +239,7 @@ import { asksOf, campaignGreeting, levelKnows, levelName, objectiveCallInstructi
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { agentBody, elevenCalls, elevenTranscript, type ElevenCalls } from "./voice/elevenAgent.js";
 import { RECALL_HOURS } from "./voice/recall.js";
+import { earlierAsks, earlierAsksBlock } from "./voice/earlierAsks.js";
 import { ONBOARDING_CALL_MIN, ONBOARDING_PAGE, ONBOARDING_TOOLS, onboardingGreeting, onboardingInstructions, onboardingKnows, onboardingObjectiveIn, onboardingRoster } from "./voice/onboarding.js";
 import { mountReplyVoice } from "./voice/speak.js";
 import { mountListenPage, mountReplyNote } from "./voice/replyNote.js";
@@ -3412,8 +3413,22 @@ export function createApp(
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
           },
         }));
+  /**
+   * what the team did with what he asked on earlier calls: his call-born lines in the chats of the call's world
+   * and of every other world of the same owner (test worlds left out), each with its ticket row and the desk's reply.
+   */
+  const earlierAsksOf = (world: string) => {
+    const owner = store.getTenant(world)?.ownerHandle;
+    const worldOfChat = (k: string) => (k === "team" ? DEFAULT_TENANT : k.startsWith("world-desk:") ? k.slice(11) : k.startsWith("milestone:") ? (store.worldOfMilestone?.(k.slice(10)) ?? DEFAULT_TENANT) : undefined);
+    const chats = (k: string) => {
+      const w = worldOfChat(k);
+      return !!w && !/(?:^|-)test(?:-|$)/.test(w) && (w === world || (!!owner && store.getTenant(w)?.ownerHandle === owner));
+    };
+    return earlierAsksBlock(earlierAsks(db, (id) => requestRows.rowsOf(id), { chats }));
+  };
   const voice = createVoice({
     db,
+    earlier: earlierAsksOf,
     mint: voiceMint,
     eleven: voiceEleven,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
@@ -3454,6 +3469,7 @@ export function createApp(
   const worldVoices = new Map<string, Voice>();
   const voiceBase = {
     db,
+    earlier: earlierAsksOf,
     mint: voiceMint,
     eleven: voiceEleven,
     onEnded: (id: string) => void memoryForward?.enqueueCall(id),
@@ -3789,6 +3805,15 @@ export function createApp(
   // his words go to the social desk (campaigns, posts, channels) or the Team desk. The coach's call path, reused.
   // the briefer's read-only lookups (tester mails, posts per day, replies and DMs, site views) beside its relay.
   const marketingTools = () => [...MARKETING_TOOLS, ...(socialArea?.callLookupTools ?? [])];
+  // the brief, read fresh for each call (a prepared call's opening line sets the greeting).
+  const readMarketingBrief = (): string | undefined => {
+    const home = resolveRepo(read.reposRoot, homeRepo())?.path;
+    try {
+      return home ? fs.readFileSync(path.join(home, marketingBrief()), "utf8") : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const marketingEleven: ElevenCalls | undefined =
     opts.voice?.marketingEleven ??
     (process.env.VITEST || process.env.CONSOLE_VOICE_ELEVEN === "off"
@@ -3797,8 +3822,8 @@ export function createApp(
           name: marketingAgentName(),
           tags: [socialProduct().toLowerCase(), "marketing-call"],
           key: elevenKey,
-          prompt: marketingInstructions,
-          firstMessage: MARKETING_GREETING,
+          prompt: () => marketingInstructions(readMarketingBrief()),
+          firstMessage: () => MARKETING_GREETING(readMarketingBrief()),
           tools: () => marketingTools() as any,
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = 'eleven_marketing_agent_id'").get() as { value: string } | undefined)?.value,
@@ -3845,7 +3870,7 @@ export function createApp(
     scope: { world: DEFAULT_TENANT },
     contextWaitMs: Number(process.env.CONSOLE_MARKETING_CONTEXT_MS) || 15_000, // the numbers wait 8 s inside it
     // the social product's desk partner, an OKR expert, too.
-    instructions: () => `${marketingInstructions()}\n${partnerRule("desk", socialProduct())}`,
+    instructions: () => `${marketingInstructions(readMarketingBrief())}\n${partnerRule("desk", socialProduct())}`,
     tools: () => marketingTools() as any,
     lookup: async (_callId, name, args) => {
       if (!socialArea?.callLookup) throw new VoiceError(404, "unknown_tool", "no lookups on this console");
@@ -3856,12 +3881,8 @@ export function createApp(
     quickStatus: noStatus,
     context: async () => {
       const home = resolveRepo(read.reposRoot, homeRepo())?.path;
-      let brief: string | undefined;
-      try {
-        if (home) brief = fs.readFileSync(path.join(home, marketingBrief()), "utf8");
-      } catch {
-        /* no brief on this console: the call still has the objectives and the campaigns */
-      }
+      // no brief on this console: the call still has the objectives and the campaigns
+      const brief = readMarketingBrief();
       let campaigns: string | undefined;
       let list: { title: string; spine?: string }[] = [];
       try {
@@ -4944,6 +4965,8 @@ export function createApp(
     v = createVoice({
       ...voiceBase,
       eleven: onboardingEleven,
+      // a new team's call: the owner's earlier call asks are not theirs
+      earlier: undefined,
       mint: async () => {
         throw new VoiceError(409, "onboarding_eleven_only", "The onboarding call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
       },

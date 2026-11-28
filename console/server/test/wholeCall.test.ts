@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb, type DB } from "../src/db.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, type DeskPort } from "../src/voice/voice.js";
-import { createWholeCall, WHOLE_GIVE_UP_MS } from "../src/voice/wholeCall.js";
+import { createWholeCall, WHOLE_GIVE_UP_MS, WHOLE_RETRY_MS } from "../src/voice/wholeCall.js";
 import { requestIdOf } from "../src/desk/requests.js";
 import type { DeskView } from "../src/desk/session.js";
 vi.hoisted(async () => (await import("../src/identity.js")).setIdentity({ owner: "Sam" }));
@@ -89,6 +89,21 @@ describe("every call's whole transcript lands on its desk once", () => {
     expect(await s.whole.tick()).toEqual([]);
     const r = s.db.prepare("SELECT whole_posted_at FROM voice_calls WHERE id = 'call_empty001'").get() as { whole_posted_at: string };
     expect(r.whole_posted_at).toBe("none: no words (lost)");
+  });
+
+  it("a call whose ElevenLabs read keeps failing is not given up at the wait: it is read again until it lands", async () => {
+    const s = setup();
+    s.call("call_slow0001", { reason: "lost" });
+    s.eleven.mockRejectedValue(new Error("ElevenLabs refused the transcript read (503)"));
+    s.clock.t += WHOLE_GIVE_UP_MS;
+    expect(await s.whole.tick()).toEqual([]);
+    const left = () => (s.db.prepare("SELECT whole_posted_at FROM voice_calls WHERE id = 'call_slow0001'").get() as { whole_posted_at: string | null }).whole_posted_at;
+    expect(left()).toBeNull();
+    s.eleven.mockResolvedValue({ conversationId: "conv_2", lines: [{ who: "owner", text: "Is 100% of the transcript there?" }] });
+    s.clock.t += 60 * 60_000;
+    expect(await s.whole.tick()).toEqual(["call_slow0001"]);
+    expect(s.sent[0].text).toContain("Sam: Is 100% of the transcript there?");
+    expect(WHOLE_RETRY_MS).toBeGreaterThan(WHOLE_GIVE_UP_MS);
   });
 
   it("a call the page ends with its lines posts whole at once and the catch-up never posts it again", async () => {

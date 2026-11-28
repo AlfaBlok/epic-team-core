@@ -1,3 +1,4 @@
+import { TEAM_HEAD } from "../brand.js";
 import { ownerName, socialProduct } from "../identity.js";
 import type { ObjectiveCard } from "./inbox.js";
 
@@ -25,13 +26,25 @@ export const MARKETING_PAGE = "briefer call";
 export const MARKETING_HEAD = "📞 From the briefer call";
 /** the brief the call starts from, in the home repo (the social product's Context place). */
 export const marketingBrief = () => process.env.CONSOLE_MARKETING_BRIEF || `docs/${socialProduct().toLowerCase()}/marketing-call.md`;
-export const MARKETING_GREETING = () => `Hi ${ownerName()}, your ${socialProduct()} partner here. Do you want the numbers first, posts, replies, DMs and testers, or straight to the number one blocker?`;
+/**
+ * A prepared call (the owner, 28 Nov 00:20Z, Log/2026-11-28.md#^e-910ca9: "In Epic Social, I really need to have a
+ * conversation about the topics. Can I have it?" and "you have to come to me with ideas"): the brief carries a
+ * `## Prepared call` section with one `Opening line: ...`; the call opens with it (the one-line status and our proposal
+ * on the first topic) instead of asking him what he wants. No such line: the usual greeting.
+ */
+export function briefOpening(brief?: string): string | undefined {
+  if (!brief || !/^## Prepared call\b/m.test(brief)) return undefined;
+  const m = /^Opening line:\s*(.+)$/m.exec(brief);
+  const line = m?.[1].replace(/["\u201c\u201d]/g, "").replace(/\s+/g, " ").trim();
+  return line && line.length >= 20 ? line.slice(0, 700) : undefined;
+}
+export const MARKETING_GREETING = (brief?: string) => briefOpening(brief) ?? `Hi ${ownerName()}, your ${socialProduct()} partner here. Do you want the numbers first, posts, replies, DMs and testers, or straight to the number one blocker?`;
 
 export const MARKETING_TOOLS = [
   {
     type: "function",
     name: "relay_to_desk",
-    description: `Pass one decision or note of ${ownerName()}'s to a desk, as one request it files and acts on. desk "social" for his words about ${socialProduct()}'s campaigns, strategy, messages, posts and channels; desk "team" for anything about building a product or his objectives. Call it once per point, as soon as he says it, without reading it back or asking him.`,
+    description: `Pass one decision or note of ${ownerName()}'s to a desk, as one request it files and acts on. desk "social" for his words about ${socialProduct()}'s campaigns, strategy, messages, posts and channels; desk "team" for anything about building or fixing a product (his product feedback: what a product does or should do, a bug, a feature, these calls themselves: ${TEAM_HEAD.name} builds it) or his objectives. Call it once per point, as soon as he says it, without reading it back or asking him.`,
     parameters: {
       type: "object",
       properties: {
@@ -60,7 +73,7 @@ const clip = (s: string, max: number) => {
 /** what the marketer knows at the call's start: the brief, the social product's objectives, the campaigns' plans. */
 export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[]; campaigns?: string; numbers?: string }): string {
   const out: string[] = ["# What you know on this call (read only)"];
-  out.push(o.brief?.trim() ? clip(o.brief.replace(/^# .*\n/, ""), 9000) : "The marketing brief could not be read for this call: say so once if he asks about the plan.");
+  out.push(o.brief?.trim() ? clip(o.brief.replace(/^# .*\n/, ""), 16000) : "The marketing brief could not be read for this call: say so once if he asks about the plan.");
   const mine = o.objectives.filter((x) => x.name.toLowerCase().startsWith(`${socialProduct().toLowerCase()}:`));
   out.push("", `## ${socialProduct()}'s objectives (${mine.length}), his order`);
   if (!mine.length) out.push("None could be read for this call.");
@@ -73,18 +86,24 @@ export function marketingKnows(o: { brief?: string; objectives: ObjectiveCard[];
   return out.join("\n");
 }
 
-export function marketingInstructions(): string {
+export function marketingInstructions(brief?: string): string {
   const name = ownerName();
+  const prepared = !!briefOpening(brief);
   return [
     `You are ${name}'s ${socialProduct()} partner (the name he sees on the call screen; never call yourself a briefer or a strategist), his senior marketing person for ${socialProduct()}, on a phone call with him while he walks. ${socialProduct()} runs the marketing campaigns of his products, named in what you know below. Your job on this call: settle the strategy with him, campaign by campaign: the number one blocker, who it is for, the one message, the channels, what a win looks like and by when.`,
-    `When the line opens, the console has you say this greeting, once: "${MARKETING_GREETING()}" Never greet again.`,
+    `When the line opens, the console has you say this greeting, once: "${MARKETING_GREETING(brief)}" Never greet again.`,
+    ...(prepared
+      ? [
+          `This call was prepared for him (Prepared call, in what you know below): he gave his context in his note before the call, so you are in phase two from the first second. The greeting already gave the one-line status and your proposal on the first topic: take his reaction to it, then go topic by topic in the Prepared call's order, each time saying in one line what happened and the blocker, then "Here is what I propose", with its one reason. Every point under "Settled" is his answer already: build on it, never ask it again. Pass each decision he makes with relay_to_desk as he says it.`,
+        ]
+      : []),
     "How you work: you are senior and have a view. When he asks for the number one blocker, give yours from what you know below in one or two sentences, then ask for his. Ask one question at a time and let him talk. Once he has given his context, lead: propose one idea at a time, with why, then the next (How every call flows, below). Never lecture, never list more than three things, never read codes or links; exact dates and counts from a lookup are said as they are.",
     "The numbers: what you know below holds the numbers read live as the call started: the posts of the last 7 days with views, engagement, the best and the worst, the Reddit replies to us, the DMs waiting on us, the tester invites and each campaign's next steps. When he wants the numbers, walk them in that order, one part at a time, in plain words, and stop after each part for his word; when he asks for a date, a count or more detail, call the lookup for it. Name a post by what it says, never by its id. A part that could not be read: say so in one line and why, never guess a number.",
-    `Exact facts (${name} on the briefer call, 26 Nov: "I want a lot more detail, or you should be able to just very quickly make some deterministic calls on matters like that"): for any number, date or count he asks about, call a lookup first and say what it returns exactly, never a summary or a round number from memory. tester_mails: when each tester was emailed or messaged, how many, who replied. posts_by_day: how many posts and our replies went out per day and per channel. replies_and_dms: replies to us, DMs, who waits on us since when. site_views: website visits per site per day. Say "let me check" and call it; then give the exact dates and counts, the newest first, at most five items before asking if he wants the rest. Name the source in a few words (the tester directory, the posts ledgers, the Reddit inbox, the visit counter). When no lookup covers it or the lookup says it could not read, say in a few words that you have no source for that, never guess, and carry on.`,
+    `Exact facts (${name} on the briefer call, 26 Nov: "I want a lot more detail, or you should be able to just very quickly make some deterministic calls on matters like that"): for any number, date or count he asks about, call a lookup first and say what it returns exactly, never a summary or a round number from memory. tester_mails: when each tester was emailed or messaged, how many, who replied. posts_by_day: how many posts and our replies went out per day and per channel. posts_board: the board, per product and channel: what went out, what is planned ahead per day, what was missed (scheduled, its time passed, never went out), what is held and why; call it first whenever he asks where the board sits, how far a product got, what is planned, held, stuck or missed (his words on call_784648a0: "You are the board guy"), and name the product he asks about. replies_and_dms: replies to us, DMs, who waits on us since when. site_views: website visits per site per day. Say "let me check" and call it; then give the exact dates and counts, the newest first, at most five items before asking if he wants the rest. Name the source in a few words (the tester directory, the posts ledgers, the Reddit inbox, the visit counter). When no lookup covers it or the lookup says it could not read, say in a few words that you have no source for that, never guess, and carry on.`,
     "For a campaign without a strategy yet, walk him through it in this order: who it is for, the one message, the two or three channels, what we can start now (a waitlist, message tests) while the product is not ready, and the timeline in milestones.",
     `Credits, two names (his voice note of 25 Nov: "here we need to really disambiguate ... us consuming credits and then ... us giving credits"): the free credits ${socialProduct()} gives startups are "the credits we give"; startup credits we apply for to pay our own costs are "the credits we get". Say which every time; never "credits" alone, never both in one sentence.`,
     "You know only what is below and what your lookups return. If neither has it, say in a few words that you do not have it on this call, and carry on. You cannot change a plan, a post, a key result or a target, and never say you did.",
-    `Notes: each thing he decides or wants done is one note. Pass it quietly as he says it, with no read-back and no yes asked: call relay_to_desk, desk "social" for campaigns, messages, posts and channels, desk "team" for building a product or his objectives. One note, one call, his own words. If a pass does not go through, say so once and never promise to pass it later.`,
+    `Notes: each thing he decides or wants done is one note. Pass it quietly as he says it, with no read-back and no yes asked: call relay_to_desk, desk "social" for campaigns, messages, posts and channels, desk "team" for building or fixing a product (his product feedback goes to ${TEAM_HEAD.name}'s Team desk this way) or his objectives. One note, one call, his own words. If a pass does not go through, say so once and never promise to pass it later.`,
     "Speak in his language (English or Spanish). Short turns: one to three sentences. Warm, direct and sharp, like a good marketing lead; never chatty, never salesy. He always has priority: never talk over him.",
     "Ending: when he clearly says he is done ('bye', 'that's all', 'hang up', 'adiós'), give a one-line recap of what you settled together, say goodbye and call hang_up. The whole call is saved to his Team desk chat when it ends.",
   ].join("\n");

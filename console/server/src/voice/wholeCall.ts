@@ -18,6 +18,11 @@ export const WHOLE_SINCE = "2026-11-27T00:00:00.000Z";
 export const WHOLE_SETTLE_MS = 45_000;
 /** ElevenLabs may need a little while to hold a dropped call's transcript; after this, a call with no words is left. */
 export const WHOLE_GIVE_UP_MS = 30 * 60_000;
+/**
+ * a call whose ElevenLabs read failed (refused, timed out) is not given up at WHOLE_GIVE_UP_MS: it keeps being read for
+ * this long, so a slow or briefly down ElevenLabs never loses a transcript (the voice tells him 100% lands by design).
+ */
+export const WHOLE_RETRY_MS = 24 * 3_600_000;
 
 export type ElevenRead = (agentId: string, startedAt: string) => Promise<{ conversationId: string; lines: CallLine[] } | undefined>;
 
@@ -47,6 +52,7 @@ export function createWholeCall(o: { db: DB; deskOf: (call: { tenant_id: string 
           lines = [];
         }
         let recovered = false;
+        let readFailed = false;
         if (!lines.length && o.eleven && r.session_id?.startsWith("agent_")) {
           try {
             const got = await o.eleven(r.session_id, r.started_at);
@@ -57,12 +63,13 @@ export function createWholeCall(o: { db: DB; deskOf: (call: { tenant_id: string 
               console.log(`[voice] ${r.id} (${r.end_reason}): ${lines.length} lines read back from ElevenLabs (${got.conversationId})`);
             }
           } catch (e) {
+            readFailed = true;
             console.warn(`[voice] ${r.id}: ElevenLabs transcript not read yet (${(e as Error).message.slice(0, 120)})`);
           }
         }
         const asked = (db.prepare("SELECT COUNT(*) n FROM voice_asks WHERE call_id = ?").get(r.id) as { n: number }).n;
         if (!lines.length && !asked) {
-          if (now() - Date.parse(r.ended_at) >= WHOLE_GIVE_UP_MS) db.prepare("UPDATE voice_calls SET whole_posted_at = ? WHERE id = ?").run(`none: no words (${r.end_reason ?? "ended"})`, r.id);
+          if (now() - Date.parse(r.ended_at) >= (readFailed ? WHOLE_RETRY_MS : WHOLE_GIVE_UP_MS)) db.prepare("UPDATE voice_calls SET whole_posted_at = ? WHERE id = ?").run(`none: no words (${r.end_reason ?? "ended"})`, r.id);
           continue;
         }
         const desk = o.deskOf(r);

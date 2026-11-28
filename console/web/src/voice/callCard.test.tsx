@@ -21,6 +21,21 @@ describe("the Call on a card", () => {
     expect(callPathOf(undefined)).toBeUndefined();
   });
 
+  it("knows an objective's page only when the card asks for its call", () => {
+    expect(callPathOf("https://team.example.com/sets/acme-launch?call=1")).toBe("sets/acme-launch");
+    expect(callPathOf("https://team.example.com/sets/acme-launch")).toBeUndefined();
+    expect(callPathOf("https://team.example.com/sets/acme-launch/x?call=1")).toBeUndefined();
+    expect(callPathOf("https://other.test/sets/acme-launch?call=1")).toBeUndefined();
+    render(
+      <MemoryRouter>
+        <CardCallButton hrefs={[undefined, "https://team.example.com/sets/acme-launch?call=1"]} />
+      </MemoryRouter>,
+    );
+    const b = screen.getByTestId("card-call-now");
+    expect(b.textContent).toContain("Call to hear the strategy");
+    expect(b.getAttribute("href")).toBe("/sets/acme-launch?call=1");
+  });
+
   it("shows one green Call that opens the call page here and starts it", () => {
     render(
       <MemoryRouter>

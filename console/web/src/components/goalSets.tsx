@@ -1570,7 +1570,28 @@ function TeamsList({ node }: { node: ScorecardNode }) {
  */
 function ObjectiveCall({ id, name }: { id: string; name: string }) {
   const who = whoAnswers.objective(id, name);
-  const call = useCallDock({ base: who.base, callee: who.callee, name: who.shown, label: "Call", where: name, wide: true, hideUnavailable: true, hint: "Key results first, or what is red. In English or Spanish." });
+  // a card's Call ("ready to present the strategy") opens this page with ?call=1: the call starts at once, then the flag leaves the URL.
+  const [params, setParams] = useSearchParams();
+  const call = useCallDock({
+    base: who.base,
+    callee: who.callee,
+    name: who.shown,
+    label: "Call",
+    where: name,
+    wide: true,
+    hideUnavailable: true,
+    hint: "Key results first, or what is red. In English or Spanish.",
+    autoStart: params.get("call") === "1",
+    onAutoStart: () =>
+      setParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.delete("call");
+          return next;
+        },
+        { replace: true },
+      ),
+  });
   if (!call.button && !call.onCall && !call.bar) return null;
   return (
     <div className="grid min-w-0 gap-2" data-testid="set-call">

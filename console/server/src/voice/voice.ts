@@ -231,6 +231,14 @@ export function teamRoster(social: string = socialProduct(), team: string = TEAM
 }
 export const STILL_WITH_ME_RULE = `If he has gone quiet for a few seconds after you finished, or you are asked to go on while he says nothing, say exactly "${STILL_WITH_ME_LINE}" (in Spanish "¿Sigues conmigo?") once, and then wait; never say it twice in a row before he speaks again. If a note says his microphone stopped, the next time you speak say exactly "${MIC_LOST_LINE}" (in Spanish "Ya no te oigo. ¿Sigues conmigo?"). Never say that line otherwise.`;
 /**
+ * What every call voice knows upfront (his briefer call call_784648a0, 28 Nov: "can you please tell me whether you can
+ * guarantee me that as part of the design, the full transcript will be available? ... next time we speak, you need to know
+ * this. This is not a question that you need to figure out over time"; the voice had said "I don't have that on this call").
+ * The whole-call catch-up made it so: the page's end posts every line, and a dropped call is read back from ElevenLabs (wholeCall.ts).
+ */
+export const WHOLE_TRANSCRIPT_ANSWER = "Yes. By design, 100% of every call's transcript reaches the desk, every word of his and yours, even when the line drops.";
+export const WHOLE_TRANSCRIPT_RULE = `The whole transcript, by design (know this upfront, never work it out): when this call ends, every word of it, his and yours, lands on his team's desk as one transcript, a dropped or cut-off call too (the console reads it back from the voice service). If he asks whether the full transcript gets through, answer at once: "${WHOLE_TRANSCRIPT_ANSWER}" Never say you don't know, that it might not, or that you will check.`;
+/**
  * How every call flows, one rule for every call voice (his calls of 27 Nov): call_8c535b1a "I wish you didn't ask
  * me so much ... you're kind of interrupting the flow" and "phase one, where I am doing a lot of talking ... in phase two
  * ... you have to be leading a little bit more"; call_910685a3 "you say, 'I'll pass this to the desk.' You don't need to
@@ -246,6 +254,7 @@ export const CALL_FLOW_RULE = [
   "- Phase two, once he has given his context (he stops for your view, asks what you think, says he has finished, or has made his points on the topic): you lead. Say what you gather in one sentence and propose: 'Here is what I propose: …', with its one reason, then go on to your next proposal. Have a real opinion, and surprise him if you can. He reacts; take his reaction and carry on. Never wait for his yes before going on.",
   "- Never ask permission after a point: no 'Pass it?', 'Want me to pass that?', 'Shall I?', 'File it?', 'Is that the point you want passed?', and no either-or question after each thing he says. What he says he wants or decides is his yes. Ask only when you truly cannot go on without his answer, one question, once. Pressing a button on one of his cards keeps its one read-back.",
   "- Never talk about passing things on: no 'I'll pass this to the desk', 'That's a note for the Team desk', 'Passed.', 'I'll send it all together'. The whole call reaches his team by itself when it ends. If you have a tool that passes or files his words, use it silently as he speaks. Only if he asks whether something got through, answer in one short line.",
+  `- ${WHOLE_TRANSCRIPT_RULE}`,
   "- Never ask again what he already answered, on this call or in what you know below.",
   "- Bad: 'Heard: a waitlist plus credits. That's a note for the Team desk. Pass it?' Good: 'Got it. Then I'd open with the waitlist this week, because it gives every post somewhere to send people.'",
   "- Time: when a note from the call's clock comes, say its line out loud at once, then carry on where you were.",
@@ -535,6 +544,8 @@ export interface VoiceDeps {
    * results and the newest daily briefing). Read at each call's start, inside the same context wait.
    */
   context?: () => Promise<string> | string;
+  /** what the team did with what he asked on earlier calls (earlierAsks.ts); "" = nothing in the window. */
+  earlier?: (world: string) => Promise<string> | string;
   /** how long a call's start waits for `context` (default BRIEF_WAIT_MS); a call whose context reads live sources waits longer. */
   contextWaitMs?: number;
   /**
@@ -956,13 +967,14 @@ export function createVoice(d: VoiceDeps) {
     const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link(lang).then((l) => ((linkMs = Date.now() - t0), l)) : undefined;
     linkP?.catch(() => undefined); // awaited below; a refusal surfaces there
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
-    const [brief, recall, cards, objectives, context, objectiveCards] = await Promise.all([
+    const [brief, recall, cards, objectives, context, objectiveCards, earlier] = await Promise.all([
       briefNow(),
       recallNow().catch(() => ""),
       focus ? focus.cards.slice(0, FOCUS_MAX) : d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
       d.objectives ? inTime("objectives", d.objectives, "") : "",
       d.context ? inTime("context", d.context, "", d.contextWaitMs) : "",
       d.objectiveCards ? inTime("objective cards", d.objectiveCards, [] as ObjectiveCard[]) : ([] as ObjectiveCard[]),
+      d.earlier ? inTime("earlier asks", () => d.earlier!(world), "") : "",
     ]);
     ctxMs = Date.now() - t0;
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
@@ -970,7 +982,7 @@ export function createVoice(d: VoiceDeps) {
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
     // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
     const briefing = objectiveCards.length ? (d.walkRule ?? briefingRule)(objectiveCards.length) : "";
-    const instructionsEn = (d.instructions ?? voiceInstructions)() + `\n${CALL_FLOW_RULE}\n${(d.roster ?? teamRoster)()}` + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (recall ? `\n\n${recall}` : "");
+    const instructionsEn = (d.instructions ?? voiceInstructions)() + `\n${CALL_FLOW_RULE}\n${(d.roster ?? teamRoster)()}` + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (earlier ? `\n\n${earlier}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
     const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length && !d.walkRule ? OBJECTIVE_TOOLS : [])];

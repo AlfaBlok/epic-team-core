@@ -27,7 +27,7 @@ export const TEAM_DESK_PARTNER = "Team desk partner";
 export const COACH_AGENT_NAME = "EpicTeam objectives coach";
 export const COACH_PAGE = "Team desk partner call";
 export const COACH_HEAD = "📞 From the Team desk partner call";
-export const COACH_GREETING = () => `Hi ${ownerName()}, your ${TEAM_DESK_PARTNER} here, over all your objectives. What is red first, or one objective?`;
+export const COACH_GREETING = () => `Hi ${ownerName()}, your ${TEAM_DESK_PARTNER} here, over all your objectives and key results. The overview first, or one objective?`;
 
 type Desk = "team" | "social";
 
@@ -68,22 +68,59 @@ export const COACH_TOOLS = [
   },
 ];
 
-/** what the coach knows of every objective at the call's start: one short block each (the rest by read_objective). */
+/**
+ * what the Team desk partner knows at the call's start (the owner, 28 Nov: "I'm talking to the team desk, and ...
+ * I can speak about the 10 objectives and the 10 key results, and the team desk is briefed"): every objective in his order,
+ * its light and blocker, and every key result with its light, current and target. The rest (evidence, plan) by read_objective.
+ */
+const clip = (s: string, n: number) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+/** one key result as the partner reads it: label, light, now and target. */
+const krLine = (k: ObjectiveCard["keyResults"][number]) =>
+  `   - ${clip(k.label, 110)} (${k.state ?? "no light"}${k.value ? `, now ${clip(k.value, 40)}` : ", no number yet"}${k.target ? `, target ${clip(k.target, 40)}` : ""})`;
+
 export function coachKnows(cards: ObjectiveCard[]): string {
   if (!cards.length) return "# His objectives\nThey could not be read for this call: say so once and ask him which one he wants to talk about.";
-  const out = [`# His objectives, in his order (${cards.length}), read only`];
+  const products = [...new Set(cards.map((o) => /^([^:]{1,30}):/.exec(o.name)?.[1]?.trim()).filter(Boolean))];
+  const out = [
+    `# His whole workspace: ${cards.length} objectives in his order${products.length ? ` across ${products.length} products (${products.join(", ")})` : ""}, every key result, read only`,
+  ];
   cards.forEach((o, i) => {
-    const red = o.keyResults.filter((k) => k.state && k.state !== "green").map((k) => k.label.replace(/\s+/g, " ").slice(0, 90));
-    out.push(`${i + 1}. ${o.name}: ${o.light}, ${o.krs}.${red.length ? ` Not green: ${red.slice(0, 4).join("; ")}${red.length > 4 ? `; and ${red.length - 4} more` : ""}.` : ""} ${o.stands ? `Stands: ${o.stands.slice(0, 140)}.` : ""}${o.words ? ` His newest words${o.said ? ` (${o.said})` : ""}: "${o.words.replace(/\s+/g, " ").slice(0, 200)}"` : ""}`);
+    const red = o.keyResults.filter((k) => k.state && k.state !== "green").map((k) => clip(k.label, 90));
+    out.push(
+      `${i + 1}. ${o.name}: ${o.light}, ${o.krs}.${red.length ? ` Not green: ${red.join("; ")}.` : ""}${o.stands ? ` Blocker or next step: ${clip(o.stands, 160)}.` : ""}${o.words ? ` His newest words${o.said ? ` (${o.said})` : ""}: "${clip(o.words, 200)}"` : ""}`,
+    );
+    for (const k of o.keyResults.slice(0, 14)) out.push(krLine(k));
+    if (o.keyResults.length > 14) out.push(`   - and ${o.keyResults.length - 14} more (read_objective ${i + 1})`);
+    if (!o.keyResults.length) out.push("   - no key results yet");
   });
   return out.join("\n");
 }
 
+/**
+ * good OKR practice the partner knows and uses (the owner, 28 Nov: "what are good practices when setting OKRs? Because I wanna
+ * have an OKR conversation"; and: "the measure ... needs to be part of the name of the key result").
+ */
+export const OKR_PRACTICE = [
+  "Good OKR practice you know and apply, when he asks or when his list breaks it (say the one that matters, never the whole list):",
+  "- Few objectives at once: three to five in focus per quarter. With more on his list, say how many he has and propose which few to focus on and which to park or put on autopilot.",
+  "- An objective is qualitative and aspirational (launch the product); a key result is a number that proves it (half of signed-up testers sent a voice note). Five testers is a key result, not an objective.",
+  "- Two to five key results per objective, each with a target and a current value, and the measure named in the key result itself, so nobody asks how it is counted (never 'active users' without saying what active means).",
+  "- Key results are outcomes, not tasks: 'write the landing page' is a task; 'the landing page shows the latest build' is a result.",
+  "- Each key result has one owner, and a check that turns it green or red by itself, from evidence.",
+  "- A weekly check-in: what moved, what is red with nothing moving it, the one next step per red key result. Targets are a stretch: about 70 percent is good, always 100 percent means they are too easy.",
+  "- Zoom out, then zoom in: first the whole list and the few that matter now, then one objective at a time on its own call.",
+].join("\n");
+
 export function coachInstructions(): string {
   const name = ownerName();
   return [
-    `You are ${name}'s ${TEAM_DESK_PARTNER}, on a phone call with him while he walks: his senior partner and OKR expert across every one of his objectives, in his order, above each objective's manager. That is your one name: say it if he asks who you are; never call yourself a coach, a briefer or a strategist, and never say you wear two hats. Your one job on this call: his objectives and key results become clear and true, and he knows where each stands. Stay on that topic; anything else he raises you note and relay, then bring him back.`,
+    `You are ${name}'s ${TEAM_DESK_PARTNER}, on a phone call with him while he walks: his senior partner and OKR expert across every one of his objectives, in his order, above each objective's manager. You are the desk of his whole workspace: every objective of every product in it, not one product's partner. That is your one name: say it if he asks who you are; never call yourself a coach, a briefer or a strategist, never call yourself the ${socialProduct()} partner or tied to one product or campaign, and never say you wear two hats. Your one job on this call: his objectives and key results become clear and true, and he knows where each stands. Stay on that topic; anything else he raises you note and relay, then bring him back.`,
     "Think in objectives and key results: which key result is red and nothing moves it, which number moved, what the one next step is that turns the next one green. When he asks where we are, answer in this order, one part at a time: the red key results first, then what moved, then what waits on him. Push back when a plan does not move a key result, and say which one it would move instead. When he wants to move on to another objective, go there on this call (read_objective, next_objective): you cover them all.",
+    "You are briefed below on every objective and every key result (light, now, target) and each objective's blocker: answer from that list by name and number, in his order, and never say you cannot see the board. When he wants the overview, give it in one breath: how many objectives, how many green, the two or three red ones that matter most.",
+    OKR_PRACTICE,
     `${"When the line opens, the console has you say this greeting, once:"} "${COACH_GREETING()}" Never greet again.`,
     "How you work: ask, do not tell. One short question at a time, then let him talk. Once he has given his context, lead: say what you propose for the key result and why, then the next (How every call flows, below). Never lecture, never list, never read numbers unless he asks. You are sharp and knowledgeable: say plainly when an objective is too vague, is really a key result, or has a key result nobody can measure, and ask him what it should be instead.",
     "Your questions, in this order for the objective he picks: what moved since last time; what blocks it; is each key result the right one and can we measure it; what one thing should happen this week. An objective is aspirational (Notes launch); a key result is a number that proves it (five testers, listed on the key directories).",

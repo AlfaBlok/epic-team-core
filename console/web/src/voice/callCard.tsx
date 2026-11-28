@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
  * the call starts there at once: the press is his, so the microphone and the voice may start.
  */
 const CALL_PATHS = [MARKETING_PATH, BRIEFING_PATH, STRATEGY_PATH, COACH_PATH];
+/** an objective's page, only when the card's link asks for its call (`?call=1`): a "ready to present" card (the owner's
+ * note: "in the inbox, I get a card that says We're ready for the call to present the strategy"). */
+const OBJECTIVE_CALL = /^sets\/[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** the call page a link opens (ours: same site, or a team/social console host), else undefined. */
 export function callPathOf(href: string | undefined): string | undefined {
@@ -25,7 +28,9 @@ export function callPathOf(href: string | undefined): string | undefined {
   const consoles = [hostOf(sites().teamUrl), hostOf(sites().socialUrl)].map((h) => h.toLowerCase());
   const ours = host === "here.invalid" || consoles.includes(host) || host.endsWith(`.${siteDomain()}`) || (typeof window !== "undefined" && host === window.location.host);
   const p = u.pathname.replace(/^\/+|\/+$/g, "");
-  return ours && CALL_PATHS.includes(p) ? p : undefined;
+  if (!ours) return undefined;
+  if (CALL_PATHS.includes(p)) return p;
+  return OBJECTIVE_CALL.test(p) && u.searchParams.get("call") === "1" ? p : undefined;
 }
 
 /** the button's words for a call page ("Call the <social product> briefer" for /marketing). */
@@ -33,6 +38,7 @@ export function callLabel(path: string): string {
   if (path === MARKETING_PATH) return `Call the ${socialProduct()} partner`;
   if (path === BRIEFING_PATH) return "Call your objectives review";
   if (path === STRATEGY_PATH) return "Call the strategy call";
+  if (OBJECTIVE_CALL.test(path)) return "Call to hear the strategy";
   return "Call the coach";
 }
 
