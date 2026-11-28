@@ -85,6 +85,27 @@ export interface PostStatsBody {
   how: string;
 }
 
+/** One reply someone wrote to us under one of our posts. */
+export interface ReplyToUs {
+  channel: string; id: string; product: string | null; account: string | null; postId: string | null; postUrl: string | null;
+  postKind: string | null; ledgerRow: string | null; url: string | null; by: string | null; text: string | null; at: string | null;
+  /** one of ours answers it; null when it could not be told. */
+  answered: boolean | null;
+}
+export interface ReplyRead {
+  channel: string; account: string | null; product: string | null; state: string; why: string | null;
+  posts: number | null; read: number | null; counted: number | null; listed: number | null;
+}
+export interface RepliesToUs {
+  /** the newest day file that read the replies (null: none has yet). */
+  date: string | null;
+  readAt: string | null;
+  comments: ReplyToUs[];
+  reads: ReplyRead[];
+  /** per channel, the last day its replies were read at all. */
+  lastRead: Record<string, string>;
+}
+
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const GROUPS = ["message", "channel", "message-channel", "campaign", "post"] as const;
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -111,6 +132,17 @@ export function migratePostStats(db: DB): void {
   const cols = new Set((db.prepare("PRAGMA table_info(post_stats_channels)").all() as { name: string }[]).map((c) => c.name));
   if (!cols.has("dms_new")) db.exec("ALTER TABLE post_stats_channels ADD COLUMN dms_new INTEGER");
   if (!cols.has("dm_links")) db.exec("ALTER TABLE post_stats_channels ADD COLUMN dm_links TEXT");
+  // the replies people wrote to us under our posts (who, what, when, answered), and per channel
+  // whether they could be read that day (the day file's `comments` / `commentsRead`)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS post_stats_comments (
+      date TEXT NOT NULL, channel TEXT NOT NULL, comment_id TEXT NOT NULL, product TEXT, account TEXT, post_id TEXT,
+      post_url TEXT, post_kind TEXT, ledger_row TEXT, url TEXT, by_who TEXT, text TEXT, at TEXT, answered INTEGER,
+      PRIMARY KEY (date, channel, comment_id));
+    CREATE TABLE IF NOT EXISTS post_stats_comment_reads (
+      date TEXT NOT NULL, channel TEXT NOT NULL, account TEXT NOT NULL, product TEXT, state TEXT NOT NULL, why TEXT,
+      posts INTEGER, read INTEGER, counted INTEGER, listed INTEGER, PRIMARY KEY (date, channel, account));
+  `);
 }
 
 /** One day file into the store (replaces that day's rows). Exported for the tests. */
@@ -156,6 +188,24 @@ export function loadPostStatsDay(db: DB, text: string, mtime = 0): number {
         str(c.dmsWhy), str(c.notMeasured), num(c.dmsNew),
         JSON.stringify(Array.isArray(c.dmLinks) ? (c.dmLinks as unknown[]).filter((l): l is string => typeof l === "string") : []));
     }
+    db.prepare("DELETE FROM post_stats_comments WHERE date = ?").run(date);
+    db.prepare("DELETE FROM post_stats_comment_reads WHERE date = ?").run(date);
+    const insCm = db.prepare(`INSERT OR REPLACE INTO post_stats_comments (date, channel, comment_id, product, account, post_id, post_url, post_kind,
+      ledger_row, url, by_who, text, at, answered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const c of Array.isArray(d.comments) ? (d.comments as Record<string, unknown>[]) : []) {
+      const channel = str(c.channel);
+      const id = str(c.id);
+      if (!channel || !id) continue;
+      insCm.run(date, channel, id, str(c.product), str(c.account), str(c.postId), str(c.postUrl), str(c.postKind), str(c.ledgerRow), str(c.url),
+        str(c.by), str(c.text), str(c.at), c.answered === true ? 1 : c.answered === false ? 0 : null);
+    }
+    const insRd = db.prepare(`INSERT OR REPLACE INTO post_stats_comment_reads (date, channel, account, product, state, why, posts, read, counted, listed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const r of Array.isArray(d.commentsRead) ? (d.commentsRead as Record<string, unknown>[]) : []) {
+      const channel = str(r.channel);
+      if (!channel) continue;
+      insRd.run(date, channel, str(r.account) ?? str(r.product) ?? "", str(r.product), str(r.state) ?? "not read", str(r.why), num(r.posts), num(r.read), num(r.counted), num(r.listed));
+    }
     db.prepare("INSERT OR REPLACE INTO post_stats_files (date, mtime, loaded_at) VALUES (?, ?, ?)").run(date, mtime, new Date().toISOString());
   })();
   return n;
@@ -199,6 +249,29 @@ export function createPostStats(o: { db: DB; reposRoot: string; home?: string; d
   };
   return {
     sync,
+    /**
+     * The replies people wrote to us under our posts, from the newest day file that read them, and
+     * per channel and account how that day's read went plus the last day each channel was read at all.
+     */
+    replies(): RepliesToUs {
+      sync();
+      const date = (o.db.prepare("SELECT max(date) AS d FROM post_stats_comment_reads").get() as { d: string | null }).d;
+      if (!date) return { date: null, readAt: null, comments: [], reads: [], lastRead: {} };
+      const readAt = (o.db.prepare("SELECT max(read_at) AS r FROM post_stats WHERE date = ?").get(date) as { r: string | null }).r;
+      const comments = (o.db.prepare("SELECT * FROM post_stats_comments WHERE date = ? ORDER BY at DESC").all(date) as Record<string, unknown>[]).map((c) => ({
+        channel: String(c.channel), id: String(c.comment_id), product: str(c.product), account: str(c.account), postId: str(c.post_id),
+        postUrl: str(c.post_url), postKind: str(c.post_kind), ledgerRow: str(c.ledger_row), url: str(c.url), by: str(c.by_who),
+        text: str(c.text), at: str(c.at), answered: c.answered == null ? null : !!c.answered,
+      }));
+      const reads = (o.db.prepare("SELECT * FROM post_stats_comment_reads WHERE date = ? ORDER BY channel, account").all(date) as Record<string, unknown>[]).map((r) => ({
+        channel: String(r.channel), account: str(r.account), product: str(r.product), state: String(r.state), why: str(r.why),
+        posts: num(r.posts), read: num(r.read), counted: num(r.counted), listed: num(r.listed),
+      }));
+      const lastRead: Record<string, string> = {};
+      for (const r of o.db.prepare("SELECT channel, max(date) AS d FROM post_stats_comment_reads WHERE state != 'not read' GROUP BY channel").all() as { channel: string; d: string }[])
+        lastRead[r.channel] = r.d;
+      return { date, readAt, comments, reads, lastRead };
+    },
     query(q: PostStatsQuery = {}): PostStatsBody {
       const dates = sync();
       const date = q.date && DATE.test(q.date) && dates.includes(q.date) ? q.date : dates[dates.length - 1] ?? null;
