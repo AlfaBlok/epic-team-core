@@ -34,7 +34,7 @@ export interface JobRoute {
    */
   handles(world: string | undefined, personaId?: string): boolean;
   /** where the route runs this world's (persona's) jobs, in words, and the run's `route` value; default a job server. */
-  where?(world: string, personaId?: string): { words: string; route: string };
+  where?(world: string, personaId?: string, box?: string): { words: string; route: string };
   /**
    * the workspace whose job servers run this milestone's wakes, when the milestone (of another world, the owner's
    * home world) is routed there one milestone at a time; undefined = the milestone follows its own world.

@@ -503,8 +503,9 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
   /** the workspace whose job server runs this milestone's job, when routed by milestone. */
   const boxOf = (m: Milestone, world: string): string | undefined => jobRoute?.boxFor?.(m.id, world);
   /** where the world's route runs this persona's jobs (a job server, or its sandbox on a host), and the run's route. */
+  // the route names a milestone-routed job's place too (its own world's sandbox, or a workspace's job server)
   const jobWhere = (world: string, personaId: string, box?: string) =>
-    box ? { words: `a job server of ${box}`, route: "job" } : (jobRoute?.where?.(world, personaId) ?? { words: `a job server of ${world}`, route: "job" });
+    jobRoute?.where?.(world, personaId, box) ?? { words: `a job server of ${box ?? world}`, route: "job" };
   const heldLogged = new Set<string>();
   /** Cadence and timed ticks skip a held world's assignment quietly: one log line per assignment per process. */
   const skipHeld = (a: Assignment, m: Milestone): boolean => {
