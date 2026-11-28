@@ -97,7 +97,8 @@ export function objectiveCallInstructions(name: string): string {
 }
 
 /** the name of who answers a level's call (objective or campaign), the same words as the web's whoAnswers.ts. */
-export const levelName = (name: string) => `${clip(flat(name).replace(/^[^:]{1,30}:\s*/, ""), 80) || name} manager`;
+/** the objectives folded into it ("(with: …)") are not part of whose call it is. */
+export const levelName = (name: string) => `${clip(flat(name).replace(/\s*\(with:.*$/, "").replace(/^[^:]{1,30}:\s*/, ""), 80) || name} manager`;
 export const objectiveGreeting = (name: string) => `Hi ${ownerName()}, the ${levelName(name)} here. Key results first, or straight to what is red?`;
 /** a campaign's call greets by its name (any world's owner, so no name of his): the greeting after `lead` (voice.ts GREETING_LEAD) is replaced, the rest kept. */
 export function campaignGreeting(instructions: string, title: string, lead: string): string {

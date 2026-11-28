@@ -38,7 +38,7 @@ import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js"
 import { contextMissing, readTicketContext } from "./cycle/ticketContext.js";
 import { readWhereWeAre, whereWeAreSection } from "./whereWeAre.js";
 import { keyResultPlanText, planSection, readWheelPlan } from "./wheelPlan.js";
-import { onboardingSection } from "./voice/campaignOnboarding.js";
+import { onboardingSection, onboardingText } from "./voice/campaignOnboarding.js";
 import { runStateFor } from "./cycle/runState.js";
 import { readySteps, wakeEnding } from "./cycle/wakeEnding.js";
 import { FAILED_WAKES_IN_A_ROW, failedWakesAction, failedWakesQuestion, openFailedWakesAsk, wakeStreak } from "./cycle/failedWakes.js";
@@ -235,7 +235,9 @@ import { createWholeCall } from "./voice/wholeCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, GREETING_LEAD, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOnboardingVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { SWITCH_TOOL, switchAnswer, switchRule } from "./voice/switchTo.js";
+import { boardManager, faceUrl, facePath, managerByName, managerOfObjective, readManagers, teamLine } from "./voice/managers.js";
 import { asksOf, campaignGreeting, levelKnows, levelName, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
+import { boardOpening, campaignOpening, objectiveOpening, PREPARED_RULE } from "./voice/prepared.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { agentBody, elevenCalls, elevenTranscript, type ElevenCalls } from "./voice/elevenAgent.js";
 import { RECALL_HOURS } from "./voice/recall.js";
@@ -2303,6 +2305,28 @@ export function createApp(
     const gaps = every.filter((g) => !isTestWorld(g.world));
     return c.json({ ok: !gaps.some(isGap), gaps, testsLeftOut: every.length - gaps.length, checked: { objectives: objectives.length, milestones: all.listMilestones().filter((m) => !m.settledAt && !m.paused).length }, at: new Date().toISOString() });
   });
+  // the people he calls, by name and face (docs/personas/managers.json); the call directory draws it
+  api.get("/managers", (c) => {
+    const all = readManagers(pursuits.homeDir());
+    const names = (id?: string) => (id ? pursuits.doc()?.pursuits.find((p) => p.id === id)?.name : undefined);
+    return c.json({
+      managers: all.map((m) => ({
+        id: m.id,
+        name: m.name,
+        role: m.role,
+        ...(m.objective ? { objective: m.objective, objectiveName: names(m.objective) ?? m.objective } : {}),
+        ...(faceUrl(m) && facePath(pursuits.homeDir(), m) ? { face: faceUrl(m) } : {}),
+        call: m.role === "board" ? "/api/voice/coach" : `/api/objectives/${encodeURIComponent(m.objective ?? "")}/voice`,
+      })),
+    });
+  });
+  api.get("/managers/:id/face", (c) => {
+    const m = readManagers(pursuits.homeDir()).find((x) => x.id === c.req.param("id"));
+    const file = facePath(pursuits.homeDir(), m);
+    if (!file) return c.json({ error: { code: "not_found", message: "no face for that manager" } }, 404);
+    const type = file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : "image/webp";
+    return c.body(fs.readFileSync(file), 200, { "content-type": type, "cache-control": "private, max-age=3600" });
+  });
   api.get("/objectives", async (c) => c.text(((await ownerObjectivesNow!().catch(() => undefined))?.block || "No objectives read.") + "\n"));
   // each objective's key results as the page shows them (its file's, a ticked Done-means box green), for the
   // WhatsApp line when one turns green or red. A TEST objective (its id or its repo says test) is marked TEST.
@@ -3351,8 +3375,15 @@ export function createApp(
   // another partner onto the same call (voice/switchTo.ts): the objective he names comes on with its whole
   // package and its manager's name goes on his screen; "desk" brings the call's own partner back. Never a hang-up.
   const switchedTo = new Map<string, string>();
+  // each switch_to call knows the team by name (docs/personas/managers.json)
+  const managersLine = (homeIsBoard: boolean) =>
+    teamLine(readManagers(pursuits.homeDir()), (id) => pursuits.doc()?.pursuits.find((p) => p.id === id)?.name, homeIsBoard);
   const switchOn = async (home: string, callId: string, args: Record<string, unknown>, deskPack?: () => Promise<string>) => {
-    const r = await switchAnswer(String(args.to ?? ""), {
+    // "pass me to Sam" names a person: that manager's objective (or the board manager's desk) is where the call goes
+    const people = readManagers(pursuits.homeDir());
+    const named = managerByName(people, String(args.to ?? ""));
+    const to = named ? (named.role === "board" ? "desk" : (named.objective ?? String(args.to ?? ""))) : String(args.to ?? "");
+    const r0 = await switchAnswer(to, {
       home,
       cards: levelCards,
       pack: async (card) => {
@@ -3362,6 +3393,13 @@ export function createApp(
       ...(deskPack ? { deskPack } : {}),
       objectiveName: levelName,
     });
+    // who is on the line now, by name and face (the owner: "you see that face, and you see that name")
+    const cards = r0.objective ? await levelCards().catch(() => [] as LevelCard[]) : [];
+    const objectiveId = r0.objective ? cards.find((c) => c.name === r0.objective)?.id : undefined;
+    const who = r0.name === home ? boardManager(people) : r0.objective ? managerOfObjective(people, objectiveId) : undefined;
+    const r = who
+      ? { ...r0, person: who.name, ...(faceUrl(who) ? { face: faceUrl(who) } : {}), result: `Your own name on this call is ${who.name} (${who.role === "board" ? "the board manager, over all his objectives" : `the campaign manager of ${r0.objective}`}): say "${who.name} here" first, and give it if he asks who he is talking to.\n\n${r0.result}` }
+      : r0;
     if (r.objective) switchedTo.set(callId, r.objective);
     else if (r.name === home) switchedTo.delete(callId);
     console.log(`[voice] ${callId} switch_to "${String(args.to ?? "").slice(0, 60)}": ${r.name || "not switched"}`);
@@ -3374,9 +3412,9 @@ export function createApp(
   const productLevel = async (product: string) =>
     levelOf("desk", `${product} desk`, (await levelCards()).filter((x) => x.name.toLowerCase().startsWith(`${product.toLowerCase()}:`))).catch(() => "");
   /** a campaign's (or milestone's) level: its spine's state and asks, its objective's key results, plan and where we are. */
-  const campaignLevel = async (id: string) => {
+  const campaignParts = async (id: string) => {
     const m = store.getMilestone(id);
-    if (!m) return "";
+    if (!m) return undefined;
     const dir = (m.repo ? (worldRepoDir(read.reposRoot, db, milestoneWorld(db, m.id))(m.repo) ?? resolveRepo(read.reposRoot, m.repo)?.path) : undefined);
     let spine: string | undefined;
     try {
@@ -3387,7 +3425,19 @@ export function createApp(
     const { state, asks } = spineState(spine);
     const oid = objectiveFor(m).objective;
     const card = oid ? (await levelCards()).find((c) => c.id === oid) : undefined;
+    return { m, state, asks, card };
+  };
+  const campaignLevel = async (id: string) => {
+    const p = await campaignParts(id);
+    if (!p) return "";
+    const { m, state, asks, card } = p;
     return levelOf("campaign", m.title, card ? [card] : [], { state, asks, ...(card ? { plan: levelPlan(card.id, card.name) } : {}) });
+  };
+  // the phone directory's calls are prepared (voice/prepared.ts, the owner's note): each opens on its own status and our proposal.
+  const objectiveOpeningOf = (card: LevelCard, person?: string) => objectiveOpening(card, { onboarding: onboardingText(pursuits.homeDir(), card.id), open: readWhereWeAre(pursuits.homeDir(), card.id)?.open ?? [], ...(person ? { person } : {}) });
+  const campaignOpeningOf = async (id: string) => {
+    const p = await campaignParts(id);
+    return p ? campaignOpening(p.m.title, p.state, p.card, p.card ? { onboarding: onboardingText(pursuits.homeDir(), p.card.id), open: readWhereWeAre(pursuits.homeDir(), p.card.id)?.open ?? [] } : {}) : undefined;
   };
   setTimeout(() => void readObjectiveCards(), 6_000).unref?.();
   setTimeout(() => void readObjectives(), 5_000).unref?.();
@@ -3604,8 +3654,9 @@ export function createApp(
         instructions: () => {
           const t = store.getMilestone(m.id)?.title ?? m.title;
           // who answers, by name (the owner, 27 Nov: "I should see a name of who I'm talking to"): the greeting says it too.
-          return `${campaignGreeting((world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(t), t, GREETING_LEAD)}\n${partnerRule("campaign", t)}`;
+          return `${campaignGreeting((world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).instructions(t), t, GREETING_LEAD)}\n${partnerRule("campaign", t)}\n${PREPARED_RULE}`;
         },
+        opening: () => campaignOpeningOf(m.id),
         tools: () => (world === DEFAULT_TENANT ? MILESTONE_CALL : socialArea?.campaignCall ?? MILESTONE_CALL).tools(store.getMilestone(m.id)?.title ?? m.title),
         desk: { send: (t, page, crid) => milestoneChats.send(m.id, t, page, crid), view: () => milestoneChats.view(m.id) },
         quickStatus: () => campaignStatus(world, m.id, world === DEFAULT_TENANT ? "milestone" : "campaign"),
@@ -3660,7 +3711,15 @@ export function createApp(
       throw new VoiceError(409, "coach_eleven_only", "The objectives coach runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
-    instructions: () => `${coachInstructions()}\n${switchRule(TEAM_DESK_PARTNER)}`,
+    instructions: () => {
+      // the board manager's own name and face: the greeting and "who am I talking to" say it (docs/personas/managers.json)
+      const board = boardManager(readManagers(pursuits.homeDir()));
+      const base = board ? coachInstructions().replace(COACH_GREETING(), COACH_GREETING().replace(/your (.+?) here,/, `${board.name} here, your $1,`)) : coachInstructions();
+      const me = board ? `\nYour own name is ${board.name}, the board manager: when he asks who he is talking to, say "${board.name}, your ${TEAM_DESK_PARTNER}".` : "";
+      return `${base}${me}\n${switchRule(TEAM_DESK_PARTNER)}\n${managersLine(true)}\n${PREPARED_RULE}`;
+    },
+    // prepared (voice/prepared.ts): the board's status and our proposal, greeted by the board manager's own name.
+    opening: async () => boardOpening(await voiceObjectiveCards(), TEAM_DESK_PARTNER, boardManager(readManagers(pursuits.homeDir()))?.name),
     tools: () => [...COACH_TOOLS, SWITCH_TOOL] as any,
     lookup: async (callId, name, args) => (name === "switch_to" ? switchOn(TEAM_DESK_PARTNER, callId, args, async () => coachKnows(await voiceObjectiveCards())) : noLookup()),
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
@@ -3758,7 +3817,7 @@ export function createApp(
       throw new VoiceError(409, "briefing_eleven_only", "The briefing call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
     },
     scope: { world: DEFAULT_TENANT },
-    instructions: () => `${briefingInstructions()}\n${switchRule(BRIEFING_WHO)}`,
+    instructions: () => `${briefingInstructions()}\n${switchRule(BRIEFING_WHO)}\n${managersLine(false)}`,
     tools: () => briefingTools() as any,
     desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
     quickStatus: noStatus,
@@ -4015,7 +4074,18 @@ export function createApp(
         throw new VoiceError(409, "objective_eleven_only", "An objective's call runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
       },
       scope: { world: DEFAULT_TENANT },
-      instructions: () => objectiveCallInstructions(name() ?? id),
+      instructions: () => {
+        // its campaign manager's own name, when the team has one for this objective
+        const who = managerOfObjective(readManagers(pursuits.homeDir()), id);
+        const n = name() ?? id;
+        const base = who ? objectiveCallInstructions(n).replace(`the ${levelName(n)} here.`, `${who.name} here, the ${levelName(n)}.`) : objectiveCallInstructions(n);
+        return `${base}${who ? `\nYour own name is ${who.name}: you are ${who.name}, the campaign manager of this objective. Say "${who.name} here" when you greet him, and give your name if he asks who he is talking to.` : ""}\n${PREPARED_RULE}`;
+      },
+      // prepared (voice/prepared.ts): its status and our proposal, greeted by its manager's own name.
+      opening: async () => {
+        const card = (await levelCards()).find((c) => c.id === id);
+        return card ? objectiveOpeningOf(card, managerOfObjective(readManagers(pursuits.homeDir()), id)?.name) : undefined;
+      },
       tools: () => MARKETING_TOOLS as any,
       desk: { send: (t, page, crid) => desk.send(t, page, crid), view: () => desk.view() },
       quickStatus: noStatus,

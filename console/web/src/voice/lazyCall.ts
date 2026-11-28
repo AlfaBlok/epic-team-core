@@ -11,7 +11,7 @@ import { isPromise } from "./voiceCode";
  * The call cannot hear him before the line is up in any case, so nothing he says is lost to the load: the bar shows
  * Connecting from the tap, as it always did while the key was minted.
  */
-export type CallEngineLike = Pick<CallEngine, "view" | "subscribe" | "start" | "startFocused" | "setMuted" | "hangup" | "pageVisible" | "clearError" | "pageHide"> & { hands?: CallHands };
+export type CallEngineLike = Pick<CallEngine, "view" | "subscribe" | "start" | "startFocused" | "setMuted" | "hangup" | "pageVisible" | "clearError" | "pageHide" | "readLevel"> & { hands?: CallHands };
 
 export const IDLE_CALL: EngineView = { phase: "idle", muted: false, hearing: "", speaking: "", lines: [], costUsd: 0, elapsedS: 0, deskWaiting: 0 };
 /** the engine's code could not be fetched (no connection): no call was made, nothing charged. */
@@ -119,5 +119,8 @@ export class LazyCall implements CallEngineLike {
   }
   pageHide() {
     this.real?.pageHide();
+  }
+  readLevel(): number {
+    return this.real?.readLevel() ?? 0;
   }
 }

@@ -5,9 +5,11 @@ import { CALL_TAP, PHONE_TAP } from "@/components/common";
 import { cn } from "@/lib/utils";
 import { useInRouterContext, useLocation } from "react-router-dom";
 import type { EngineView, Media, VoiceApi } from "./engine";
-import { busy, useCallTab } from "./CallProvider";
+import { busy, lostSince, useCallTab } from "./CallProvider";
 import { connectingText, useConnectingSeconds } from "./connecting";
 import { getCallLang, useCallLang, type CallLang } from "./callLang";
+import { useManagerFor } from "./managers";
+import { lostFor } from "./timeLeft";
 
 /** GET /api/voice/state: what the button needs before a call. */
 export interface VoiceState {
@@ -122,6 +124,7 @@ export function useCallDock(
   const callee = props.callee ?? "the desk";
   // the owner, 27 Nov (call_910685a3): "on the call, I should see a name of who I'm talking to".
   const who = props.name ?? callee.replace(/^the /, "");
+  const person = useManagerFor(props.base ?? "/api/voice");
   const [st, setSt] = useState<VoiceState | undefined>();
   // the tab's engine for these routes, owned above the router (a call started here and still on when the page comes
   // back is this one); while this bar is mounted the floating widget leaves the call to it.
@@ -150,11 +153,31 @@ export function useCallDock(
   }, [st?.available, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   const autoStarted = useRef(false);
   useEffect(() => {
+    // the flag gone from the URL arms it again: the directory's same line pressed twice starts a second call.
+    if (!props.autoStart) autoStarted.current = false;
     if (!props.autoStart || autoStarted.current || !st?.available || busy(v.phase)) return;
     autoStarted.current = true;
     void start();
     props.onAutoStart?.();
   }, [props.autoStart, st?.available, v.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the phone locked and this tab came back as a new page: the call it held reconnects by itself (CallProvider's record)
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!st?.available || resumed.current) return;
+    const r = tab.resumable(h, st.activeCall?.id);
+    if (!r) return;
+    resumed.current = true;
+    tab.forget(h.base);
+    void (async () => {
+      if (r.stale && h.api.endActive) await h.api.endActive(r.stale).catch(() => undefined);
+      const now = Date.now();
+      tab.started(h, here());
+      await engine.start({
+        resumed: true,
+        notice: `We lost you for ${lostFor(now - lostSince(r))}: the phone locked and the page reloaded. Reconnected at ${new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; the voice remembers the call.`,
+      });
+    })();
+  }, [st]); // eslint-disable-line react-hooks/exhaustive-deps
   const shownPhase = useRef(v.phase);
   useEffect(() => {
     if (shownPhase.current === v.phase) return; // a call that ended before this page came back is not news
@@ -222,14 +245,17 @@ export function useCallDock(
               </span>
               <span className="font-medium tabular-nums text-foreground phone:font-semibold">{v.phase === "live" ? `On call ${clock(v.elapsedS)}` : connectingText(connectingS)}</span>
               <span className="tabular-nums" data-testid="call-cost">{money(v.costUsd)}</span>
-              {/* who he is talking to, named on the call itself (the owner: "on the call, I should see a name of who I'm talking to") */}
-              {/* the full name, wrapping on a phone, never cut short */}
-              <span className="min-w-0 basis-full font-medium text-foreground [overflow-wrap:anywhere]" data-testid="call-with">
-                <span data-testid="call-who">
-                  {v.phase === "live" ? "with" : "calling"} the {v.speaker ?? who}
-                </span>
-              </span>
+              {/* who he is talking to, big, with the manager's name and face (the owner 28 Nov: "the name of the person and like a persona ... taking a big part of the screen") */}
+              <CallPersona
+                name={v.speaker ?? who}
+                person={(v.speaker ? v.speakerPerson : person?.name) || undefined}
+                face={(v.speaker ? v.speakerFace : person?.face) || undefined}
+                verb={v.phase === "live" ? "with" : "calling"}
+                role={roleOf(v.speaker ?? who, h.base)}
+              />
               {/* the microphone, said plainly (his call_dab66f00: with the screen off the phone stopped it and he talked to himself) */}
+              {/* his mic level, live, as on a voice note (the owner 28 Nov: "the UX should show my mic, the levels of the mic") */}
+              {v.phase === "live" && <CallLevel read={() => engine.readLevel()} on={!v.muted && v.mic !== "lost"} />}
               {v.phase === "live" && (
                 <span
                   data-testid="call-mic"
@@ -403,6 +429,84 @@ export function useCallDock(
       </span>
     ) : undefined;
   return { bar, button, live, liveKey, onCall };
+}
+
+/** what the one on the line does, in a few words under the name. */
+export function roleOf(name: string, base: string): string {
+  if (/briefer/i.test(name)) return "Briefer: the numbers and what happened";
+  if (/partner$/i.test(name)) return "Senior partner: your objectives and key results";
+  if (/desk line$/i.test(name)) return "Desk line: quick status, passes your words on";
+  if (base.includes("/milestones/")) return "Campaign manager: this campaign only";
+  if (base.includes("/objectives/")) return "Objective manager: this objective only";
+  return "On the line with you";
+}
+
+/** who he is talking to: the manager's face (else a round mark with the first letter), the name big, the role under it. */
+export function CallPersona({ name, person, face, verb, role }: { name: string; person?: string; face?: string; verb: string; role: string }) {
+  const initial = ((person ?? name.replace(/^(manager of\s+)/i, "")).match(/[A-Za-z0-9]/)?.[0] ?? "•").toUpperCase();
+  return (
+    <span className="my-1 flex min-w-0 basis-full items-center gap-3" data-testid="call-persona">
+      {face ? (
+        <img data-testid="call-face" src={face} alt="" className="size-12 shrink-0 rounded-full object-cover phone:size-16" />
+      ) : (
+        <span aria-hidden className="flex size-12 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-xl font-semibold text-white phone:size-16 phone:text-2xl">
+          {initial}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        {/* the full name, wrapping on a phone, never cut short */}
+        <span className="block font-semibold leading-tight text-foreground [overflow-wrap:anywhere]" data-testid="call-with">
+          <span data-testid="call-who">
+            <span className="block text-xs font-normal text-muted-foreground">{verb} </span>
+            <span className="text-lg phone:text-2xl">
+              {person ? `${person}, ` : ""}the {name}
+            </span>
+          </span>
+        </span>
+        <span className="block text-xs text-muted-foreground phone:text-sm" data-testid="call-role">
+          {role}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** his microphone's level on the call, 0 to 100, read many times a second (the voice note's meter, wider). */
+export function CallLevel({ read, on }: { read: () => number; on: boolean }) {
+  const [lv, setLv] = useState(0);
+  useEffect(() => {
+    if (!on) return void setLv(0);
+    const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let shown = 0;
+    const t = setInterval(
+      () => {
+        const now = Math.round(read() * 100);
+        shown = now >= shown ? now : Math.max(now, Math.floor(shown * 0.82));
+        setLv(shown);
+      },
+      reduce ? 500 : 80,
+    );
+    return () => clearInterval(t);
+  }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <span
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={lv}
+      aria-label={`your microphone level ${lv}%`}
+      title="How loud the call hears you, 0 to 100"
+      className="flex min-w-0 basis-full items-center gap-2 phone:my-1"
+      data-testid="call-level"
+      data-level={lv}
+    >
+      <Mic className="size-4 shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden />
+      <span className="relative h-2 w-full max-w-56 overflow-hidden rounded-full bg-muted-foreground/25 phone:h-3" aria-hidden>
+        <span className={cn("absolute inset-y-0 left-0 rounded-full transition-[width] duration-75", lv >= 85 ? "bg-amber-500" : "bg-emerald-600")} style={{ width: `${lv}%` }} />
+      </span>
+      <span className="w-7 text-right text-[11px] tabular-nums text-muted-foreground">{lv}</span>
+    </span>
+  );
 }
 
 /**

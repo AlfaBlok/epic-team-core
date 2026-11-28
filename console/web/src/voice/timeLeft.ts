@@ -40,3 +40,9 @@ export function quietLine(secondsLeft: number, lang: CallLang = "en"): string {
 /** the note a line's agent gets to say a time line word for word (the ElevenLabs line has no other way in). */
 export const CLOCK_MARK = "[call clock]";
 export const clockNote = (line: string) => `${CLOCK_MARK} A note from the call's clock, not from the caller: say exactly "${line}" and nothing else, then carry on where you were.`;
+
+/** a span said plainly on his screen ("40 seconds", "2 min 05 s"): how long a dropped call lost him. */
+export const lostFor = (ms: number) => {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s < 60 ? `${s} second${s === 1 ? "" : "s"}` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+};

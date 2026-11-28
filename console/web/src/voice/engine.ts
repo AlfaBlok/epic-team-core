@@ -15,7 +15,7 @@
 import { callMediaSession, stickyWakeLock } from "./keepAwake";
 import { ownerName } from "@/lib/identity";
 import { getCallLang, type CallLang } from "./callLang";
-import { CLOCK_MARK, callLimitLine, clockNote, quietLine, spanWords } from "./timeLeft";
+import { lostFor, CLOCK_MARK, callLimitLine, clockNote, quietLine, spanWords } from "./timeLeft";
 
 export interface Limits {
   callMaxMin: number;
@@ -86,6 +86,9 @@ export interface EngineView {
   onCard?: { id: string; place: string; title?: string; link?: { label: string; url: string } };
   /** who is on the line now, when the call switched partner (switch_to): his screen names them instead of the callee. */
   speaker?: string;
+  /** that manager's own name and face (the owner: "you see that face, and you see that name"). */
+  speakerPerson?: string;
+  speakerFace?: string;
 }
 
 /** The console calls this engine makes (fetch by default; tests fake them). */
@@ -152,6 +155,16 @@ export interface Media {
  * voice the earlier talk, and the voice opens with RESUME_GREETING instead of its first-call greeting.
  */
 export const RESUME_GREETING = "Sorry, we got cut off when your phone locked. I'm back. Where were we?";
+/**
+ * (the owner, 28 Nov 01:25Z: "the call got ... dropped again"): his 00:20Z call (call_2761225c) was cut at exactly
+ * 20 minutes, mid-answer, by the line's own length cap. A call he is still talking on now goes on as a new call just before
+ * the cap (the console's call memory gives the voice the talk so far), opening with this line; a quiet call ends as before.
+ */
+export const LIMIT_GREETING = "We reached the twenty-minute mark, so I reconnected the line. I still have everything we said. Go on.";
+/** the line rolls over this long before the call's length cap (the agent's own cap counts from a moment earlier). */
+export const ROLLOVER_EARLY_S = 15;
+/** the call rolls over only if he spoke within this long; otherwise the cap ends it. */
+export const ROLLOVER_IF_SPOKE_MS = 3 * 60_000;
 /** A line that dropped while away reconnects on return only within this long; after it the screen says so and waits for Call. */
 export const RECONNECT_WINDOW_MS = 15 * 60_000;
 /** End reasons that a locked phone causes (anything else, his hang-up, the limits, a stop from the console, never reconnects). */
@@ -363,6 +376,8 @@ export class CallEngine {
   /** the line closed while away (reason, when): reconnect on return. */
   private droppedAway?: { reason: string; at: number; since: number };
   private unsession?: () => void;
+  /** his microphone's loudness meter (an analyser on the stream the call uses). */
+  private micLevel?: { read(): number; close(): void };
   /** the ElevenLabs line, when the console put this call on ElevenLabs Agents. */
   private el?: import("./elevenSession").ElevenLine;
   private listeners = new Set<(v: EngineView) => void>();
@@ -406,12 +421,12 @@ export class CallEngine {
     return this.start({ focused: true });
   }
 
-  async start(o: { notice?: string; resumed?: boolean; focused?: boolean } = {}): Promise<void> {
+  async start(o: { notice?: string; resumed?: boolean; focused?: boolean; greeting?: string } = {}): Promise<void> {
     if (this.v.phase === "starting" || this.v.phase === "connecting" || this.v.phase === "live") return;
     if (!o.focused && !o.resumed) this.focus = undefined;
     this.set({ onCard: undefined });
     this.droppedAway = this.away = undefined;
-    this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice, speaker: undefined });
+    this.set({ phase: "starting", error: undefined, warn: undefined, endReason: undefined, lines: [], hearing: "", speaking: "", costUsd: 0, elapsedS: 0, callId: undefined, deskWaiting: 0, notice: o.notice, speaker: undefined, speakerPerson: undefined, speakerFace: undefined });
     try {
       // Microphone first: a refused permission costs nothing (no key minted, no call row).
       this.mic = await this.media.microphone();
@@ -422,7 +437,7 @@ export class CallEngine {
       this.timeLine = undefined;
       this.lang = getCallLang();
       this.turnDetection = s.turnDetection ?? NORMAL_TURN;
-      this.greeting = o.resumed ? RESUME_GREETING : s.greeting?.trim() || undefined;
+      this.greeting = o.greeting ?? (o.resumed ? RESUME_GREETING : s.greeting?.trim() || undefined);
       this.set({ callId: s.call.id, phase: "connecting" });
       if (s.provider === "elevenlabs" && s.signedUrl) return await this.startEleven(s);
       const pc = (this.pc = this.media.peer());
@@ -1125,6 +1140,7 @@ export class CallEngine {
     // the ElevenLabs client opens its own microphone: ours only proved the permission.
     for (const t of this.mic?.getTracks() ?? []) t.stop();
     this.mic = undefined;
+    callAudioSession(true);
     const id = s.call.id;
     const { startEleven, ELEVEN_ASK_WAIT_MS } = await import("./elevenSession");
     const said = () => this.v.lines.slice(this.wordsFrom).filter((l) => l.who === "owner").map((l) => l.text).join(" ");
@@ -1222,10 +1238,10 @@ export class CallEngine {
         if (!this.api.lookup) return "This line cannot switch. Stay as you are and tell him in one line.";
         try {
           const r = await this.api.lookup(id, "switch_to", a);
-          const x = JSON.parse(r.result ?? "{}") as { name?: string; result?: string };
+          const x = JSON.parse(r.result ?? "{}") as { name?: string; person?: string; face?: string; result?: string };
           if (x.name) {
-            this.set({ speaker: x.name });
-            this.line("tool", `switched to the ${x.name}`);
+            this.set({ speaker: x.name, speakerPerson: x.person, speakerFace: x.face });
+            this.line("tool", `switched to ${x.person ? `${x.person}, ` : ""}the ${x.name}`);
           }
           return x.result ?? "Not switched. Tell him in one line.";
         } catch (e) {
@@ -1257,7 +1273,11 @@ export class CallEngine {
         this.set({ speaking: speaking ? "…" : "" });
       },
       onEnded: (reason) => {
-        if (this.v.phase === "live" || this.v.phase === "connecting") void this.hangup(reason);
+        if (this.v.phase !== "live" && this.v.phase !== "connecting") return;
+        // the agent's own 20-minute cap closes the line as the agent: that is the limit, never his bye
+        const atCap = reason === "bye" && !!this.limits && this.clock.now() - this.startedAt >= (this.limits.callMaxMin * 60 - 60) * 1000;
+        if (atCap && this.talking() && this.away === undefined) return void this.rollover();
+        void this.hangup(atCap ? "call_limit" : reason);
       },
       onError: (message) => this.set({ warn: message.slice(0, 200) }),
       onMic: (stream) => this.watchMic(stream),
@@ -1266,18 +1286,49 @@ export class CallEngine {
     this.unsession = this.media.session?.({ hangup: () => void this.hangup("hangup"), toggleMute: () => this.setMuted(!this.v.muted) }) ?? undefined;
   }
 
+  /** his microphone's level now, 0..1, as the line hears it (the call screen's meter reads it many times a second). */
+  readLevel(): number {
+    if (this.v.phase !== "live" || this.v.muted) return 0;
+    // the microphone's own loudness (the voice note's meter), else the line's volume (a small linear number)
+    const own = this.micLevel?.read() ?? 0;
+    if (own > 0) return own;
+    const raw = this.el?.level?.() ?? 0;
+    return Math.max(0, Math.min(1, Math.sqrt(Math.max(0, raw)) * 1.6));
+  }
+
   /** the ElevenLabs line's clock: elapsed time and the 20-minute limit (the agent ends a quiet call itself). */
   private elevenTick() {
     if (this.v.phase !== "live" || !this.limits) return;
     const elapsedS = Math.floor((this.clock.now() - this.startedAt) / 1000);
     this.set({ elapsedS });
+    if (elapsedS >= this.limits.callMaxMin * 60 - ROLLOVER_EARLY_S && this.talking()) return void this.rollover();
     if (elapsedS >= this.limits.callMaxMin * 60) return void this.hangup("call_limit");
-    this.timeLeftDue(elapsedS);
+    if (!this.talking()) this.timeLeftDue(elapsedS);
     // said by the agent as soon as it is not talking and he has not just spoken
     if (this.timeLine && !this.elevenSpeaking && this.clock.now() - this.lastOwnerAt >= HOLD_AFTER_HIM_MS && this.el?.say) {
       const l = this.timeLine;
       this.timeLine = undefined;
       this.el.say(clockNote(l));
+    }
+  }
+
+  /** he spoke on this call within ROLLOVER_IF_SPOKE_MS: at the length cap the call goes on rather than ending. */
+  private talking(): boolean {
+    return this.lastOwnerAt > 0 && this.clock.now() - this.lastOwnerAt <= ROLLOVER_IF_SPOKE_MS;
+  }
+
+  private rolling = false;
+  /** the length cap is near and he is still talking: end this call (its transcript posts) and go on as a new one at once. */
+  private async rollover(): Promise<void> {
+    if (this.rolling || !this.limits) return;
+    this.rolling = true;
+    const max = this.limits.callMaxMin;
+    try {
+      this.line("tool", `${max}-minute mark: the call goes on as a new call`);
+      await this.hangup("call_limit");
+      await this.start({ resumed: true, focused: !!this.focus, greeting: LIMIT_GREETING, notice: `The call reached ${max} minutes at ${hhmm(this.clock.now())}, so it went on as a new call. Nothing was lost: the voice remembers the talk.` });
+    } finally {
+      this.rolling = false;
     }
   }
 
@@ -1312,6 +1363,9 @@ export class CallEngine {
     this.checkedIn = false;
     if (this.v.mic) this.set({ mic: undefined });
     void this.lock?.release().catch(() => undefined);
+    callAudioSession(false);
+    this.micLevel?.close();
+    this.micLevel = undefined;
     this.unsession?.();
     this.pc = this.dc = this.mic = this.lock = this.unsession = undefined;
     this.responding = this.userSpeaking = this.playing = this.spoke = this.elevenSpeaking = false;
@@ -1401,7 +1455,7 @@ export class CallEngine {
       this.set({ notice: `${what} at ${hhmm(d.at)}. That was a while ago, so it did not reconnect: press Call to talk again.` });
       return;
     }
-    await this.start({ resumed: true, notice: `${what}. Reconnected at ${hhmm(now)}; the desk remembers the call.` });
+    await this.start({ resumed: true, notice: `${what}. We lost you for ${lostFor(now - d.since)}. Reconnected at ${hhmm(now)}; the desk remembers the call.` });
   }
 
   /** The microphone went mute or ended under a live call (an iPhone while locked): take it again and send the new track. */
@@ -1426,6 +1480,8 @@ export class CallEngine {
   private watchMic(stream: MediaStream) {
     const t = stream.getAudioTracks?.()[0];
     if (!t) return;
+    this.micLevel?.close();
+    this.micLevel = micMeter(stream);
     this.unwatchMic?.();
     const lost = () => this.micLost();
     const back = () => this.micBack();
@@ -1484,6 +1540,45 @@ export class CallEngine {
 }
 
 export { fetchVoiceApi } from "./callApi";
+
+/**
+ * Safari 17+ (iPhone): the page's audio session as a call ("play-and-record"), so the phone keeps the microphone and the
+ * voice together the way a call app does, and back to "auto" when the call ends. Other browsers have no audioSession.
+ */
+/** an analyser on the call's microphone stream: its loudness, -60 dB (silence) to -12 dB (loud speech) as 0..1. */
+export function micMeter(stream: MediaStream): { read(): number; close(): void } | undefined {
+  try {
+    const AC = typeof window === "undefined" ? undefined : ((window as any).AudioContext ?? (window as any).webkitAudioContext);
+    if (!AC) return undefined;
+    const ctx: AudioContext = new AC();
+    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    return {
+      read: () => {
+        if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+        an.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += ((buf[i] - 128) / 128) ** 2;
+        const rms = Math.sqrt(sum / buf.length);
+        return rms <= 0 ? 0 : Math.max(0, Math.min(1, (20 * Math.log10(rms) + 60) / 48));
+      },
+      close: () => void ctx.close().catch(() => undefined),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function callAudioSession(on: boolean, nav: any = typeof navigator === "undefined" ? undefined : navigator): void {
+  try {
+    if (nav?.audioSession) nav.audioSession.type = on ? "play-and-record" : "auto";
+  } catch {
+    /* not settable here */
+  }
+}
 
 /** The browser's microphone, peer connection and OpenAI's WebRTC call endpoint. */
 export function browserMedia(audio: HTMLAudioElement): Media {

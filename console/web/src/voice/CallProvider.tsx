@@ -9,6 +9,33 @@ import { fetchVoiceApi } from "./callApi";
 import { LazyCall } from "./lazyCall";
 import { callEngineCode, isPromise } from "./voiceCode";
 import { connectingText, useConnectingSeconds } from "./connecting";
+import { hookLinks } from "./linkGuard";
+
+/**
+ * (the owner, 28 Nov 01:25Z: "if the phone gets locked or whatever, the calls drop"): his 00:41Z call (call_784648a0)
+ * stopped beating at 00:53:15 when the phone locked, and the page came back as a new page that no longer held the call:
+ * it showed "A call is still on … Hang it up here", he hung it up at 00:54:20 and the reconnect never ran. Each call this tab
+ * holds is now kept in the tab's own sessionStorage (it survives a reload of the same tab, never another tab's), with the
+ * last moment the page was alive; a fresh page that finds it hangs the dead call up and reconnects by itself.
+ *
+ *   live call ──▶ { id, aliveAt } every few seconds ──▶ phone locks, page reloads ──▶ same tab finds it (≤ 15 min)
+ *        └─ he hangs up / bye / limit: the record goes                         └─▶ end the dead call, reconnect, "we lost you for N s"
+ */
+export const HELD_KEY = (base: string) => `console-call-held:${base}`;
+/** a call this tab held reconnects after a reload within this long (the engine's own RECONNECT_WINDOW_MS). */
+export const RESUME_WINDOW_MS = 15 * 60_000;
+/** End reasons after which the tab's record goes: he or the voice ended it (a drop, the quiet, a closed page keep it). */
+const KEEP_REASONS = new Set(["line_dropped", "quiet", "tab_closed"]);
+export interface HeldRecord {
+  id: string;
+  aliveAt: number;
+  /** the call ended by a drop or a closed page at this time (still on at the console otherwise). */
+  droppedAt?: number;
+  /** the page went out of view (the phone locked) at this time and has not come back: what he says from here may be lost. */
+  hiddenAt?: number;
+}
+/** when the call stopped reaching him: the lock, else the page's last sign of life. */
+export const lostSince = (r: HeldRecord) => Math.min(r.aliveAt, r.hiddenAt ?? r.aliveAt);
 
 /**
  * A call is the tab's, never a page's: leaving
@@ -47,6 +74,8 @@ export class CallTab {
   /** The tab's pagehide (tab closed, reload): every call on ends with its transcript, whatever page is showing. */
   hook(): () => void {
     if (!this.unhook && this.win) {
+      // a link tap or a new build's script reload never reloads the page under a call (lazyPage reads the same check)
+      const offLinks = hookLinks(this.win, { busy: () => this.busy() });
       const hide = () => this.pageHide();
       // the phone locked or came back (the engine keeps the call, or reconnects it on return).
       const doc = this.win.document;
@@ -54,6 +83,7 @@ export class CallTab {
       this.win.addEventListener("pagehide", hide);
       doc.addEventListener("visibilitychange", seen);
       this.unhook = () => {
+        offLinks();
         this.win?.removeEventListener("pagehide", hide);
         doc.removeEventListener("visibilitychange", seen);
         this.unhook = undefined;
@@ -65,7 +95,18 @@ export class CallTab {
     for (const h of this.held.values()) h.engine.pageHide();
   }
   visibility(visible: boolean) {
-    for (const h of this.held.values()) void h.engine.pageVisible(visible);
+    for (const h of this.held.values()) {
+      const r = this.heldRecord(h.base);
+      if (r && busy(h.engine.view().phase)) {
+        try {
+          const next: HeldRecord = { ...r, hiddenAt: visible ? undefined : (r.hiddenAt ?? Date.now()) };
+          this.store()?.setItem(HELD_KEY(h.base), JSON.stringify(next));
+        } catch {
+          /* off */
+        }
+      }
+      void h.engine.pageVisible(visible);
+    }
   }
 
   /** The tab's engine for `base` (made on first use). */
@@ -113,9 +154,72 @@ export class CallTab {
       const hands = () => import("./SectionCall").then((m) => m.inboxHands());
       h.engine.hands = { file: async (p) => (await hands()).file!(p) };
     }
-    h.engine.subscribe(() => this.changed());
+    h.engine.subscribe((v) => {
+      this.keep(base, v);
+      this.changed();
+    });
     this.held.set(base, h); // no change event: this runs while a page renders, and nothing floats until a call starts
     return h;
+  }
+
+  private store(): Storage | undefined {
+    try {
+      return this.win?.sessionStorage;
+    } catch {
+      return undefined;
+    }
+  }
+  private keptAt = new Map<string, number>();
+  /** the tab's record of the call on `base` (written every few seconds while live; gone when he or the voice ends it). */
+  private keep(base: string, v: { phase: Phase; callId?: string; endReason?: string }) {
+    const st = this.store();
+    if (!st) return;
+    const now = Date.now();
+    try {
+      if ((v.phase === "live" || v.phase === "connecting") && v.callId) {
+        if (now - (this.keptAt.get(base) ?? 0) < 3_000) return;
+        this.keptAt.set(base, now);
+        const had = this.heldRecord(base);
+        st.setItem(HELD_KEY(base), JSON.stringify({ id: v.callId, aliveAt: now, ...(had?.id === v.callId && had.hiddenAt ? { hiddenAt: had.hiddenAt } : {}) } satisfies HeldRecord));
+      } else if (v.phase === "ended" || v.phase === "failed") {
+        this.keptAt.delete(base);
+        const had = this.heldRecord(base);
+        if (had && v.endReason && KEEP_REASONS.has(v.endReason) && had.id === v.callId) st.setItem(HELD_KEY(base), JSON.stringify({ ...had, droppedAt: had.droppedAt ?? now }));
+        else if (had && (!v.callId || had.id === v.callId)) st.removeItem(HELD_KEY(base));
+      }
+    } catch {
+      /* storage full or off: no reconnect after a reload, the call itself goes on */
+    }
+  }
+  heldRecord(base: string): HeldRecord | undefined {
+    try {
+      const raw = this.store()?.getItem(HELD_KEY(base));
+      const r = raw ? (JSON.parse(raw) as HeldRecord) : undefined;
+      return r && typeof r.id === "string" && typeof r.aliveAt === "number" ? r : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  /**
+   * A fresh page (after a lock and a reload) whose tab held a call on `h`: the call to reconnect, or undefined. `activeId`
+   * is the console's call still on for this world: a different one is another device's, never touched.
+   */
+  resumable(h: HeldCall, activeId: string | undefined, now = Date.now()): (HeldRecord & { stale?: string }) | undefined {
+    if (busy(h.engine.view().phase) || h.engine.view().phase === "ended") return undefined;
+    const r = this.heldRecord(h.base);
+    if (!r) return undefined;
+    if (now - r.aliveAt > RESUME_WINDOW_MS || (activeId && activeId !== r.id)) {
+      this.store()?.removeItem(HELD_KEY(h.base));
+      return undefined;
+    }
+    return { ...r, ...(activeId === r.id ? { stale: r.id } : {}) };
+  }
+  forget(base: string) {
+    try {
+      this.store()?.removeItem(HELD_KEY(base));
+    } catch {
+      /* off */
+    }
   }
 
   /** A call bar shows `h` while mounted; `page` is where it is (kept as the call's page when the call starts there). */
@@ -217,10 +321,10 @@ function Floating({ h }: { h: HeldCall }) {
           className="min-w-0 underline-offset-2 [overflow-wrap:anywhere] hover:underline phone:flex-1 phone:font-semibold phone:underline"
           title="Back to the call"
         >
-          {h.where ? `${h.where} · ` : ""}On call with {v.speaker ? `the ${v.speaker}` : h.callee}
+          {h.where ? `${h.where} · ` : ""}On call with {v.speaker ? `${v.speakerPerson ? `${v.speakerPerson}, ` : ""}the ${v.speaker}` : h.callee}
         </Link>
       ) : (
-        <span className="min-w-0 [overflow-wrap:anywhere] phone:flex-1 phone:font-semibold">On call with {v.speaker ? `the ${v.speaker}` : h.callee}</span>
+        <span className="min-w-0 [overflow-wrap:anywhere] phone:flex-1 phone:font-semibold">On call with {v.speaker ? `${v.speakerPerson ? `${v.speakerPerson}, ` : ""}the ${v.speaker}` : h.callee}</span>
       )}
       {/* a section call: the card the voice is on and its evidence, on his screen while they talk about it */}
       {v.onCard && v.phase === "live" && (

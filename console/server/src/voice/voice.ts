@@ -170,6 +170,15 @@ export function greetingOf(instructions: string): string | undefined {
   const i = instructions.indexOf(GREETING_LEAD);
   return i < 0 ? undefined : /^\s*"([^"]+)"/.exec(instructions.slice(i + GREETING_LEAD.length))?.[1];
 }
+/** the call's instructions with its greeting replaced by a prepared opening line (voice/prepared.ts); unchanged without one. */
+export function withGreeting(instructions: string, line: string | undefined): string {
+  const say = line?.replace(/"/g, "'").replace(/\s+/g, " ").trim();
+  if (!say || say.length < 20) return instructions;
+  const i = instructions.indexOf(GREETING_LEAD);
+  if (i < 0) return instructions;
+  const at = i + GREETING_LEAD.length;
+  return instructions.slice(0, at) + instructions.slice(at).replace(/^(\s*)"[^"]+"/, (_m, sp: string) => `${sp}"${say}"`);
+}
 /**
  * the voice used to announce every hand-off at length, give "still working" updates every 10 s
  * and read each desk reply as a speech. It went minimal. That overcorrected: an eight-word cap,
@@ -546,6 +555,11 @@ export interface VoiceDeps {
   context?: () => Promise<string> | string;
   /** what the team did with what he asked on earlier calls (earlierAsks.ts); "" = nothing in the window. */
   earlier?: (world: string) => Promise<string> | string;
+  /**
+   * a prepared call's first words (voice/prepared.ts: where it stands and our proposal), read at the call's start beside
+   * its context; it replaces the greeting in the instructions. Not on a call started from an inbox section.
+   */
+  opening?: () => Promise<string | undefined> | string | undefined;
   /** how long a call's start waits for `context` (default BRIEF_WAIT_MS); a call whose context reads live sources waits longer. */
   contextWaitMs?: number;
   /**
@@ -967,7 +981,7 @@ export function createVoice(d: VoiceDeps) {
     const linkP = provider() === "elevenlabs" && d.eleven ? d.eleven.link(lang).then((l) => ((linkMs = Date.now() - t0), l)) : undefined;
     linkP?.catch(() => undefined); // awaited below; a refusal surfaces there
     // a call started from an inbox section holds that section's cards (as the page showed them), not the whole inbox.
-    const [brief, recall, cards, objectives, context, objectiveCards, earlier] = await Promise.all([
+    const [brief, recall, cards, objectives, context, objectiveCards, earlier, opening] = await Promise.all([
       briefNow(),
       recallNow().catch(() => ""),
       focus ? focus.cards.slice(0, FOCUS_MAX) : d.inbox ? inTime("inbox", d.inbox, undefined as InboxCard[] | undefined) : undefined,
@@ -975,6 +989,7 @@ export function createVoice(d: VoiceDeps) {
       d.context ? inTime("context", d.context, "", d.contextWaitMs) : "",
       d.objectiveCards ? inTime("objective cards", d.objectiveCards, [] as ObjectiveCard[]) : ([] as ObjectiveCard[]),
       d.earlier ? inTime("earlier asks", () => d.earlier!(world), "") : "",
+      d.opening && !focus ? inTime("opening", async () => (await d.opening!()) ?? "", "", d.contextWaitMs) : "",
     ]);
     ctxMs = Date.now() - t0;
     // a call whose inbox could not be read in time starts as before (no inbox, no walk tools).
@@ -982,7 +997,7 @@ export function createVoice(d: VoiceDeps) {
     const pack = focus && walkCards ? focusPack({ section: focus.section, cards: walkCards }, objectives) : walkCards ? inboxPack(walkCards, objectives) : "";
     // a call that holds his objectives walks them one by one too (the briefing), on the whole-inbox call and a section's.
     const briefing = objectiveCards.length ? (d.walkRule ?? briefingRule)(objectiveCards.length) : "";
-    const instructionsEn = (d.instructions ?? voiceInstructions)() + `\n${CALL_FLOW_RULE}\n${(d.roster ?? teamRoster)()}` + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (earlier ? `\n\n${earlier}` : "") + (recall ? `\n\n${recall}` : "");
+    const instructionsEn = withGreeting((d.instructions ?? voiceInstructions)(), opening) + `\n${CALL_FLOW_RULE}\n${(d.roster ?? teamRoster)()}` + (pack ? `\n\n${pack}` : "") + (briefing ? `\n\n${briefing}` : "") + (context ? `\n\n${context}` : "") + (brief ? `\n\n${brief}` : "") + (earlier ? `\n\n${earlier}` : "") + (recall ? `\n\n${recall}` : "");
     const tools = d.tools?.() ?? VOICE_TOOLS;
     // the voice presses his button on every card it walks, the whole inbox's as a section's.
     const walkTools = [...(walkCards ? [...INBOX_TOOLS, PRESS_TOOL] : []), ...(objectiveCards.length && !d.walkRule ? OBJECTIVE_TOOLS : [])];

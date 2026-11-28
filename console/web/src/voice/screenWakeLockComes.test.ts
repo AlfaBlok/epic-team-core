@@ -181,7 +181,7 @@ describe("T42-S34 a call when the phone locks", () => {
     // The old call ended (with its transcript) before the new one started, so the console's call memory holds it.
     expect(f.api.end.mock.invocationCallOrder[0]).toBeLessThan(f.api.start.mock.invocationCallOrder[1]);
     expect(f.engine.view()).toMatchObject({ phase: "connecting", callId: "call_2" });
-    expect(f.engine.view().notice).toMatch(/^The phone locked at \d?\d:\d\d( [AP]M)? and the line dropped\. Reconnected at \d?\d:\d\d( [AP]M)?; the desk remembers the call\.$/);
+    expect(f.engine.view().notice).toMatch(/^The phone locked at \d?\d:\d\d( [AP]M)? and the line dropped\. We lost you for \d+ min \d\d s\. Reconnected at \d?\d:\d\d( [AP]M)?; the desk remembers the call\.$/);
     f.sent.length = 0;
     f.pcs[1].dc.onopen();
     expect(f.sent).toContainEqual({ type: "response.create", response: { instructions: greetingInstructions(RESUME_GREETING), tool_choice: "none" } });

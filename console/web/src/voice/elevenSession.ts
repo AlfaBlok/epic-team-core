@@ -40,6 +40,8 @@ export interface ElevenLine {
   restartMic(): Promise<void>;
   /** a note the agent reads without answering it (the microphone stopped or came back). */
   context(text: string): void;
+  /** his microphone's volume as the line hears it now (0..1, small for speech). */
+  level?(): number;
 }
 
 /**
@@ -88,6 +90,13 @@ export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
     id: () => convId ?? conv.getId?.(),
     say: (note) => conv.sendUserMessage(note),
     restartMic: () => catchMic(h.onMic, () => (conv as { changeInputDevice?: (o: object) => Promise<void> }).changeInputDevice?.({}) ?? Promise.resolve()),
+    level: () => {
+      try {
+        return (conv as { getInputVolume?: () => number }).getInputVolume?.() ?? 0;
+      } catch {
+        return 0;
+      }
+    },
     context: (text) => {
       try {
         conv.sendContextualUpdate(text);

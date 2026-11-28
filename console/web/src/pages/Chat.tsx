@@ -403,9 +403,30 @@ export function DeskPage({
   const [threadId, setThreadId] = useState<{ threadId?: string; environmentId?: string; ownServer?: boolean }>({});
   // with a Partner beside it, the desk's own Call takes no second language pick (one pick, shared by both).
   const call = useCallDock({ ...(callBase ? { base: callBase } : {}), ...(caller ? { callee: caller.callee, name: caller.name } : {}), ...(partner ? { noLang: true } : {}) });
+  // the phone directory's board line opens this page with ?call=partner: the Partner's call starts at once, then the flag leaves the URL.
+  const [deskParams, setDeskParams] = useSearchParams();
   const mate = useCallDock(
     partner
-      ? { base: partner.base, callee: partner.callee, name: partner.name, label: "Partner", where: partner.name, wide: true, hideUnavailable: true, hint: `${partner.name}: key results, where we are, what waits on you.` }
+      ? {
+          base: partner.base,
+          callee: partner.callee,
+          name: partner.name,
+          label: "Partner",
+          where: partner.name,
+          wide: true,
+          hideUnavailable: true,
+          hint: `${partner.name}: key results, where we are, what waits on you.`,
+          autoStart: deskParams.get("call") === "partner",
+          onAutoStart: () =>
+            setDeskParams(
+              (p) => {
+                const next = new URLSearchParams(p);
+                next.delete("call");
+                return next;
+              },
+              { replace: true },
+            ),
+        }
       : { base: "/api/voice/none", state: async () => undefined, hideUnavailable: true },
   );
   // a workspace on its own server and AI calls with the browser's own speech (never our voice key)

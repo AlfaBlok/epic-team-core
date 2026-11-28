@@ -26,6 +26,7 @@ import { lazyPage } from "@/lib/lazyPage";
 import { keptPart, loadCampaignHome, loadGoalSets, loadMobileMenu, prefetchSidebarScripts, useScriptIn } from "@/lib/sidebarScripts";
 import { milestoneName } from "@/lib/format";
 import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
+import { PhoneDirectory } from "@/voice/PhoneDirectory";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
 import { COMPANY_PATH } from "@/lib/company";
 import { GAP_FINDER_PATH, MARKETING_PATH, NEW_CAMPAIGN_PATH, OUTCOMES_PATH, PAGES_PATH, VOICE_NOTES_PATH, X_STATS_PATH } from "@/lib/routePaths";
@@ -1284,6 +1285,8 @@ export function Layout() {
           <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu" onClick={() => setMobileOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
+          {/* his phone directory, top left (the owner's note): everyone he can call, one tap each. */}
+          <PhoneDirectory />
           {/* the product's mark and name, as in the sidebar. */}
           {/* the mark is the way Home on a phone: the bar itself keeps only Inbox, Chat and the mic (vn_87528e51). */}
           {/* below 480 px (every phone, the widest is 430) the mark stands alone: with the back arrow, the menu and the
