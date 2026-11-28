@@ -222,7 +222,7 @@ import { mountProviders } from "./providers/routes.js";
 import { noticeRef, parseNoticeRef } from "./plug/marks.js";
 import { ensureAuth } from "./auth/schema.js";
 import { authModeFromEnv, credentialWorld, currentAuth, outsideRequest, runWithAuth, type AuthMode } from "./auth/identity.js";
-import { customerHosts, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
+import { customerHosts, doorLogins, mountAuth, requestHost, socialHosts } from "./auth/gate.js";
 import { customerLogins, mountOAuth, storeCreds } from "./auth/oauth.js";
 import { mountWorldGithub } from "./tenancy/worldGithub.js";
 import { socialHead, TEAM_HEAD } from "./brand.js";
@@ -276,7 +276,7 @@ import { driftLine, type DriftResult } from "./readModel/drift.js";
 import type { AnswerJobs } from "./inbox/answerJobs.js";
 import { viewWaiting, computeWaiting, computeStatus, type WaitingPayload } from "./readModel/views.js";
 import { sameRepo } from "./adapters/repoNames.js";
-import { homeRepo, homeWorld, type HostId, keyFile, mainHost, memoryName, ownerName, ownerPattern, sites as siteConfig, socialProduct, socialWorld, workerHost } from "./identity.js";
+import { homeRepo, homeWorld, type HostId, keyFile, mainHost, memoryName, ownerName, ownerPattern, platformWorld, sites as siteConfig, socialProduct, socialWorld, workerHost } from "./identity.js";
 import { identityIndex, originFile } from "./identityPage.js";
 import { chatCopyMessages, createRequestRows, hisMessages, requestsIn } from "./desk/requests.js";
 import { saidInAny, saidRequest, saidWords } from "./desk/said.js";
@@ -5029,10 +5029,29 @@ export function createApp(
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES ('eleven_onboarding_agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id),
           },
         }));
-  /** an EpicTeam customer workspace (never ours, never a social world): the only worlds with an onboarding call. */
+  /**
+   * the platform owner's own logins never get a stranger's onboarding call: a personal provider login that once made its own
+   * empty customer workspace must not lead him to a call that treats him as a new customer. A workspace whose owner is the
+   * platform's owner (a door login, a declared customer login or its provider email, or a member of the home world) has no
+   * onboarding call and no Call button on its Home.
+   */
+  const ownerEmails = () => {
+    const out = doorLogins(process.env);
+    for (const d of customerLogins(process.env)) out.add(d.email), out.add(d.login);
+    return out;
+  };
+  const ownedByPlatformOwner = (w: string): boolean => {
+    const owners = db.prepare("SELECT u.id, lower(u.email) email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ? AND m.role = 'owner'").all(w) as { id: string; email: string }[];
+    if (!owners.length) return false;
+    const mine = ownerEmails();
+    const home = new Set([DEFAULT_TENANT, platformWorld(process.env)]);
+    return owners.some((o) => mine.has(o.email) || (db.prepare("SELECT tenant_id FROM memberships WHERE user_id = ?").all(o.id) as { tenant_id: string }[]).some((m) => home.has(m.tenant_id)));
+  };
+  /** an EpicTeam customer workspace (never ours, never a social world, never one the owner himself owns): the only worlds with an onboarding call. */
   const teamWorkspace = (w: string) => {
     if (!w || w === DEFAULT_TENANT || !w.startsWith("et-")) return undefined;
-    return db.prepare("SELECT name, owner_name, owner_handle FROM tenants WHERE id = ? AND COALESCE(skin, '') <> 'social'").get(w) as { name?: string; owner_name?: string; owner_handle?: string } | undefined;
+    const t = db.prepare("SELECT name, owner_name, owner_handle FROM tenants WHERE id = ? AND COALESCE(skin, '') <> 'social'").get(w) as { name?: string; owner_name?: string; owner_handle?: string } | undefined;
+    return t && !ownedByPlatformOwner(w) ? t : undefined;
   };
   const ONBOARDING_ROOT = "docs/spines/root.md";
   /** the workspace's own objectives: its goals other than the root spine's Get set up. */
