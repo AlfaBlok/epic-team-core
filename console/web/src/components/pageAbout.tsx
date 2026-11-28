@@ -103,7 +103,7 @@ export function DeckAboutBlock({ a, code }: { a: DeckAbout; code: string }) {
   return (
     <Fold line={line} testId="deck-about">
       <li>
-        This page lives on {ownerName()}'s team console, {hostOf(sites().teamUrl)}. It is built from the spine{" "}
+        This page lives on {ownerName()}'s team console, {typeof location !== "undefined" && location.hostname ? location.hostname : hostOf(sites().teamUrl)}. It is built from the spine{" "}
         <a href={`${githubRepoUrl(a.repo)}/blob/main/${a.spinePath}`} target="_blank" rel="noreferrer" className="underline">
           {a.spinePath}
         </a>{" "}
@@ -164,7 +164,7 @@ export function RocksAboutBlock({ r }: { r: RocksAbout }) {
   return (
     <Fold line={line} testId="rocks-about">
       <li>
-        This board lives on {ownerName()}'s team console, {hostOf(sites().teamUrl)}. It is read from{" "}
+        This board lives on {ownerName()}'s team console, {typeof location !== "undefined" && location.hostname ? location.hostname : hostOf(sites().teamUrl)}. It is read from{" "}
         <a href={`${githubRepoUrl()}/blob/main/${r.file}`} target="_blank" rel="noreferrer" className="underline">
           {r.file}
         </a>{" "}

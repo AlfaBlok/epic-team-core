@@ -6,6 +6,7 @@ import { askItemId } from "../inbox/waiting.js";
 import type { Milestone, Store } from "../store.js";
 import { repoKey } from "../adapters/repoNames.js";
 import { homeWorld, ownerName, sites } from "../identity.js";
+import { teamLink } from "../notify/notice.js";
 
 /**
  * a `Monitoring:` item that names a stop or an outage (a 429, a rate limit, a logged-out account, an egress
@@ -262,5 +263,5 @@ export const refKey = (r: AskRef) => `${r.repo?.toLowerCase() ?? ""}/${r.code}`;
 /** The console origin serving a world: the team skin for the home world, the social skin for the others (none on staging). */
 export function worldHost(world: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (env.CONSOLE_STAGING === "1") return undefined;
-  return world === homeWorld() ? env.CONSOLE_TEAM_URL || sites().teamUrl : env.CONSOLE_SOCIAL_URL || sites().socialUrl;
+  return world === homeWorld() ? env.CONSOLE_TEAM_URL || teamLink(env) : env.CONSOLE_SOCIAL_URL || sites().socialUrl;
 }

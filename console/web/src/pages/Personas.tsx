@@ -80,6 +80,12 @@ export function PersonasPage() {
           These personas do not wake yet: {me.wakeHold}.
         </div>
       )}
+      {me?.wakeLimits && (
+        // this plan's limits, so the owner sees why a persona wakes less than it is set to
+        <div className="mb-3 rounded border p-3 text-sm" role="status" data-testid="wake-limits">
+          On this plan your team runs on {me.wakeLimits.model}. The campaign manager wakes at most twice a day, and the Publisher at most twice for each post.
+        </div>
+      )}
       {wa && personas && <WhatsAppSender view={wa} personas={personas} />}
       {error && <ErrorBox error={error} />}
       {loading && <Loading />}
@@ -94,7 +100,12 @@ export function PersonasPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{p.name}</span>
-                    <Badge variant="outline">{p.model}</Badge>
+                    <Badge variant="outline">{me?.wakeLimits ? me.wakeLimits.model : p.model}</Badge>
+                    {me?.wakeLimits?.personas[p.id] && (
+                      <Badge variant="secondary" data-testid="persona-wake-limit">
+                        {me.wakeLimits.personas[p.id]}
+                      </Badge>
+                    )}
                     {p.host === workerHost() && <Badge variant="outline">{workerHost()}</Badge>}
                     {p.mayWrite ? <Badge variant="amber">writes by default</Badge> : <Badge variant="gray">diagnose by default</Badge>}
                     {wa?.holder?.id === p.id && (

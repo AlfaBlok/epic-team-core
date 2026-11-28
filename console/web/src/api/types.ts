@@ -2138,6 +2138,8 @@ export interface Me {
   worlds: WorldMembership[];
   /** why this world's personas do not wake (no isolated box yet); absent = they wake. */
   wakeHold?: string;
+  /** a limited plan's plan limits: the model its AI runs on and a line per capped persona id. */
+  wakeLimits?: { model: string; personas: Record<string, string> };
   /** `awaiting_payment` for an EpicTeam sign-up's world until its plan is paid; absent = nothing to pay. */
   billing?: string;
   /**

@@ -45,3 +45,17 @@ describe("T59-S4 Personas page: the world wake gate's reason", () => {
     expect(screen.queryByTestId("wake-hold")).toBeNull();
   });
 });
+
+describe("Personas page: a limited plan's limits", () => {
+  it("shows the plan's model and the persona's wake limit; none without limits", async () => {
+    mount({ ...me("es-tina-1a2b"), wakeLimits: { model: "Haiku", personas: { pe_w: "at most 2 wakes a day" } } } as Me);
+    expect((await screen.findByTestId("wake-limits")).textContent).toContain("runs on Haiku");
+    expect((await screen.findByTestId("persona-wake-limit")).textContent).toBe("at most 2 wakes a day");
+    expect(screen.getByText("Haiku")).toBeTruthy();
+    cleanup();
+    mount(me("acme"));
+    expect(await screen.findByText("Writer")).toBeTruthy();
+    expect(screen.queryByTestId("wake-limits")).toBeNull();
+    expect(screen.queryByTestId("persona-wake-limit")).toBeNull();
+  });
+});

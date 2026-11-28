@@ -13,6 +13,7 @@ import { FOCUS_MAX, INBOX_WALK_MAX, briefingRule, focusGreeting, focusPack, inbo
 import type { CallCheck } from "./afterCall.js";
 import { ELEVEN_MODEL_LABEL, ELEVEN_TURN_TIMEOUT_S, type CallLang, type ElevenCalls } from "./elevenAgent.js";
 import { spanishGreeting, spanishInstructions } from "./spanish.js";
+import { teamLink } from "../notify/notice.js";
 
 /**
  * "Call the desk". the owner talks to OpenAI's realtime voice model straight from his browser (WebRTC);
@@ -94,7 +95,7 @@ export const callWholeNote = () =>
 /** the client request id of a call's whole-call post (one per call: a retry or the catch-up never posts it twice). */
 export const wholeCallRequestId = (callId: string) => `voice-transcript-whole-${callId}`;
 /** where the whole transcript of a call reads on the console (the post links it). */
-export const callTranscriptUrl = (callId: string) => `${sites().teamUrl.replace(/\/+$/, "")}/api/voice/calls/${callId}/transcript`;
+export const callTranscriptUrl = (callId: string) => `${teamLink().replace(/\/+$/, "")}/api/voice/calls/${callId}/transcript`;
 
 export type CallLine = { who: string; text: string; feedback?: string };
 /** One note a call passed on live with its relay tool (his words, short), kept on the call (voice_calls.relays). */

@@ -213,7 +213,7 @@ async function send<T>(method: string, path: string, body: unknown, form: boolea
     }
     // with CONSOLE_AUTH=on a lapsed session answers 401 login_required: back to the login page, then here again.
     if (res.status === 401 && code === "login_required" && !worldSwitching.on && typeof window !== "undefined" && window.location.pathname !== "/login")
-      window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`);
     throw new ApiError(res.status, msg, code, issues, TRANSIENT_STATUS.has(res.status) && !fromConsole, world);
   }
   // a read the service worker answered with its saved copy marks the screen until a fresh one lands
@@ -246,7 +246,7 @@ export function uploadWithProgress<T>(path: string, body: Blob, headers: Record<
       const code = typeof j?.error?.code === "string" ? j.error.code : undefined;
       const msg = j?.error ? (typeof j.error === "string" ? j.error : String(j.error.message ?? j.error.code)) : `POST /api${path} → ${x.status}`;
       if (x.status === 401 && code === "login_required" && typeof window !== "undefined" && window.location.pathname !== "/login")
-        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`);
       fail(new ApiError(x.status, msg, code, undefined, TRANSIENT_STATUS.has(x.status) && !j?.error));
     };
     x.onerror = () => fail(new TypeError("the upload did not reach the console (network)"));

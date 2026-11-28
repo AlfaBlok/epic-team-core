@@ -1997,7 +1997,7 @@ export function WaitingOnYou({
   }
   // vn_e00f1134: an ask he answered stays where it was, as its green Sent row, after the refetch drops it
   const placeKey = `blocked:${milestoneId ?? nodeKey ?? "all"}:${part ?? "all"}`;
-  const keptRows = useKeepSent(openRows, (r) => (r.card ? `ask:${r.card.id}` : `status:${r.status!.id}`), `${placeKey}:rows`);
+  const keptRows = useKeepSent(openRows, (r) => (r.card ? `ask:${r.card.id}` : `status:${r.status!.id}`), `${placeKey}:rows`, (r) => r.card?.since ?? r.status?.since);
   const keptBlocking = useKeepSent(blocking, (i) => `ask:${i.id}`, `${placeKey}:blocking`);
   const blockedBy = useRef(new Map<string, string>());
   const byPersona = new Map<string, { slot: string; item?: WaitingItem; sent?: SentEntry }[]>();

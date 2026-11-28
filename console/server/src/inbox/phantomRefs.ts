@@ -1,4 +1,5 @@
 import { ownerName, sites } from "../identity.js";
+import { teamLink } from "../notify/notice.js";
 
 /**
  * E996-S29 (the owner, on T9-A10: "HOW CAN I HAVE SOME TEXT REFERRING TO A PASTE IN A BOX THAT DOESN'T EXIST"): an ask or
@@ -113,8 +114,9 @@ export function stepTexts(html: string): { step: string; text: string }[] {
 export function phantomBoxSteps(html: string, withBox: Set<string>, boxedUrls: Set<string> = new Set()): string[] {
   if (withBox.size) return [];
   const team = sites().teamUrl.replace(/\/+$/, "");
+  const link = teamLink().replace(/\/+$/, ""); // the console on the address the owner's links go to
   const elsewhere = (t: string) =>
-    T3_SECRET_CARD.test(t) || (!!team && t.includes(team)) || [...t.matchAll(/https?:\/\/[^\s"'<>)]+/g)].some((m) => boxedUrls.has(m[0].replace(/[.,;]+$/, "")));
+    T3_SECRET_CARD.test(t) || (!!team && t.includes(team)) || (!!link && t.includes(link)) || [...t.matchAll(/https?:\/\/[^\s"'<>)]+/g)].some((m) => boxedUrls.has(m[0].replace(/[.,;]+$/, "")));
   return stepTexts(html)
     .filter((s) => NAMES_KEY_BOX.test(s.text) && !elsewhere(s.text))
     .map((s) => s.step);

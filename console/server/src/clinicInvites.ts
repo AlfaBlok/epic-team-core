@@ -82,7 +82,8 @@ export const normalEmail = (v: unknown): string | undefined => {
   return e.length <= 120 && EMAIL.test(e) ? e : undefined;
 };
 
-export function inviteMail(c: Pick<Clinic, "clinic" | "sales" | "receptionist">, link: string): { subject: string; text: string; html: string } {
+export function inviteMail(c: Pick<Clinic, "clinic" | "sales" | "receptionist" | "lang">, link: string): { subject: string; text: string; html: string } {
+  if (c.lang === "en") return inviteMailEn(c, link);
   const who = c.receptionist ?? "nuestra recepcionista";
   const company = c.sales?.company ?? c.clinic;
   const subject = `Su invitación: hable con ${who}, la recepcionista por voz de ${company}`;
@@ -103,6 +104,27 @@ export function inviteMail(c: Pick<Clinic, "clinic" | "sales" | "receptionist">,
   return { subject, text: lines.join("\n"), html };
 }
 
+/** the invite mail in English (the Irish demo). */
+export function inviteMailEn(c: Pick<Clinic, "clinic" | "sales" | "receptionist">, link: string): { subject: string; text: string; html: string } {
+  const who = c.receptionist ?? "our receptionist";
+  const company = c.sales?.company ?? c.clinic;
+  const subject = `Your invite: hear ${who} answer, the AI receptionist from ${company}`;
+  const p = [
+    `Here is your invite to try our AI receptionist live. Open the link, press the button and talk to ${who} the way a patient would, or ask what it would cost for your clinic.`,
+    `The link is yours alone and works for ${INVITE_DAYS} days. You need a microphone; we never keep the audio.`,
+    "If you did not ask for this, ignore this email: we will not write again.",
+  ];
+  const text = ["Hello,", "", p[0], "", link, "", p[1], "", p[2], "", `The ${company} team`].join("\n");
+  const html = `<p>Hello,</p><p>${esc(p[0])}</p><p><a href="${esc(link)}">Talk to ${esc(who)}</a></p><p>${esc(p[1])}</p><p>${esc(p[2])}</p><p>The ${esc(company)} team</p>`;
+  return { subject, text, html };
+}
+
+/** the mail's sender shown as the product's own name (never the company behind it), on the configured address. */
+export const senderAs = (from: string, c: Pick<Clinic, "sales" | "clinic">) => {
+  const addr = (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
+  return addr ? `${(c.sales?.company ?? c.clinic).replace(/[<>"]/g, "")} <${addr}>` : from;
+};
+
 export function createInvites(d: InviteDeps) {
   const { db } = d;
   ensureInviteTables(db);
@@ -110,7 +132,7 @@ export function createInvites(d: InviteDeps) {
   const iso = () => new Date(now()).toISOString();
   const base = (d.base ?? process.env.CONSOLE_CLINIC_DEMO_URL ?? sites().clinicDemoUrl).replace(/\/$/, "");
   const from = d.from ?? process.env.CONSOLE_INVITE_FROM ?? sites().clinicInviteFrom;
-  const link = (i: Pick<Invite, "slug" | "token">) => `${base}/api/public/clinic/${i.slug}?i=${i.token}`;
+  const link = (i: Pick<Invite, "slug" | "token">, c?: Pick<Clinic, "site">) => (c?.site ? `${c.site.replace(/\/$/, "")}?i=${i.token}` : `${base}/api/public/clinic/${i.slug}?i=${i.token}`);
   const get = (slug: string, email: string) => db.prepare("SELECT * FROM clinic_invites WHERE slug = ? AND email = ?").get(slug, email) as Invite | undefined;
   const make = (slug: string, email: string, via: Invite["via"]): Invite => {
     const have = get(slug, email);
@@ -123,11 +145,11 @@ export function createInvites(d: InviteDeps) {
   const mail = async (c: Clinic, i: Invite): Promise<string> => {
     let outcome: string;
     if (i.mailed_at && now() - Date.parse(i.mailed_at) < 86_400_000) return "sent today already";
-    if (!d.send || !from || !base) outcome = "held: no mail sender";
+    if (!d.send || !from || (!base && !c.site)) outcome = "held: no mail sender";
     else if (mailsToday() >= MAILS_PER_DAY) outcome = "held: day cap";
     else {
-      const m = inviteMail(c, link(i));
-      const r = await d.send({ from, to: i.email, ...m }).catch((e) => ({ ok: false as const, message: (e as Error).message }));
+      const m = inviteMail(c, link(i, c));
+      const r = await d.send({ from: senderAs(from, c), to: i.email, ...m }).catch((e) => ({ ok: false as const, message: (e as Error).message }));
       outcome = r.ok ? `sent${r.id ? ` ${r.id}` : ""}` : `failed: ${r.message.slice(0, 120)}`;
     }
     db.prepare("UPDATE clinic_invites SET mail = ?, mailed_at = CASE WHEN ? LIKE 'sent%' THEN ? ELSE mailed_at END WHERE token = ?").run(outcome, outcome, iso(), i.token);
@@ -155,7 +177,7 @@ export function createInvites(d: InviteDeps) {
       const i = make(c.slug, email, "team");
       const out = send ? await mail(c, i) : undefined;
       const now_ = get(c.slug, email)!;
-      return { invite: now_, link: link(now_), ...(out ? { mail: out } : {}) };
+      return { invite: now_, link: link(now_, c), ...(out ? { mail: out } : {}) };
     },
     revoke(token: string) {
       return db.prepare("UPDATE clinic_invites SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL").run(iso(), token).changes > 0;
@@ -197,6 +219,7 @@ export function mountInvites(api: Hono, x: Invites, clinic: (slug: string) => Cl
     c.header("x-robots-tag", "noindex");
     const cl = clinic(c.req.param("slug") ?? "");
     if (!cl || !gated(cl)) return c.json({ error: { code: "not_found", message: "No hay ninguna demo con ese nombre." } }, 404);
+    const en = cl.lang === "en";
     const t = await c.req.text().catch(() => "");
     let b: any = {};
     try {
@@ -206,8 +229,8 @@ export function mountInvites(api: Hono, x: Invites, clinic: (slug: string) => Cl
     }
     if (b.web) return c.json({ ok: true }); // the hidden box only robots fill
     const r = await x.request(cl, b.email, clientAddress(peerOf(c), (h) => c.req.header(h)));
-    if (r.reason === "bad_email") return c.json({ error: { code: "bad_email", message: "Revise el correo: no parece una dirección válida." } }, 400);
-    if (r.reason === "too_many") return c.json({ error: { code: "too_many", message: "Ya ha pedido varias invitaciones. Vuelva a probar dentro de una hora." } }, 429);
+    if (r.reason === "bad_email") return c.json({ error: { code: "bad_email", message: en ? "Check the email: it does not look like an address." : "Revise el correo: no parece una dirección válida." } }, 400);
+    if (r.reason === "too_many") return c.json({ error: { code: "too_many", message: en ? "You have asked for several invites. Try again in an hour." : "Ya ha pedido varias invitaciones. Vuelva a probar dentro de una hora." } }, 429);
     return c.json({ ok: true });
   });
   api.get("/clinic-demo/invites", (c) => c.json({ invites: x.list() }));
@@ -224,6 +247,7 @@ export function mountInvites(api: Hono, x: Invites, clinic: (slug: string) => Cl
 
 /** the page a visitor from the internet sees without an invite: what it is, and the email box that brings one. */
 export function invitePage(c: Clinic, o: { bad?: boolean } = {}): string {
+  if (c.lang === "en") return invitePageEn(c, o);
   const s = c.sales;
   const who = c.receptionist ?? "nuestra recepcionista";
   return `<!doctype html>
@@ -274,4 +298,25 @@ f.onsubmit = async (e) => {
   } catch (err) { m.textContent = err.message; b.disabled = false; }
 };
 </script></body></html>`;
+}
+
+/** the English invite page (the Irish demo): what it is, and the email box that brings the invite. */
+export function invitePageEn(c: Clinic, o: { bad?: boolean } = {}): string {
+  const s = c.sales;
+  const who = c.receptionist ?? "our receptionist";
+  return invitePage({ ...c, lang: undefined }, o)
+    .replace('<html lang="es">', '<html lang="en-IE">')
+    .replace(/<title>.*?<\/title>/, `<title>Get your invite · ${esc(s?.company ?? c.clinic)}</title>`)
+    .replace(/<span class="tag">.*?<\/span>/, `<span class="tag">Demo by invite${s ? ` · ${esc(s.company)}` : ""}</span>`)
+    .replace(/<h1>.*?<\/h1>/, `<h1>Hear ${esc(who)}, our AI receptionist, answer the phone</h1>`)
+    .replace(/<p class="punch">.*?<\/p>/, `<p class="punch">The live demo works by invite. Leave your email and we send you your own link.</p>`)
+    .replace(/<div class="flow" aria-hidden="true">.*?<\/div>/, `<div class="flow" aria-hidden="true"><span>Your email</span><i>→</i><span>Your invite</span><i>→</i><span>Talk to ${esc(who)}</span></div>`)
+    .replace('<label for="email">Su correo</label>', '<label for="email">Your email</label>')
+    .replace('placeholder="Su correo"', 'placeholder="Your email"')
+    .replace(">Recibir mi invitación<", ">Send my invite<")
+    .replace("Este enlace de invitación no es válido o ha caducado. Pida uno nuevo.", "This invite link is not valid or has expired. Ask for a new one.")
+    .replace(/<p class="small" style="margin-top:28px">.*?<\/p>/, `<p class="small" style="margin-top:28px">Each invite is for one email and works for ${INVITE_DAYS} days. We use your email only to send the link.</p>`)
+    .replace('"Enviando…"', '"Sending…"')
+    .replace('"No se pudo enviar. Pruebe otra vez."', '"Could not send. Try again."')
+    .replace('"Listo. Le hemos enviado su invitación a " + f.email.value + ". Mire también en correo no deseado."', '"Done. Your invite is on its way to " + f.email.value + ". Check your spam folder too."');
 }

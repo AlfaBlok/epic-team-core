@@ -90,8 +90,14 @@ export interface Clinic {
   /** the set-up call that set them (its id in the console's clinic calls). */
   objectivesFromCall?: string;
   objectivesAt?: string;
-  /** the language its receptionist speaks (default Spanish); a Catalan one runs on its own agent (clinicIntake.ts). */
-  lang?: "es" | "ca";
+  /** the language its receptionist speaks (default Spanish); a Catalan one runs on its own agent (clinicIntake.ts); an
+   * English one (the Irish demo) gets its prompt, tools, page and invite mail in English. */
+  lang?: "es" | "ca" | "en";
+  /** the public address of its call page (its invite links open here), when it is not the console's default demo address. */
+  site?: string;
+  /** an accent its voice should have (e.g. irish): the console picks a voice with it from the ElevenLabs voice library,
+   * one at no extra cost, and keeps the default voice when none is found. */
+  voiceAccent?: string;
   /** what kind of practice it is, in its own words (default: una clínica dental). */
   kind?: string;
   /** a clinic set up from a Catalan call answers its own try calls until this day, before any plan (clinicIntake.ts). */
@@ -125,7 +131,9 @@ export const clinicIn = z.object({
     .optional(),
   objectivesFromCall: z.string().max(60).optional(),
   objectivesAt: z.string().max(40).optional(),
-  lang: z.enum(["es", "ca"]).optional(),
+  lang: z.enum(["es", "ca", "en"]).optional(),
+  site: z.string().url().max(200).optional(),
+  voiceAccent: z.string().regex(/^[a-z]{3,20}$/).optional(),
   kind: z.string().min(3).max(80).optional(),
   tryUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   fromCall: z.string().max(60).optional(),
@@ -229,9 +237,31 @@ const CA_WORDS: [RegExp, string][] = [
   [/\bdesembre\b/g, "diciembre"],
 ];
 const fromCatalan = (t: string) => CA_WORDS.reduce((x, [re, to]) => x.replace(re, to), t);
+/** English day and month words as the Spanish ones parseDay reads (the Irish demo's receptionist passes the day as said). */
+const EN_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const EN_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const EN_WORDS: [RegExp, string][] = [
+  [/\bthe day after tomorrow\b/g, "pasado manana"],
+  [/\bday after tomorrow\b/g, "pasado manana"],
+  [/\btomorrow\b/g, "manana"],
+  [/\btoday\b/g, "hoy"],
+  [/\b(\d{1,2})(?:st|nd|rd|th)\b/g, "$1"],
+  [/\bof\b/g, "de"],
+  [/\bnext\b/g, "que viene"],
+  [/\b(morning)\b/g, "manana"],
+  [/\b(afternoon|evening)\b/g, "tarde"],
+  ...EN_DAYS.map((d, i) => [new RegExp(`\\b${d}\\b`, "g"), plain(WEEKDAYS[i])] as [RegExp, string]),
+  ...EN_MONTHS.map((m, i) => [new RegExp(`\\b${m}\\b`, "g"), MONTHS[i]] as [RegExp, string]),
+];
+export const fromEnglish = (t: string) => {
+  let x = EN_WORDS.reduce((y, [re, to]) => y.replace(re, to), t);
+  // "december 3" said month first
+  x = x.replace(new RegExp(`\\b(${MONTHS.join("|")})\\s+(\\d{1,2})\\b`), "$2 de $1");
+  return x;
+};
 
 export function parseDay(said: string, now: number): string | undefined {
-  const t = fromCatalan(plain(said));
+  const t = fromEnglish(fromCatalan(plain(said)));
   const today = madridToday(now);
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
   if (/pasado manana/.test(t)) return addDays(today.iso, 2);
@@ -282,10 +312,16 @@ export function freeSlots(c: Clinic, date: string, taken: Set<string>, now: numb
   return out;
 }
 
-function sayDate(iso: string): string {
+function sayDate(iso: string, en = false): string {
   const d = new Date(`${iso}T12:00:00Z`);
+  if (en) return `${EN_DAYS[d.getUTCDay()][0].toUpperCase()}${EN_DAYS[d.getUTCDay()].slice(1)} ${d.getUTCDate()} ${EN_MONTHS[d.getUTCMonth()][0].toUpperCase()}${EN_MONTHS[d.getUTCMonth()].slice(1)}`;
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} de ${MONTHS[d.getUTCMonth()]}`;
 }
+/** the config's weekday key (lunes …) in English, for an English clinic's prompt and page. */
+export const dayEn = (d: string) => {
+  const i = WEEKDAYS.indexOf(d);
+  return i < 0 ? d : `${EN_DAYS[i][0].toUpperCase()}${EN_DAYS[i].slice(1)}`;
+};
 
 // ---------- the agent ----------
 
@@ -293,6 +329,12 @@ export const clinicAgentName = (c: Clinic) => `Recepcionista · ${c.clinic} (${c
 
 export function clinicGreeting(c: Clinic): string {
   if (c.greeting) return c.greeting;
+  if (c.lang === "en") {
+    const r = c.receptionist ?? "the receptionist";
+    return c.sales
+      ? `Hello, ${c.clinic}, you're through to ${r}. I'm the AI receptionist from ${c.sales.company}, and this is a live demo. Are you calling as a patient, or to hear how this would work for your clinic?`
+      : `Hello, ${c.clinic}, ${r} speaking. How can I help?`;
+  }
   const who = c.receptionist ?? "la recepcionista";
   if (c.sales)
     return `Hola, soy ${who}, una recepcionista de inteligencia artificial de ${c.sales.company}, y esto es una demostración en directo en ${c.clinic}, una clínica inventada. ¿Llama como paciente para pedir cita, o quiere saber cómo funcionaría en su clínica?`;
@@ -301,12 +343,13 @@ export function clinicGreeting(c: Clinic): string {
 }
 
 /** the language a clinic's receptionist speaks. */
-export const clinicLang = (c: Clinic): "es" | "ca" => (c.lang === "ca" ? "ca" : "es");
+export const clinicLang = (c: Clinic): CallLang => (c.lang === "ca" ? "ca" : c.lang === "en" ? "en" : "es");
 /** a clinic set up from a Catalan call answers its try calls until its tryUntil day (Madrid's date). */
 export const inTry = (c: Clinic, now: number) => !!c.tryUntil && madridToday(now).iso <= c.tryUntil;
 
 /** the receptionist's instructions, in Spanish, made from the clinic's config only. */
 export function clinicPrompt(c: Clinic): string {
+  if (c.lang === "en") return clinicPromptEn(c);
   const who = c.receptionist ?? "la recepcionista";
   const hours = WEEKDAYS.slice(1)
     .concat(WEEKDAYS[0])
@@ -377,7 +420,115 @@ export function clinicPrompt(c: Clinic): string {
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 
-export const CLINIC_TOOLS = (c: Clinic) => [
+/** the receptionist's instructions in English (an Irish clinic), made from the clinic's config only. */
+export function clinicPromptEn(c: Clinic): string {
+  const who = c.receptionist ?? "the receptionist";
+  const hours = WEEKDAYS.slice(1)
+    .concat(WEEKDAYS[0])
+    .map((d) => `- ${dayEn(d)}: ${(c.hours[d] ?? []).length ? c.hours[d].map((r) => r.replace("-", " to ")).join(" and ") : "closed"}`)
+    .join("\n");
+  const services = c.services.map((s) => `- ${s.name}: ${s.price}${s.minutes ? ` (${s.minutes} minutes)` : ""}`).join("\n");
+  const out = [
+    `You are ${who}, the voice receptionist of ${c.clinic}, ${c.kind ?? "a dental practice"} in ${c.city}${c.address ? ` (${c.address})` : ""}, Ireland. You speak warm, natural Irish English in short sentences, friendly and professional. You answer every call to the practice: you are its phone line, not an answering machine.`,
+    c.madeUp ? "This practice is a demo: its patients, appointments and prices are made up. If asked, say so naturally." : "",
+    "",
+    "# What you know about the practice (only this)",
+    "Opening hours:",
+    hours,
+    "Treatments and prices:",
+    services,
+    c.insurers?.length ? `Schemes and insurers: ${c.insurers.join(", ")}.` : "",
+    c.dentists?.length ? `Dentists: ${c.dentists.join(", ")}.` : "",
+    ...(c.notes ?? []),
+    ...(c.objectives?.length
+      ? ["", "# What the practice wants from you", ...c.objectives.map((o, i) => `${i + 1}. ${sayObjective(o)}`), "Keep it in mind on every call. Never read it out or push anyone with it."]
+      : []),
+    "",
+    "# How you look after a patient",
+    "1. Ask what they need. If they do not know the treatment, offer a check-up.",
+    "2. Ask which day suits and call free_slots with the day as they say it (for example \"Tuesday\", \"tomorrow\", \"3 December\"). Offer at most three of the times it returns. Never make up a free time.",
+    "3. When they pick a time, ask their name and call book_appointment with the name, the treatment, the date (the one free_slots returned, YYYY-MM-DD) and the time. Then repeat the day, time and treatment in one sentence.",
+    "4. To change or cancel an appointment, take their name and the appointment they have, and file a ticket for the front desk unless you booked it on this call.",
+    "5. Prices, hours, schemes, insurance and directions: only what is above. If you do not know, say so and file a ticket so the team rings back.",
+    "Never give medical advice or say what a pain means. In a serious emergency (heavy bleeding, swelling that makes breathing hard, a hard knock to the face) tell them to ring 999 or 112. If they are in pain, offer the first free emergency slot.",
+    "Never ask for medical details, PPS numbers or card details.",
+  ];
+  if (c.sales) {
+    const s = c.sales;
+    out.push(
+      "",
+      `# If the caller owns or runs a clinic (the ${s.company} demo)`,
+      `You are the product: what they just heard is what their clinic would have. You become the clinic's phone line: you pick up every call, turn each into a booking, a lead or a task for the staff, and put the calls that matter through to their people. In your first answer say what it is in one sentence and the price and free trial in another; never ask whether they want the price, say it. Then answer what they ask, one thing at a time:`,
+      `- What it is: ${s.what}`,
+      `- Price: ${s.price}.${s.priceWhatsappOnly ? ` WhatsApp only: ${s.priceWhatsappOnly}.` : ""}`,
+      `- Trial: ${s.trialDays} days free on their own number.`,
+      `- Setting up: ${s.setup}`,
+      s.terms ? `- ${s.terms}` : "",
+      "Say only what it does, never results: never promise more patients, fewer no-shows or any figure, because no clinic has used it yet. If they ask for something not here (their practice software, data protection), say the team will cover it on the follow-up call.",
+      `To follow up: offer ${s.followUp}. Ask their name, their clinic, a phone or email and when suits, and call book_follow_up. A name and a phone or email is enough: if you miss a detail, ask once, then note what you have. Then confirm in one sentence that the team will be in touch.`,
+      "If they want to try it as a patient, switch to the receptionist role and look after them as a patient.",
+      "",
+      "# Who is calling and what they need (for the team)",
+      "When you see they are calling for a clinic, ask once and naturally who you are speaking with: the owner or practice manager, the front desk, or someone else, and which clinic and town.",
+      "Before saying goodbye to someone from a clinic, call qualify_lead once with who they are, their clinic and town, what they asked, what they need (in their words, short) and their answer: yes, maybe or no. Do not say it out loud: it is a note for the team. If you do not know something, put \"not said\".",
+    );
+  }
+  out.push(
+    "",
+    "# What you cannot sort out on the call",
+    "If they want something you cannot do (a question whose answer is not above, a person to ring them, a change to an appointment you did not book, a complaint, a quote), never leave it hanging: call file_ticket with what they need in one sentence, who they are (patient, clinic or other) and, if they give it, a phone or email. Then say exactly the sentence it returns: it is the practice's promise; never promise anything else or another day.",
+    "",
+    "# How you speak",
+    "One or two sentences a turn. No long lists or long numbers. Never interrupt.",
+    `When they say goodbye (bye, thanks, that's all), say goodbye in one sentence${c.sales ? ", call qualify_lead if they are from a clinic and you have not," : ""} and call end_call, even if a detail is missing: never keep them.`,
+  );
+  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
+}
+
+const CLINIC_TOOLS_EN = (c: Clinic) => [
+  {
+    name: "file_ticket",
+    description: "Puts something you cannot sort out on the call on the practice's task list. Returns the promise sentence you must say.",
+    parameters: { properties: { need: { type: "string", description: "what the person needs, in one sentence" }, who: { type: "string", description: "patient, clinic or other" }, contact: { type: "string", description: "optional: their phone or email if they give it" } }, required: ["need"] },
+  },
+  {
+    name: "free_slots",
+    description: "The practice's free times on a day. Pass the day as the person says it (today, tomorrow, Tuesday, 3 December) or a date YYYY-MM-DD.",
+    parameters: { properties: { day: { type: "string", description: "the day the person asks for" }, part: { type: "string", description: "optional: morning or afternoon" } }, required: ["day"] },
+  },
+  {
+    name: "book_appointment",
+    description: "Books a patient into a free time that free_slots returned.",
+    parameters: { properties: { name: { type: "string", description: "the patient's name" }, service: { type: "string", description: "the treatment" }, date: { type: "string", description: "the date YYYY-MM-DD" }, time: { type: "string", description: "the time HH:MM" } }, required: ["name", "service", "date", "time"] },
+  },
+  ...(c.sales
+    ? [
+        {
+          name: "book_follow_up",
+          description: "Notes the follow-up call with the team for an interested clinic.",
+          parameters: { properties: { name: { type: "string", description: "the person's name" }, clinic: { type: "string", description: "their clinic" }, contact: { type: "string", description: "their phone or email" }, when: { type: "string", description: "when suits for the call" } }, required: ["name", "contact"] },
+        },
+        {
+          name: "qualify_lead",
+          description: "A note for the team, once per call with someone from a clinic: who they are, what they asked, what they need and their answer. Never said out loud.",
+          parameters: {
+            properties: {
+              who: { type: "string", description: "who answered: owner or practice manager, receptionist, or someone else with their role" },
+              clinic: { type: "string", description: "their clinic's name, if said" },
+              city: { type: "string", description: "their town, if said" },
+              asks: { type: "string", description: "what they asked, short" },
+              needs: { type: "string", description: "what their clinic needs, in their words, short" },
+              answer: { type: "string", description: "yes, maybe or no: whether they want to go on" },
+            },
+            required: ["who", "needs"],
+          },
+        },
+      ]
+    : []),
+];
+
+export const CLINIC_TOOLS = (c: Clinic) => (c.lang === "en" ? CLINIC_TOOLS_EN(c) : CLINIC_TOOLS_ES(c));
+const CLINIC_TOOLS_ES = (c: Clinic) => [
   {
     name: "file_ticket",
     description: "Apunta en la lista de pendientes de la clínica algo que no puedes resolver en la llamada. Devuelve la frase con la promesa que debes decir.",
@@ -444,9 +595,10 @@ export const CLINIC_TOOLS = (c: Clinic) => [
 
 /** the agent as made on the account: Spanish, multilingual voice, end_call only on a goodbye, a short call, no
  * overrides (the public page can never change what it says) and signed links only. */
-export function clinicAgentBody(c: Pick<Clinic, "voiceId">, maxS: number = CLINIC_CALL_MAX_S, endCall = "Termina la llamada cuando la persona se despide, después de una despedida corta.") {
+export function clinicAgentBody(c: Pick<Clinic, "voiceId"> & { lang?: Clinic["lang"] }, maxS: number = CLINIC_CALL_MAX_S, endCall = "Termina la llamada cuando la persona se despide, después de una despedida corta.") {
+  if (c.lang === "en" && endCall.startsWith("Termina")) endCall = "End the call when the person says goodbye, after a short goodbye.";
   return (prompt: string, firstMessage: string, tools: Parameters<typeof agentBody>[2], name?: string, tags?: string[], lang: CallLang = "es") => {
-    const b = agentBody(prompt, firstMessage, tools, name, tags, lang === "en" ? "es" : lang);
+    const b = agentBody(prompt, firstMessage, tools, name, tags, c.lang === "en" ? "en" : lang === "en" ? "es" : lang);
     const agent = b.conversation_config.agent;
     agent.prompt.tools = agent.prompt.tools.map((t: any) =>
       t.type === "system" ? { ...t, description: endCall } : { ...t, response_timeout_secs: 20 },
@@ -546,11 +698,33 @@ export function createClinicDemo(d: ClinicDeps) {
   ensureClinicPlans(db);
   const now = d.now ?? Date.now;
   const doors = new Map<string, ElevenCalls>();
-  // one door per clinic and skin; a changed prompt (new objectives) makes a new door, which brings the agent in step.
-  const door = (c: Clinic, kind: ClinicCallKind = "reception") => {
+  const setting = (k: string) => (db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(k) as { value: string } | undefined)?.value;
+  const setSetting = (k: string, v: string) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, v);
+  const finding = new Set<string>();
+  // a clinic whose voice should have an accent (the Irish demo): the voice found once in the ElevenLabs voice library and
+  // kept as `<voice id>|<name>`; until then (or when none is found, tried again after a day) the default voice speaks.
+  const accentVoice = (c: Clinic): string | undefined => {
+    if (c.voiceId || !c.voiceAccent || d.eleven) return c.voiceId;
+    const k = `eleven_voice_accent_${c.voiceAccent}`;
+    const have = setting(k);
+    if (have && !have.startsWith("none|")) return have.split("|")[0];
+    if (have && now() - Number(have.split("|")[1] ?? 0) < 86_400_000) return undefined;
+    if (!finding.has(k)) {
+      finding.add(k);
+      void findAccentVoice(d.key, c.voiceAccent, clinicLang(c))
+        .then((v) => setSetting(k, v ? `${v.id}|${v.name}` : `none|${now()}|no free voice with that accent`))
+        .catch((e) => setSetting(k, `none|${now()}|${(e as Error).message.slice(0, 120)}`))
+        .finally(() => finding.delete(k));
+    }
+    return undefined;
+  };
+  // one door per clinic and skin; a changed prompt (new objectives) or voice makes a new door, which brings the agent in step.
+  const door = (c0: Clinic, kind: ClinicCallKind = "reception") => {
+    const voice = accentVoice(c0);
+    const c: Clinic = voice ? { ...c0, voiceId: voice } : c0;
     const setup = kind === "setup";
     const prompt = setup ? setupPrompt(c) : clinicPrompt(c);
-    const at = `${c.slug}|${kind}|${crypto.createHash("sha256").update(prompt).digest("hex").slice(0, 12)}`;
+    const at = `${c.slug}|${kind}|${crypto.createHash("sha256").update(`${prompt}|${c.voiceId ?? ""}`).digest("hex").slice(0, 12)}`;
     let x = doors.get(at);
     if (!x) {
       const k = setup ? `eleven_clinic_setup_${c.slug}_agent_id` : `eleven_clinic_${c.slug}_agent_id`;
@@ -564,6 +738,7 @@ export function createClinicDemo(d: ClinicDeps) {
           firstMessage: () => (setup ? setupGreeting(c) : clinicGreeting(c)),
           tools: () => (setup ? SETUP_TOOLS : CLINIC_TOOLS(c)) as any,
           body: clinicAgentBody(c, setup ? CLINIC_SETUP_MAX_S : CLINIC_CALL_MAX_S),
+          knownLang: clinicLang(c),
           known: {
             get: () => (db.prepare("SELECT value FROM voice_settings WHERE key = ?").get(k) as { value: string } | undefined)?.value,
             set: (id) => void db.prepare("INSERT INTO voice_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, id),
@@ -629,6 +804,8 @@ export function createClinicDemo(d: ClinicDeps) {
   return {
     clinic,
     list: () => [...d.clinics().values()],
+    /** the voice an accented clinic speaks with: the library voice found, or why the default speaks. */
+    voiceOf: (c: Clinic) => (c.voiceAccent ? (setting(`eleven_voice_accent_${c.voiceAccent}`) ?? "looking") : c.voiceId ?? "default"),
     /** one scan per open of the call page, with the letter's code when the link carries one (?c=). */
     scan(slug: string, code: string | undefined, addr: string) {
       clinic(slug);
@@ -675,27 +852,29 @@ export function createClinicDemo(d: ClinicDeps) {
       if (r.tools >= TOOLS_PER_CALL * (r.kind === "setup" ? 2 : 1)) return { result: "No puedo hacer más gestiones en esta llamada." };
       db.prepare("UPDATE clinic_calls SET tools = tools + 1 WHERE id = ?").run(id);
       if (r.kind === "setup") return setupTool(c, id, name, args);
+      const en = c.lang === "en";
+      const L = (es: string, e: string) => (en ? e : es);
       const s = (k: string) => String(args[k] ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
       const booked = () => (db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ?").get(id) as { n: number }).n;
       if (name === "free_slots") {
         const date = parseDay(s("day"), now());
-        if (!date) return { result: `No he entendido el día "${s("day")}". Pide el día de la semana o la fecha.` };
-        if (date < madridToday(now()).iso) return { result: "Ese día ya ha pasado. Pide otro día." };
+        if (!date) return { result: L(`No he entendido el día "${s("day")}". Pide el día de la semana o la fecha.`, `I did not understand the day "${s("day")}". Ask for the weekday or the date.`) };
+        if (date < madridToday(now()).iso) return { result: L("Ese día ya ha pasado. Pide otro día.", "That day has passed. Ask for another day.") };
         let slots = freeSlots(c, date, taken(slug, date), now());
-        const part = plain(s("part"));
+        const part = fromEnglish(plain(s("part")));
         if (/tarde/.test(part)) slots = slots.filter((h) => h >= "14:00");
         else if (/manana/.test(part)) slots = slots.filter((h) => h < "14:00");
-        if (!(c.hours[WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()]] ?? []).length) return { result: `El ${sayDate(date)} (${date}) la clínica está cerrada.` };
-        if (!slots.length) return { result: `El ${sayDate(date)} (${date}) no queda ninguna hora libre${part ? ` por la ${part}` : ""}. Ofrece otro día.` };
-        return { result: `${sayDate(date)} (${date}): horas libres ${slots.slice(0, 3).join(", ")}. Ofrece estas.` };
+        if (!(c.hours[WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()]] ?? []).length) return { result: L(`El ${sayDate(date)} (${date}) la clínica está cerrada.`, `The practice is closed on ${sayDate(date, true)} (${date}).`) };
+        if (!slots.length) return { result: L(`El ${sayDate(date)} (${date}) no queda ninguna hora libre${part ? ` por la ${part}` : ""}. Ofrece otro día.`, `Nothing free on ${sayDate(date, true)} (${date})${part ? ` in the ${s("part")}` : ""}. Offer another day.`) };
+        return { result: L(`${sayDate(date)} (${date}): horas libres ${slots.slice(0, 3).join(", ")}. Ofrece estas.`, `${sayDate(date, true)} (${date}): free at ${slots.slice(0, 3).join(", ")}. Offer these.`) };
       }
       if (name === "book_appointment") {
-        if (booked() >= BOOKINGS_PER_CALL) return { result: "En una llamada de demostración se reservan como mucho tres citas." };
+        if (booked() >= BOOKINGS_PER_CALL) return { result: L("En una llamada de demostración se reservan como mucho tres citas.", "A demo call books three appointments at most.") };
         const date = /^\d{4}-\d{2}-\d{2}$/.test(s("date")) ? s("date") : parseDay(s("date"), now());
         const time = (s("time").match(/^(\d{1,2})[:.h ]?(\d{2})?/) ?? []).slice(1);
         const hm = time[0] ? `${time[0].padStart(2, "0")}:${time[1] ?? "00"}` : "";
-        if (!date || !hm || !s("name")) return { result: "Faltan el nombre, la fecha o la hora. Pídelos y vuelve a llamar a book_appointment." };
-        if (!freeSlots(c, date, taken(slug, date), now()).includes(hm)) return { result: `Las ${hm} del ${sayDate(date)} no están libres. Llama a free_slots y ofrece otra hora.` };
+        if (!date || !hm || !s("name")) return { result: L("Faltan el nombre, la fecha o la hora. Pídelos y vuelve a llamar a book_appointment.", "The name, date or time is missing. Ask for it and call book_appointment again.") };
+        if (!freeSlots(c, date, taken(slug, date), now()).includes(hm)) return { result: L(`Las ${hm} del ${sayDate(date)} no están libres. Llama a free_slots y ofrece otra hora.`, `${hm} on ${sayDate(date, true)} is not free. Call free_slots and offer another time.`) };
         db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, date, time, data, at) VALUES (?, ?, ?, 'appointment', ?, ?, ?, ?)").run(
           `cb_${crypto.randomBytes(6).toString("hex")}`,
           id,
@@ -705,23 +884,24 @@ export function createClinicDemo(d: ClinicDeps) {
           JSON.stringify({ name: s("name"), service: s("service") }),
           iso(),
         );
-        return { result: `Reservado: ${s("service") || "cita"} para ${s("name")}, el ${sayDate(date)} a las ${hm}. Confírmalo en una frase.` };
+        return { result: L(`Reservado: ${s("service") || "cita"} para ${s("name")}, el ${sayDate(date)} a las ${hm}. Confírmalo en una frase.`, `Booked: ${s("service") || "appointment"} for ${s("name")}, ${sayDate(date, true)} at ${hm}. Confirm it in one sentence.`) };
       }
       if (name === "file_ticket") {
-        if (!d.followUp) return { result: "No puedo apuntar pendientes ahora. Di que llamen a la clínica en horario de recepción." };
-        return { result: d.followUp.file(c, id, { need: s("need"), who: s("who"), contact: s("contact") }).result };
+        if (!d.followUp) return { result: L("No puedo apuntar pendientes ahora. Di que llamen a la clínica en horario de recepción.", "I cannot note tasks right now. Ask them to ring the practice during opening hours.") };
+        const t = d.followUp.file(c, id, { need: s("need"), who: s("who"), contact: s("contact") });
+        return { result: en ? `Noted for the team. Promise exactly this, in English: the practice will get back to them within ${c.followUpDays ?? 1} working day${(c.followUpDays ?? 1) === 1 ? "" : "s"}. (Its note: ${t.result})` : t.result };
       }
       if (name === "qualify_lead" && c.sales) {
         if ((db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ? AND kind = 'lead'").get(id) as { n: number }).n)
-          return { result: "Ya está anotado. Sigue la conversación o despídete." };
+          return { result: L("Ya está anotado. Sigue la conversación o despídete.", "Already noted. Carry on or say goodbye.") };
         const lead = { who: whoAnswered(s("who")), clinic: s("clinic"), city: s("city"), asks: s("asks"), needs: s("needs"), answer: s("answer"), code: r.code ?? undefined };
         db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'lead', ?, ?)").run(`cb_${crypto.randomBytes(6).toString("hex")}`, id, slug, JSON.stringify(lead), iso());
         void d.leads?.land({ call: id, day: madridToday(now()).iso, ...lead });
-        return { result: "Anotado para el equipo. No lo menciones; sigue la conversación o despídete." };
+        return { result: L("Anotado para el equipo. No lo menciones; sigue la conversación o despídete.", "Noted for the team. Do not mention it; carry on or say goodbye.") };
       }
       if (name === "book_follow_up" && c.sales) {
-        if (booked() >= BOOKINGS_PER_CALL) return { result: "Ya está apuntado. Confírmalo y despídete." };
-        if (!s("name") || !s("contact")) return { result: "Faltan su nombre o un teléfono o email. Pídelos." };
+        if (booked() >= BOOKINGS_PER_CALL) return { result: L("Ya está apuntado. Confírmalo y despídete.", "Already noted. Confirm it and say goodbye.") };
+        if (!s("name") || !s("contact")) return { result: L("Faltan su nombre o un teléfono o email. Pídelos.", "Their name or a phone or email is missing. Ask for it.") };
         db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'follow_up', ?, ?)").run(
           `cb_${crypto.randomBytes(6).toString("hex")}`,
           id,
@@ -729,7 +909,7 @@ export function createClinicDemo(d: ClinicDeps) {
           JSON.stringify({ name: s("name"), clinic: s("clinic"), contact: s("contact"), when: s("when") }),
           iso(),
         );
-        return { result: `Apuntado: el equipo de ${c.sales.company} llamará a ${s("name")} (${s("clinic")})${s("when") ? `, ${s("when")}` : ""}. Confírmalo en una frase.` };
+        return { result: L(`Apuntado: el equipo de ${c.sales.company} llamará a ${s("name")} (${s("clinic")})${s("when") ? `, ${s("when")}` : ""}. Confírmalo en una frase.`, `Noted: the ${c.sales.company} team will be in touch with ${s("name")} (${s("clinic")})${s("when") ? `, ${s("when")}` : ""}. Confirm it in one sentence.`) };
       }
       return { result: `No conozco la herramienta ${name}.` };
     },
@@ -777,6 +957,34 @@ export function createClinicDemo(d: ClinicDeps) {
   };
 }
 export type ClinicDemo = ReturnType<typeof createClinicDemo>;
+
+/**
+ * A voice with this accent from the ElevenLabs voice library, added once to the account: only a voice open to every plan
+ * and billed at the normal rate (no custom price), so it costs nothing beyond the call's usual minutes. Undefined when
+ * none fits; the clinic then keeps the default voice.
+ */
+export async function findAccentVoice(key: () => Promise<string | undefined>, accent: string, lang: CallLang, f: typeof fetch = fetch): Promise<{ id: string; name: string } | undefined> {
+  const k = await key();
+  if (!k) throw new Error("no ElevenLabs key");
+  const get = async (p: string, init: RequestInit = {}) => {
+    const r = await f(`https://api.elevenlabs.io${p}`, { ...init, headers: { "xi-api-key": k, ...(init.body ? { "content-type": "application/json" } : {}) }, signal: AbortSignal.timeout(20_000) });
+    const j = (await r.json().catch(() => ({}))) as any;
+    if (!r.ok) throw new Error(`ElevenLabs ${r.status}: ${String(j?.detail?.message ?? j?.detail?.status ?? "").slice(0, 100)}`);
+    return j;
+  };
+  const ours = `Clinic receptionist · ${accent}`;
+  const mine = await get(`/v1/voices?show_legacy=false`).catch(() => ({ voices: [] }));
+  const kept = ((mine?.voices ?? []) as any[]).find((v) => v?.name === ours);
+  if (kept?.voice_id) return { id: kept.voice_id, name: ours };
+  const pick = (vs: any[]) =>
+    vs.find((v) => v?.voice_id && v?.public_owner_id && v.free_users_allowed !== false && !(Number(v.rate) > 1) && v.category !== "famous" && /conversational|customer|narrat|social|informative/i.test(`${v.use_case ?? ""} ${v.descriptive ?? ""}`)) ??
+    vs.find((v) => v?.voice_id && v?.public_owner_id && v.free_users_allowed !== false && !(Number(v.rate) > 1) && v.category !== "famous");
+  const q = (gender: string) => `/v1/shared-voices?accent=${encodeURIComponent(accent)}&language=${lang}&gender=${gender}&page_size=50&sort=cloned_by_count`;
+  const v = pick((await get(q("female")))?.voices ?? []) ?? pick((await get(q("male")))?.voices ?? []);
+  if (!v) return undefined;
+  const added = await get(`/v1/voices/add/${encodeURIComponent(v.public_owner_id)}/${encodeURIComponent(v.voice_id)}`, { method: "POST", body: JSON.stringify({ new_name: ours }) });
+  return added?.voice_id ? { id: added.voice_id, name: `${ours} (${String(v.name ?? "").slice(0, 40)})` } : undefined;
+}
 
 // ---------- routes ----------
 
@@ -871,8 +1079,9 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo, o: { invites?: Invi
       let inv: string | undefined;
       if (needsInvite(c, cl) && !letterOk(b.code)) {
         const i = o.invites!.valid(slug, b.invite);
-        if (!i) return c.json({ error: { code: "invite_needed", message: "La demo funciona con invitación. Pida la suya con su correo." } }, 403);
-        if (o.invites!.callsToday(i.token) >= INVITE_CALLS_PER_DAY) return c.json({ error: { code: "too_many", message: "Su invitación ya ha hecho todas las llamadas de hoy. Vuelva mañana." } }, 429);
+        const en = cl.lang === "en";
+        if (!i) return c.json({ error: { code: "invite_needed", message: en ? "The demo works by invite. Ask for yours with your email." : "La demo funciona con invitación. Pida la suya con su correo." } }, 403);
+        if (o.invites!.callsToday(i.token) >= INVITE_CALLS_PER_DAY) return c.json({ error: { code: "too_many", message: en ? "Your invite has made all of today's calls. Come back tomorrow." : "Su invitación ya ha hecho todas las llamadas de hoy. Vuelva mañana." } }, 429);
         inv = i.token;
       } else if (o.invites?.valid(slug, b.invite)) inv = String(b.invite).toLowerCase();
       const r = await demo.start(slug, clientAddress(peerOf(c), (h) => c.req.header(h)), b.code);
@@ -912,7 +1121,7 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo, o: { invites?: Invi
     }),
   );
   // the owner's (signed in, not open): every demo call with its text and bookings.
-  api.get("/clinic-demo/calls", (c) => c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, sales: !!x.sales })), calls: demo.calls(Number(c.req.query("limit")) || 50) }));
+  api.get("/clinic-demo/calls", (c) => c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, sales: !!x.sales, lang: x.lang ?? "es", voice: demo.voiceOf(x) })), calls: demo.calls(Number(c.req.query("limit")) || 50) }));
   // the owner's (signed in): each clinic's private set-up link and the objectives its file holds.
   api.get("/clinic-demo/setup", (c) =>
     c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, link: demo.setupLink(x.slug), objectives: x.objectives ?? [], objectivesFromCall: x.objectivesFromCall ?? null })) }),
@@ -928,6 +1137,7 @@ export const ELEVEN_CLIENT_URL = `https://cdn.jsdelivr.net/npm/${ELEVEN_CLIENT.p
 
 export function clinicPage(c: Clinic, o: { ring?: boolean; letter?: { code: string; clinic: string }; setup?: string } = {}): string {
   if (o.setup) return setupPage(c, o.setup);
+  if (c.lang === "en" && !o.letter) return clinicPageEn(c, o);
   const s = c.sales;
   // a Catalan clinic (set up from the Catalan call, clinicIntake.ts) gets its page in Catalan
   const ca = c.lang === "ca" && !s && !o.letter;
@@ -1031,6 +1241,87 @@ td:last-child{text-align:right;white-space:nowrap;padding-left:12px}
 .small{font-size:13px;color:var(--muted)}
 `;
 
+/** the questions a caller to an Irish dental practice is likely to ask (the owner, 28 Nov, vn_d168d96e: "we should just be
+ * able to, like, have an idea for what are the questions that are likely to be asked"); each one is a button that asks it
+ * on the call. */
+export const LIKELY_QUESTIONS_EN: { topic: string; ask: string }[] = [
+  { topic: "Opening hours", ask: "Hi, what time are you open until today?" },
+  { topic: "A new booking", ask: "I'd like to book a check-up for next week, please." },
+  { topic: "Changing an appointment", ask: "I need to move my appointment on Thursday. Can you help?" },
+  { topic: "Prices", ask: "How much is a scale and polish?" },
+  { topic: "PRSI and insurance", ask: "Can I use my PRSI for a check-up, and do you take VHI?" },
+  { topic: "Medical card", ask: "Do you see medical card patients?" },
+  { topic: "Where you are", ask: "Where are you, and is there parking nearby?" },
+  { topic: "A toothache today", ask: "I've a bad toothache. Can someone see me today?" },
+  { topic: "A person, please", ask: "Can I speak to someone about getting implants?" },
+  { topic: "For your clinic", ask: "I run a dental practice. How would this work for us, and what does it cost?" },
+];
+export const CALL_UI_EN = {
+  you: "You",
+  failed: "Could not: ",
+  again: "Call again",
+  endedBye: "Call ended. Thank you.",
+  ended: "Call ended.",
+  ready: "Press the button and speak normally, or tap a question below.",
+  noLoad: "The call could not load. Reload the page.",
+  connecting: "Connecting…",
+  live: "Live. Speak whenever you like, or tap a question.",
+  error: "Error: ",
+  mic: "The call needs your microphone.",
+};
+
+/** an English clinic's call page (the Irish demo): one button, and the questions callers are likely to ask, each one tap. */
+function clinicPageEn(c: Clinic, o: { ring?: boolean } = {}): string {
+  const s = c.sales;
+  const who = c.receptionist ?? "Reception";
+  const days = WEEKDAYS.slice(1).concat(WEEKDAYS[0]).filter((d) => (c.hours[d] ?? []).length);
+  const title = s ? `Hear ${who} answer · ${s.company}` : `${c.clinic} · Call reception`;
+  return `<!doctype html>
+<html lang="en-IE"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex"><title>${esc(title)}</title>
+<style>
+${PAGE_CSS}
+.asks{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:8px;margin:0;padding:0;list-style:none}
+.asks button{width:100%;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:15px/1.4 Inter,system-ui,sans-serif;cursor:pointer}
+.asks button:hover{border-color:var(--green)}
+.asks button:focus-visible,#call:focus-visible,#hang:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.asks b{display:block;font-size:13px;font-weight:600;color:var(--green);margin-bottom:2px}
+</style></head><body><main>
+<span class="tag">${s ? `Live demo · ${esc(s.company)}` : esc(c.city)}</span>
+<h1>${s ? `Ring ${esc(c.clinic)} and hear ${esc(who)} answer` : esc(c.clinic)}</h1>
+<p class="punch">${s ? `${esc(who)} is the AI receptionist on this made-up Irish practice's phone line. Ask what your patients ask, the way they ask it.` : `Call reception: ${esc(who)} answers, books and passes on what needs a person.`}</p>
+<div class="flow" aria-hidden="true">${["A patient rings", `${who} answers`, "Booked, noted or put through"].map((f) => `<span>${esc(f)}</span>`).join("<i>→</i>")}</div>
+<button id="call" data-testid="call-start" disabled>${o.ring ? "Answer" : `Call ${esc(who)}`}</button>
+<button id="hang" data-testid="call-hangup">Hang up</button>
+<p id="status" role="status">Getting the line ready…</p>
+<ul id="lines" aria-live="polite"></ul>
+<p id="trace" class="small" hidden><a data-testid="call-trace" href="#">Your call and what is still to do</a>: this page is yours alone, keep it.</p>
+<section id="questions" data-testid="likely-questions"><h2>What callers to an Irish practice ask</h2>
+<p class="small" style="margin:0 0 10px">Tap one to ask it on the call, or say it in your own words.</p>
+<ul class="asks">${LIKELY_QUESTIONS_EN.map((q) => `<li><button type="button" data-ask="${esc(q.ask)}"><b>${esc(q.topic)}</b>${esc(q.ask)}</button></li>`).join("")}</ul>
+</section>
+${
+  s
+    ? `<section id="offer"><h2>What your clinic gets</h2>
+<p>${esc(s.what)}</p>
+<p class="price">${esc(s.price.replace(/,.*$/, ""))}</p>
+<table>
+<tr><td>Every call to your number, answered</td><td>${esc(s.price.replace(/,.*$/, ""))}</td></tr>
+<tr><td>Free trial on your own number</td><td>${s.trialDays} days</td></tr>
+<tr><td>Setting up</td><td>one 45 minute call</td></tr>
+</table>
+<p class="small">${esc(s.terms ?? "")} Ask ${esc(who)} to have the team ring you.</p></section>`
+    : ""
+}
+<section id="clinic"><h2>The practice ${c.madeUp ? "(made up for the demo)" : ""}</h2>
+<table>${days.map((d) => `<tr><td>${dayEn(d)}</td><td>${c.hours[d].map((r) => r.replace("-", "–")).join(", ")}</td></tr>`).join("")}</table>
+<table style="margin-top:12px">${c.services.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.price)}</td></tr>`).join("")}</table>
+</section>
+<p class="small" style="margin-top:24px">${c.madeUp ? "Demo practice: patients, appointments and prices are made up. " : ""}You need a microphone. We keep the text of the call, never the audio. ${esc(who)} never rings anyone: it only answers.${s?.contact ? ` Questions: ${esc(s.contact)}.` : ""}</p>
+</main>
+${callScript(c.slug, "/calls", ["free_slots", "book_appointment", "book_follow_up", "file_ticket", "qualify_lead"], who, "", { ui: CALL_UI_EN })}</body></html>`;
+}
+
 /** the call page's words (Spanish by default; the Catalan intake page passes its own). */
 export const CALL_UI_ES = {
   you: "Usted",
@@ -1101,13 +1392,17 @@ btn.onclick = async () => {
       connectionType: "websocket",
       clientTools: Object.fromEntries(${JSON.stringify(tools)}.map((n) => [n, tool(n)])),
       onConnect: () => { btn.style.display = "none"; hang.style.display = "block"; say(UI.live); },
-      onMessage: (m) => { const t = (m.message || "").replace(/\\[[a-z ]{2,20}\\]\\s*/g, "").trim(); if (t.replace(/[.\\s…]/g, "")) add(m.role === "user" ? "caller" : "voice", t); },
+      onMessage: (m) => { const t = (m.message || "").replace(/\\[[a-z ]{2,20}\\]\\s*/g, "").trim(); if (t.replace(/[.\\s…]/g, "") && !(m.role === "user" && lines.length && lines[lines.length - 1].who === "caller" && lines[lines.length - 1].text === t)) add(m.role === "user" ? "caller" : "voice", t); if (m.role !== "user" && queued) { const q = queued; queued = ""; setTimeout(() => ask(q), 400); } },
       onDisconnect: (d) => finish(d && d.reason === "agent" ? "bye" : d && d.reason === "user" ? "hangup" : "line_dropped"),
       onError: (m) => say(UI.error + m),
     });
   } catch (e) { say(e.message && /Permission|NotAllowed/i.test(e.name + e.message) ? UI.mic : e.message); btn.disabled = false; }
 };
 hang.onclick = () => { if (conv) conv.endSession().catch(() => {}); finish("hangup"); };
+// a likely question tapped (the English demo page): asked on the live call, or the call starts and it is asked after the greeting
+let queued = "";
+function ask(q) { if (conv && !ended && hang.style.display === "block") { try { conv.sendUserMessage(q); add("caller", q); } catch (e) { say(UI.error + e.message); } } else { queued = q; if (!btn.disabled) btn.click(); } }
+document.querySelectorAll("[data-ask]").forEach((b) => (b.onclick = () => ask(b.dataset.ask)));
 addEventListener("pagehide", () => { if (conv && !ended) { conv.endSession().catch(() => {}); finish("left"); } });
 </script>`;
 }

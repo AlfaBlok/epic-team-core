@@ -4,6 +4,7 @@ import type { SpineWrite, SpineWriter } from "../inbox/spineWrite.js";
 import { slotOf } from "../book/refresh.js";
 import type { Press, Presses, WriteHealth } from "./presses.js";
 import { homeRepo, ownerName, sites } from "../identity.js";
+import { teamLink } from "../notify/notice.js";
 
 /**
  * the daily live test of the owner's buttons, a timer the console owns (no persona, no seat). Once a
@@ -67,7 +68,7 @@ const LEDGER_HEAD = [
   "|---|---|---|---|---|---|---|---|---|---|---|",
 ];
 const rowLine = (r: TestRow, date: string) =>
-  `| ${r.ref} | Ticket worker | TEST builder | ${r.title} | review | none | none | main | [test page](${sites().teamUrl}/) | ${date} | followups: none; confirm: yes — a TEST card |`;
+  `| ${r.ref} | Ticket worker | TEST builder | ${r.title} | review | none | none | main | [test page](${teamLink()}/) | ${date} | followups: none; confirm: yes — a TEST card |`;
 
 const head = (code: string, title: string) => [
   `# ${code}: ${title}`,
@@ -77,7 +78,7 @@ const head = (code: string, title: string) => [
   "Root spine: [root](root.md)",
   "Parent spine: [root](root.md)",
   "Integration policy: main-direct",
-  `Project name: [TEST Epic Team](${sites().teamUrl}/)`,
+  `Project name: [TEST Epic Team](${teamLink()}/)`,
   "Goal sentence: We want to see every press land.",
   "",
   "## Goal",
@@ -132,7 +133,7 @@ export const cardFile = (r: TestRow) =>
     "  - ✓ The test card is there to press.",
     "  - ✓ Nothing real depends on it.",
     // the review gate holds a bare link to our own pages; land on this card and say what to look at
-    `evidence: [Open the test card](${sites().teamUrl}/?focus=${encodeURIComponent(r.card)})`,
+    `evidence: [Open the test card](${teamLink()}/?focus=${encodeURIComponent(r.card)})`,
     "look: The test card the daily press test presses.",
     `screenshot: ${SHOT}`,
     "source: The daily press test raised it, to check that every button works.",
@@ -240,7 +241,7 @@ const DAILY_HEAD = [
   "One line per day, written by the agent-team console's daily press test (core/console/server/src/press/dailyTest.ts).",
   `It presses every review button kind on TEST rows in the TEST repo e67-feedback-test (on no production list), checks each press landed with a commit, checks /api/write-health and ${ownerName()}'s lists, then puts the TEST rows back.`,
   `A FAIL line is an alert to the agents (/api/health \`pressTest\`, the Delivery Manager's wake). Two FAIL days in a row raise one ask in ${pressTestHome().epic}.`,
-  `Live: ${sites().teamUrl}/api/press-test`,
+  `Live: ${teamLink()}/api/press-test`,
   "",
 ];
 

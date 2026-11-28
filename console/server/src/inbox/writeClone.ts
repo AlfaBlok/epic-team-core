@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { withRepoLock } from "../repoLock.js";
-import { localHealRunner, parseRedundant, REDUNDANT, type HealRunner } from "../gitStaleLock.js";
+import { localHealRunner, parseHeal, parseRedundant, REDUNDANT, type HealRunner } from "../gitStaleLock.js";
 import { runner, type EditInput, type SpineWrite, type SpineWriter } from "./spineWrite.js";
 
 /**
@@ -256,9 +256,29 @@ export function createCloneWriter(inner: SpineWriter, o: CloneWriterOptions): Cl
       const st = await g(["status", "--porcelain", "--untracked-files=all"]);
       if (!st.ok) return { error: `git status in the clone failed: ${st.err}` };
       if (st.out) {
-        await g(["reset", "-q", "--hard"], { timeout: 300_000 });
-        await g(["clean", "-fdq"], { timeout: 120_000 });
-        log(`spine write: cleaned leftovers in ${dir} (${st.out.split("\n")[0].trim()}${st.out.includes("\n") ? ", …" : ""})`);
+        const what = `${st.out.split("\n")[0].trim()}${st.out.includes("\n") ? ", …" : ""}`;
+        // (28 Nov 10:20Z): a release stopped the console mid-commit and git was killed, leaving .git/index.lock
+        // and a staged line. `reset --hard` then failed on the lock, unchecked, the log said "cleaned" every two minutes and
+        // every write to this clone was refused "the checkout has uncommitted changes" for 45 minutes (his presses spun at
+        // "writing it to the project… 294 s"). Nothing but the console writes here and it holds the repo lock: a lock
+        // file with no git running in the clone is a dead write's, whatever its age, so it is removed and the reset run again.
+        let reset = await g(["reset", "-q", "--hard"], { timeout: 300_000 });
+        for (const lock of ["index.lock", "HEAD.lock"]) {
+          if (reset.ok) break;
+          const f = path.join(dir, ".git", lock);
+          if (!fs.existsSync(f)) continue;
+          const h = parseHeal(f, await heal(path.resolve(dir), f, 0).catch((e: Error) => `failed ${e.message}`));
+          log(`spine write: ${dir}: ${h.removed ? `removed the dead write's ${lock}` : `kept ${lock} (${h.why})`}`);
+          if (h.removed) reset = await g(["reset", "-q", "--hard"], { timeout: 300_000 });
+        }
+        if (reset.ok) await g(["clean", "-fdq"], { timeout: 120_000 });
+        const after = await g(["status", "--porcelain", "--untracked-files=all"]);
+        if (!reset.ok || !after.ok || after.out) {
+          const why = !reset.ok ? reset.err : !after.ok ? after.err : `still ${after.out.split("\n")[0].trim()}`;
+          log(`spine write: could not clean leftovers in ${dir} (${what}): ${why}`);
+          return { error: `the console's clone ${path.basename(dir)} holds a leftover it could not clean (${what}): ${why}` };
+        }
+        log(`spine write: cleaned leftovers in ${dir} (${what})`);
       }
       await capBig(dir);
       checked.set(dir, Date.now());

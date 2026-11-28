@@ -1284,6 +1284,8 @@ export function createApp(
       void failedWakesCard(runId).catch((e) => console.error(`failed wakes card ${runId}:`, e));
     },
     creditGate: (a, m) => credits?.gate(a, m), // per-world gate, default off; the home world never held (hosted/billing.ts)
+    // a limited plan's plan limits (campaign manager 2 wakes a day, Publisher 2 wakes a post); none for ours
+    wakeCap: hooks.wakeCap({ db, repoDir: (m) => resolveRepo(read.reposRoot, m.repo)?.path, runsOf: (id) => store.listRuns({ assignmentId: id, limit: 200 }) }),
     // the wake also lists the rows other personas' running child runs claim (the repo desk's, the DM's).
     treeTodo: async (m) => [await treeTodo(m), claimsSection(claimsFor(store, m))].filter(Boolean).join("\n\n") || undefined,
     treeFor,

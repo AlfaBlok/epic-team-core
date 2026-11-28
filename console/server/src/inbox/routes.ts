@@ -52,6 +52,9 @@ import { isDuplicate, traceDuplicate, withTrace, type DupCandidate } from "./dup
  * E996-S29: the other open asks that store the same key (same `secret: <app> <NAME>`) as `item`: one card and one box in
  * the inbox, and the one Save key answers them all.
  */
+/** a spine write refused because the checkout held a leftover (a passing state, cleaned before the next try). */
+export const DIRTY_CHECKOUT = /the checkout has uncommitted changes/;
+
 export function sameKeyTwins(items: WaitingItem[], item: WaitingItem): WaitingItem[] {
   const s = item.secret;
   if (!s) return [];
@@ -1247,6 +1250,11 @@ export function mountInbox(
     const settled = await settleOthers(r).catch((e) => (console.warn(`answer ${r!.id}: one answer closes many: ${(e as Error).message}`), undefined));
     if (settled) r = getResponse(id)!;
     r = await notifyAsker(r, { wake, ...(r.replacedAnswer ? { oldAnswer: r.replacedAnswer } : {}), ...(settled ? { settled } : {}) });
+    // the console's own checkout left dirty by a write a restart cut off is no refusal of his answer: the next try
+    // finds it cleaned (writeClone), so it is tried again, never failed for good (28 Nov 10:44-10:57Z: six of his answers
+    // failed on "the checkout has uncommitted changes" and their cards came back into his inbox).
+    if (!last && r.spine && r.spine.status !== "written" && r.delivery !== "delivered" && DIRTY_CHECKOUT.test(r.spine.reason ?? ""))
+      return { state: "retry", error: r.spine.reason ?? "the checkout has uncommitted changes" };
     if (r.delivery === "failed" || (r.spine && r.spine.status !== "written" && r.delivery !== "delivered"))
       return { state: "failed", error: r.spine?.reason ?? r.deliveryError ?? r.delivery };
     return { state: "done" };

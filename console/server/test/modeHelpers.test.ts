@@ -257,6 +257,9 @@ describe("login and sessions", () => {
     const redirect = await t.req("GET", "/milestones/x", { peer: OUTSIDE });
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get("location")).toBe("/login?next=%2Fmilestones%2Fx");
+    // the query survives sign-in (a card's Call link, ?call=1&focus=call)
+    const withQuery = await t.req("GET", "/sets/camper-marketing?call=1&focus=call", { peer: OUTSIDE });
+    expect(withQuery.headers.get("location")).toBe(`/login?next=${encodeURIComponent("/sets/camper-marketing?call=1&focus=call")}`);
     const api = await t.req("GET", "/api/milestones", { peer: OUTSIDE });
     expect(api.status).toBe(401);
     expect(api.json.error.code).toBe("login_required");

@@ -3,6 +3,7 @@ import type { DB } from "../db.js";
 import type { Vps3Target } from "../t3/remoteHost.js";
 import type { SecretPut, SecretPutInput, SecretStoreResult } from "./keys.js";
 import type { GatewayExtra } from "../gateway/gateway.js";
+import type { Assignment, Milestone, Persona, Run } from "../store.js";
 import { ownerName } from "../identity.js";
 
 /**
@@ -90,6 +91,14 @@ export interface JobEnd {
 }
 
 /** The world gate with the job worlds let through (their wakes never reach a shared host). */
+/** A wake held by its plan's limit: the reason, or undefined when it may wake (hosted: cycle/customerCaps.ts createWakeCap). */
+export type WakeCap = (a: Assignment, m: Milestone, p: Persona) => string | undefined;
+/** A workspace's plan limits, as its Personas page shows them: the model, and a line per capped persona id. */
+export interface WakeLimits {
+  model: string;
+  personas: Record<string, string>;
+}
+
 export const openForJobs = (hold: WorldWakeHold, route: JobRoute | undefined): WorldWakeHold =>
   route ? (world) => (route.handles(world) ? undefined : hold(world)) : hold;
 
@@ -104,6 +113,10 @@ export interface HostedHooks {
   worldWakeGateState(env?: NodeJS.ProcessEnv): { on: boolean; sharedHostWorlds: string[] };
   /** The job servers' route for worlds of model A (hosted: cycle/jobRoute.ts createJobRoute); none in the one-team core. */
   jobRoute(db: DB): JobRoute | undefined;
+  /** the wake cap of customer workspaces on a limited plan (hosted: cycle/customerCaps.ts); none in the one-team core. */
+  wakeCap(d: { db: DB; repoDir(m: Milestone): string | undefined; runsOf(assignmentId: string): Run[] }): WakeCap | undefined;
+  /** those limits for a workspace's Personas page (hosted: cycle/customerCaps.ts wakeLimitsOf). */
+  wakeLimits(db: DB, world: string | undefined, personas: Pick<Persona, "id" | "name" | "remit">[]): WakeLimits | undefined;
   /** Where a pasted key is stored (hosted: inbox/secretPut.ts, secrets/worlds.ts, secrets/worldStore.ts). */
   keys: KeyHooks;
   /** Live counts read from our sites for the red line's band (hosted: social/remoteCounts.ts). */
@@ -193,6 +206,8 @@ const ONE_TEAM: HostedHooks = {
   worldWakeGate: () => () => undefined,
   worldWakeGateState: () => ({ on: false, sharedHostWorlds: [] }),
   jobRoute: () => undefined,
+  wakeCap: () => undefined,
+  wakeLimits: () => undefined,
   keys: {
     runner: () => async () => ({ ok: false, err: NO_KEY_STORE }),
     putWithFallback: async (put, i) => {

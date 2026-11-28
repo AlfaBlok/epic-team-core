@@ -4,6 +4,7 @@ import { notJordi } from "../status/mark.js";
 import { VoiceError, type Voice } from "./voice.js";
 import { homeWorld, ownerName, sites } from "../identity.js";
 import { currentAuth, runWithAuth } from "../auth/identity.js";
+import { teamLink } from "../notify/notice.js";
 
 const usageIn = z.object({ eventId: z.string().min(1).max(120), kind: z.enum(["response", "transcription"]), usage: z.record(z.unknown()) });
 const endIn = z.object({
@@ -151,7 +152,7 @@ export function mountOwnCall(
   if (o.ownWorld) asHomeWorld(api, prefix, o.ownWorld);
   const inWorld = () => (o.world() ?? VOICE_WORLD) === VOICE_WORLD;
   // the owner: "why so difficult": where it can run, so a page that cannot call links there instead of a dead greyed Call.
-  const elsewhere = o.page ? `${sites().teamUrl.replace(/\/$/, "")}${o.page}` : undefined;
+  const elsewhere = o.page ? `${teamLink().replace(/\/$/, "")}${o.page}` : undefined;
   api.get(
     `${prefix}/state`,
     // onState: the page opened, so a call may follow (the marketing call warms its live numbers then).

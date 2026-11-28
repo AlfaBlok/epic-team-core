@@ -55,7 +55,7 @@ import {
   wakeStub,
 } from "./prompts.js";
 import { milestoneWorld } from "../tenancy/world.js";
-import { hooks, openForJobs, WORLD_WAKE_HOLD_CODE, type JobEnd, type JobRoute, type WorldWakeHold } from "../plug/hooks.js";
+import { hooks, openForJobs, WORLD_WAKE_HOLD_CODE, type JobEnd, type JobRoute, type WakeCap, type WorldWakeHold } from "../plug/hooks.js";
 import { seatHeldElsewhere, threadRefusal, worldOfRun } from "./threadBinding.js";
 import { headSha } from "../gitRefs.js";
 import { createLastCommits } from "./lastCommits.js";
@@ -275,6 +275,12 @@ export interface CycleOptions {
    * a world out of credits with its gate on gets a held run back and nothing reaches T3. Unset or undefined = wake.
    */
   creditGate?: (a: Assignment, m: Milestone) => Run | undefined;
+  /**
+   * a plan's wake limit (hosted: cycle/customerCaps.ts, customer workspaces on a limited plan only): the reason a
+   * wake is held, checked before every wake. A capped cadence tick or timed wake starts nothing (the timed one stays
+   * pending); Run now refuses 409 wake_cap. Unset = no limit (the one-team core, our own worlds).
+   */
+  wakeCap?: WakeCap;
   /**
    * no-model pre-check of a cadence or timed wake (cycle/wakeGate.ts): `work: false` records an idle skip and
    * starts nothing; `work: true` wakes (past the unchanged-skip) and `commit` runs once the wake starts. Undefined = no gate.
@@ -516,6 +522,16 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       console.log(`world wake gate ${a.id} (${worldOfM(m)}): ${hold}`);
     }
     return true;
+  };
+  const cappedLogged = new Map<string, string>();
+  /** the plan's wake limit holds this wake (one log line per assignment per reason). */
+  const capOf = (a: Assignment, m: Milestone, p: Persona): string | undefined => {
+    const why = o.wakeCap?.(a, m, p);
+    if (why && cappedLogged.get(a.id) !== why) {
+      cappedLogged.set(a.id, why);
+      console.log(`wake cap ${a.id} (${worldOfM(m)}): ${why}`);
+    }
+    return why;
   };
   const refuseHeld = (m: Milestone) => {
     const hold = holdOf(m);
@@ -1024,6 +1040,7 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       const next = nextRunAfter(cadence, now);
       store.updateAssignment(a.id, { nextRunAt: next.toISOString(), lastRunAt: now.toISOString() });
       if (liveWake(a.id) || deferredWake(a.id)) continue; // still running, or deferred (it retries itself): skip this tick
+      if (capOf(a, m, p)) continue; // its plan's wake limit is reached: this tick starts nothing
       const pubCadence = gateKindOf(p) === "publisher"; // a Publisher's cadence is its catch-up pace
       const timed = timedCheckReplaces(a.retryAt, next, now, pubCadence); // the timed check due this hour wakes instead
       // once the Publisher's cadence wake starts, it covers a timed check due before its next fire (no second wake)
@@ -1085,6 +1102,8 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       if (liveWake(a.id) || deferredWake(a.id)) continue;
       if (skipHeld(a, m)) continue; // the request stays pending until the world has its own box
       if (o.wakeHold?.(a.id)) continue; // priority mode: the request stays pending until it ends
+      const rp = store.getPersona(a.personaId);
+      if (rp && capOf(a, m, rp)) continue; // the request stays pending until its plan's limit frees
       clear();
       const notRun = (await notRunnable(m)) ?? (await awaitingMark(m)); // a follow-up wake does not work a spine that stopped being runnable (or waits for the owner's mark)
       if (notRun) {
@@ -1854,6 +1873,11 @@ export function createCycle(db: DB, store: Store, o: CycleOptions) {
       const r = store.updateRun(taken.run.id, { startGuards: [...(taken.run.startGuards ?? []), g] }) ?? taken.run;
       console.log(`start guard ${id}: handled (the note already reached ${taken.run.id}; by ${noteBy})`);
       return { ...r, startGuard: "handled" };
+    }
+    const capped = capOf(a, m, p); // its plan's wake limit, before any run row or T3 call
+    if (capped) {
+      if (note) holdNote(id, noteBy, note, undefined, `wake cap: ${capped}`); // the note rides on its next allowed wake
+      throw new CycleError(409, "wake_cap", note ? `${capped} Your note waits for that wake.` : capped);
     }
     const held = o.creditGate?.(a, m); // out of credits (gate on): a held run, no T3 call
     if (held) {

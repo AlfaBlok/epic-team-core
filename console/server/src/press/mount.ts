@@ -96,8 +96,12 @@ export const PRESS_ROUTES: PressRoute[] = [
   },
 ];
 
-/** E948-S141: how far back GET /api/presses/answered reads (the web's Sent marks live as long, lib/sentRows SENT_KEEP_MS). */
-export const ANSWERED_MS = 2 * 60 * 60_000;
+/**
+ * E948-S141: how far back GET /api/presses/answered reads; the web's answered marks live as long (lib/sentRows
+ * ANSWER_KEEP_MS). (the owner 28 Nov, vn_8768081d: "If I've answered, I want it gone from the inbox until it
+ * comes back"): 14 days, was 2 h, after which a card the server still listed came back into his inbox with his answer on it.
+ */
+export const ANSWERED_MS = 14 * 24 * 60 * 60_000;
 /** E948-S141: a press that answers its card (it leaves his counts on every device); snoozes keep their own server state. */
 export const isAnswerPress = (action: string) => !/snooze|reopen|bring back|comment|change|retry/.test(action);
 /** E948-S141: a press that takes an answer back (Bring it back after it landed): the card is open again on every device. */

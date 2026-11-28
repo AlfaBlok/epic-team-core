@@ -26,10 +26,19 @@ import { pickUrgent, type UrgentWhy } from "@/lib/cardKind";
  * Before, only Blocked on you left answered items out (E948-S117); Done, Decisions, Goals to set and Ideas counted
  * them while E948-S140 had already taken their rows off the page.
  */
-export function openCards<T>(items: T[], slotOf: (t: T) => string, answered: (slot: string) => boolean = answeredSlot): T[] {
-  return items.filter((i) => !answered(slotOf(i)));
+export function openCards<T>(
+  items: T[],
+  slotOf: (t: T) => string,
+  answered: (slot: string, since?: string | null) => boolean = answeredSlot,
+  sinceOf?: (t: T) => string | null | undefined,
+): T[] {
+  // answered stays answered until the server lists the card again dated after his answer (sent back to him)
+  return items.filter((i) => !answered(slotOf(i), sinceOf?.(i)));
 }
 export const reviewSlot = (i: Pick<ReviewItem, "id">) => `review:${i.id}`;
+/** when a review card last came to him (its round back in review), to tell a card sent back from one he answered. */
+// (inboxSince only: createdAt moves on a restamp, which is nothing new for him)
+export const reviewSince = (i: Partial<Pick<ReviewItem, "inboxSince">>) => i.inboxSince ?? undefined;
 
 /** Which milestones a count covers: all, or the selected project's (lib/project `keep`). */
 export type Keep = (milestoneId?: string | null) => boolean;
@@ -38,7 +47,7 @@ const all: Keep = () => true;
 /** The open items the owner must act on, each once, in the batch's order: what the red pill counts and Blocked lists. */
 export function blockedItems(
   status: { items?: PendingItem[] } | undefined,
-  o: { keep?: Keep; nodeKey?: string; snoozing?: { has: (id: string) => boolean }; answered?: (id: string) => boolean } = {},
+  o: { keep?: Keep; nodeKey?: string; snoozing?: { has: (id: string) => boolean }; answered?: (id: string, since?: string | null) => boolean } = {},
 ): PendingItem[] {
   const keep = o.keep ?? all;
   // a green Sent row counts nothing: what he answered here is out of every red count at once
@@ -48,7 +57,7 @@ export function blockedItems(
   for (const i of status?.items ?? []) {
     if (i.state !== "open" || seen.has(i.id)) continue;
     if (o.nodeKey && i.nodeKey !== o.nodeKey && !i.nodeKey?.startsWith(o.nodeKey + "/")) continue;
-    if (!keep(i.milestoneId) || o.snoozing?.has(i.id) || answered(i.id)) continue;
+    if (!keep(i.milestoneId) || o.snoozing?.has(i.id) || answered(i.id, i.since)) continue;
     seen.add(i.id);
     out.push(i);
   }
@@ -102,10 +111,10 @@ export const resetReviewGone = () => {
 /** The review cards waiting on the owner: what the green pill counts and "Done, waiting for your review" lists. */
 export function reviewCards<T extends Pick<ReviewItem, "id" | "milestoneId">>(
   list: T[] | undefined,
-  o: { keep?: Keep; snoozing?: { has: (id: string) => boolean }; gone?: { has: (id: string) => boolean }; answered?: (slot: string) => boolean } = {},
+  o: { keep?: Keep; snoozing?: { has: (id: string) => boolean }; gone?: { has: (id: string) => boolean }; answered?: (slot: string, since?: string | null) => boolean } = {},
 ): T[] {
   const keep = o.keep ?? all;
-  return openCards((list ?? []).filter((i) => keep(i.milestoneId) && !o.snoozing?.has(i.id) && !o.gone?.has(i.id)), reviewSlot, o.answered);
+  return openCards((list ?? []).filter((i) => keep(i.milestoneId) && !o.snoozing?.has(i.id) && !o.gone?.has(i.id)), reviewSlot, o.answered, (i) => reviewSince(i as Partial<ReviewItem>));
 }
 
 /** The world's status batch, one fetch for every reader (sidebar, top bar, project switcher, Team home). */

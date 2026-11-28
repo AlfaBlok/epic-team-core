@@ -147,7 +147,7 @@ export function WaitingForReview({
   const snoozed = hits || search.goals ? snoozedAll.filter(search.keeps) : snoozedAll;
   const items = data ?? [];
   // vn_e00f1134: a card he pressed stays where it was as its green Sent row, after the refetch drops it too
-  const rows = useKeepSent(items, (i) => `review:${i.id}`, `review:${fold ?? testId}`);
+  const rows = useKeepSent(items, (i) => `review:${i.id}`, `review:${fold ?? testId}`, (i) => i.inboxSince);
   // tasks just marked here are no longer open, before the list refetches (a goal's confirm never names them)
   // what a pressed card is doing once it has left: "Saved · writing it to the project… 3 s", then "Done ✓ … in 6.1 s"
   const progress = usePressProgress((id) => fetched?.find((i) => i.id === id));
@@ -721,7 +721,10 @@ export const LANDED_LINE = "Done ✓ It is in the project.";
 /** a refusal because the row left review before the press (the console lands those now; an older console still refused). */
 export const MOVED_ON_WHY = /is not in review any more|not in this spine's ledger any more|the spine moved on/;
 
-type Progress = { id: string; title: string; state: "writing" | "done" | "kept"; at: number; doneAt?: number; ms?: number; steps?: Record<string, number>; movedOn?: string };
+/** what a press line says once it is PRESS_LATE_MS old and still not written (the console keeps trying). */
+export const LATE_LINE = "Not written yet. Your answer is kept and is tried again by itself.";
+
+type Progress = { id: string; title: string; state: "writing" | "late" | "done" | "kept"; at: number; why?: string; doneAt?: number; ms?: number; steps?: Record<string, number>; movedOn?: string };
 
 /**
  * every review press the console saved (its 202) gets a line at the bottom of the screen while it is written to
@@ -746,6 +749,8 @@ function usePressProgress(itemOf: (id: string) => Listed | undefined): Progress[
         } else if (n.state === "landed") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "done", doneAt: Date.now(), ms: n.ms ?? Date.now() - x.at, steps: n.steps, ...(n.movedOn ? { movedOn: n.movedOn } : {}) } : x)));
         // kept until its row is repaired: said once, like a landed press, then the line goes
         else if (n.state === "kept") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "kept", doneAt: Date.now() } : x)));
+        // 30 s and still not written: the line says so plainly, and why, while the console tries again
+        else if (n.state === "late") setLines((l) => l.map((x) => (x.id === id ? { ...x, state: "late", why: n.reason } : x)));
         else setLines((l) => l.filter((x) => x.id !== id));
       }),
     [],
@@ -781,16 +786,16 @@ function PressProgress({ lines }: { lines: Progress[] }) {
           key={l.id}
           className={cn(
             "pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
-            l.state !== "writing" ? "border-emerald-600/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "bg-card text-card-foreground",
+            l.state === "late" ? "bg-card text-card-foreground" : l.state !== "writing" ? "border-emerald-600/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" : "bg-card text-card-foreground",
           )}
           data-testid="press-progress-line"
           data-state={l.state}
-          title={l.state === "done" ? stepsText(l.steps) : undefined}
+          title={l.state === "done" ? stepsText(l.steps) : l.state === "late" ? l.why : undefined}
         >
-          {l.state !== "writing" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+          {l.state === "late" ? <X className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : l.state !== "writing" ? <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={3} aria-hidden /> : <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden />}
           <span className="min-w-0">
             {/* E948-S206: a press on a card that had moved on says where it went, never a refusal */}
-            <b data-testid={l.movedOn ? "press-moved-on" : undefined}>{l.state === "kept" ? KEPT_LINE : l.state === "done" ? (l.movedOn ? `Done ✓ ${l.movedOn}` : `${PRESS.done} in ${secs(l.ms ?? 0)}.`) : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
+            <b data-testid={l.movedOn ? "press-moved-on" : undefined}>{l.state === "late" ? LATE_LINE : l.state === "kept" ? KEPT_LINE : l.state === "done" ? (l.movedOn ? `Done ✓ ${l.movedOn}` : `${PRESS.done} in ${secs(l.ms ?? 0)}.`) : `${PRESS.writing} ${Math.floor((Date.now() - l.at) / 1000)} s`}</b>
             <span className="block truncate text-xs opacity-80">{l.title}</span>
           </span>
         </div>

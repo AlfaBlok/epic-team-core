@@ -9,6 +9,7 @@ import { notJordi } from "../status/mark.js";
 import { VoiceError, type DeskPort, type Voice } from "./voice.js";
 import { ownerName, sites } from "../identity.js";
 import { partModel } from "./transcription.js";
+import { teamLink } from "../notify/notice.js";
 
 /**
  * rework (the owner's review, 2026-11-02): voice notes in Chat. One button: tap to start, tap to finish. The page records
@@ -997,7 +998,7 @@ export function mountVoiceNotesRec(api: Hono, prefix: string, pick: (c: Context)
       guard(async (c, n) => {
         const b = (await json(c)) as { force?: unknown };
         // a note with no kept link (a card answer) gets the console's public address, not the caller's
-        const pub = sites().teamUrl.replace(/\/$/, "");
+        const pub = teamLink().replace(/\/$/, ""); // the address the owner's links go to
         const audioBase = /^https?:\/\/(localhost|127\.|100\.)/.test(base(c)) && !/example\.com/.test(pub) ? `${pub}${c.req.path.replace(/\/notes\/.*$/, "")}/notes` : base(c);
         return c.json(await n.redo(c.req.param("nid") ?? "", { audioBase, force: b.force === true }));
       }, false),

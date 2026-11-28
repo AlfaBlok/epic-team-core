@@ -18,6 +18,20 @@ import { holdAfterAnswer } from "@/lib/keepPlace";
  * state, so it outlives the card and every list that shows it agrees. Kept for the page's life (SENT_KEEP_MS at most).
  */
 export const SENT_KEEP_MS = 2 * 60 * 60_000;
+/**
+ * (the owner 28 Nov, vn_8768081d: "Some of the cards that I gave an answer seem to be left inside the inbox, but
+ * now I can see the answer I gave. That's weird ... If I've answered, I want it gone from the inbox until it comes back."):
+ * a card he answered stays answered (out of every list and count) until its owner sends it back with something new: the
+ * server lists it again with a newer date than his answer (`cameBack`). Before, the mark lived SENT_KEEP_MS (2 h): a card
+ * the server still listed after that (a review card whose next round was not back yet, a press still being written)
+ * came back into his inbox showing his own answer. Kept this long at most (the green row still shows SENT_KEEP_MS).
+ */
+export const ANSWER_KEEP_MS = 14 * 24 * 60 * 60_000;
+/** the card was sent back to him after he answered it: the server dates it later than his answer. */
+export const cameBack = (e: Pick<SentEntry, "at">, since?: string | null) => {
+  const t = since ? Date.parse(since) : NaN;
+  return Number.isFinite(t) && t > e.at;
+};
 
 export interface SentEntry {
   id: number;
@@ -92,7 +106,7 @@ function loadSent(): Map<string, SentEntry> {
     const raw = storage()?.getItem(STORE);
     const list = raw ? (JSON.parse(raw) as [string, SentEntry][]) : [];
     const now = Date.now();
-    return onlyNewest(new Map(list.filter(([k, e]) => typeof k === "string" && e && typeof e.at === "number" && now - e.at < SENT_KEEP_MS)));
+    return onlyNewest(new Map(list.filter(([k, e]) => typeof k === "string" && e && typeof e.at === "number" && now - e.at < ANSWER_KEEP_MS)));
   } catch {
     return new Map();
   }
@@ -100,7 +114,7 @@ function loadSent(): Map<string, SentEntry> {
 function saveSent(m: Map<string, SentEntry>) {
   try {
     const now = Date.now();
-    storage()?.setItem(STORE, JSON.stringify([...m].filter(([, e]) => now - e.at < SENT_KEEP_MS && !e.voice && !e.dropped).map(([k, { back: _b, ...e }]) => [k, e])));
+    storage()?.setItem(STORE, JSON.stringify([...m].filter(([, e]) => now - e.at < ANSWER_KEEP_MS && !e.voice && !e.dropped).map(([k, { back: _b, ...e }]) => [k, e])));
   } catch {
     /* a full or private store: the rows still show until the page closes */
   }
@@ -188,7 +202,7 @@ export function withServerAnswers(m: Map<string, SentEntry>, answers: ServerAnsw
   const newest = new Map<string, { at: number; lands: boolean }>();
   for (const a of answers) {
     const at = Date.parse(a.at);
-    if (!Number.isFinite(at) || now - at >= SENT_KEEP_MS) continue;
+    if (!Number.isFinite(at) || now - at >= ANSWER_KEEP_MS) continue;
     const had = newest.get(a.target);
     if (!had || at > had.at) newest.set(a.target, { at, lands: LANDS.has(a.state) });
   }
@@ -225,6 +239,8 @@ export function applyServerAnswers(answers: ServerAnswer[] | undefined) {
 }
 
 const live = (e: SentEntry | undefined, now = Date.now()) => (e && now - e.at < SENT_KEEP_MS ? e : undefined);
+/** an answer that still keeps its card out of the inbox (ANSWER_KEEP_MS), its green row shown or not. */
+const held = (e: SentEntry | undefined, now = Date.now()) => (e && now - e.at < ANSWER_KEEP_MS ? e : undefined);
 /** E948-S140: an answered card whose green row still shows (the newest answer, not swiped away). */
 export const shownSent = (e: SentEntry | undefined) => {
   const top = newestShown(sent);
@@ -247,13 +263,16 @@ export const sentOf = (slot: string) => live(sent.get(slot));
  * (the owner 16 Nov, "why showing one, none left???"): an item he answered here (its card or status row is a green
  * Sent row now) is no longer open for him, so no red count holds it, even while the server's status batch still lists it.
  */
-export const answeredHere = (id: string) => answeredSlot(`ask:${id}`) || answeredSlot(`status:${id}`);
+export const answeredHere = (id: string, since?: string | null) => answeredSlot(`ask:${id}`, since) || answeredSlot(`status:${id}`, since);
 /**
  * E948-S141 (the owner 18 Nov, "Must have given this feedback more than 20 times"): a card he answered here, by its slot
  * (`review:<id>`, `team:<id>`, `ask:<id>`, `status:<id>`), whether its green row shows or not. Every inbox count leaves
  * it out (lib/inbox `openCards`), so no pill counts a card the section no longer draws.
  */
-export const answeredSlot = (slot: string) => !!live(sent.get(slot));
+export const answeredSlot = (slot: string, since?: string | null) => {
+  const e = held(sent.get(slot));
+  return !!e && !cameBack(e, since);
+};
 /** Re-render on every Sent mark (the counts read `answeredHere`). */
 export const useSentVersion = () => useSyncExternalStore(subscribe, () => sent);
 export function useSent(slot: string | undefined): SentEntry | undefined {
@@ -301,7 +320,7 @@ export function keepPlaces<T>(prev: { slot: string; item?: T }[], items: T[], sl
  * A list keeps its sent cards in place: each row is `{slot, item}` (a card still listed) or `{slot}` (it left the
  * list after he answered it: draw its Sent row there). One press that closed several cards (a set) keeps one row.
  */
-export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: string): { slot: string; item?: T; sent?: SentEntry }[] {
+export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: string, sinceOf?: (t: T) => string | null | undefined): { slot: string; item?: T; sent?: SentEntry }[] {
   const map = useSentMap();
   // E948-S130: a named list starts from its order before the reload, so a sent card that left keeps its place
   const prev = useRef<{ slot: string; item?: T }[] | undefined>(undefined);
@@ -323,7 +342,15 @@ export function useKeepSent<T>(items: T[], slotOf: (t: T) => string, list?: stri
   const seen = new Set<number>();
   const out: { slot: string; item?: T; sent?: SentEntry }[] = [];
   for (const r of kept) {
-    const e = live(map.get(r.slot));
+    const h = held(map.get(r.slot));
+    // a card sent back to him after his answer is his card again, never its old Sent row
+    if (h && r.item && sinceOf && cameBack(h, sinceOf(r.item))) {
+      out.push({ slot: r.slot, item: r.item });
+      continue;
+    }
+    // an answered card still listed past its green row's time stays out (it comes back only when sent back)
+    if (h && r.item && !live(h)) continue;
+    const e = live(h);
     if (e && seen.has(e.id)) continue;
     if (e) seen.add(e.id);
     if (!r.item && !e) continue;

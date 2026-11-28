@@ -16,7 +16,7 @@ export { LAUNCH_PATH };
  * 30 minutes, server/src/launch/board.ts); the home world only: another world's home never shows it.
  */
 /** the console the decks live on (this one) */
-const consoleUrl = () => sites().teamUrl.replace(/\/+$/, "");
+const consoleUrl = () => (typeof location !== "undefined" && location.origin.startsWith("https://") ? location.origin : sites().teamUrl).replace(/\/+$/, ""); // the address the owner opened
 
 function Dot({ state }: { state: LaunchLight["state"] }) {
   return (

@@ -5,7 +5,19 @@ import { TEST_REPO, TEST_ROW } from "../review/rows.js";
  * What a notice to the owner is and when it may go: core's web push and the hosted WhatsApp notifier share these;
  * moved unchanged from notify/whatsapp.ts.
  */
-export const teamLink = (): string => sites().teamUrl;
+export const teamLink = (env: NodeJS.ProcessEnv = process.env): string => linkBase(env) ?? sites().teamUrl;
+
+/**
+ * the one address links to the owner go to once every screen opens there for his login (CONSOLE_DOOR_PLATFORM=1,
+ * auth/gate.ts): CONSOLE_LINK_URL, else undefined (links stay on the team site). The team site keeps answering; only the
+ * links it hands out move.
+ */
+export function linkBase(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const to = (env.CONSOLE_LINK_URL ?? "").trim().replace(/\/+$/, "");
+  return env.CONSOLE_DOOR_PLATFORM?.trim() === "1" && /^https:\/\/[^/\s]+$/.test(to) ? to : undefined;
+}
+/** paths that never move: the public forms and webhooks are not served on the customer site (traefik agent-team-customer.yml). */
+const STAYS_ON_TEAM_SITE = /^\/api\/(?:public|hooks)\//;
 
 /**
  * The owner's pages that already open on the customer site too (CONSOLE_LINK_URL, e.g. the cloud address of the same
@@ -24,7 +36,8 @@ export function linkSite(text: string, env: NodeJS.ProcessEnv = process.env): st
     const raw = p ?? "";
     const tail = raw.match(/[.,;:!?]+$/)?.[0] ?? "";
     const path = raw.slice(0, raw.length - tail.length);
-    return LINK_SITE_PAGES.test(path || "/") ? `${to}${path}${tail}` : whole;
+    const every = !!linkBase(env) && !STAYS_ON_TEAM_SITE.test(path); // every screen opens there now
+    return every || LINK_SITE_PAGES.test(path || "/") ? `${to}${path}${tail}` : whole;
   });
 }
 

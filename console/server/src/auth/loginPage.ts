@@ -118,7 +118,10 @@ export const LOGIN_PAGE = (): string => `<!doctype html>
   // a path on this site only: no "//", no backslash, no space or control character anywhere (a browser drops tabs
   // and reads a backslash as a slash, so "/<tab>/x" and "/<backslash>x" would leave the site); same rule as oauth.ts safeNext.
   const okNext = (v) => !!v && v[0] === "/" && v[1] !== "/" && ![...v].some((ch) => ch.charCodeAt(0) <= 32 || ch.charCodeAt(0) === 92 || ch.charCodeAt(0) === 127);
-  const next = okNext(q.get("next")) ? q.get("next") : "/";
+  // the #hash of the link he opened rides along (a redirect keeps it on this page), never one of the login's own
+  const ownFrag = /(^|&)(pick|handoff|confirm|making|reset)=/.test(location.hash.slice(1));
+  const next0 = okNext(q.get("next")) ? q.get("next") : "/";
+  const next = location.hash.length > 1 && !ownFrag && !next0.includes("#") ? next0 + location.hash : next0;
   const $ = (id) => document.getElementById(id);
   // a start at /leads is the Epic Leads line on this same sign-up (oauth.ts lineOfNext): the page says so before anything else
   const leads = next === "/leads" || ["/leads/", "/leads?", "/leads#"].some((p) => next.startsWith(p));

@@ -7,7 +7,8 @@
 export type PressNote = {
   path: string;
   /** `kept`: saved and kept until its row is repaired; it lands by itself, the card treats it as done. */
-  state: "landing" | "kept" | "landed" | "failed" | "undone";
+  /** `late`: still not written PRESS_LATE_MS after the press: the page says so plainly; the console keeps trying. */
+  state: "landing" | "late" | "kept" | "landed" | "failed" | "undone";
   reason?: string;
   /** landed, from the press to its commit */ ms?: number;
   steps?: Record<string, number>;
@@ -43,6 +44,13 @@ export class PressUndone extends Error {
  */
 export const askAfterMs = (i: number) => (i < 30 ? 700 : i < 60 ? 2_000 : 10_000);
 
+/**
+ * (the owner 28 Nov, two presses at "writing it to the project… 294 s" and "242 s": "300s in why these still
+ * showing at bottom?"): a press never spins on. Still not written 30 s after it was saved, its line says plainly that it
+ * is not written yet and why, and that the console tries again by itself (it does: every press is retried until it lands).
+ */
+export const PRESS_LATE_MS = 30_000;
+
 /** failed asks in a row before the card says it could not check the press (each GET already waits out a restart for ~60 s). */
 export const PRESS_ASK_MISSES = 3;
 
@@ -62,6 +70,8 @@ export async function landed<T>(first: unknown, path: string, get: (id: string) 
   if (!p?.id || p.state !== "landing") return first as T;
   tell({ path, state: "landing", reason: p.reason, id: p.id, ...(p.undoMs ? { undoMs: p.undoMs } : {}) });
   let misses = 0;
+  const t0 = Date.now();
+  let lateSaid: string | undefined;
   for (let i = 0; ; i++) {
     await sleep(askAfterMs(i));
     let now: Press;
@@ -86,6 +96,12 @@ export async function landed<T>(first: unknown, path: string, get: (id: string) 
       // writes it by itself once the row is repaired. Nothing for him to do: the card says it was kept.
       tell({ path, state: "kept", reason: now.held, id: p.id });
       return { press: { id: p.id, state: "kept", message: KEPT_LINE } } as T;
+    }
+    if (now.state === "landing" && Date.now() - t0 >= PRESS_LATE_MS) {
+      const why = now.reason || "the project did not take it yet";
+      if (why !== lateSaid) tell({ path, state: "late", reason: why, id: p.id });
+      lateSaid = why;
+      continue;
     }
     if (now.state === "landed") {
       const movedOn = (now.response as { movedOn?: { line?: string } } | undefined)?.movedOn?.line;

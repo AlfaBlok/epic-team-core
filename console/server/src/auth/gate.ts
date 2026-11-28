@@ -1,7 +1,8 @@
 import type { Context, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { DEFAULT_TENANT, type DB } from "../db.js";
-import type { Store } from "../store.js";
+import { forTenant, type Store } from "../store.js";
+import { hooks } from "../plug/hooks.js";
 import { AuthError, createAuth, currentAuth, runWithAuth, SESSION_COOKIE, SESSION_DAYS, type Auth, type AuthMode, type Identity } from "./identity.js";
 import { judge, ownerOfPath } from "./routeScope.js";
 import { apiPathRefusal } from "./pathGuard.js";
@@ -116,7 +117,16 @@ export const platformBlocked = (host: string | undefined, tenant: string | undef
  */
 export const doorOwner = (env: NodeJS.ProcessEnv = process.env): boolean => env.CONSOLE_DOOR_OWNER?.trim() === "1";
 /** a door session on a customer site: the owner's plain workspace (doorOwner) or, off, the door's member view. */
+/**
+ * the owner retires the private address: `CONSOLE_DOOR_PLATFORM=1` lets the door login on a customer site be exactly what it is on the private
+ * console: every screen (settings, admin, decks, briefing, scorecard, listen, Pages, the API in his browser), no door
+ * or plain mark. Still only the CONSOLE_PLATFORM_DOOR login, still only by Google or GitHub (DOOR_VIA), never a
+ * password, a switch, an agent token or the host owner token (machineBlocked). It wins over doorOwner. Undo: drop the
+ * line and restart (the door is a member again, sessions judged at once).
+ */
+export const doorPlatform = (env: NodeJS.ProcessEnv = process.env): boolean => env.CONSOLE_DOOR_PLATFORM?.trim() === "1";
 export function doorSessionOf<T extends Identity & { kind: "session" }>(i: T, env: NodeJS.ProcessEnv = process.env): T {
+  if (doorPlatform(env)) return platformSession(i, env);
   return doorOwner(env) ? { ...i, plain: true } : { ...i, role: "member", door: true };
 }
 /**
@@ -283,7 +293,8 @@ export function mountAuth(
     if (!v.allow) {
       auth.logEvent({ mode, method: c.req.method, path, status: v.status, reason: v.reason, identity, peer: peerOf(c), agent: looksLikeAgent(header), caller: callerOf(header) });
       if (mode === "on") {
-        if (!path.startsWith("/api/") && v.status === 401) return c.redirect(`/login?next=${encodeURIComponent(path)}`, 302);
+        // the whole link survives sign-in (a card's ?call=1&focus=call); the browser keeps its #hash on the login page
+        if (!path.startsWith("/api/") && v.status === 401) return c.redirect(`/login?next=${encodeURIComponent(path + new URL(c.req.url).search)}`, 302);
         // a link to another world's page this same login belongs to (the owner's Google login on the social site,
         // a campaign of his social world) names that world, so the page switches there and opens it; anyone else still
         // gets the plain 404, so no world is revealed to a login outside it.
@@ -345,8 +356,10 @@ export function mountAuth(
     const tenant = tenantId ? o.store.getTenant(tenantId) ?? null : null;
     const wakeHold = tenant ? o.worldHold?.(tenant.id) : undefined; // the Personas page says why nobody wakes
     const billing = tenant ? o.billingOf?.(tenant.id) : undefined; // an EpicTeam sign-up waits for its payment
+    // a limited plan's plan limits, shown on its Personas page (none for our own worlds)
+    const wakeLimits = tenant && tenant.id !== DEFAULT_TENANT ? hooks.wakeLimits(o.db, tenant.id, forTenant(o.db, tenant.id).listPersonas()) : undefined;
     const worlds = i.kind === "session" ? auth.memberships(i.userId).filter((m) => !platformBlocked(hostOfReq(c), m.tenantId, process.env, { email: i.email })) : [];
-    return c.json({ mode, identity: publicIdentity(i), tenant, worlds, ...(wakeHold ? { wakeHold } : {}), ...(billing ? { billing } : {}), ...(companyViewOn() ? { companyView: true } : {}) }); // the parked Company view
+    return c.json({ mode, identity: publicIdentity(i), tenant, worlds, ...(wakeHold ? { wakeHold } : {}), ...(wakeLimits ? { wakeLimits } : {}), ...(billing ? { billing } : {}), ...(companyViewOn() ? { companyView: true } : {}) }); // the parked Company view
   };
   /**
    * the origin a world opens on when it is not this host: social worlds on the social host, the others on

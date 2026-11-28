@@ -206,7 +206,7 @@ describe("his phone and his laptop show the same counts", () => {
     expect(withServerAnswers(laptop, [...log, { target: "rv_b", at: iso(5), action: "review complete", state: "failed" }], now).has("review:rv_b")).toBe(false);
   });
 
-  it("the rule: landing or landed counts as answered, failed or brought back does not, older than two hours is forgotten", () => {
+  it("the rule: landing or landed counts as answered, failed or brought back does not, older than 14 days is forgotten", () => {
     const now = Date.now();
     const mine: SentEntry = { id: 1, said: "Closed", title: "x", at: now - 5 * 60_000 };
     const m = withServerAnswers(new Map([["review:rv_a", mine], ["review:rv_b", mine]]), [
@@ -217,7 +217,9 @@ describe("his phone and his laptop show the same counts", () => {
     expect(m.has("review:rv_a")).toBe(false); // its press failed after this mark
     expect(m.get("review:rv_b")).toBe(mine); // pressed here, not reported yet: kept
     expect(m.get("review:rv_c")).toMatchObject({ gone: true, server: true }); // answered elsewhere: out, no green row
-    expect(m.has("review:rv_old")).toBe(false);
+    // (was: forgotten after 2 h): his answer of 3 h ago still keeps the card out until it comes back
+    expect(m.get("review:rv_old")).toMatchObject({ gone: true, server: true });
+    expect(withServerAnswers(new Map(), [{ target: "rv_older", at: new Date(now - 15 * 86_400_000).toISOString(), action: "review complete", state: "landed" }], now).has("review:rv_older")).toBe(false);
     // the next read no longer lists rv_c (brought back): it is open again
     expect(withServerAnswers(m, [], now).has("review:rv_c")).toBe(false);
   });
