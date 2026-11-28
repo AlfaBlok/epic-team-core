@@ -1012,7 +1012,8 @@ function SnoozedRow({ item, qualify, showMilestone }: { item: WaitingItem; quali
  */
 export function WaitingCard(props: { item: WaitingItem; showMilestone?: boolean; readOnly?: string; qualify?: boolean }) {
   const slot = `ask:${props.item.id}`;
-  const sent = useSent(slot);
+  // E948-S231: an ask sent back to him after his answer draws as his card, as every count reads it
+  const sent = useSent(slot, props.item.since);
   // the refresh says his answer did not get through (still open, its delivery or spine write failed): the card is back
   const r = props.item.response;
   const failed = props.item.state === "open" && !!r && (r.delivery === "failed" || r.spine?.status === "failed" || r.spine?.status === "skipped");
@@ -2345,7 +2346,7 @@ function Open({ n = 1, item, children }: { n?: number; item?: Pick<WaitingItem, 
 export function StatusItemRow(props: { item: PendingItem; milestone?: string }) {
   // E948-S130: a status line or an alert he wrote on collapses to its Sent row, like every card
   return (
-    <SentOr slot={`status:${props.item.id}`}>
+    <SentOr slot={`status:${props.item.id}`} since={props.item.since}>
       <StatusItemBody {...props} />
     </SentOr>
   );
@@ -2620,7 +2621,7 @@ export function alertAskItem(alert: PendingItem, a: MonitorAlertAsk): WaitingIte
  */
 export function MonitorAlertCard({ item }: { item: PendingItem }) {
   return (
-    <SentOr slot={`status:${item.id}`}>
+    <SentOr slot={`status:${item.id}`} since={item.since}>
       <MonitorAlertBody item={item} />
     </SentOr>
   );

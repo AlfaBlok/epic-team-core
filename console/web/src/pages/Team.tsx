@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Clock, ExternalLink, MessageSquare, MessagesSquare,
 import { useMemo, useState, type ReactNode } from "react";
 import { ACTIVE_THREAD_STATUSES, api } from "@/api";
 import { useQuery, useWaitingList } from "@/lib/data";
+import { useCountHeal } from "@/lib/countHeal";
 import { dodCount, milestoneName } from "@/lib/format";
 import { milestoneTiming } from "@/lib/derive";
 import { milestoneState, openAskCodes, statusOf } from "@/lib/status";
@@ -93,6 +94,8 @@ export function TeamPage({
   only?: "goals" | "inbox";
 } = {}) {
   const { data: me } = useQuery(() => (api.getMe ? api.getMe() : Promise.resolve(undefined)), []);
+  // E948-S231: the open Inbox reads its pills against its lists every minute and reads again on a difference
+  useCountHeal(section === "inbox" && only !== "goals");
   const ms = useQuery(() => api.listMilestones(), []);
   const { data: assignments = [] } = useQuery(() => api.listAssignments(), []);
   // the cards' and personas' wake numbers come from /api/runs/stats (same 500 runs, counted on the server),

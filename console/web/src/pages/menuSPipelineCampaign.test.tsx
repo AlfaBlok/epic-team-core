@@ -103,8 +103,7 @@ const cardIn = async (lane: string, text: string) => (await within(await screen.
 
 describe("the menu's Pipeline: every campaign on one board", () => {
   it("the left menu reads Team, Chat, Pipeline in the social skin (not in the console skin)", async () => {
-    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
-    localStorage.setItem("sidebar.more.open", "1");
+    // one menu for both skins (the console skin's); the social pages sit in the Tools fold.
     render(
       <SkinProvider skin={SKINS.social}>
         <MemoryRouter>
@@ -116,10 +115,13 @@ describe("the menu's Pipeline: every campaign on one board", () => {
     // Messages (DMs) sits under Pipeline in a world with a social repo (the mock world has one).
     await screen.findByTestId("nav-messages");
     const names = (el: Element) => [...el.querySelectorAll("a")].map((a) => a.textContent?.replace(/\d+/g, "").trim());
-    // Home and
-    // Chat on top, the campaigns next, then Performance, Product and Messages. The Pipeline is each campaign's tab.
-    expect(names(main)).toEqual(["Home", "Inbox", "Chat"]);
-    expect(names(screen.getByTestId("nav-social-pages"))).toEqual(["Performance", "Product", "Messages"]);
+    // Inbox and Chat on top, Messages in the main list as in the console skin; Performance and Product are tools.
+    // The Pipeline is each campaign's tab.
+    expect(names(main).slice(0, 2)).toEqual(["Inbox", "Chat"]);
+    expect(names(main)).toContain("Messages");
+    expect(screen.queryByTestId("nav-social-pages")).toBeNull();
+    fireEvent.click(screen.getByTestId("nav-pages-toggle"));
+    expect(names(screen.getByTestId("nav-pages-list")).slice(0, 2)).toEqual(["Performance", "Product"]);
     expect(screen.queryByTestId("nav-pipeline")).toBeNull();
     cleanup();
     render(

@@ -53,7 +53,26 @@ describe("clinic configs", () => {
     expect(CLINIC_TOOLS(all.get("demo-sales")!).map((t) => t.name)).toContain("book_follow_up");
     // a garbled clinic name never blocks the follow-up: a name and a phone or email are enough
     expect(CLINIC_TOOLS(all.get("demo-sales")!).find((t) => t.name === "book_follow_up")!.parameters.required).toEqual(["name", "contact"]);
-    expect(sales).toMatch(/nunca la retengas/);
+    expect(sales).toMatch(/nunca la retengas/i);
+  });
+
+  it("a goodbye ends the call: no question after it, in Spanish and in English", () => {
+    const c = loadClinics(DIR).get("demo-sales")!;
+    for (const [p, head, noAsk, lead] of [
+      [clinicPrompt(c), "# La despedida (manda sobre todo lo demás)", /no haces ninguna pregunta, ni su nombre, ni un teléfono/, /tu primera acción, antes de decir nada, es llamar a qualify_lead/],
+      [clinicPrompt({ ...c, lang: "en" }), "# Goodbye (this rule wins over every other)", /you ask nothing at all, not their name, a phone/, /your first action, before saying anything, is to call qualify_lead/],
+    ] as const) {
+      // the goodbye rule is the prompt's last word, so nothing after it asks for more
+      expect(p.slice(p.indexOf(head))).toMatch(noAsk);
+      expect(p.slice(p.indexOf(head))).toMatch(lead);
+      expect(p.slice(p.indexOf(head))).toMatch(/end_call/);
+      expect(p.slice(p.indexOf(head) + head.length)).not.toMatch(/\n# /);
+    }
+    const plain = clinicPrompt(loadClinics(DIR).get("plain-clinic")!);
+    expect(plain).toMatch(/# La despedida/);
+    expect(plain).not.toMatch(/qualify_lead/);
+    const b = clinicAgentBody(c)("p", "hola", CLINIC_TOOLS(c) as any) as any;
+    expect(b.conversation_config.agent.prompt.tools.find((t: any) => t.name === "end_call").description).toMatch(/sin hacer ninguna pregunta/);
   });
 
   it("the agent speaks Spanish, takes no overrides and needs a signed link", () => {
@@ -125,6 +144,8 @@ describe("the public call", () => {
     expect(await tool("book_appointment", { name: "Ana", service: "Limpieza dental", date: "2026-12-01", time: first })).toMatch(/^Reservado/);
     // the same half hour is no longer free
     expect(await tool("book_appointment", { name: "Luis", service: "Revisión", date: "2026-12-01", time: first })).toMatch(/no están libres/);
+    // a follow-up with no contact never makes the rep ask after goodbye
+    expect(await tool("book_follow_up", { name: "Dra. Pérez", clinic: "Clínica Pérez" })).toMatch(/Si ya se ha despedido, no lo pidas: despídete en una frase y llama a end_call/);
     expect(await tool("book_follow_up", { name: "Dra. Pérez", clinic: "Clínica Pérez", contact: "600000000", when: "el lunes por la tarde" })).toMatch(/^Apuntado/);
     await post(app, `/api/public/clinic/demo-sales/calls/${s.call}/end`, { reason: "bye", transcript: [{ who: "voice", text: "Hola" }, { who: "owner", text: "Adiós" }] });
     const [c] = demo.calls();

@@ -288,12 +288,24 @@ export function noteReach(d: { store: Store; resolve: (repo: string) => { path: 
   return { repo: r.name, goal, manager, reads: manager === "on", urgentWakes: manager === "on" || manager === "parked", say };
 }
 
-export function mountDeskInbox(api: Hono, d: { store: Store; resolve: (repo: string) => { path: string; name: string } | undefined }) {
+export function mountDeskInbox(
+  api: Hono,
+  d: {
+    store: Store;
+    resolve: (repo: string) => { path: string; name: string } | undefined;
+    /**
+     * the home world's view of every world: a note is how one world hands another work, so when the caller is the home
+     * world and its own goals do not hold the repo, the world whose goal does is the one that reads it.
+     */
+    everyWorld?: { store: Store; callerIsHome: () => boolean };
+  },
+) {
   // GET /api/desk/inbox/reach?repo=<checkout or owner/name>: who reads a note sent there (desk_note.py asks it)
   api.get("/desk/inbox/reach", (c) => {
     const repo = (c.req.query("repo") ?? "").trim();
     if (!repo) return c.json({ error: "validation_error", message: "repo is required (a checkout name or owner/name)" }, 400);
-    const reach = noteReach(d, repo);
+    let reach = noteReach(d, repo);
+    if (reach?.manager === "no goal" && d.everyWorld?.callerIsHome()) reach = noteReach({ store: d.everyWorld.store, resolve: d.resolve }, repo) ?? reach;
     return reach ? c.json(reach) : c.json({ error: "not_found", message: `${repo} is not a repo the console has checked out` }, 404);
   });
   api.get("/desk/inbox", (c) => {

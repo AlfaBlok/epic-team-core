@@ -23,3 +23,11 @@ export function asksChoice(decision: string | undefined): boolean {
 /** the buttons a choice gets when the card names none: Yes: plan it for "Do we …?", Yes: go ahead for any other; a "Which …?" needs its own. */
 export const choiceDefaults = (decision: string | undefined): string[] | undefined =>
   DECIDE_QUESTION.test(firstAsk(decision)) ? ["Yes: plan it", "No: park it"] : asksChoice(decision) && !PICK_QUESTION.test(firstAsk(decision)) ? ["Yes: go ahead", "No: park it"] : undefined;
+
+/** E948-S232: the question asks what the team does next ("Do we / Should we …?", "Which / When …?"), as web lib/cardKind `asksNext`. */
+export const asksNext = (decision: string | undefined) => {
+  const q = firstAsk(decision);
+  return q.endsWith("?") && (DECIDE_QUESTION.test(q) || SHOULD.test(q) || PICK_QUESTION.test(q));
+};
+/** the Yes of finished work: it keeps what was made, it starts nothing new (web lib/cardKind KEEPS). */
+export const KEEPS = /^[^:]*:\s*(?:keep|leave|accept|close|mark|done|looks|it'?s|that'?s|fine|good|right|ship it as)\b/i;

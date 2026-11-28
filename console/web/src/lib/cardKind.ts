@@ -18,9 +18,25 @@ export const FEEDBACK_OPTION = /^[^:]*:\s*(?:say|tell|change|give|write|send)\b|
 export function isDecisionCard(face: Pick<CardFace, "decision" | "options" | "next"> | undefined | null): boolean {
   if (!face) return false;
   const own = (face.options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
-  if (own.length >= 2) return own.filter((o) => !FEEDBACK_OPTION.test(o.trim())).length >= 2;
+  const real = own.filter((o) => !FEEDBACK_OPTION.test(o.trim()));
+  if (own.length >= 2 && real.length >= 2) return true;
+  // E948-S232 (the owner 28 Nov 11:45Z on the traction card "Should we try these three next?", drawn under Done:
+  // "If it's waiting for an answer from me from like a decision, not in terms of like was this complete but actually like
+  // some other decision, then was this in the right place?"): what the card asks decides its section, never only its
+  // buttons. A question that asks a real choice ("Should we …?", "Which …?") is a Decision even when its one other
+  // button is Change it: when it asks what the team does next ("Should we …?", "Do we …?", "Which …?"), or names a step to
+  // take ("Run each test at 10 euros?") whose Yes does more than keep what was made. A question that judges finished work
+  // ("Does the page say it?", "Are these numbers right?") or "Make the box ours?" with Yes: keep it stays a Review.
+  if (own.length >= 2) return asksNext(face.decision) || (asksChoice(face.decision) && !real.some((r) => KEEPS.test(r)));
   return asksChoice(face.decision);
 }
+/** the Yes of finished work: it keeps what was made ("Yes: keep it", "Yes: looks right"), it starts nothing new. */
+const KEEPS = /^[^:]*:\s*(?:keep|leave|accept|close|mark|done|looks|it'?s|that'?s|fine|good|right|ship it as)\b/i;
+/** E948-S232: the question asks what the team does next: "Do we / Should we …?", "Which / When …?". */
+export const asksNext = (decision: string | undefined) => {
+  const q = firstAsk(decision);
+  return q.endsWith("?") && (DECIDE_QUESTION.test(q) || SHOULD.test(q) || PICK_QUESTION.test(q));
+};
 
 /**
  * (the owner 26 Nov on a tester-names card, "this came as review but was a question??"): a decision that asks him

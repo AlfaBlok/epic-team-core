@@ -14,6 +14,9 @@ const CALL_PATHS = [MARKETING_PATH, BRIEFING_PATH, STRATEGY_PATH, COACH_PATH];
 /** an objective's page, only when the card's link asks for its call (`?call=1`): a "ready to present" card (the owner's
  * note: "in the inbox, I get a card that says We're ready for the call to present the strategy"). */
 const OBJECTIVE_CALL = /^sets\/[a-z0-9][a-z0-9-]{0,63}$/;
+/** a campaign's own call, the social skin's level (its chat tab, `?tab=chat&call=1`, as the phone directory opens it):
+ * a social product's card asks for it, so his call starts on that product's site, never on the team's. */
+const CAMPAIGN_CALL = /^milestones\/ms_[A-Za-z0-9-]{1,64}$/;
 
 /** the call page a link opens (ours: same site, or a team/social console host), else undefined. */
 export function callPathOf(href: string | undefined): string | undefined {
@@ -30,7 +33,9 @@ export function callPathOf(href: string | undefined): string | undefined {
   const p = u.pathname.replace(/^\/+|\/+$/g, "");
   if (!ours) return undefined;
   if (CALL_PATHS.includes(p)) return p;
-  return OBJECTIVE_CALL.test(p) && u.searchParams.get("call") === "1" ? p : undefined;
+  if (u.searchParams.get("call") !== "1") return undefined;
+  if (OBJECTIVE_CALL.test(p)) return p;
+  return CAMPAIGN_CALL.test(p) && u.searchParams.get("tab") === "chat" ? `${p}?tab=chat` : undefined;
 }
 
 /** the button's words for a call page ("Call the <social product> briefer" for /marketing). */
@@ -38,7 +43,7 @@ export function callLabel(path: string): string {
   if (path === MARKETING_PATH) return `Call the ${socialProduct()} partner`;
   if (path === BRIEFING_PATH) return "Call your objectives review";
   if (path === STRATEGY_PATH) return "Call the strategy call";
-  if (OBJECTIVE_CALL.test(path)) return "Call to hear the strategy";
+  if (OBJECTIVE_CALL.test(path) || CAMPAIGN_CALL.test(path.split("?")[0])) return "Call to hear the strategy";
   return "Call the coach";
 }
 
@@ -49,7 +54,7 @@ export function CardCallButton({ hrefs, className }: { hrefs: (string | undefine
   const label = callLabel(path);
   return (
     <Link
-      to={`/${path}?call=1`}
+      to={`/${path}${path.includes("?") ? "&" : "?"}call=1`}
       data-testid="card-call-now"
       aria-label={label}
       className={cn(

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { api, type Assignment, type Milestone, type Persona } from "@/api";
 import type { CampaignCard } from "@/api/campaign-types";
@@ -47,9 +47,7 @@ describe("the repo's own level is not a campaign", () => {
     expect(repoLevelIds([repo]).size).toBe(0);
   });
 
-  it("the social skin's sidebar leaves PLAN-0 out of Other campaigns; the console skin still lists it", async () => {
-    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
-    localStorage.setItem("sidebar.more.open", "1");
+  it("the social skin's sidebar leaves PLAN-0 out of its campaigns; the console skin still lists it", async () => {
     const mk = (title: string, bigRoot?: number) => api.createMilestone({ title, repo: "acme-ai/social", path: "docs/spines/root.md", owner: "Sam", ...(bigRoot ? { bigRoot } : {}) });
     const w37: Milestone = await mk("Reddit awareness week 37", 1);
     const epic0: Milestone = await mk("PLAN-0: Memo social presence");
@@ -66,11 +64,11 @@ describe("the repo's own level is not a campaign", () => {
         </MemoryRouter>
       </SkinProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId("other-milestones-toggle").textContent).toMatch(/^Other campaigns \(1\)/));
-    fireEvent.click(screen.getByTestId("other-milestones-toggle"));
-    expect(screen.getByText(job.title)).toBeTruthy();
-    expect(screen.queryByText("PLAN-0: Memo social presence")).toBeNull();
-    expect(screen.getAllByText("Reddit awareness week 37").length).toBeGreaterThan(0);
+    // one menu for both skins; the social skin's campaigns stand where the console lists its objectives.
+    const camps = await screen.findByTestId("sidebar-campaigns", undefined, { timeout: 8000 });
+    await waitFor(() => expect(within(camps).getAllByText("Reddit awareness week 37").length).toBeGreaterThan(0));
+    expect(within(camps).queryByText("PLAN-0: Memo social presence")).toBeNull();
+    expect(job.title).toBeTruthy(); // a job is not a campaign: it opens by its link, never in the campaigns list
     cleanup();
 
     render(

@@ -118,13 +118,30 @@ function computeClaims(rows: { repo: string; tenant_id: string | null }[], repos
  * always allowed. A world: the checkout must be its own (claimed by it alone) or the one named after it that no one claims.
  */
 export function milestoneRepoRefusal(db: DB, reposRoot: string, world: string | undefined, repo: string): string | undefined {
-  if (world === undefined || world === DEFAULT_TENANT) return undefined;
+  if (world === DEFAULT_TENANT) return homeRepoRefusal(db, reposRoot, repo);
+  if (world === undefined) return undefined;
   const syntax = repoSyntaxRefusal(repo);
   if (syntax) return `repo ${repo} is ${syntax}: a world names one of its own checkouts by name`;
   const r = worldCheckout(reposRoot, repo);
   const claim = r && worldClaims(db, reposRoot).get(r.path);
   const own = r && (claim ? claim.size === 1 && claim.has(world) : path.basename(r.path) === world);
   return own ? undefined : `repo ${repo} is not one of ${world}'s checkouts`;
+}
+
+/**
+ * The home world takes no checkout another world already holds. A home goal there claims the checkout (computeClaims),
+ * which turns every goal of that world in it `refused:` at once: the world reads none of its own cards and they show in
+ * the home world's inbox instead (the owner: "why am I being offered this call" in the wrong product). A checkout the
+ * home world already holds a goal in stays its own, as before.
+ */
+export function homeRepoRefusal(db: DB, reposRoot: string, repo: string): string | undefined {
+  const r = resolveRepo(reposRoot, repo);
+  if (!r) return undefined; // not a checkout here: the route's own answer
+  const rows = db.prepare("SELECT repo, tenant_id FROM milestones ORDER BY created_at, id").all() as { repo: string; tenant_id: string | null }[];
+  const home = rows.some((m) => (m.tenant_id ?? DEFAULT_TENANT) === DEFAULT_TENANT && resolveRepo(reposRoot, m.repo)?.path === r.path);
+  if (home) return undefined;
+  const holder = rows.find((m) => (m.tenant_id ?? DEFAULT_TENANT) !== DEFAULT_TENANT && worldCheckout(reposRoot, m.repo)?.path === r.path)?.tenant_id;
+  return holder ? `repo ${repo} is world ${holder}'s checkout: make the goal in ${holder}, so its cards reach that world's inbox` : undefined;
 }
 
 /** Store hook: a stored milestone of `tenant` keeps its repo when allowed, else gets `refused:<repo>`. */

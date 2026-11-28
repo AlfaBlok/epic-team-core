@@ -950,7 +950,8 @@ export const PHONE_FIRST = 5;
  */
 export function ReviewCard(props: CardProps & { closedRefs?: Set<string> }) {
   const slot = `review:${props.item.id}`;
-  const sent = useSent(slot);
+  // E948-S231: a card sent back to him after his answer draws as his card, as every count reads it
+  const sent = useSent(slot, props.item.inboxSince);
   return sent ? <SentRow slot={slot} entry={sent} /> : <ReviewCardBody {...props} />;
 }
 
@@ -1439,7 +1440,7 @@ export function postButtons(p: Pick<PostCardInfo, "kind" | "slot" | "nextSlot">,
 /** E948-S130: a held post he answered collapses to its green Sent row too, like every card. */
 export function PostReviewCard(props: CardProps) {
   return (
-    <SentOr slot={`review:${props.item.id}`}>
+    <SentOr slot={`review:${props.item.id}`} since={props.item.inboxSince}>
       <PostReviewCardBody {...props} />
     </SentOr>
   );

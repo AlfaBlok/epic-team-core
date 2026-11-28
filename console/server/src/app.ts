@@ -2150,10 +2150,23 @@ export function createApp(
         }
       : {}),
   });
+  // one of the owner's own worlds that is not the home world and holds no workspace repo (his social world on the
+  // social product's site) reads only its own product's objectives, the ones named "<product>: …", never the home world's
+  // others (the owner, 28 Nov: the home world's objectives showed in his social world).
+  // Its product is the social product for a world in the social skin; any other such world reads none.
+  const ownProductOf = (w: string | undefined): string | null | undefined => {
+    if (!w || w === DEFAULT_TENANT) return undefined; // the home world: every objective
+    const skin = (db.prepare("SELECT skin FROM tenants WHERE id = ?").get(w) as { skin?: string } | undefined)?.skin;
+    return skin === "social" ? socialProduct() : null;
+  };
+  const isOwnProduct = (product: string | null, name: string | undefined) => !!product && (name ?? "").trim().toLowerCase().startsWith(`${product.toLowerCase()}:`);
   api.get("/pursuits", async (c) => {
     const w = connectedWorld();
     if (w) return c.json(withMilestones(await worldPursuits(w).get(), forTenant(db, w)));
-    return c.json(withMilestones(await pursuits.get(), store, pursuitEffort));
+    const body = withMilestones(await pursuits.get(), store, pursuitEffort);
+    const product = ownProductOf(credentialWorld());
+    if (product === undefined) return c.json(body);
+    return c.json({ ...body, pursuits: body.pursuits.filter((p) => isOwnProduct(product, p.name)) });
   });
   // goal sets: every pursuit a scorecard, its epics scorecards inside it, each with its queue and the codes its inbox matches.
   const scorecardSpine = createSpineFileReader((name) => resolveRepo(read.reposRoot, name)?.path);
@@ -2224,7 +2237,10 @@ export function createApp(
   api.get("/scorecards", async (c) => {
     const w = connectedWorld();
     if (w) return c.json(await worldScorecards(w));
-    return sendPrepared(c, await keptScorecards.get());
+    const product = ownProductOf(credentialWorld());
+    if (product === undefined) return sendPrepared(c, await keptScorecards.get());
+    const body = JSON.parse((await keptScorecards.get()).json.toString("utf8")) as ScorecardsBody;
+    return c.json({ ...body, nodes: body.nodes.filter((n) => isOwnProduct(product, n.name)), retired: [] });
   });
   // the ticket index, read only (scripts/ticket_index.py builds it from every spine; the Board, Key results
   // and Inbox read their rows from it). ?repo= ?state= ?world= ?id= ?open=1; the home world's only (routeScope).
@@ -2856,7 +2872,11 @@ export function createApp(
     ...(chatUnread ? { unread: chatUnread } : {}),
     memberships: (userId) => auth.memberships(userId), // the world switcher
   });
-  mountDeskInbox(api, { store, resolve: (repo) => resolveRepo(read.reposRoot, repo) }); // the world's desk-to-desk notes
+  mountDeskInbox(api, {
+    store,
+    resolve: (repo) => resolveRepo(read.reposRoot, repo),
+    everyWorld: { store: allWorldsStore, callerIsHome: () => (store.tenant ?? DEFAULT_TENANT) === DEFAULT_TENANT },
+  }); // the world's desk-to-desk notes
   /**
    * a deploy restarts the console (49 restarts in 6 h on 2026-11-02) and the first tree read after it took
    * 17-26 s on the main server (spines.py cold, then every tree of the world for the waiting list). After a start, read each

@@ -18,7 +18,8 @@ import { VoiceError } from "./voice/voice.js";
  *        │                                                                  │
  *        └── POST …/clinic/<demo>/calls {ref: CODE} ── the call carries the clinic's code ──▶ GET /api/clinic-demo/letters
  *
- * The public short link is <short host>/<CODE> (a router in the hosted layer maps it here). A code is six characters
+ * The public short link is <public address>/carta/<CODE> (a router in the hosted layer maps it here; an older short
+ * host redirects there). A code is six characters
  * from an alphabet without look-alikes (no 0, O, 1, I, L). Nothing here sends or posts anything: a letter is printed and
  * posted only after the owner's yes. A scan keeps only the time and a hashed address.
  */
@@ -185,7 +186,8 @@ export function mountLetters(api: Hono, x: Letters, demo: ClinicDemo) {
     const q = c.req.query("codigo");
     if (q) {
       const l = x.find(q);
-      if (l) return c.redirect(`/api/public/carta/${l.code}`, 302);
+      // relative, so the public short address keeps its own path (<public>/carta?codigo=X -> <public>/carta/X)
+      if (l) return c.redirect(`carta/${l.code}`, 302);
       return c.html(codePage(q), 404);
     }
     return c.html(codePage());

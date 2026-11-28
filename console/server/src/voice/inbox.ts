@@ -1,6 +1,6 @@
 import { ownerName } from "../identity.js";
 import { isYesNoQuestion } from "../inbox/decideChoices.js";
-import { choiceDefaults } from "../review/cardKind.js";
+import { asksChoice, asksNext, choiceDefaults, KEEPS } from "../review/cardKind.js";
 
 /**
  * (his pick "Walk the inbox by voice"): the call knows his inbox. When a Team
@@ -65,7 +65,9 @@ const FEEDBACK_OPTION = /^[^:]*:\s*(?:say|tell|change|give|write|send)\b|^(?:cha
 export function reviewButtons(face: { decision?: string; options?: string[] } | undefined | null): string[] {
   const own = (face?.options ?? []).filter((o) => /^[^:]{1,30}:\s*\S/.test(o));
   const decision = (face?.decision ?? "").trim();
-  if (own.length >= 2 && own.filter((o) => !FEEDBACK_OPTION.test(o.trim())).length >= 2) return [...own.slice(0, 4), CHANGES_WANTED];
+  // E948-S232: a card that asks a real choice ("Should we …?") answers with its own buttons, even when one is Change it
+  const real = own.filter((o) => !FEEDBACK_OPTION.test(o.trim()));
+  if (own.length >= 2 && (real.length >= 2 || asksNext(decision) || (asksChoice(decision) && !real.some((r) => KEEPS.test(r))))) return [...own.slice(0, 4), CHANGES_WANTED];
   const defaults = own.length < 2 ? choiceDefaults(decision) : undefined;
   if (defaults) return [...defaults, CHANGES_WANTED];
   return [MARK_COMPLETE, CHANGES_WANTED];

@@ -275,9 +275,17 @@ export const answeredSlot = (slot: string, since?: string | null) => {
 };
 /** Re-render on every Sent mark (the counts read `answeredHere`). */
 export const useSentVersion = () => useSyncExternalStore(subscribe, () => sent);
-export function useSent(slot: string | undefined): SentEntry | undefined {
+/**
+ * E948-S231 (the owner 28 Nov, his phone: "counter off again :((", Decisions waiting on you 2 over one Sent row): a card's
+ * own Sent row reads the same rule as every count. With `since` (when the server last sent the card to him), a card its
+ * owner sent back after his answer is his card again: drawn as a card and counted, never his old green row. Before,
+ * the count (answeredSlot) let it back in while the card itself still drew its Sent row for two hours, and a second
+ * Sent row hides behind the newest one: 2 on the pill, one Sent row in the list.
+ */
+export function useSent(slot: string | undefined, since?: string | null): SentEntry | undefined {
   const e = useSyncExternalStore(subscribe, () => (slot ? sent.get(slot) : undefined));
-  return live(e);
+  const l = live(e);
+  return l && !cameBack(l, since) ? l : undefined;
 }
 const useSentMap = () => useSyncExternalStore(subscribe, () => sent);
 

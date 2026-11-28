@@ -7,6 +7,7 @@ import type { DB } from "./db.js";
 import { clientAddress } from "./clientAddress.js";
 import { agentBody, elevenCalls, type CallLang, type ElevenCalls } from "./voice/elevenAgent.js";
 import { VoiceError } from "./voice/voice.js";
+import { sites } from "./identity.js";
 import { tracePage, type FollowUp } from "./clinicFollowUp.js";
 import { questionsIn, whoAnswered, type Leads } from "./clinicLeads.js";
 import { activationPage, clinicPlan, ensureClinicPlans, planOn } from "./clinicPlan.js";
@@ -360,6 +361,7 @@ export function clinicPrompt(c: Clinic): string {
     c.lang === "ca"
       ? `# Idioma: parles sempre en català, amb frases curtes, càlida i professional. Tractes de vostè. Si et parlen en castellà, contestes en castellà; en anglès, en anglès. Les instruccions d'aquí sota són en castellà, però tu parles en català.\n`
       : "",
+    "Regla número uno: cuando la persona se despide, no preguntas nada más (ni nombre, ni teléfono, ni email): ver «La despedida» al final.\n",
     `Eres ${who}, la recepcionista por voz de ${c.clinic}, ${c.kind ? `${/^(una?|el|la)\s/i.test(c.kind) ? "" : "una "}${c.kind}` : "una clínica dental"} en ${c.city}${c.address ? ` (${c.address})` : ""}. ${c.lang === "ca" ? "Hablas catalán" : "Hablas español de España"}, con frases cortas, cálida y profesional. Tratas siempre de usted. Si te hablan en inglés, contestas en inglés.`,
     c.madeUp ? "Esta clínica es una demostración: sus pacientes, citas y precios son inventados. Si te lo preguntan, lo dices con naturalidad." : "",
     "",
@@ -400,12 +402,12 @@ export function clinicPrompt(c: Clinic): string {
       `- Puesta en marcha: ${s.setup}`,
       s.terms ? `- ${s.terms}` : "",
       "Di solo lo que hace, nunca resultados: no prometas más pacientes, menos ausencias ni cifras, porque ninguna clínica lo ha usado todavía. Si te piden algo que no está aquí (una integración con su programa de gestión, protección de datos), di que lo verá el equipo en la llamada de seguimiento.",
-      `Para seguir: ofrece ${s.followUp}. Pide su nombre, el nombre de su clínica, un teléfono o email y cuándo le viene bien, y llama a book_follow_up. Con su nombre y un teléfono o email basta: si no entiendes un dato, pregúntalo una sola vez y después apunta lo que tengas. Después confirma en una frase que el equipo le llamará.`,
+      `Para seguir: ofrece ${s.followUp} en la misma respuesta en que das el precio, y ahí pide su nombre, el nombre de su clínica, un teléfono o email y cuándo le viene bien, y llama a book_follow_up. Con su nombre y un teléfono o email basta: si no entiendes un dato, pregúntalo una sola vez y después apunta lo que tengas. Después confirma en una frase que el equipo le llamará. Si se despide sin darlos, aunque en la misma frase diga que le interesa, no los vuelvas a pedir: lo que preguntó ya queda en la nota de qualify_lead.`,
       "Si quiere probar la demo como paciente, cambia al papel de recepcionista y atiéndele como a un paciente.",
       "",
       "# Quién te habla y qué necesita (para el equipo)",
       "Cuando veas que llama por una clínica, pregunta una sola vez y con naturalidad con quién hablas: si es el dueño o director de la clínica, de recepción u otra persona, y de qué clínica y ciudad llama. Escucha qué pregunta y qué le hace falta en su clínica (por ejemplo cubrir la hora de comer, las llamadas perdidas, el WhatsApp, su programa de agenda).",
-      "Antes de despedirte de alguien de una clínica, llama una vez a qualify_lead con quién es, su clínica y ciudad, lo que preguntó, lo que necesita (en sus palabras, corto) y su respuesta: sí, quizá o no. No lo digas en voz alta: es una nota para el equipo. Si no sabes algo, pon \"no lo dijo\".",
+      "Con alguien de una clínica, llama una vez a qualify_lead, en silencio, en cuanto se despida (o antes si ya lo sabes todo), con quién es, su clínica y ciudad, lo que preguntó, lo que necesita (en sus palabras, corto) y su respuesta: sí, quizá o no. No lo digas en voz alta: es una nota para el equipo. Si no sabes algo, pon \"no lo dijo\".",
     );
   }
   out.push(
@@ -415,7 +417,11 @@ export function clinicPrompt(c: Clinic): string {
     "",
     "# Cómo hablas",
     "Una o dos frases por turno. No leas listas largas ni números largos. Nunca interrumpas.",
-    `Cuando la persona se despide (adiós, gracias, eso es todo), despídete en una frase${c.sales ? ", llama a qualify_lead si es de una clínica y no lo has hecho," : ""} y llama a end_call, aunque falte algún dato: nunca la retengas.`,
+    "",
+    "# La despedida (manda sobre todo lo demás)",
+    "Cuando la persona se despide (adiós, gracias, hasta luego, eso es todo, ya lo hablo y le digo), la llamada se acaba: desde ese momento no haces ninguna pregunta, ni su nombre, ni un teléfono, ni un email, ni un día, ni nada más, aunque falte algún dato. Nunca la retengas.",
+    ...(c.sales ? ["Si es de una clínica y no has llamado a qualify_lead, tu primera acción, antes de decir nada, es llamar a qualify_lead con lo que ya sabes: así lo que preguntó queda anotado. Después haz lo que te devuelva. No llames a book_follow_up después de la despedida."] : []),
+    "Tu respuesta a una despedida es una sola frase de despedida, sin ninguna pregunta, por ejemplo «Gracias a usted, que tenga buena tarde.», y llamas a end_call en ese mismo turno.",
   );
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
@@ -429,6 +435,7 @@ export function clinicPromptEn(c: Clinic): string {
     .join("\n");
   const services = c.services.map((s) => `- ${s.name}: ${s.price}${s.minutes ? ` (${s.minutes} minutes)` : ""}`).join("\n");
   const out = [
+    "Rule number one: when they say goodbye, you ask nothing more (no name, phone or email): see \"Goodbye\" at the end.\n",
     `You are ${who}, the voice receptionist of ${c.clinic}, ${c.kind ?? "a dental practice"} in ${c.city}${c.address ? ` (${c.address})` : ""}, Ireland. You speak warm, natural Irish English in short sentences, friendly and professional. You answer every call to the practice: you are its phone line, not an answering machine.`,
     c.madeUp ? "This practice is a demo: its patients, appointments and prices are made up. If asked, say so naturally." : "",
     "",
@@ -465,12 +472,12 @@ export function clinicPromptEn(c: Clinic): string {
       `- Setting up: ${s.setup}`,
       s.terms ? `- ${s.terms}` : "",
       "Say only what it does, never results: never promise more patients, fewer no-shows or any figure, because no clinic has used it yet. If they ask for something not here (their practice software, data protection), say the team will cover it on the follow-up call.",
-      `To follow up: offer ${s.followUp}. Ask their name, their clinic, a phone or email and when suits, and call book_follow_up. A name and a phone or email is enough: if you miss a detail, ask once, then note what you have. Then confirm in one sentence that the team will be in touch.`,
+      `To follow up: offer ${s.followUp} in the same answer where you give the price, and there ask their name, their clinic, a phone or email and when suits, and call book_follow_up. A name and a phone or email is enough: if you miss a detail, ask once, then note what you have. Then confirm in one sentence that the team will be in touch. If they say goodbye without giving them, even if in the same sentence they say they are interested, do not ask again: what they asked is already in the qualify_lead note.`,
       "If they want to try it as a patient, switch to the receptionist role and look after them as a patient.",
       "",
       "# Who is calling and what they need (for the team)",
       "When you see they are calling for a clinic, ask once and naturally who you are speaking with: the owner or practice manager, the front desk, or someone else, and which clinic and town.",
-      "Before saying goodbye to someone from a clinic, call qualify_lead once with who they are, their clinic and town, what they asked, what they need (in their words, short) and their answer: yes, maybe or no. Do not say it out loud: it is a note for the team. If you do not know something, put \"not said\".",
+      "With someone from a clinic, call qualify_lead once, silently, as soon as they say goodbye (or earlier if you know it all), with who they are, their clinic and town, what they asked, what they need (in their words, short) and their answer: yes, maybe or no. Do not say it out loud: it is a note for the team. If you do not know something, put \"not said\".",
     );
   }
   out.push(
@@ -480,7 +487,11 @@ export function clinicPromptEn(c: Clinic): string {
     "",
     "# How you speak",
     "One or two sentences a turn. No long lists or long numbers. Never interrupt.",
-    `When they say goodbye (bye, thanks, that's all), say goodbye in one sentence${c.sales ? ", call qualify_lead if they are from a clinic and you have not," : ""} and call end_call, even if a detail is missing: never keep them.`,
+    "",
+    "# Goodbye (this rule wins over every other)",
+    "When they say goodbye (bye, thanks, cheers, that's all, I'll talk it over and get back to you), the call is over: from then on you ask nothing at all, not their name, a phone, an email, a day or anything else, even if a detail is missing. Never keep them.",
+    ...(c.sales ? ["If they are from a clinic and you have not called qualify_lead, your first action, before saying anything, is to call qualify_lead with what you already know, so what they asked is noted. Then do what it returns. Do not call book_follow_up after goodbye."] : []),
+    "Your reply to a goodbye is one goodbye sentence with no question in it, for example \"Thanks a million, have a lovely day.\", and you call end_call in that same turn.",
   );
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
@@ -595,8 +606,8 @@ const CLINIC_TOOLS_ES = (c: Clinic) => [
 
 /** the agent as made on the account: Spanish, multilingual voice, end_call only on a goodbye, a short call, no
  * overrides (the public page can never change what it says) and signed links only. */
-export function clinicAgentBody(c: Pick<Clinic, "voiceId"> & { lang?: Clinic["lang"] }, maxS: number = CLINIC_CALL_MAX_S, endCall = "Termina la llamada cuando la persona se despide, después de una despedida corta.") {
-  if (c.lang === "en" && endCall.startsWith("Termina")) endCall = "End the call when the person says goodbye, after a short goodbye.";
+export function clinicAgentBody(c: Pick<Clinic, "voiceId"> & { lang?: Clinic["lang"] }, maxS: number = CLINIC_CALL_MAX_S, endCall = "Termina la llamada cuando la persona se despide, después de una despedida corta y sin hacer ninguna pregunta.") {
+  if (c.lang === "en" && endCall.startsWith("Termina")) endCall = "End the call when the person says goodbye, after a short goodbye and without asking anything.";
   return (prompt: string, firstMessage: string, tools: Parameters<typeof agentBody>[2], name?: string, tags?: string[], lang: CallLang = "es") => {
     const b = agentBody(prompt, firstMessage, tools, name, tags, c.lang === "en" ? "en" : lang === "en" ? "es" : lang);
     const agent = b.conversation_config.agent;
@@ -893,15 +904,15 @@ export function createClinicDemo(d: ClinicDeps) {
       }
       if (name === "qualify_lead" && c.sales) {
         if ((db.prepare("SELECT COUNT(*) n FROM clinic_bookings WHERE call_id = ? AND kind = 'lead'").get(id) as { n: number }).n)
-          return { result: L("Ya está anotado. Sigue la conversación o despídete.", "Already noted. Carry on or say goodbye.") };
+          return { result: L("Ya está anotado. Si la persona ya se ha despedido, despídete en una frase sin preguntar nada y llama a end_call; si no, sigue la conversación.", "Already noted. If they have said goodbye, say goodbye in one sentence without asking anything and call end_call; if not, carry on.") };
         const lead = { who: whoAnswered(s("who")), clinic: s("clinic"), city: s("city"), asks: s("asks"), needs: s("needs"), answer: s("answer"), code: r.code ?? undefined };
         db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'lead', ?, ?)").run(`cb_${crypto.randomBytes(6).toString("hex")}`, id, slug, JSON.stringify(lead), iso());
         void d.leads?.land({ call: id, day: madridToday(now()).iso, ...lead });
-        return { result: L("Anotado para el equipo. No lo menciones; sigue la conversación o despídete.", "Noted for the team. Do not mention it; carry on or say goodbye.") };
+        return { result: L("Anotado para el equipo. No lo menciones. Si la persona se ha despedido, di solo una frase de despedida sin ninguna pregunta y llama a end_call ya. Si no, sigue la conversación.", "Noted for the team. Do not mention it. If they have said goodbye, say only one goodbye sentence with no question and call end_call now. If not, carry on.") };
       }
       if (name === "book_follow_up" && c.sales) {
-        if (booked() >= BOOKINGS_PER_CALL) return { result: L("Ya está apuntado. Confírmalo y despídete.", "Already noted. Confirm it and say goodbye.") };
-        if (!s("name") || !s("contact")) return { result: L("Faltan su nombre o un teléfono o email. Pídelos.", "Their name or a phone or email is missing. Ask for it.") };
+        if (booked() >= BOOKINGS_PER_CALL) return { result: L("Ya está apuntado. Confírmalo en una frase; si ya se ha despedido, despídete sin preguntar nada y llama a end_call.", "Already noted. Confirm it in one sentence; if they have said goodbye, say goodbye without asking anything and call end_call.") };
+        if (!s("name") || !s("contact")) return { result: L("Faltan su nombre o un teléfono o email. Si la persona sigue en la conversación, pídelo una vez. Si ya se ha despedido, no lo pidas: despídete en una frase y llama a end_call.", "Their name or a phone or email is missing. If they are still talking with you, ask once. If they have said goodbye, do not ask: say goodbye in one sentence and call end_call.") };
         db.prepare("INSERT INTO clinic_bookings (id, call_id, slug, kind, data, at) VALUES (?, ?, ?, 'follow_up', ?, ?)").run(
           `cb_${crypto.randomBytes(6).toString("hex")}`,
           id,
@@ -1123,8 +1134,9 @@ export function mountClinicDemo(api: Hono, demo: ClinicDemo, o: { invites?: Invi
   // the owner's (signed in, not open): every demo call with its text and bookings.
   api.get("/clinic-demo/calls", (c) => c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, sales: !!x.sales, lang: x.lang ?? "es", voice: demo.voiceOf(x) })), calls: demo.calls(Number(c.req.query("limit")) || 50) }));
   // the owner's (signed in): each clinic's private set-up link and the objectives its file holds.
+  // and the links the owner hands a clinic, on its public address (<public>/clinics/<slug>/…), never the private console's.
   api.get("/clinic-demo/setup", (c) =>
-    c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, link: demo.setupLink(x.slug), objectives: x.objectives ?? [], objectivesFromCall: x.objectivesFromCall ?? null })) }),
+    c.json({ clinics: demo.list().map((x) => ({ slug: x.slug, clinic: x.clinic, link: demo.setupLink(x.slug), ...publicLinks(x.slug, demo.setupLink(x.slug)), objectives: x.objectives ?? [], objectivesFromCall: x.objectivesFromCall ?? null })) }),
   );
 }
 
@@ -1437,4 +1449,19 @@ ${
 <p class="small" style="margin-top:24px">${c.madeUp ? "Clínica de demostración, inventada. " : ""}Necesita micrófono. No guardamos el audio, solo el texto de la llamada. Este enlace es solo para su clínica: no lo comparta.</p>
 </main>
 ${callScript(c.slug, `/setup/calls?k=${encodeURIComponent(k)}`, ["add_objective", "confirm_objectives", "file_ticket"], "Asistente")}</body></html>`;
+}
+
+/**
+ * A clinic's public address (sites().clinicDemoUrl): the pages a clinic opens are served
+ * there by the hosted layer's router (traefik/agent-team-voice-clinic.yml), never on the private console address.
+ *   /clinics/<slug>/activar              the payment page (clinicPlan.ts)
+ *   /clinics/<slug>/puesta-en-marcha?k=  the set-up call (clinicSetup.ts)
+ *   /carta/<CODE>                        the posted letter's call page (clinicLetters.ts)
+ */
+export const clinicPublicBase = () => (process.env.CONSOLE_CLINIC_DEMO_URL ?? sites().clinicDemoUrl ?? "").replace(/\/+$/, "");
+export function publicLinks(slug: string, setupLink: string): { publicSetup?: string; publicPay?: string } {
+  const base = clinicPublicBase();
+  if (!base) return {};
+  const q = setupLink.includes("?") ? setupLink.slice(setupLink.indexOf("?")) : "";
+  return { publicSetup: `${base}/clinics/${slug}/puesta-en-marcha${q}`, publicPay: `${base}/clinics/${slug}/activar` };
 }

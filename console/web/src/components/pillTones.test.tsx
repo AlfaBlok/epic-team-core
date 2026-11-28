@@ -111,8 +111,7 @@ describe("T48-S19 sidebar pills", () => {
   });
 
   it("the social skin shows the same pills (PLAN-34 L-5)", async () => {
-    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
-    localStorage.setItem("sidebar.more.open", "1");
+    // one menu for both skins; the social skin's campaigns stand where the console lists its objectives.
     const [a] = await api.listMilestones();
     await seed({ [a.id]: 1 }, () => ({ review: 2, chat: 1, milestones: { [a.id]: { needsYou: 1, review: 2, chat: 1 } } }));
     // the social menu lists campaigns only: this milestone is one.
@@ -127,10 +126,8 @@ describe("T48-S19 sidebar pills", () => {
     const main = await screen.findByTestId("nav-main");
     const team = () => main.querySelector('a[href="/inbox"]')!; // the pills sit on the Inbox entry
     await waitFor(() => expect(pills(team())).toEqual(["needs-you:1", "review:2"]));
-    expect(pills(within(main).getByText("Chat").closest("a")!)).toEqual(["unread:1"]);
-    const open = screen.queryByTestId("other-milestones-toggle");
-    if (open?.getAttribute("aria-expanded") === "false") act(() => open.click());
-    await waitFor(() => expect(pills(document.querySelector(`[data-testid="sidebar-milestones"] a[href="/milestones/${a.id}"]`)!)).toEqual(["needs-you:1", "review:2"]));
+    await waitFor(() => expect(pills(within(main).getByText("Chat").closest("a")!)).toEqual(["unread:1"]));
+    await waitFor(() => expect(pills(document.querySelector(`[data-testid="sidebar-campaigns"] a[href="/milestones/${a.id}"]`)!)).toEqual(["needs-you:1", "review:2"]), { timeout: 8000 });
   });
 
   it("the top bar (phone) carries Team's red + green and Chat's blue, each a link; the Layout reads /counts once", async () => {

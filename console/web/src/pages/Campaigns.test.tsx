@@ -77,15 +77,13 @@ describe("Campaigns list", () => {
     expect(screen.getByText(/Not found/)).toBeTruthy();
   });
 
-  it("T58-S3: no Campaigns menu entry; Add campaign or job → Campaign opens the wizard", async () => {
-    // the social menu folds everything after his pinned campaigns into More; open it as a press would.
-    localStorage.setItem("sidebar.more.open", "1");
+  it("T58-S3: no Campaigns menu entry; Add campaign under the campaigns opens the wizard", async () => {
+    // one menu for both skins: Add campaign sits under the campaigns, as Add objective sits under the objectives.
     vi.spyOn(api, "listCampaignRepos").mockResolvedValue([]);
     at("/"); // the Layout renders the sidebar
     // no menu entry (Home's own "Campaigns" tab is not the menu)
     expect(screen.queryAllByRole("link", { name: "Campaigns" }).filter((a) => !a.closest('[data-testid="set-tabs"]'))).toEqual([]);
-    fireEvent.click((await screen.findAllByRole("button", { name: "Add campaign or job" }))[0]); // the menu draws at once, when its lists are in
-    fireEvent.click(await screen.findByTestId("choose-campaign"));
+    fireEvent.click((await screen.findAllByTestId("sidebar-add-campaign", undefined, { timeout: 8000 }))[0]); // the menu draws at once, when its lists are in
     expect(await screen.findByRole("heading", { name: "New campaign" })).toBeTruthy();
   });
 });

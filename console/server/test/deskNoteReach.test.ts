@@ -75,6 +75,20 @@ describe("who reads a desk note", () => {
     expect((await api.request("/desk/inbox/reach?repo=nowhere")).status).toBe(404);
   });
 
+  // a note is how one world hands another work: the home world asks who reads a note in a repo whose goal is another
+  // world's, and that world's manager is the answer (no home goal in the repo, which would take the checkout from it).
+  it("the home world sees the other world's goal that reads the note; another world sees only its own", async () => {
+    const own = fake([], []);
+    const every = fake([travel], [{ id: "a", milestoneId: "ms_travel", personaId: "pe_dm", enabled: true }]);
+    for (const [home, reads] of [[true, true], [false, false]] as const) {
+      const api = new Hono();
+      mountDeskInbox(api, { store: own, resolve, everyWorld: { store: every, callerIsHome: () => home } });
+      const r = (await (await api.request("/desk/inbox/reach?repo=trips")).json()) as { reads: boolean; manager: string };
+      expect(r.reads, `home ${home}`).toBe(reads);
+      expect(r.manager).toBe(reads ? "on" : "no goal");
+    }
+  });
+
   it("the desk's remit: every claim names its check, and NOT READ is said at once", () => {
     const lines = endpointLines("http://console");
     const claim = lines.find((l) => l.startsWith("- Name the check behind each claim"));

@@ -101,6 +101,15 @@ describe("the set-up call", () => {
     const v = (await (await app.request("/api/clinic-demo/setup")).json()) as any;
     expect(v.clinics[0].objectivesFromCall).toBe(s.call);
     expect(v.clinics[0].link).toMatch(/^\/api\/public\/clinic\/demo-setup\/puesta-en-marcha\?k=[a-f0-9]{24}$/);
+    // and the links the owner hands the clinic, on its public address (never the private console's)
+    process.env.CONSOLE_CLINIC_DEMO_URL = "https://clinics.example.com/";
+    try {
+      const w = (await (await app.request("/api/clinic-demo/setup")).json()) as any;
+      expect(w.clinics[0].publicSetup).toMatch(/^https:\/\/clinics\.example\.com\/clinics\/demo-setup\/puesta-en-marcha\?k=[a-f0-9]{24}$/);
+      expect(w.clinics[0].publicPay).toBe("https://clinics.example.com/clinics/demo-setup/activar");
+    } finally {
+      delete process.env.CONSOLE_CLINIC_DEMO_URL;
+    }
     // the page shows them now
     expect(await (await app.request(`/api/public/clinic/demo-setup/puesta-en-marcha?k=${key(demo)}`)).text()).toMatch(/No perder llamadas a la hora de comer/);
   });

@@ -124,11 +124,11 @@ export function CampaignRing({ metric, size = 30 }: { metric: Metric | null | un
  */
 export function SidebarCampaigns({ onNavigate }: { onNavigate?: () => void }) {
   const { nodes, cardOf, countFor, read } = useCampaignHome();
-  if (!read || !nodes.length) return null;
+  if (!read) return null;
   return (
     <div className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-campaigns">
-      <div className="px-2.5 pb-0.5 text-xs font-medium text-muted-foreground">Your campaigns</div>
-      <ul className="grid min-w-0 gap-1">
+      {nodes.length > 0 && <div className="px-2.5 pb-0.5 text-xs font-medium text-muted-foreground">Your campaigns</div>}
+      {nodes.length > 0 && <ul className="grid min-w-0 gap-1">
         {nodes.map((n) => {
           const card = cardOf(n.id);
           const c = countFor(n.id);
@@ -153,7 +153,7 @@ export function SidebarCampaigns({ onNavigate }: { onNavigate?: () => void }) {
             </li>
           );
         })}
-      </ul>
+      </ul>}
       {/* a customer adds a campaign right under their campaigns (the wizard), not only from More. */}
       <NavLink to="/campaigns/new" onClick={onNavigate} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground" data-testid="sidebar-add-campaign">
         <Plus className="h-4 w-4" />

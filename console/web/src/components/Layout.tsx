@@ -13,7 +13,7 @@ import { RECONNECTING_MESSAGE, isReconnecting, onReconnecting } from "@/api/real
 import { useOnboardingLeads } from "@/lib/onboardingLeads";
 import { cn } from "@/lib/utils";
 import { GOAL_INBOX_TAB, GoalPills, SetWheel, topObjectives, useGoalSets } from "@/components/goalRing";
-import { isVoiceNotesPin, useFold, useStoredFlag } from "@/lib/storedFlag";
+import { isVoiceNotesPin, useFold } from "@/lib/storedFlag";
 import { objectiveOf } from "@/lib/scorecards";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { INBOX_LAND } from "@/lib/inboxPlace";
@@ -25,7 +25,7 @@ import { statusOf } from "@/lib/status";
 import { lazyPage } from "@/lib/lazyPage";
 import { keptPart, loadCampaignHome, loadGoalSets, loadMobileMenu, prefetchSidebarScripts, useScriptIn } from "@/lib/sidebarScripts";
 import { milestoneName } from "@/lib/format";
-import { focusHeading, useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
+import { useShows, useSkin, useWords, type ScreenId } from "@/lib/skin";
 import { PhoneDirectory } from "@/voice/PhoneDirectory";
 import { BRAND_MARKS, BrandMark, brandOf, siblingOf } from "@/components/brand";
 import { COMPANY_PATH } from "@/lib/company";
@@ -141,10 +141,6 @@ const itemClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
   );
 
-/** "Other milestones" open or folded, kept in localStorage (default folded). */
-const OTHERS_STORE = "sidebar.otherMilestones.open";
-/** the social skin's More fold open or folded, kept in localStorage (default folded). */
-const MORE_STORE = "sidebar.more.open";
 /** the console's Tools and Settings folds, each open or folded in this browser (default folded). */
 const TOOLS_STORE = "sidebar.tools.open";
 const SETTINGS_STORE = "sidebar.settings.open";
@@ -208,7 +204,6 @@ const SIDEBAR_PILL_IDS = { ask: "sidebar-needs-you", review: "sidebar-review" };
 /** the console's words for the goals no objective holds: goals like the objectives, never "projects". */
 export const OTHER_GOALS = "Other goals";
 export const MORE_GOALS = "More goals";
-const reviewOf = (cards: { milestoneId?: string }[] | undefined, id: string) => (cards ?? []).filter((c) => c.milestoneId === id).length;
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: allMilestones } = useSharedQuery("sb:milestones", () => api.listMilestones());
@@ -258,77 +253,33 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // (a house decision, a server, taxes) is team work and stays on the team side.
   const { data: camps } = useCampaigns();
   const { roots, rest } = splitBigRoots(campaigns ? campaignMilestones(camps?.campaigns, milestones) : milestones);
-  const [othersOpen, setOthersOpen] = useStoredFlag(OTHERS_STORE);
   // about 20 milestones show in priority order (focus first, his order); Load more shows the next 20.
   const [limit, setLimit] = useState(MILESTONE_PAGE);
   const page = pageMilestones(roots, rest, limit);
-  const restShows = roots.length === 0 || othersOpen;
-  // Unique open items of the folded milestones (an ask two milestones share counts once, as the Team badge does).
-  const restLoading = rest.some((m) => statusOf(statuses, m.id)?.loading);
-  const restNeeds = new Set(rest.flatMap((m) => blockedItems(statusOf(statuses, m.id), { snoozing }).map((i) => i.id))).size;
   // Chat's unread pill (quiet dark grey); the milestone lines show red and green only.
   const counts = useCounts();
-  // in the social skin Team, Chat, Performance and the project's Product deck; the Pipeline is each campaign's
-  // tab (every campaign's board still opens at /pipeline by URL). In the social skin these follow the campaigns.
-  const socialPages = (
-    <>
-      {shows("performance") && campaigns && (
-        <NavLink to={`/${PERFORMANCE_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-performance">
-          <BarChart3 className="h-4 w-4" />
-          Performance
-        </NavLink>
-      )}
-      {shows("performance") && campaigns && (
-        <NavLink to={`/${PRODUCT_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-product">
-          <Presentation className="h-4 w-4" />
-          Product
-        </NavLink>
-      )}
-      {/* Post stats in the social skin too (the owner, 22 Nov: "I don't mind having it in both places"). */}
-      {shows("postStats") && campaigns && (
-        <NavLink to={`/${X_STATS_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-x-stats">
-          <BarChart3 className="h-4 w-4" />
-          Post stats
-        </NavLink>
-      )}
-      {/* Messages (DMs) under Pipeline (social) or Chat (console), in a world with a social repo; its pill counts the chats that need the owner. */}
-      {shows("messages") && <MessagesNav onNavigate={onNavigate} />}
-    </>
-  );
+  // the owner, 28 Nov: the social product is the same engine as the console with a different skin: one sidebar for both skins. The social skin's own pages (Performance, the Product deck, Post stats) are tools,
+  // in the same Tools fold the console skin uses; Messages sits in the main list in both.
+  const socialTools: ToolEntry[] = campaigns
+    ? [
+        ...(shows("performance") ? [{ to: `/${PERFORMANCE_PATH}`, label: "Performance", icon: BarChart3, testId: "nav-performance" }] : []),
+        ...(shows("performance") ? [{ to: `/${PRODUCT_PATH}`, label: "Product", icon: Presentation, testId: "nav-product" }] : []),
+        ...(shows("postStats") ? [{ to: `/${X_STATS_PATH}`, label: "Post stats", icon: BarChart3, testId: "nav-x-stats" }] : []),
+      ]
+    : [];
   const operatorPages = useOperatorPages();
   // read-only pages (Seats, Hosts, Applications, Voice feedback, Dashboard) sit with the console's pages, never under Settings (settings are only what he changes).
   const toolPages = useToolPages();
   const pinnedPages = useSharedQuery("sb:pinned", () => api.listPinnedPages());
-  // the owner, 12 Nov 16:02Z: "I just want to see the thing that I put there": the social skin shows Home, Inbox, Chat
-  // and his pinned campaigns; everything else folds into More (default folded). The console skin draws it all, unfolded.
-  const [moreOpen, setMoreOpen] = useStoredFlag(MORE_STORE);
-  const fold = (body: ReactNode) =>
-    !campaigns ? (
-      body
-    ) : (
-      <div className="grid min-w-0 grid-cols-1 gap-4" data-testid="sidebar-more">
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-md border-t px-2.5 pb-1.5 pt-3 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          aria-expanded={moreOpen}
-          data-testid="sidebar-more-toggle"
-          onClick={() => setMoreOpen(!moreOpen)}
-        >
-          <FoldChevron open={moreOpen} />
-          More
-          <span className="ml-auto text-xs">{moreOpen ? "" : "all else"}</span>
-        </button>
-        {moreOpen && body}
-      </div>
-    );
   // one row for every goal no objective holds, pinned or not: its circle, name and the pills its Inbox tab shows.
   const rootLink = (m: Milestone) => <MilestoneGoalLink key={m.id} m={m} status={statusOf(statuses, m.id)} counts={milestoneInbox(statuses, allCards, m.id, snoozing)} onNavigate={onNavigate} />;
 
-  // ---- the console skin's sidebar as the owner approved it ("Yes: build it" on the mock-up):
-  // Inbox and Chat, his objectives (one list in his order, no Other goals), Tools folded, Settings
-  // folded, Worlds last. Nothing is removed: every page keeps its entry, inside a fold.
+  // ---- the sidebar as the owner approved it ("Yes: build it" on the mock-up), one menu for both skins:
+  // Inbox and Chat, the world's own objectives (one list in his order, no Other goals; in the social skin its campaigns,
+  // which are its objectives), Tools folded, Settings folded, Worlds last. Nothing is removed: every page keeps its entry,
+  // inside a fold. The social skin never lists the home world's objectives (the owner, 28 Nov: they showed there).
   const { pathname } = useLocation();
-  const hasObjectives = shows("goalSets") && topObjectives(sets.data?.nodes).length > 0;
+  const hasObjectives = !campaigns && shows("goalSets") && topObjectives(sets.data?.nodes).length > 0;
   const addGoal = (
     <button
       type="button"
@@ -350,6 +301,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   // (his tool-by-tool note): Runs left for the top, Spines, Threads, Tickets, Voice feedback, Dashboard and Applications
   // left the menu (their pages still open by address), One-offs became an objective, the Company map sits under the objectives.
   const tools: ToolEntry[] = [
+    ...socialTools,
     ...consoleTools(shows, !!gapFinder?.on, pinnedPages.data?.pinned),
     ...toolPages.filter((p) => TOOL_KEEP.has(p.testId)).map((p) => ({ to: p.to, label: p.label, icon: TOOL_ICONS[p.testId] ?? Files, testId: `nav-tool-${p.testId.slice(3)}` })),
   ];
@@ -358,16 +310,18 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const settings: ToolEntry[] = [
     ...(shows("settings") ? [{ to: `/${SETTINGS_PATH}`, label: "All settings", icon: Settings, testId: "nav-settings-link", end: true }] : []),
     ...(shows("personas") ? [{ to: "/personas", label: w.personas, icon: Bot, testId: "nav-personas" }] : []),
-    ...(shows("runs") ? [{ to: `/${PRIORITY_PATH}`, label: "Priority mode", icon: Crosshair, testId: "nav-priority" }] : []),
+    ...(shows("runs") && !campaigns ? [{ to: `/${PRIORITY_PATH}`, label: "Priority mode", icon: Crosshair, testId: "nav-priority" }] : []),
     ...operatorPages.map((p) => ({ to: p.to, label: p.label, icon: SETTING_ICONS[p.testId] ?? Settings, testId: `nav-${p.testId}` })),
   ];
   const here = (list: ToolEntry[]) => list.some((t) => !t.external && (pathname === t.to || pathname.startsWith(`${t.to}/`)));
   // each fold opens by itself on one of its own pages, and a press always opens or folds it.
   const [toolsShown, toggleTools] = useFold(TOOLS_STORE, here(tools));
   const [settingsShown, toggleSettings] = useFold(SETTINGS_STORE, here(settings));
-  const consoleMenu = (
+  const menu = (
     <>
-      {hasObjectives ? (
+      {campaigns ? (
+        <SidebarCampaigns onNavigate={onNavigate} />
+      ) : hasObjectives ? (
         <>
           <SidebarGoalSetsOf
             data={sets.data}
@@ -395,7 +349,6 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       )}
       <SidebarFold label="Tools" items={tools} open={toolsShown} onToggle={toggleTools} onNavigate={onNavigate} testId="nav-pages" className="border-t" />
       <SidebarFold label="Settings" items={settings} open={settingsShown} onToggle={toggleSettings} onNavigate={onNavigate} testId="nav-settings">
-        {shows("setup") && <SetupLink onNavigate={onNavigate} />}
         <button
           type="button"
           onClick={toggle}
@@ -446,30 +399,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       {!byProject && !campaigns && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
 
       <nav className="grid min-w-0 grid-cols-1 gap-0.5" aria-label="Main" data-testid="nav-main">
-        {/* in the
-            social skin these pages sit under the project's name: every campaign of it together; each campaign's own
-            Deck, Product, Waiting on me and Pipeline are its tabs. */}
-        {/* first in the social product's menu. */}
-        {shows("performance") && !campaigns && (
-          <NavLink to={`/${PERFORMANCE_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-performance">
-            <BarChart3 className="h-4 w-4" />
-            Performance
-          </NavLink>
-        )}
-        {/* the product deck (the landing page as slides), read by every persona at each wake. */}
-        {shows("performance") && !campaigns && (
-          <NavLink to={`/${PRODUCT_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-product">
-            <Presentation className="h-4 w-4" />
-            Product
-          </NavLink>
-        )}
-        {/* Home is the goals view (all goal sets), the Inbox its own entry with the pills, in both skins. */}
-        {campaigns && (
-          <NavLink to="/" end className={itemClass} onClick={onNavigate} data-testid="nav-home">
-            <Home className="h-4 w-4" />
-            Home
-          </NavLink>
-        )}
+        {/* one main list for both skins, the console skin's (the name at the top opens Home in both). */}
         <NavLink to={`/${INBOX_PATH}`} state={INBOX_LAND} className={itemClass} onClick={onNavigate} data-testid="nav-inbox">
           <InboxIcon className="h-4 w-4" />
           Inbox
@@ -496,7 +426,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         )}
         {/* Runs high (the owner, 22 Nov: "Runs I would make much higher. That's the one I actually use the most"). */}
-        {shows("runs") && !campaigns && (
+        {shows("runs") && (
           <NavLink to="/runs" className={itemClass} onClick={onNavigate} data-testid="nav-runs">
             <Activity className="h-4 w-4" />
             {w.runs}
@@ -517,128 +447,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             Company view
           </NavLink>
         )}
-        {/* in the social skin Team, Chat, Performance and the project's Product deck, in that order; the
-            Pipeline is each campaign's tab (every campaign's board still opens at /pipeline by URL). */}
-        {!campaigns && socialPages}
-      </nav>
-
-      {/* The social skin: his pinned campaigns, each its number ring, name and inbox pills, right under Home, Inbox and Chat. */}
-      {campaigns && <SidebarCampaigns onNavigate={onNavigate} />}
-
-      {campaigns ? fold(
-        <>
-      {campaigns && !byProject && <ProjectSwitcher statuses={statuses} cards={allCards} onNavigate={onNavigate} />}
-      {/* his pursuits lead the projects: each its name, moving or stalled, and its green lines. */}
-      {/* every sidebar entry is a goal set, nested, All goal sets on top; both skins. */}
-      {shows("goalSets") && <SidebarGoalSetsOf data={sets.data} onNavigate={onNavigate} />}
-
-      {/* the owner, 2026-11-12 (vn_87528e51): "In there, we only need the quick access to the inbox, the chat, and the
-          microphone. The other things are in the sidebar." So every other page sits here, below the goal sets, in his
-          order: one-offs, the outcome log, every one-off page the team made, his voice notes, the Gap finder. */}
-      <SidebarMorePages onNavigate={onNavigate} gapFinderOn={!!gapFinder?.on} />
-
-      <div className="grid min-w-0 grid-cols-1 gap-0.5" data-testid="sidebar-milestones">
-        <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground" data-testid="sidebar-focus-heading">
-          {campaigns ? (roots.length ? focusHeading(w) : w.milestones) : OTHER_GOALS}
-        </div>
-        {/* the owner's big roots lead, each with its color, % done and waiting count; the per-repo milestones fold below. */}
-        {byProject ? <ProjectGroups roots={page.roots} statuses={statuses} cards={allCards} onNavigate={onNavigate} link={rootLink} /> : page.roots.map(rootLink)}
-        {roots.length > 0 && rest.length > 0 && (
-          <button
-            type="button"
-            className="mt-1 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-            aria-expanded={othersOpen}
-            data-testid="other-milestones-toggle"
-            onClick={() => setOthersOpen(!othersOpen)}
-          >
-            <FoldChevron open={othersOpen} />
-            {campaigns ? `Other ${w.milestonesWord}` : MORE_GOALS} ({rest.length})
-            {!othersOpen && restLoading && <CountLoading className="ml-auto" />}
-            {!othersOpen && (
-              <Pills
-                needsYou={restLoading ? 0 : restNeeds}
-                review={rest.reduce((n, m) => n + reviewOf(allCards, m.id), 0)}
-                ids={{ needsYou: "other-needs-you", review: "other-review" }}
-              />
-            )}
-          </button>
-        )}
-        {restShows && page.rest.map(rootLink)}
-        {(restShows || page.roots.length < roots.length) && <LoadMore hidden={page.hidden} onMore={() => setLimit(limit + MILESTONE_PAGE)} testId="sidebar-load-more" />}
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-          data-testid="add-milestone"
-          // in the social skin one dialog offers a campaign (the New campaign wizard) or a one-off job (a milestone).
-          onClick={() => setNewOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          {campaigns ? ADD_CAMPAIGN_OR_JOB : w.addMilestone}
-        </button>
-      </div>
-
-      {campaigns && (
-        <nav className="grid min-w-0 grid-cols-1 gap-0.5" aria-label="Campaign pages" data-testid="nav-social-pages">
-          {socialPages}
-        </nav>
-      )}
-
-      <nav className="mt-auto grid min-w-0 grid-cols-1 gap-0.5 border-t pt-3" aria-label="Console pages" data-testid="nav-pages">
-        {shows("personas") && (
-          <NavLink to="/personas" className={itemClass} onClick={onNavigate}>
-            <Bot className="h-4 w-4" />
-            {w.personas}
-          </NavLink>
-        )}
-        {shows("runs") && (
-          <NavLink to="/runs" className={itemClass} onClick={onNavigate}>
-            <Activity className="h-4 w-4" />
-            {w.runs}
-          </NavLink>
-        )}
-        {/* priority mode one tap away (the Runs page's panel alone), no top-bar button; the console skin only. */}
-        {shows("runs") && !campaigns && (
-          <NavLink to={`/${PRIORITY_PATH}`} className={itemClass} onClick={onNavigate} data-testid="nav-priority">
-            <Crosshair className="h-4 w-4" />
-            Priority mode
-          </NavLink>
-        )}
-        {toolPages.filter((p) => TOOL_KEEP.has(p.testId)).map((p) => {
-          const Icon = TOOL_ICONS[p.testId] ?? Files;
-          return (
-            <NavLink key={p.to} to={p.to} className={itemClass} onClick={onNavigate} data-testid={`nav-tool-${p.testId.slice(3)}`}>
-              <Icon className="h-4 w-4" />
-              {p.label}
-            </NavLink>
-          );
-        })}
-      </nav>
-
-      {/* Settings, then its pages (only what he changes, settings are only what he changes), small and indented under it. */}
-      <nav className="grid min-w-0 grid-cols-1 gap-0.5 border-t pt-3" aria-label="Settings" data-testid="nav-settings">
-        {shows("settings") && (
-          <NavLink to={`/${SETTINGS_PATH}`} end className={itemClass} onClick={onNavigate} data-testid="nav-settings-link">
-            <Settings className="h-4 w-4" />
-            Settings
-          </NavLink>
-        )}
-        {operatorPages.map((p) => (
-          <NavLink key={p.to} to={p.to} className={(s) => cn(itemClass(s), "text-[13px]", shows("settings") && "pl-9")} onClick={onNavigate}>
-            {p.label}
-          </NavLink>
-        ))}
+        {/* Get set up, while something is still unconnected (the social skin's screen): in the main list, never folded away. */}
         {shows("setup") && <SetupLink onNavigate={onNavigate} />}
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-        >
-          {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          {dark ? "Light mode" : "Dark mode"}
-        </button>
+        {/* Messages (DMs), in a world with a social repo; its pill counts the chats that need the owner. Both skins. */}
+        {shows("messages") && <MessagesNav onNavigate={onNavigate} />}
       </nav>
-        </>,
-      ) : consoleMenu}
+
+      {menu}
 
       <AccountBlock />
       {/* the worlds come last, in the flow of the menu, seen when you scroll to them. */}
@@ -915,54 +730,6 @@ export function AccountBlock() {
 type StatusBatch = { needsYou?: number | null; items?: PendingItem[] } | undefined;
 type Cards = Pick<ReviewItem, "id" | "milestoneId" | "ownerPriority" | "face">[] | undefined;
 
-/**
- * the social menu's pinned campaigns under their project's name,
- * in his pinned order within each project. The project's name narrows every page to it (`?project=`,'s select); a
- * campaign of no project sits last under Other. Each heading keeps the switcher's pills and test ids.
- */
-function ProjectGroups({ roots, statuses, cards, onNavigate, link }: { roots: Milestone[]; statuses: StatusBatch; cards: Cards; onNavigate?: () => void; link: (m: Milestone) => ReactNode }) {
-  const { projects, current, select, keepIn, projectOf } = useProject();
-  const { entries: snoozing } = useSnoozes();
-  const groups = [...projects.map((p) => ({ p, ms: roots.filter((m) => projectOf(m.id)?.repo === p.repo) })), { p: undefined, ms: roots.filter((m) => !projectOf(m.id)) }];
-  return (
-    <div className="grid min-w-0 gap-2" data-testid="project-groups">
-      {groups.map(({ p, ms }) =>
-        !p ? (
-          ms.length > 0 && (
-            <div key="other" className="grid min-w-0 gap-0.5" data-testid="project-group-other">
-              <div className="px-2.5 text-[11px] font-medium text-muted-foreground">Other</div>
-              {ms.map(link)}
-            </div>
-          )
-        ) : (
-          <div key={p.repo} className="grid min-w-0 gap-0.5" data-testid={`project-group-${p.repo}`}>
-            <button
-              type="button"
-              className={cn(
-                "flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1 text-left text-xs max-sm:min-h-11",
-                p.repo === current?.repo ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-              )}
-              aria-current={p.repo === current?.repo ? "true" : undefined}
-              title={p.repo === current?.repo ? `Showing ${p.name} only: press Home for every project` : `Show ${p.name} only`}
-              onClick={() => {
-                select(p.repo === current?.repo ? ALL_PROJECTS : p.repo);
-                onNavigate?.();
-              }}
-              data-testid={`project-${p.repo}`}
-            >
-              <span className={cn("grid h-5 min-w-5 shrink-0 place-items-center rounded px-0.5 text-[10px] font-semibold", worldTint(p.repo))} aria-hidden>
-                {worldMark(p.name)}
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium uppercase tracking-wider">{p.name}</span>
-              <Pills needsYou={blockedItems(statuses, { keep: keepIn(p), snoozing }).length + splitDecisions(reviewCards(cards, { keep: keepIn(p) })).decisions.length} review={splitDecisions(reviewCards(cards, { keep: keepIn(p) })).review.length} ids={{ needsYou: `project-${p.repo}-needs-you`, review: `project-${p.repo}-review` }} />
-            </button>
-            {ms.map(link)}
-          </div>
-        ),
-      )}
-    </div>
-  );
-}
 
 /**
  * the project switcher at the top of the menu (desktop sidebar and the
@@ -1390,43 +1157,7 @@ export function morePages(shows: (s: ScreenId) => boolean, socialSkin: boolean, 
   ];
 }
 
-/**
- * the pages he pinned by name (docs/pages/registry.json `pinned`, `scripts/pages.py pin`), first under More pages,
- * one tap each: the link is the page's short address on the console (the console/scorecard), which opens the page.
- */
-function SidebarPinnedPages({ onNavigate }: { onNavigate?: () => void }) {
-  const { data } = useSharedQuery("sb:pinned", () => api.listPinnedPages());
-  const pinned = data?.pinned ?? [];
-  if (!pinned.length) return null;
-  return (
-    <>
-      {pinned.map((p) => (
-        <a key={p.url} href={p.slug ? `/${p.slug}` : p.url} target="_blank" rel="noreferrer" className={itemClass({ isActive: false })} onClick={onNavigate} data-testid="nav-pinned-page" title={p.title}>
-          <Pin className="h-4 w-4" />
-          <span className="min-w-0 flex-1 truncate">{p.name}</span>
-        </a>
-      ))}
-    </>
-  );
-}
 
-function SidebarMorePages({ onNavigate, gapFinderOn }: { onNavigate?: () => void; gapFinderOn: boolean }) {
-  const shows = useShows();
-  const pages = morePages(shows, !!useSkin().campaigns, gapFinderOn);
-  if (!pages.length) return null;
-  return (
-    <nav className="grid min-w-0 grid-cols-1 gap-0.5" aria-label="More pages" data-testid="sidebar-more-pages">
-      <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground">More pages</div>
-      <SidebarPinnedPages onNavigate={onNavigate} />
-      {pages.map((p) => (
-        <NavLink key={p.to} to={p.to} className={itemClass} onClick={onNavigate} data-testid={p.testId}>
-          <p.icon className="h-4 w-4" />
-          {p.label}
-        </NavLink>
-      ))}
-    </nav>
-  );
-}
 
 /** the pages that use the screen's width: the Pipeline (every campaign's, and a campaign's Pipeline tab). */
 export const widePage = (path: string, search = "") => /\/pipeline\/?$/.test(path) || new URLSearchParams(search).get("tab") === "pipeline";

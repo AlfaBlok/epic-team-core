@@ -615,7 +615,8 @@ const OWNER_ONLY: [string, RegExp][] = [
  * the owner's objectives: the owner's login on the social site lands in the owner's own social world, which read none of
  * them (403 world_scope, an empty sidebar). The objectives are the platform owner's, read from the home repo's scorecards
  * and pursuits, so an owner login in one of the owner's own worlds (plan internal: never a customer's or a tester's world)
- * reads them too. Read only. ownerWorldObjectives.test.ts
+ * reads them too. Read only. ownerWorldObjectives.test.ts. Since 28 Nov (the owner: the home world's objectives showed
+ * there) app.ts answers such a world with its own product's objectives only (socialWorldOwnObjectives.test.ts).
  */
 const OWNER_WORLD_READS: [string, RegExp][] = [
   ["GET", /^\/api\/(scorecards|pursuits)$/],

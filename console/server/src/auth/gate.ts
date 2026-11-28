@@ -162,6 +162,19 @@ export const socialMovedTo = (env: NodeJS.ProcessEnv = process.env): string | un
   return to && customerHosts(env).get(to) === "social" ? to : undefined;
 };
 
+/**
+ * the team site's pages open on the team product's customer site, the way the social site's do (socialMovedTo): a browser
+ * page load on the team site (a navigation, no credential header, so agents and headless checks with a token answer as
+ * before) gets a 302 there with its path and query, and the browser keeps its #hash. /api, agents and scripts are
+ * untouched. `CONSOLE_TEAM_MOVED_TO` names a team customer host; unset or empty = off; never on a staging copy. Undo:
+ * drop the line and restart.
+ */
+export const teamMovedTo = (env: NodeJS.ProcessEnv = process.env): string | undefined => {
+  if (env.CONSOLE_STAGING === "1") return undefined;
+  const to = (env.CONSOLE_TEAM_MOVED_TO ?? "").trim().toLowerCase();
+  return to && customerHosts(env).get(to) === "team" ? to : undefined;
+};
+
 /** The host name the browser asked for: Traefik's X-Forwarded-Host, else Host; lower case, no port. */
 export function requestHost(header: (n: string) => string | undefined): string | undefined {
   const raw = (header("x-forwarded-host") || header("host") || "").split(",")[0].trim().toLowerCase();
@@ -243,6 +256,19 @@ export function mountAuth(
     if (c.req.header("sec-fetch-mode") !== "navigate" && !(c.req.header("accept") ?? "").includes("text/html")) return next();
     const u = new URL(c.req.url);
     return c.redirect(`https://${movedTo}${u.pathname}${u.search}`, 302);
+  });
+
+  // the team site's pages open on the team product's customer site (teamMovedTo).
+  const teamTo = teamMovedTo();
+  const teamHost = hostOf(sites().teamUrl).toLowerCase();
+  app.use("*", async (c, next) => {
+    const host = hostOfReq(c);
+    if (!teamTo || !host || host !== teamHost || customers.has(host)) return next();
+    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || c.req.path === "/api" || c.req.path.startsWith("/api/")) return next();
+    if (c.req.header("sec-fetch-mode") !== "navigate") return next();
+    if (c.req.header("authorization") || c.req.header("x-run-id") || c.req.header("x-console-run")) return next();
+    const u = new URL(c.req.url);
+    return c.redirect(`https://${teamTo}${u.pathname}${u.search}`, 302);
   });
 
   // the customer sites are the console on the internet.

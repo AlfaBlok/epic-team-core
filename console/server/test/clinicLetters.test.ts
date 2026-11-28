@@ -99,7 +99,8 @@ describe("the letter's page", () => {
     expect(await (await get(app, "/api/public/carta")).text()).toMatch(/seis letras y números/);
     const r = await get(app, "/api/public/carta?codigo=zx93-ht");
     expect(r.status).toBe(302);
-    expect(r.headers.get("location")).toBe("/api/public/carta/ZX93HT");
+    expect(r.headers.get("location")).toBe("carta/ZX93HT");
+    expect(new URL(r.headers.get("location")!, "https://h.example/api/public/carta?codigo=zx93ht").pathname).toBe("/api/public/carta/ZX93HT");
   });
 
   it("the rep's first words say it is an AI and a live demo", () => {

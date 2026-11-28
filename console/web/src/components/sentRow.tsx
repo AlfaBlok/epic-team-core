@@ -198,8 +198,8 @@ function ShownSentRow({ slot, entry, className }: { slot: string; entry: SentEnt
  * each collapses to its green Sent row the same way once he answered it (a press, his words or a voice note), and keeps
  * it after a reload. `slot` is the card's `data-inbox-card` id (`ask:`, `review:`, `team:`, `status:`, `mac:`, `connect:`).
  */
-export function SentOr({ slot, children }: { slot: string; children: ReactNode }) {
-  const sent = useSent(slot);
+export function SentOr({ slot, since, children }: { slot: string; /** E948-S231: when the server last sent the card to him */ since?: string | null; children: ReactNode }) {
+  const sent = useSent(slot, since);
   // E948-S174: the card's slot for a voice note sent from inside it (it collapses to this row at once)
   return sent ? <SentRow slot={slot} entry={sent} /> : <div className="contents" data-card-slot={slot}>{children}</div>;
 }

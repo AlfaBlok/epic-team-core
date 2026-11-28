@@ -83,33 +83,30 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
     expect(screen.getByTestId("where").textContent).toBe("");
   });
 
-  it("the menu: Home, Inbox, Chat, then only his pinned campaigns; everything else folds into More", async () => {
+  // the owner, 28 Nov: the social product is the same engine as the console with a different skin: the social menu is the console's menu, its campaigns where the console lists its objectives, no More fold,
+  // no home-world objectives, Tools and Settings folded as in the console skin.
+  it("the menu is the console skin's: Inbox, Chat, then his campaigns as the objectives, Tools and Settings folded", async () => {
     at(<SidebarNav />);
-    const pinned = await screen.findByTestId("sidebar-campaigns");
+    const pinned = await screen.findByTestId("sidebar-campaigns", undefined, { timeout: 8000 });
     const main = screen.getByTestId("nav-main");
-    expect([...main.querySelectorAll("a")].map((a) => a.textContent?.replace(/\d+/g, "").trim())).toEqual(["Home", "Inbox", "Chat"]);
+    const entries = [...main.querySelectorAll("a")].map((a) => a.textContent?.replace(/\d+/g, "").trim());
+    expect(entries.slice(0, 2)).toEqual(["Inbox", "Chat"]);
+    expect(entries).not.toContain("Home"); // the name at the top opens Home, as in the console skin
     // the pinned campaigns in his order (1, 2, 3), each with its number ring; the unpinned one is not here
     await waitFor(() => expect(within(pinned).getAllByTestId("sidebar-campaign").map((a) => a.dataset.milestoneId)).toEqual(["m-z1", "m-z2", "m-e1"]));
     expect(within(pinned).getAllByTestId("campaign-ring")).toHaveLength(3);
     expect(main.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // folded: no projects, no other pages, no settings until More is pressed
+    // the old social-only parts are gone: no More fold, no project groups, no home-world objectives, no other goals
+    expect(screen.queryByTestId("sidebar-more-toggle")).toBeNull();
     expect(screen.queryByTestId("project-groups")).toBeNull();
-    expect(screen.queryByTestId("nav-social-pages")).toBeNull();
-    expect(screen.queryByTestId("nav-pages")).toBeNull();
-    const toggle = screen.getByTestId("sidebar-more-toggle");
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(pinned.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(toggle);
-    // More open: every campaign by project, then Performance, Product, Messages; the choice is kept
-    const groups = await screen.findByTestId("project-groups");
-    await waitFor(() => expect(within(screen.getByTestId("project-group-social")).getAllByTestId("big-root").map((a) => a.dataset.milestoneId)).toEqual(["m-z1", "m-z2"]));
-    expect(groups.compareDocumentPosition(screen.getByTestId("nav-social-pages")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(localStorage.getItem("sidebar.more.open")).toBe("1");
-    // a project's name narrows every page to it, pressed again it goes back to all projects
-    fireEvent.click(screen.getByTestId("project-social"));
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("?project=social"));
-    fireEvent.click(screen.getByTestId("project-social"));
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe(""));
+    expect(screen.queryByTestId("sidebar-goal-sets")).toBeNull();
+    expect(screen.queryByTestId("sidebar-milestones")).toBeNull();
+    // Tools after the campaigns, folded, with the social pages in it
+    const tools = screen.getByTestId("nav-pages-toggle");
+    expect(pinned.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(tools);
+    expect(within(screen.getByTestId("nav-pages-list")).getByText("Performance")).toBeTruthy();
+    expect(screen.getByTestId("nav-settings-toggle")).toBeTruthy();
   });
 
   it("Home is the console skin's All objectives page with his pinned campaigns as the rows", async () => {

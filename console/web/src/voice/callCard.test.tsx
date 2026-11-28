@@ -36,6 +36,22 @@ describe("the Call on a card", () => {
     expect(b.getAttribute("href")).toBe("/sets/acme-launch?call=1");
   });
 
+  it("knows a campaign's own call (the social skin's level) only from its chat tab with the call asked", () => {
+    expect(callPathOf("https://social.example.com/milestones/ms_240d9c9b-b060?tab=chat&call=1")).toBe("milestones/ms_240d9c9b-b060?tab=chat");
+    expect(callPathOf("/milestones/ms_240d9c9b-b060?tab=chat&call=1")).toBe("milestones/ms_240d9c9b-b060?tab=chat");
+    expect(callPathOf("https://social.example.com/milestones/ms_240d9c9b-b060?tab=chat")).toBeUndefined();
+    expect(callPathOf("https://social.example.com/milestones/ms_240d9c9b-b060?tab=deck&call=1")).toBeUndefined();
+    expect(callPathOf("https://other.test/milestones/ms_240d9c9b-b060?tab=chat&call=1")).toBeUndefined();
+    render(
+      <MemoryRouter>
+        <CardCallButton hrefs={["https://social.example.com/milestones/ms_240d9c9b-b060?tab=chat&call=1"]} />
+      </MemoryRouter>,
+    );
+    const b = screen.getByTestId("card-call-now");
+    expect(b.textContent).toContain("Call to hear the strategy");
+    expect(b.getAttribute("href")).toBe("/milestones/ms_240d9c9b-b060?tab=chat&call=1");
+  });
+
   it("shows one green Call that opens the call page here and starts it", () => {
     render(
       <MemoryRouter>
