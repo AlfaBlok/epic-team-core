@@ -90,6 +90,14 @@ describe("the filing step matches his words itself", () => {
     expect(t.text()).toContain("Counters wrong again: on his phone (follow-up of E909-S2, closed)");
   });
 
+  it("words that match a ticket in his review get a ready follow-up row, never sit on the card", async () => {
+    const t = mount({ held: null, after: "E909-S2", status: "review — snoozed until: 2026-12-17", top: ["E909-S2"], why: "the same call" });
+    const r = await t.add({ kind: "row", title: "One briefed call", line: "all objectives", chat: "fix it" });
+    expect(r).toMatchObject({ id: "E909-S3", ready: true });
+    expect(t.text()).toContain("One briefed call: all objectives (follow-up of E909-S2, in his review)");
+    expect(t.commits[0].body).toContain("Matched at filing: follow-up of E909-S2, in his review");
+  });
+
   it("when the match cannot run, the desk's own `matched: new: …` is still required", async () => {
     const t = mount(undefined);
     expect((await t.add({ kind: "row", title: "Dark mode", chat: "fix it" })).error.code).toBe("match_first");

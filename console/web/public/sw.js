@@ -161,38 +161,42 @@ self.addEventListener("push", (e) => {
   );
 });
 
+// (the owner 28 Nov: "I get like one bar with a cross ... it feels like I'm never in the actual app"): a tap goes to
+// the installed app's own window first. Any other window of this site (a browser tab, or a link opened from mail or chat in
+// a view with a cross bar) is used only when no app window answers; on Android, where such a view is what a tap would
+// land in, the tap opens the page in the installed app instead (Chrome hands a link inside its scope to the app).
+// Each window says whether it is the installed app (main.tsx answers "display-mode?").
+const isApp = (w) =>
+  new Promise((ok) => {
+    const ch = new MessageChannel();
+    const t = setTimeout(() => ok(false), 400);
+    ch.port1.onmessage = (m) => {
+      clearTimeout(t);
+      ok(!!(m.data && m.data.standalone));
+    };
+    try {
+      w.postMessage({ type: "display-mode?" }, [ch.port2]);
+    } catch {
+      clearTimeout(t);
+      ok(false);
+    }
+  });
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = new URL((e.notification.data && e.notification.data.url) || "/", self.location.origin).href;
   e.waitUntil(
     (async () => {
-      const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      for (const w of wins) {
-        if ("focus" in w) {
-          await w.focus();
-          if ("navigate" in w) await w.navigate(url).catch(() => undefined);
-          return;
-        }
+      const wins = (await self.clients.matchAll({ type: "window", includeUncontrolled: true })).filter((w) => "focus" in w);
+      const apps = await Promise.all(wins.map(isApp));
+      const app = wins.find((_, i) => apps[i]);
+      const android = /Android/i.test((self.navigator && self.navigator.userAgent) || "");
+      const w = app || (android ? undefined : wins[0]);
+      if (w) {
+        await w.focus();
+        if ("navigate" in w) await w.navigate(url).catch(() => undefined);
+        return;
       }
       await self.clients.openWindow(url);
-    })(),
-  );
-});
-
-// The push service renewed the subscription (rare): hand the new one to the console.
-self.addEventListener("pushsubscriptionchange", (e) => {
-  e.waitUntil(
-    (async () => {
-      const r = await fetch("/api/push", { credentials: "same-origin" });
-      const s = r.ok ? await r.json() : {};
-      if (!s.publicKey) return;
-      const sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: s.publicKey });
-      await fetch("/api/push/subscribe", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ subscription: sub.toJSON(), device: "renewed" }),
-      });
     })(),
   );
 });

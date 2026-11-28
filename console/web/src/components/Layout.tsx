@@ -19,6 +19,8 @@ import { INBOX_PATH } from "@/components/inboxLine";
 import { INBOX_LAND } from "@/lib/inboxPlace";
 import { Button } from "@/components/ui/button";
 import { BackArrow } from "@/components/backArrow";
+import { goToSite } from "@/lib/inPlaceLinks";
+import { MovedAppLine } from "@/components/MovedAppLine";
 import { MILESTONE_PAGE, milestoneWheelRows, pageMilestones, progressLabel, splitBigRoots } from "@/lib/bigRoots";
 import { LoadMore } from "@/components/loadMore";
 import { statusOf } from "@/lib/status";
@@ -830,7 +832,7 @@ export function WorldSwitcher() {
     try {
       const w = await api.newWorkspace!(here!, name.trim());
       const r = await api.switchWorld!(w.tenantId);
-      window.location.assign(r?.handoff || "/");
+      if (goToSite(r?.handoff || "/") === "window") setBusy(undefined);
     } catch (x) {
       setErr((x as Error).message);
       setBusy(undefined);
@@ -841,8 +843,9 @@ export function WorldSwitcher() {
     setErr(undefined);
     try {
       const r = await api.switchWorld!(w.tenantId);
-      // a world on the other host (the memory service social on the social site) opens there, already signed in.
-      window.location.assign(r?.handoff || "/");
+      // a world on the other host (the memory service social on the social site) opens there, already signed in; the
+      // installed app opens it in a new window and stays on its own site (no cross bar over the app).
+      if (goToSite(r?.handoff || "/") === "window") setBusy(undefined);
     } catch (e) {
       setErr((e as Error).message);
       setBusy(undefined);
@@ -1074,6 +1077,7 @@ export function Layout() {
         {/* the Pipeline pages take the screen's width. */}
         <main className={cn("mx-auto w-full min-w-0 flex-1 break-words px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 lg:px-8", widePage(location.pathname, location.search) ? "max-w-[110rem]" : "max-w-5xl")}>
           <Reconnecting />
+          <MovedAppLine />
           <BillingNote />
           <Outlet />
         </main>

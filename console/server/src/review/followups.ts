@@ -39,7 +39,8 @@ export interface StartedRef {
 export interface FollowupsCell {
   started: StartedRef[];
   suggested: Suggestion[];
-  confirm?: { yes: boolean; why?: string };
+  /** `confirm: auto — <why>`: a small sure change, closes itself (yes false, auto true). */
+  confirm?: { yes: boolean; auto?: true; why?: string };
   /** A Done-means id, `goal` or `ask`. */
   completes?: string;
 }
@@ -57,9 +58,9 @@ export function parseFollowups(cell: string | undefined): FollowupsCell {
   for (const raw of cell.slice(m.index + m[0].length).split(/\s*;\s*/)) {
     const item = stripInline(raw).trim().replace(/\.$/, "");
     if (!item || /^none$/i.test(item)) continue;
-    const conf = /^confirm\s*:?\s*(yes|no)\b\s*(?:(?:—|--|–|:)\s*)?(.*)$/i.exec(item);
+    const conf = /^confirm\s*:?\s*(yes|no|auto)\b\s*(?:(?:—|--|–|:)\s*)?(.*)$/i.exec(item);
     if (conf) {
-      out.confirm = { yes: conf[1].toLowerCase() === "yes", ...(conf[2].trim() ? { why: conf[2].trim() } : {}) };
+      out.confirm = { yes: conf[1].toLowerCase() === "yes", ...(conf[1].toLowerCase() === "auto" ? { auto: true as const } : {}), ...(conf[2].trim() ? { why: conf[2].trim() } : {}) };
       continue;
     }
     const comp = /^completes?\s*:?\s*(.+)$/i.exec(item);
@@ -123,7 +124,22 @@ export interface FollowupPick {
   /** true: a `ready` row (Start now; the Delivery manager starts it); false: a parked `draft` row on the goal. */
   start: boolean;
 }
-export type FollowupRow = { ref: string; title: string; status: "ready" | "draft" };
+/**
+ * A started follow-up nobody can start alone: its title or why says it needs his Mac (a Mac-agent ticket on his Mac
+ * list) or his yes (one ask in his inbox). It waits under that, never reads ready (two such rows once sat ready for
+ * hours and woke the Delivery Manager as ready rows nobody is on).
+ */
+export type NeedsHim = "mac" | "yes";
+const himWords = () => String.raw`(?:his|your|the owner'?s|${escape(ownerName())}'?s)`;
+const needsMac = () => new RegExp(String.raw`\b(?:${himWords()}\s+(?:mac|macbook|laptop)|mac[- ]agent|mac (?:ticket|list))\b`, "i");
+const needsYes = () => new RegExp(String.raw`\b(?:needs?|waits? (?:on|for)|on|after|with)\s+${himWords()}\s+(?:yes|ok|okay|approval|go[- ]ahead|sign[- ]off)\b`, "i");
+export function needsHim(title: string, why?: string): NeedsHim | undefined {
+  const t = `${title} ${why ?? ""}`;
+  if (needsMac().test(t)) return "mac";
+  if (needsYes().test(t)) return "yes";
+  return undefined;
+}
+export type FollowupRow = { ref: string; title: string; status: "ready" | "draft" | "waiting"; needs?: NeedsHim };
 export type FollowupEdit = { text: string; rows: FollowupRow[] } | { skip: string };
 
 const SEP = /^\s*\|?\s*:?-{3,}/;
@@ -160,23 +176,36 @@ export function writeFollowups(text: string, ref: string, picks: FollowupPick[],
   const lines: string[] = [];
   for (const p of picks) {
     const code = nextCode(text, followupBase(ref), [...taken, ...made.map((r) => r.ref)]);
-    const status = p.start ? ("ready" as const) : ("draft" as const);
+    const needs = p.start ? needsHim(p.title, p.why) : undefined;
+    const status = needs ? ("waiting" as const) : p.start ? ("ready" as const) : ("draft" as const);
     const title = cellText(`${p.title}${p.why ? ` (${p.why})` : ""}: follow-up of ${ref}`);
     const cells = headers.map((h, i) => {
       if (i === 0) return code;
       if (/^role$/.test(h)) return "Ticket worker";
       if (/^owner/.test(h)) return "unassigned";
       if (/^(title|task|item|description|scope|purpose|name|summary)$/.test(h)) return title;
-      if (/^(status|state)$/.test(h)) return status;
+      if (/^(status|state)$/.test(h))
+        return needs === "mac"
+          ? cellText(`waiting (on ${who}'s Mac: its Mac-agent ticket on his Mac list, never a ready row)`)
+          : needs === "yes"
+            ? cellText(`waiting (on ${who}'s yes: its one ask in his inbox, never a ready row)`)
+            : status;
       if (/^depends/.test(h)) return ref;
       if (/^base$/.test(h)) return "main";
       if (/evidence/.test(h)) return cellText(p.start ? `${who} started it when closing ${ref} ${date}` : `parked by ${who} when closing ${ref} ${date}`);
       if (/verified/.test(h)) return date;
-      if (i === cNext) return p.start ? "worker" : `${who} starts it from the goal when wanted`;
+      if (i === cNext)
+        return needs === "mac"
+          ? "Delivery Manager: write its Mac-agent ticket (scripts/laptop_ticket.py) unless one already carries it, then it waits there"
+          : needs === "yes"
+            ? "Delivery Manager: post its one coded ask under Waiting on unless one already asks it, then it waits on his answer"
+            : p.start
+              ? "worker"
+              : `${who} starts it from the goal when wanted`;
       return "none";
     });
     lines.push(joinRow(cells) + cr);
-    made.push({ ref: code, title: p.title, status });
+    made.push({ ref: code, title: p.title, status, ...(needs ? { needs } : {}) });
   }
   if (cNext >= 0) {
     const cells = splitRow(bare(at));

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type TextareaHTMLAttributes } from
 import { Check, Clock, Copy } from "lucide-react";
 import { api, type MilestoneStatus, type Run, type RunOutcome } from "@/api";
 import { worldSwitching } from "@/api/real";
+import { goToSite } from "@/lib/inPlaceLinks";
 import { RUN_WORD_LABEL, runWord, type RunWord } from "@/lib/status";
 import { useOpenAsks } from "@/components/status";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -425,7 +426,13 @@ function OtherWorld({ world }: { world: { id: string; name: string } }) {
     worldSwitching.on = true;
     api
       .switchWorld?.(world.id)
-      .then((r) => window.location.assign(r?.handoff || here))
+      .then((r) => {
+        // the installed app never loads the other site over itself: a new window, the app stays here
+        if (goToSite(r?.handoff || here) === "window") {
+          worldSwitching.on = false;
+          setErr("Opened in your other workspace in a new window.");
+        }
+      })
       .catch((e: unknown) => {
         worldSwitching.on = false;
         setErr((e as Error).message);

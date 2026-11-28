@@ -163,7 +163,7 @@ export interface ReviewItem {
   iteration?: number;
   /** Other open cards that complete the same Done-means line (all but the last read as a step). */
   lineWith?: string[];
-  followupRows?: { ref: string; title: string; status: "ready" | "draft" }[];
+  followupRows?: { ref: string; title: string; status: "ready" | "draft" | "waiting"; needs?: "mac" | "yes" }[];
   /** `card` = on the owner's list; the rest stays with the agents (closes itself, needs evidence, card needs rewriting). */
   verdict?: ReviewVerdict;
   /** the card face (the approved mockup), read from the row's card file and its spines. */
@@ -256,7 +256,7 @@ export interface CardFace {
   /** the card's deadline (ISO UTC) and where it comes from: the card leads the whole inbox with its time left. */
   deadline?: { at: string; why?: string };
   /** something he was waiting on is ready: why he waits, where it is, the one link to open it. It leads his inbox. */
-  ready?: { why: "ready" | "deadline" | "urgent" | "asked"; whyText: string; where: string; url: string };
+  ready?: { why: "ready" | "deadline" | "urgent" | "output" | "asked"; whyText: string; where: string; url: string };
 }
 
 /** a note left inside a page's own feedback box: date (YYYY-MM-DD), time (HH:MM UTC) when kept, his words, the page. */

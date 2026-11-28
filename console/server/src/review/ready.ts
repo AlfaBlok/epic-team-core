@@ -10,9 +10,11 @@
  * - its card has a `deadline:`;
  * - its card's `source:` (his own words) says urgent (his "mark it as urgent"); a row title that only describes an urgent
  *   card does not count (a title saying "marked urgent" about another card);
- * - his own words on the row or in its source ask for it: "get me…", "send me…", "email me…", "give it back to me".
+ * - his own words on the row or in its source ask for it: "get me…", "send me…", "email me…", "give it back to me";
+ * - it is an output he asked for, a result he reads (a list, a shortlist, an analysis, a report): his
+ *   "if I'm asking for an output ... it needs to have a review card ... like a high priority green" (28 Nov, e-6765db).
  */
-export type ReadyWhy = "ready" | "deadline" | "urgent" | "asked";
+export type ReadyWhy = "ready" | "deadline" | "urgent" | "output" | "asked";
 
 export interface CardReady {
   why: ReadyWhy;
@@ -26,6 +28,16 @@ export interface CardReady {
 
 /** his words asking for something to be made and handed to him. */
 export const ASKED_FOR = /\b(get|send|email|e-mail|mail|give|bring|hand)\s+(it\s+|that\s+|this\s+|them\s+)?(back\s+)?(to\s+)?me\b/i;
+/**
+ * an output he asked for, a result he has to read ("a result, a list, a short list or a competitive analysis",
+ * 28 Nov, e-6765db). Matched on the row's title and the card's source, title and goal.
+ */
+export const OUTPUT = /\b(short[- ]?list|competitive analysis|(?:an?|competitor|market|cost|price|gap)\s+analysis|an? list of|(?:make|give|send|get|build|write)\s+(?:me\s+)?(?:a|the)\s+list|comparison of|report on|research on)\b/i;
+export function askedOutput(words: string[]): boolean {
+  return OUTPUT.test(words.filter(Boolean).join(" \n "));
+}
+/** the reason words a small sure change closes itself with (`done (no confirm: small sure change: <why>)`). */
+export const SMALL_SURE = "small sure change";
 export const URGENT = /\burgent(ly)?\b|\bas a matter of urgency\b/i;
 /**
  * E948-S168 (the owner, 22 Nov 05:09Z, on the Adeje card titled "Urgent."): "If something is being marked urgent, why is it
@@ -45,6 +57,7 @@ const WHY_TEXT: Record<ReadyWhy, string> = {
   ready: "You were waiting on this",
   deadline: "It has a deadline",
   urgent: "You marked it urgent",
+  output: "A result you asked for",
   asked: "You asked for it",
 };
 
@@ -61,7 +74,7 @@ export function readyOf(o: {
 }): CardReady | undefined {
   const text = o.words.filter(Boolean).join(" \n ");
   // E948-S168: urgent wins over a deadline (the Adeje card had both and sat under Done as "It has a deadline").
-  const why: ReadyWhy | undefined = o.labelled || URGENT.test(o.source ?? "") ? "urgent" : o.deadline ? "deadline" : ASKED_FOR.test(text) ? "asked" : o.ready ? "ready" : undefined;
+  const why: ReadyWhy | undefined = o.labelled || URGENT.test(o.source ?? "") ? "urgent" : o.deadline ? "deadline" : OUTPUT.test(text) ? "output" : ASKED_FOR.test(text) ? "asked" : o.ready ? "ready" : undefined;
   if (!why) return undefined;
   const url = o.ready?.url ?? o.evidence.url ?? "";
   const where = o.ready?.where || o.evidence.label || url;

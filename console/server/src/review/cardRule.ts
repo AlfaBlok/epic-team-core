@@ -6,7 +6,7 @@ import { CARD_LIMITS as L } from "./card.js";
  */
 export const CARD_FIELDS_RULE =
   `A row in \`review\` becomes ${ownerName()}'s card only when it passes the review gate (format: docs/review-cards.md in ${homeRepo()}): ` +
-  "(1) its Next Action has `confirm: yes` (anything he cannot open and judge himself, like plumbing or a fix another card covers, closes `done (no confirm: <why>)` instead); " +
+  "(1) its Next Action has `confirm: yes` (anything he cannot open and judge himself, like plumbing or a fix another card covers, closes `done (no confirm: <why>)` instead; a small sure change he will meet in use says `confirm: auto — <why>` and closes itself once its card is whole; a result he asked for, a list, shortlist or analysis, is always `confirm: yes`); " +
   `(2) a card file \`docs/cards/<row>.md\` in its repo holds the card fields as front matter, about half the words cards used to carry: \`row\`, \`title\` (one complete sentence in the past tense, ${L.title} words or fewer: what was made and what it is for), ` +
   `\`goal\` (the task's goal, ${L.goal} words or fewer), \`delivered\` (${L.deliveredMin} to ${L.deliveredMax} lines, each \`✓\` or \`✗\` with the reason, ${L.delivered} words or fewer each), ` +
   "`evidence` (the live thing or an evidence page, never GitHub, never a dry run, pointed at the one section, row or number to look at: on our own pages, the page hub's and the console's, a bare page link is held as \"point the link at the thing\", so add `#<id>` or `?focus=<id or words>`, which scrolls to it and highlights it), " +

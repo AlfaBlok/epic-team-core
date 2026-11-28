@@ -5,6 +5,7 @@ import "./index.css";
 import "./fonts.css"; // Inter and Instrument Sans (the wordmark)
 import "./polish.css"; // the approved polish layer (both skins)
 import { installKeepPlace } from "./lib/keepPlace";
+import { standalone } from "./lib/inPlaceLinks";
 import { installDeepFocus } from "./lib/deepFocus";
 import { installChunkReload } from "./lib/lazyPage";
 import "./lib/countCheck"; // E948-S141: window.inboxCountCheck(), read by the live inbox count check after each release
@@ -13,6 +14,10 @@ import "./lib/inboxOnly"; // root L-87: window.inboxOnlyCheck(), read by the liv
 // the service worker that shows phone notifications (no caching); the Chat page's "Turn on notifications" subscribes.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  // a notification tap asks each window whether it is the installed app, so the tap lands in the app itself
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if ((e.data as { type?: string } | null)?.type === "display-mode?") e.ports[0]?.postMessage({ standalone: standalone() });
+  });
   // the installed app stays open for days: back on screen it asks for a new worker at once (at most once a minute), so a
   // release's worker is in place before the build watch reloads onto it
   let asked = 0;

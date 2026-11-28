@@ -169,6 +169,16 @@ export type RunReview = z.infer<typeof runReview>;
 /** his feedback, Not yet and Decline words are never cut or refused below this (HIS_WORDS_MAX). */
 export const RELAUNCH_MAX = HIS_WORDS_MAX;
 
+/** What the Delivery Manager does with started follow-ups that wait on his Mac or his yes (never dispatched). */
+export function waitingLine(waits: FollowupRow[]): string {
+  const mac = waits.filter((m) => m.needs === "mac");
+  const yes = waits.filter((m) => m.needs === "yes");
+  return [
+    mac.length ? `Waiting on his Mac, never dispatch: ${mac.map((m) => `${m.ref} ${m.title}`).join("; ")}: write its Mac-agent ticket (scripts/laptop_ticket.py) unless one already carries it.` : "",
+    yes.length ? `Waiting on his yes, never dispatch: ${yes.map((m) => `${m.ref} ${m.title}`).join("; ")}: post its one coded ask under Waiting on unless one already asks it.` : "",
+  ].filter(Boolean).join(" ");
+}
+
 /** Wake prompt line: how finished work reaches the owner's review list. */
 export const REVIEW_RULE =
   `Review is only for a finished outcome (root L-43) ${ownerName()} can open and judge himself: a page, a post, a feature on his phone. A step that only prepares an ask or the next build (proposal, mockup, guide, checklist page, prepared script) never goes to review: its ask is ${ownerName()}'s one card; once that ask is posted, close the row \`done (fed <ask code>)\` in the spine. ` +
@@ -768,13 +778,18 @@ export function createReview(db: DB, o: ReviewOptions) {
     o.readModel?.patch({ kind: "review", id, op: "closed" });
     const done: ReviewItem = { ...item, state: "approved", status: `done (approved by ${by} ${new Date().toISOString().slice(0, 10)})`, ...(w.write.sha ? { sha: w.write.sha } : {}), followupRows: made };
     const started = made.filter((m) => m.status === "ready");
+    const waits = made.filter((m) => m.status === "waiting");
     const target = relaunchTarget(r);
-    if (started.length && target && o.cycle) {
+    if ((started.length || waits.length) && target && o.cycle) {
       try {
         await wakeSoon(o.cycle.runNowRequest(
           target,
           {
-            instructions: `${by} closed ${r.ref} ("${r.title}") and started its follow-ups: ${started.map((m) => `${m.ref} ${m.title}`).join("; ")}. The console wrote them as ready rows in ${r.path}${w.write.sha ? ` (commit ${w.write.sha})` : ""}: dispatch them.`.slice(0, RELAUNCH_MAX),
+            instructions: (
+              `${by} closed ${r.ref} ("${r.title}") and started its follow-ups.` +
+              (started.length ? ` Ready rows in ${r.path}${w.write.sha ? ` (commit ${w.write.sha})` : ""}, dispatch them: ${started.map((m) => `${m.ref} ${m.title}`).join("; ")}.` : "") +
+              (waits.length ? ` ${waitingLine(waits)}` : "")
+            ).slice(0, RELAUNCH_MAX),
             instructionsBy: by,
           },
           `review-start:${id}:${w.write.sha ?? ""}`,
@@ -920,17 +935,25 @@ export function createReview(db: DB, o: ReviewOptions) {
       followupRows: rows,
       switched: { on: [...started.map((x) => ({ ref: x.ref, goal: x.goal, title: x.title })), ...newGoals.map((x) => ({ ref: x.goal, goal: x.goal, title: x.title }))], off: offs },
     };
+    const waits = made.filter((m) => m.status === "waiting");
     const wake = [
       ...made.filter((m) => m.status === "ready").map((m) => `${m.ref} ${m.title} (in ${r.path})`),
       ...started.map((x) => `${x.ref} ${x.title} (in ${x.rel})`),
       ...newGoals.map((x) => `the new goal ${x.goal} ${x.title} (${x.rel}, now ready: dispatch a Delivery Manager on it)`),
     ];
     const target = relaunchTarget(r);
-    if (wake.length && target && o.cycle) {
+    if ((wake.length || waits.length) && target && o.cycle) {
       try {
         await wakeSoon(o.cycle.runNowRequest(
           target,
-          { instructions: `${by} closed ${r.ref} ("${r.title}") and switched on: ${wake.join("; ")}. The console wrote them as ready rows (commit ${w.sha}): dispatch them.`.slice(0, RELAUNCH_MAX), instructionsBy: by },
+          {
+            instructions: (
+              `${by} closed ${r.ref} ("${r.title}").` +
+              (wake.length ? ` Switched on: ${wake.join("; ")}. The console wrote them as ready rows (commit ${w.sha}): dispatch them.` : "") +
+              (waits.length ? ` ${waitingLine(waits)}` : "")
+            ).slice(0, RELAUNCH_MAX),
+            instructionsBy: by,
+          },
           `review-start:${id}:${w.sha}`,
         ), `complete ${r.ref}`);
       } catch (e) {
@@ -1294,7 +1317,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       const w = await writeRow(
         r,
         () => (st) => (/^review\b/i.test(st.trim()) ? `done (no confirm: ${why})` : { skip: `${r.ref} is not in review any more` }),
-        `Close ${r.ref}: done (no confirm), nothing for ${ownerName()} to judge (console)`,
+        why.startsWith("small sure change") ? `Close ${r.ref}: done (no confirm), a small sure change that closes itself (console)` : `Close ${r.ref}: done (no confirm), nothing for ${ownerName()} to judge (console)`,
         `The agent-team console closed row ${r.ref} in ${r.path}: it was in review but is no card for ${ownerName()} (${why}), so the spine now says what the review feed shows.`,
         false,
       );

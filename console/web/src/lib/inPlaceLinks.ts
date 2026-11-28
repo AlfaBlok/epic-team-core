@@ -18,6 +18,40 @@
  * Shift or middle click and a download keep their own behaviour everywhere.
  */
 
+/**
+ * A move the app makes itself to another of our sites (a world switch's one-time link to the social site from
+ * the team site), the owner 28 Nov (e-e3055a, said again e-33b9a3): "when I'm in the app ... I get like one bar
+ * with a cross ... it feels like I'm never in the actual app". The installed app's scope is its own site: loaded in the
+ * app's window, the other site turned the whole app into a browser view with a cross bar until it was closed. In the
+ * installed app it opens in a new window (like every outside link) and the app stays where it was; in a browser tab, and
+ * for a move on this same site, the window moves as before. Returns where it went.
+ */
+export function goToSite(
+  url: string,
+  o: { installed?: boolean; assign?: (url: string) => void; open?: (url: string) => void } = {},
+): "here" | "window" {
+  const installed = o.installed ?? standalone();
+  let other = false;
+  try {
+    other = new URL(url, window.location.href).origin !== window.location.origin;
+  } catch {
+    other = false;
+  }
+  if (installed && other) {
+    (o.open ?? ((u: string) => void window.open(u, "_blank", "noopener")))(url);
+    return "window";
+  }
+  (o.assign ?? ((u: string) => window.location.assign(u)))(url);
+  return "here";
+}
+
+/** The installed app (components/backArrow installedApp, kept here so this file needs no component). */
+export const standalone = () =>
+  typeof window !== "undefined" &&
+  (!!window.matchMedia?.("(display-mode: standalone)").matches ||
+    !!window.matchMedia?.("(display-mode: window-controls-overlay)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true);
+
 /** The app's screen that shows a page of ours the app does not draw (components/OurPage). */
 export const OUR_PAGE_PATH = "/open";
 export const ourPagePath = (path: string) => `${OUR_PAGE_PATH}?u=${encodeURIComponent(path)}`;

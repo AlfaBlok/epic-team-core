@@ -76,6 +76,8 @@ export const ROW_CLOSE_RULE =
   `Set your row to \`review\` only for a finished outcome ${ownerName()} can open and judge himself (what he asked for, delivered and live). A step that only prepares an ask or the next build ` +
   "(proposal, mockup, guide, checklist page, prepared script) is never a review: once its ask is posted, close the row `done (fed <ask code>)` (root L-43). " +
   `Never close a finished row \`done\` yourself: only ${ownerName()}'s button does. A step with nothing for him to open and judge closes \`done (no confirm: <why>)\`. ` +
+  // (the owner, 28 Nov, e-6765db): "low impact, high certainty ... autocomplete decision"
+  "A small sure change he will meet in use (a colour, a small UX fix: low impact, high certainty) is set to `review` with its whole card and `confirm: auto — <why>` instead: it closes itself, logged on its goal's timeline, and comes back as his card if he asks about it. A result he asked for (a list, a shortlist, an analysis, a report) always gets `confirm: yes` and leads his inbox. Unsure: `confirm: yes`. " +
   "Set to `review`, the row's Next Action names its follow-ups and `confirm: yes`: `followups: started <code> (<covers>); start <title> — <why>; park <title> — <why>; confirm: yes — <why he must confirm>` (or `followups: none; confirm: yes — …`), so his close starts or parks each one and none is lost. " +
   `Before you set it to review, write its card fields: ${CARD_FIELDS_RULE} ${FEATURE_LIST_RULE}`;
 

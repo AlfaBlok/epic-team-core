@@ -57,12 +57,13 @@ export interface RedLine {
 }
 
 export const OBJECTIVES_HEAD = "## His objectives: reread them before any work";
-/** Root L-100 in one line (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
+/** Root L-100 in one line, opened by the Blueprint pointer (the owner, 28 Nov: "your first day in school") (his vn_cdef45cd, 24 Nov: "I've explained it more than 20 times ... this is the last time"):
  * every wake prompt (objectivesBlock) and every worker brief (objectivesRule) carries it, so no agent asks him again
  * The five words plot, objective, key result, chapter and kernel are in the wording cheap agents got right most often
  * (the owner's note of 25 Nov; the home repo's scripts/explain_quiz.py quizzed five ways to say them, 0 wrong of 200);
  * change it only with a new quiz run that scores as well. */
 export const OBJECT_SHAPE_RULE =
+  "Your first day in school (his words, 28 Nov): read the Blueprint chapter, docs/blueprint/README.md in the home repo, before you plan: one engine, many apps, an app is a configuration, objective is the one entry type everywhere, one schema in the config repo, one UX. " +
   "Our five words, the way agents get them (root L-100, never ask him again; a quiz of cheap agents on five ways to say them kept the clearest): PLOT = the big picture: every objective of the owner's in his order, where each stands and what is next; made from his one objectives list, so it grows or shrinks with it by itself (never a hand-picked set); the desk reads every message of his against it; on his screens never the word plot: the list is titled His objectives. " +
   "OBJECTIVE = one branch of the plot: one thing the owner wants, named `Product: short goal` (EpicTeam: Finish the Bitwarden migration); green when every key result under it is green; every objective, and every campaign, is an object of one class, always the same shape; it sits under the product whose scope covers it (a product that only communicates holds no login, multi-tenant or server objective: those are the platform product's). " +
   "KEY RESULT = a leaf under an objective: a short plain sentence a stranger understands, with target and current (All secrets in the team store copied to Bitwarden: 100% (now 62%)); a check makes it green or red; every open ticket hangs under one; the objective's manager adds one: a worker hands it a proposal, never asks the owner. " +
@@ -128,7 +129,7 @@ export function chaptersLine(c: Chapters | undefined): string {
   return `Your chapters, told at birth (docs/totems/<product>.json \`wheel.tabs\`): ${each.join(" ; ")}.${c.shared.length ? ` Shared by every product: ${c.shared.join(", ")}.` : ""}${rules ? ` ${rules}` : ""}${scopes ? ` Scope: ${scopes}` : ""}`;
 }
 /** the block rides on every wake: kept short. */
-export const OBJECTIVES_MAX_CHARS = 5_300; // room for each objective's tickets line, plus the five words (+1 700)
+export const OBJECTIVES_MAX_CHARS = 5_600; // room for each objective's tickets line, plus the five words (+1 700) and the Blueprint pointer (+300)
 
 const DOT: Record<string, string> = { green: "🟢", amber: "🟡", red: "🔴" };
 const cut = (s: string | undefined, max: number) => {

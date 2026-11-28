@@ -109,7 +109,8 @@ export interface CardFields {
   nextNone?: boolean;
   /** An explicit Done-means line id, or `goal`. Case C comes only from this (never from title text, the bug). */
   completes?: string;
-  confirm?: { yes: boolean; why?: string };
+  /** `confirm: auto — <why>` is a small sure change (yes false, auto true): it closes itself, logged. */
+  confirm?: { yes: boolean; auto?: true; why?: string };
   /** An example made for another row's feature: never its own card (spec decision 8). */
   exampleOf?: string;
   /** The ask this row fed: once that ask is answered, the row closes itself. */
@@ -338,8 +339,8 @@ export function parseCard(text: string): CardFields | undefined {
     }
     if (!v) continue;
     if (key === "confirm") {
-      const c = /^(yes|no|true|false)\b\s*(?:(?:—|--|–|:)\s*)?(.*)$/i.exec(v);
-      if (c) out.confirm = { yes: /^(yes|true)$/i.test(c[1]), ...(c[2].trim() ? { why: c[2].trim() } : {}) };
+      const c = /^(yes|no|true|false|auto)\b\s*(?:(?:—|--|–|:)\s*)?(.*)$/i.exec(v);
+      if (c) out.confirm = { yes: /^(yes|true)$/i.test(c[1]), ...(/^auto$/i.test(c[1]) ? { auto: true as const } : {}), ...(c[2].trim() ? { why: c[2].trim() } : {}) };
       continue;
     }
     if (key === "urgent") {

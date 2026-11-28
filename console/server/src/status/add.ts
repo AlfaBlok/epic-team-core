@@ -408,7 +408,9 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
       o.onAdded?.({ repoDir, path: heldRel, kind: "row", id: ref, title: input.title }, (n) => c.req.header(n));
       return c.json({ kind: input.kind, placed: ref, path: heldRel, why: judged.why, ready: readied, ...(w.sha ? { sha: w.sha } : {}), ...(readied ? await after(ref, heldRel) : {}), ...delivery(m.id) }, 200);
     }
-    if (judged?.after) input.line = `${input.line ? `${input.line} ` : ""}(follow-up of ${judged.after}, closed)`.slice(0, LINE_MAX);
+    // a ticket in his review is no home for new words either: no worker picks it up, so they get a ready follow-up
+    const afterState = judged?.after && /^(in[ _-]?)?review\b/i.test(judged.status ?? "") ? "in his review" : "closed";
+    if (judged?.after) input.line = `${input.line ? `${input.line} ` : ""}(follow-up of ${judged.after}, ${afterState})`.slice(0, LINE_MAX);
 
     if (input.kind === "epic") {
       if (!o.skillDir) return err(c, 409, "conflict", "the EpicSpine skill is not installed here: a child epic cannot be scaffolded");
@@ -488,7 +490,7 @@ export function mountTreeAdd(api: Hono, o: AddOptions) {
             ? `Add ready ${what} ${out.id}${row ? ` + row ${row}` : ""} to ${path.posix.basename(target)} (${ownerName()}'s ask, via console)`
             : `Add draft ${what} ${out.id} to ${path.posix.basename(target)} (via console)`,
           body: ready
-            ? `${out.id}: ${label(input)}\n\n${judged ? `Matched at filing: ${judged.after ? `follow-up of closed ${judged.after}` : "new"} (read ${(judged.top ?? []).join(", ") || "none close"}): ${judged.why ?? ""}\n\n` : ""}${input.matched ? `New or existing: ${input.matched}\n\n` : ""}Added from the agent-team console tree, ready on ${ownerName()}'s ask (L-37, ${(asker as { via: string }).via})${row ? `, with ready row ${row} building it` : ""}; a Decisions row cites it; written in the existing format of ${target}.`
+            ? `${out.id}: ${label(input)}\n\n${judged ? `Matched at filing: ${judged.after ? `follow-up of ${judged.after}, ${afterState}` : "new"} (read ${(judged.top ?? []).join(", ") || "none close"}): ${judged.why ?? ""}\n\n` : ""}${input.matched ? `New or existing: ${input.matched}\n\n` : ""}Added from the agent-team console tree, ready on ${ownerName()}'s ask (L-37, ${(asker as { via: string }).via})${row ? `, with ready row ${row} building it` : ""}; a Decisions row cites it; written in the existing format of ${target}.`
             : `${out.id}: ${label(input)}\n\nAdded from the agent-team console tree as a draft (${draftWhy}); written in the existing format of ${target}.`,
         };
       },

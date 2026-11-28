@@ -19,7 +19,7 @@ import { activeMark, noteMarksOf, type NoteMark } from "./noteMarks.js";
 import { pageNotesFor, pageNotesOf, type PageNote } from "./pageNotes.js";
 import { cardFor, goalSentenceOf, plainName, plainNamesOf, projectOf, repoCards, screenshotPath, targetGoals, treeOf, type CardFace, type TargetGoal, type Sibling } from "./face.js";
 import { ownerName } from "../identity.js";
-import { cutUrgentLead, readyOf } from "./ready.js";
+import { askedOutput, cutUrgentLead, readyOf, SMALL_SURE } from "./ready.js";
 import { aboutOf } from "../inbox/about.js";
 import { ticketIndex } from "../tickets/ticketIndex.js";
 
@@ -739,7 +739,9 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
             : undefined;
           const yes = card?.confirm ? card.confirm.yes : fu.confirm?.yes;
           const why = (card?.confirm?.yes === yes ? card?.confirm?.why : undefined) ?? (fu.confirm?.yes === yes ? fu.confirm?.why : undefined);
-          const confirm = yes === undefined ? undefined : { yes, ...(why ? { why } : {}) };
+          // `confirm: auto — <why>` is a small sure change (a colour, a small UX fix): it closes itself, logged
+          const auto = !!(card?.confirm ? card.confirm.auto : fu.confirm?.auto);
+          const confirm = yes === undefined ? undefined : { yes, ...(auto ? { auto } : {}), ...(why ? { why } : {}) };
           const startedOwn = fu.started.filter((c) => c.ref !== r.id).map((c) => stepState(byCode.get(c.ref)?.status ?? ""));
           // (the owner 23 Nov 00:29Z: "Closed by the team, it should not be possible ... I never ask for this"): a row he sent
           // back (it is in a later iteration) never closes itself. What would have closed it goes back to its worker
@@ -753,7 +755,7 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
             // `confirm: no` goes back to its worker to say which. (A ticket the owner asked for at 10:06Z on 22 Nov was
             // closed this way 4 minutes after it reached review, and again at 00:03Z after he asked for it back.)
             if (!confirm) return { kind: "needs-rewriting", reason: "card needs rewriting", problems: [`the row says neither \`confirm: yes\` nor \`confirm: no\`: write its card with \`confirm: yes\` so it reaches ${ownerName()}, or \`confirm: no — <why he has nothing to judge>\`; the console no longer closes a ticket by default`] };
-            if (!confirm.yes) return selfClose(confirm.why ?? `nothing for ${ownerName()} to open and judge`);
+            if (!confirm.yes && !confirm.auto) return selfClose(confirm.why ?? `nothing for ${ownerName()} to open and judge`);
             if (card?.fed && doc.askOpen.get(card.fed) === false) return selfClose(`the ask it fed, ${card.fed}, is answered`);
             if (card?.exampleOf) return selfClose(`an example made for ${card.exampleOf}: that feature's card is the one card`);
             if (startedOwn.length && startedOwn.every((x) => x === "running" || x === "live") && !next.length) return selfClose("its next steps already run");
@@ -767,6 +769,14 @@ export function computeReviewRows(store: Pick<Store, "listMilestones">, reposRoo
               problems.push(
                 `the card says it completes the goal, but ${working.length} other ${working.length === 1 ? "part is" : "parts are"} still open (${working.map((x) => x.ref).join(", ")}): drop the \`completes: goal\` line, or finish them first`,
               );
+            // (the owner, 28 Nov, e-6765db): "low impact, high certainty ... autocomplete decision", but "if I'm
+            // asking for an output ... it needs to have a review card". A small sure change closes itself once its card is
+            // whole (so a rescue brings back a full card); an output he asked for never does; unsure means confirm: yes.
+            if (confirm.auto && !problems.length) {
+              if (askedOutput([titleCell, card?.source ?? "", card?.title ?? "", card?.goal ?? ""]))
+                problems.push(`an output ${ownerName()} asked for (a list, a shortlist, an analysis, a report) always gets his card, never \`confirm: auto\`: write \`confirm: yes\``);
+              else return selfClose(`${SMALL_SURE}: ${confirm.why ?? "a small change he will see in use"}`);
+            }
             if (problems.length) return { kind: "needs-rewriting", reason: "card needs rewriting", problems };
             // E948-S62: did he get what he asked for, and does it look right at 390 and 1280: else back to its worker
             const q = qcVerdict({ row: r.id, required: qcRequired(g.dir), qc, cardText: cardRaw });

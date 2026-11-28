@@ -10,6 +10,10 @@ describe("what an objective is, in every wake and worker brief", () => {
   it("says class, object, chapter, enforced to exist, never ask again, and points at /made-of", () => {
     for (const w of ["root L-100", "never ask him again", "object of one class", "chapters", "Chapter is his word", "enforced to exist", "/made-of"]) expect(OBJECT_SHAPE_RULE).toContain(w);
   });
+  it("opens with the Blueprint chapter every worker reads first (the owner, 28 Nov: \"your first day in school\")", () => {
+    expect(OBJECT_SHAPE_RULE.startsWith("Your first day in school")).toBe(true);
+    for (const w of ["docs/blueprint/README.md", "one engine", "objective is the one entry type", "config repo", "one UX"]) expect(OBJECT_SHAPE_RULE).toContain(w);
+  });
   it("every wake prompt's objectives block and every worker rule carry it", () => {
     const block = objectivesBlock({ nodes: [{ id: "a", kind: "pursuit", name: "Acme: Get 5 testers", headline: "Acme: Get 5 testers", rank: 1, greens: 0, total: 1 }] });
     expect(block).toContain(OBJECT_SHAPE_RULE);
