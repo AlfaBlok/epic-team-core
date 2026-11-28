@@ -47,7 +47,7 @@ describe("calls in Spanish with a Spanish voice", () => {
   it("each call's greeting has its Spanish one", () => {
     expect(spanishGreeting(MARKETING_GREETING())).toMatch(/^Hola .+, aquí tu briefer de .+\. ¿Quieres primero los números/);
     expect(spanishGreeting(OPENING_LINE)).toMatch(/^Hola .+, soy la línea del equipo\. ¿En qué te ayudo\?$/);
-    expect(spanishGreeting(objectiveGreeting("SocialApp: Launch SocialApp"))).toMatch(/soy tu briefer de Launch SocialApp\. ¿Empezamos por los resultados clave/);
+    expect(spanishGreeting(objectiveGreeting("SocialApp: Launch SocialApp"))).toMatch(/^Hola .+, aquí el responsable de Launch SocialApp\. ¿Qué hay de nuevo desde la última vez\?$/);
     expect(spanishGreeting("anything else")).toMatch(/^Hola .+, ¿por dónde empezamos\?$/);
     const i = spanishInstructions(`Say "${OPENING_LINE}" once.`, OPENING_LINE, "Hola");
     expect(i.startsWith("# Idioma de esta llamada: español de España")).toBe(true);

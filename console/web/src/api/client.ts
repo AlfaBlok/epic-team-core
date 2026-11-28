@@ -1,7 +1,7 @@
 import type { ClosedGoal, ReviewGoal, ReviewItem, ClosedCard, ClosedCardRef, SentBackCard } from "./review-types";
 import type { Company, CompanyBuild, CompanyInput, CompanySaved, CompanyOps, CompanyPromo, WheelId, WheelNote, WorldInbox, Experiment, Goal } from "./company-types";
 import type { BuildingList } from "./building-types";
-import type { ObjectiveGroup, PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan } from "./pursuit-types";
+import type { ObjectiveGroup, PersonaGapsBody, ProductView, ProductsBody, PursuitKitBody, PursuitsBody, ScorecardsBody, WhereWeAre, WheelPlan, ObjectiveBlueprint } from "./pursuit-types";
 import type { OneOffsBody } from "./oneoff-types";
 import type { CampaignTrackers, CampaignWheel, CampaignWheelPlan, Consumption, PersonaLog, StepLabel, TotemMaps, TotemView, WheelTrackers } from "./totem-types";
 import type { OutcomeFilter, OutcomesBody } from "./outcome-types";
@@ -590,6 +590,8 @@ export interface ApiClient {
   saveCampaignPlan(tenantId: string, milestoneId: string, input: MarketingPlanWrite): Promise<MarketingPlan>;
   /** an objective's Plan tab: its wheel's plan, how each key result gets to green (steps, owners, dates). */
   getObjectivePlan(id: string): Promise<WheelPlan>;
+  /** an EpicTeam objective's Blueprint chapter: its hard truths and basic blueprint. */
+  getObjectiveBlueprint?(id: string): Promise<ObjectiveBlueprint>;
   /** root L-77: every product's map (its hardwired totems) and one totem's content for its tab. */
   getTotems(): Promise<TotemMaps>;
   getTotem(product: string, id: string): Promise<TotemView>;

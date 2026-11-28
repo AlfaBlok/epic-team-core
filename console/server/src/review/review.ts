@@ -427,6 +427,16 @@ export function createReview(db: DB, o: ReviewOptions) {
   const recheckMs = o.recheckMs ?? 60_000;
   const checking = new Map<string, Promise<void>>();
   const who = () => o.who?.() ?? ownerName();
+  // E948-S231 iteration 2: the cards he answered in the press log's window (GET /api/presses/answered reads the same
+  // table): whether each is back in his inbox turns on its inbox time, so a list waits for theirs (inboxSinceOf mustWait)
+  const answeredIds = (): Set<string> => {
+    try {
+      const since = new Date(now().getTime() - 14 * 24 * 60 * 60_000).toISOString();
+      return new Set((db.prepare("SELECT DISTINCT target FROM presses WHERE at >= ?").all(since) as { target: string }[]).map((r) => r.target));
+    } catch {
+      return new Set();
+    }
+  };
 
   /** The rows in review and their goals: the read model's stored view, else (no read model) read from the spines now. */
   async function payload(): Promise<ReviewPayload> {
@@ -611,6 +621,7 @@ export function createReview(db: DB, o: ReviewOptions) {
       rs.filter((r) => r.verdict.kind === "card").map((r) => ({ id: r.id, repoDir: repoDir(r), path: r.path, ref: r.ref, status: r.status })),
       o.inboxSinceBudgetMs,
       o.inboxSince,
+      answeredIds(),
     );
     for (const i of items) {
       const at = since.get(i.id);

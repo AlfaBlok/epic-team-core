@@ -184,9 +184,9 @@ describe("E948-S59 the Senior advisor's weekly set", () => {
 // The owner on a call ("is there a relation between these 15 numbers?"): Goals to set says what its count is made of.
 describe("Goals to set's split line", () => {
   it("names his objectives needing a goal apart from the campaigns", () => {
-    expect(goalsSplit(7, 8, { active: 13, needGoal: 7 })).toBe("7 of your 13 objectives still need a goal, and 8 campaigns need a number.");
+    expect(goalsSplit(7, 8, { active: 13, needGoal: 7 })).toBe("7 of your 13 objectives still need a goal, and 8 objectives need a number.");
     expect(goalsSplit(1, 0, { active: 13, needGoal: 1 })).toBe("1 of your 13 objectives still needs a goal.");
-    expect(goalsSplit(0, 2)).toBe("2 campaigns need a number.");
-    expect(goalsSplit(2, 1)).toBe("2 objectives need a goal, and 1 campaign needs a number.");
+    expect(goalsSplit(0, 2)).toBe("2 objectives need a number.");
+    expect(goalsSplit(2, 1)).toBe("2 objectives need a goal, and 1 objective needs a number.");
   });
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
 import type { CampaignCard } from "@/api/campaign-types";
@@ -88,7 +88,10 @@ describe("the social Home and menu", () => {
     const { camp } = await seed();
     vi.spyOn(api, "listCampaigns").mockResolvedValue({ tenantId: "social", campaigns: [card({ milestoneId: camp.id })] });
     inSocial(<SidebarNav />);
-    await waitFor(() => expect(screen.getAllByText("Get testers").length).toBeGreaterThan(0));
+    // each entry is the objective row, named from its card (Product: goal), opening its objective page
+    const camps = await screen.findByTestId("sidebar-campaigns", undefined, { timeout: 8000 });
+    await waitFor(() => expect(within(camps).getAllByTestId("sidebar-set").map((e) => e.dataset.set)).toEqual([camp.id]), { timeout: 8000 });
+    expect(within(camps).getByTestId("objective-goal").textContent).toBe("Memo social presence");
     expect(screen.queryByText("House decision")).toBeNull();
     expect(screen.queryByText("Server stability")).toBeNull();
   });

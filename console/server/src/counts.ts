@@ -38,6 +38,8 @@ export interface WorldCounts {
   needsYou: number | null;
   /** Review cards (the green pill). */
   review: number;
+  /** the app the workspace is in (its skin: social or the console); the switcher lists only this app's. */
+  app?: "social" | "team";
 }
 
 export interface MilestoneCounts {
@@ -76,7 +78,8 @@ export function mountCounts(api: Hono, d: CountsDeps) {
     for (const m of d.memberships(i.userId).filter((w) => !platformBlocked(host, w.tenantId, process.env, { email: i.email }))) {
       const scoped = { ...ctx, identity: { ...i, tenant: m.tenantId, role: m.role }, scope: m.tenantId };
       const n = m.tenantId === here ? await own() : await runWithAuth(scoped, own).catch(() => ({ needsYou: null, review: 0 }));
-      worlds.push({ tenantId: m.tenantId, tenantName: m.tenantName || m.tenantId, role: m.role, current: m.tenantId === here, ...n });
+      const app = d.store.getTenant(m.tenantId)?.skin === "social" ? "social" : "team";
+      worlds.push({ tenantId: m.tenantId, tenantName: m.tenantName || m.tenantId, role: m.role, current: m.tenantId === here, app, ...n });
     }
     return c.json({ worlds });
   });

@@ -138,6 +138,48 @@ describe("his phone and his laptop show the same counts", () => {
     expect(counters()).toEqual(laptop);
   });
 
+  it("E948-S231 iteration 2: a laptop whose answers read lands after its card list never counts the cards answered on the phone", async () => {
+    // the count check 28 Nov 13:56Z: after answers on his phone, his laptop drew one card more in Decisions and in Done
+    answers = [
+      { target: "rv_decision", at: ago(30), action: "review feedback", state: "landed" },
+      { target: "rv_done_1", at: ago(20), action: "review complete", state: "landed" },
+    ];
+    let land: () => void = () => {};
+    const slow = new Promise<void>((r) => (land = r));
+    api.listAnsweredPresses = () => slow.then(() => ({ since: ago(120), answers }));
+    inbox();
+    openAll();
+    // the card list is in, the answers are not: Done and Decisions are still counting, never 4 and 1
+    await waitFor(() => expect(document.querySelector('[data-testid="waiting-for-review-loading"]')).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(pill("waiting-for-review")).not.toBe("4");
+    expect(pill("inbox-decisions")).not.toBe("1");
+    await act(async () => land());
+    openAll();
+    await waitFor(() => expect(pill("waiting-for-review")).toBe("3"));
+    await waitFor(() => allMatch());
+    expect(counters()).toMatchObject({ green: 3 });
+  });
+
+  it("E948-S231 iteration 2: a card answered again on the phone after it came back leaves the laptop that kept the older answer", () => {
+    // rv_0a6562be (28 Nov): answered 27 Nov 15:18Z, sent back 16:20Z (its inbox time), answered again on his phone today
+    const now = Date.now();
+    const old = now - 24 * 60 * 60_000;
+    const since = new Date(old + 60 * 60_000).toISOString();
+    const today = new Date(now - 10 * 60_000).toISOString();
+    const log = [{ target: "rv_back", at: today, action: "review feedback", state: "landed" }];
+    // the laptop kept the server's mark of the first answer (localStorage) from an earlier read
+    const kept = new Map<string, SentEntry>([["review:rv_back", { id: -1, said: "Answered", title: "", at: old, gone: true, server: true }]]);
+    const laptop = withServerAnswers(kept, log, now).get("review:rv_back")!;
+    const phone = withServerAnswers(new Map([["review:rv_back", { id: 7, said: "Closed", title: "b", at: now - 10 * 60_000 }]]), log, now).get("review:rv_back")!;
+    // both date his answer today, after the card came back: answered on both, never drawn on one only
+    expect(laptop.at).toBe(Date.parse(today));
+    expect(laptop.at > Date.parse(since)).toBe(true);
+    expect(phone.at > Date.parse(since)).toBe(true);
+    // the phone's own press stays its own Sent row (the server's answer is the same press)
+    expect(phone.id).toBe(7);
+  });
+
   it("an answer whose press failed is open again on every device, this browser's mark included", async () => {
     act(() => void markSent("review:rv_done_2", { said: "Closed", title: "Finished work number 2." }));
     answers = [{ target: "rv_done_2", at: new Date().toISOString(), action: "review complete", state: "failed" }];

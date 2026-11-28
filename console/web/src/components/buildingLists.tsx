@@ -64,7 +64,7 @@ export function BuildingLists({ milestones = [], list }: { milestones?: Mileston
         <div className="divide-y rounded-xl border bg-card">
           {lists.map((l) => {
             const m = l.repos.map((r) => repoProject(milestones, r)).find(Boolean);
-            const campaigns = l.campaigns.length ? `${l.campaigns.length} ${l.campaigns.length === 1 ? "campaign" : "campaigns"}` : "";
+            const campaigns = l.campaigns.length ? `${l.campaigns.length} ${l.campaigns.length === 1 ? "objective" : "objectives"}` : "";
             const grey = [l.line?.replace(/\.$/, ""), campaigns].filter(Boolean);
             return (
               <div key={l.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 [overflow-wrap:anywhere]" data-testid="building-list" data-list={l.id}>

@@ -50,6 +50,8 @@ export interface StartAnswer {
   provider?: "elevenlabs";
   signedUrl?: string;
   instructions?: string;
+  /** the voice of who answers this call (each manager its own); none: the agent's own voice. */
+  voiceId?: string;
 }
 export interface Line {
   who: "owner" | "voice" | "tool";
@@ -177,6 +179,15 @@ export const NO_CREDIT = /credit_balance_exhausted|insufficient_quota|no credits
 export const NO_CREDIT_TEXT = "OpenAI's account has no credit left, so the call could not start (nothing was charged). Voice works again as soon as credit is added.";
 export const OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 export const BEAT_MS = 20_000;
+/**
+ * the calls this tab hung up whose hang-up the console never got (the front door's 502 three times over, the page closing):
+ * the console would hold one open for 3 minutes and refuse his next call (his note of 28 Nov: "I tried calling another
+ * number in the directory, and then it didn't happen"). The next call of any line in this tab ends them first. The
+ * transcript still reaches the desk: the console reads it back from the voice service.
+ */
+const unended = new Set<string>();
+/** for tests: the calls whose hang-up is still owed. */
+export const unendedCalls = () => [...unended];
 export const ASK_POLL_MS = 2_500;
 /** After this the console stops checking a question; its reply is in Chat either way. */
 export const ASK_GIVE_UP_MS = 10 * 60_000;
@@ -431,6 +442,7 @@ export class CallEngine {
       // Microphone first: a refused permission costs nothing (no key minted, no call row).
       this.mic = await this.media.microphone();
       this.watchMic(this.mic);
+      await this.endUnended();
       const s = this.focus ? await this.api.start({ section: this.focus.section, cards: this.focus.cards }) : await this.api.start();
       this.limits = s.limits;
       this.warned = false;
@@ -1254,6 +1266,7 @@ export class CallEngine {
     this.el = await startEleven({
       signedUrl: s.signedUrl!,
       instructions: s.instructions,
+      ...(s.voiceId ? { voiceId: s.voiceId } : {}),
       greeting: this.greeting,
       tools,
       onLive: () => {
@@ -1385,6 +1398,17 @@ export class CallEngine {
   }
 
   /** Hang up (button, quiet timer, limit, console stop): close the line, then hand the transcript to the console. */
+  /** a call this tab hung up whose hang-up never reached the console: ended now, so the next call is not refused. */
+  private async endUnended(): Promise<void> {
+    if (!this.api.endActive) return;
+    for (const id of [...unended]) {
+      await this.api.endActive(id).then(
+        () => unended.delete(id),
+        () => undefined,
+      );
+    }
+  }
+
   async hangup(reason = "hangup"): Promise<void> {
     if (this.v.phase !== "live" && this.v.phase !== "connecting") return;
     const id = this.v.callId;
@@ -1399,7 +1423,7 @@ export class CallEngine {
     // The last response.done may still be on its way to the meter: give it a moment.
     await new Promise((r) => setTimeout(r, 400));
     if (id) {
-      const r = (await this.api.end(id, { reason, transcript: this.v.lines }).catch(() => undefined)) as { call?: CallInfo; monthUsd?: number } | undefined;
+      const r = (await this.api.end(id, { reason, transcript: this.v.lines }).catch(() => (unended.add(id), undefined))) as { call?: CallInfo; monthUsd?: number } | undefined;
       if (r?.call) this.set({ costUsd: r.call.costUsd, monthUsd: r.monthUsd });
     }
     this.set({ phase: "ended", deskWaiting: 0 });

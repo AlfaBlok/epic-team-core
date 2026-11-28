@@ -164,7 +164,7 @@ export const SKINS: Record<SkinId, Skin> = {
     words: { ...CONSOLE_WORDS, get appName() {
         return socialProduct();
       },
-      milestones: "Campaigns", milestone: "campaign", milestonesWord: "campaigns", addMilestone: "Add campaign", teamSkills: "Skills" },
+      milestones: "Objectives", milestone: "objective", milestonesWord: "objectives", addMilestone: "Add objective", teamSkills: "Skills" },
     // Plan §3: hidden are Hosts, Seats, Threads, Secrets (keys come as approval cards), Testers and the Book.
     screens: new Set<ScreenId>(["goalSets", "performance", "team", "chat", "messages", "milestones", "spines", "personas", "runs", "tickets", "services", "teamSkills", "credits", "browserAuth", "setup", "postingLimits", "postStats"]),
     reach: new Set(SOCIAL_REACH),

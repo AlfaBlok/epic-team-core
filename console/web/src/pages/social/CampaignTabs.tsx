@@ -169,7 +169,7 @@ export function CampaignActions({ m, card }: { m: Milestone; card: CampaignCard 
           {open === "rename" ? (
             <>
               <DialogHeader>
-                <DialogTitle>Rename campaign</DialogTitle>
+                <DialogTitle>Rename objective</DialogTitle>
                 <DialogDescription>The new name shows in the menu and on its page{card.campaign ? `, and becomes the title of ${card.campaign.path}. Its posts keep their tag ${card.campaign.code}.` : "."}</DialogDescription>
               </DialogHeader>
               <Input value={name} onChange={(e) => setName(e.target.value)} aria-label="Campaign name" data-testid="campaign-rename-input" />

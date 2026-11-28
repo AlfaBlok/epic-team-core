@@ -214,7 +214,12 @@ export function withServerAnswers(m: Map<string, SentEntry>, answers: ServerAnsw
       const slot = `${kind}:${target}`;
       const mine = next.get(slot);
       if (lands) {
-        if (!mine) next.set(slot, { id: -++n, said: "Answered", title: "", at, gone: true, server: true });
+        // E948-S231 iteration 2 (the count check 28 Nov 13:56Z and 16:0xZ, rv_0a6562be on the laptop only): a mark kept from
+        // an older answer moves to the newer one. His laptop kept the server's mark of his answer of 27 Nov 15:18Z; the
+        // card came back at 16:20Z and he answered it again on his phone today, but the laptop still dated his answer
+        // 27 Nov, so it read the card as sent back after his answer and drew it, one card more than the phone. A mark of
+        // this browser's own press is kept when the server's answer is the same press (a minute apart at most).
+        if (!mine || (mine.server ? mine.at < at : mine.at + 60_000 < at)) next.set(slot, { id: -++n, said: "Answered", title: "", at, gone: true, server: true });
       } else if (mine && !mine.server && mine.at <= at + 60_000) {
         // failed or brought back after this mark: the card is his to answer again, here as on every other device
         next.delete(slot);
@@ -224,9 +229,26 @@ export function withServerAnswers(m: Map<string, SentEntry>, answers: ServerAnsw
   return next;
 }
 let serverKey = "";
+/**
+ * E948-S231 iteration 2 (the count check 28 Nov 13:56Z: after answers on his phone, his laptop drew one card more in
+ * Decisions and in Done): the answers from every device are a read of their own, so a list that came first was counted
+ * with cards he had answered elsewhere until that read landed. The review lists count only once the answers were read
+ * (or failed, or took longer than ANSWERS_WAIT_MS: an inbox never waits on them for long).
+ */
+export const ANSWERS_WAIT_MS = 8_000;
+let answersRead = false;
+export const serverAnswersRead = () => answersRead;
+export const useServerAnswersRead = () => useSyncExternalStore(subscribe, () => answersRead);
+/** the answers read landed, failed, or is not there (an API without it): the lists may count. */
+export function markServerAnswersRead() {
+  if (answersRead) return;
+  answersRead = true;
+  emit();
+}
 /** Fold the server's answers in (lib/inbox reads them with the status batch and the review list). */
 export function applyServerAnswers(answers: ServerAnswer[] | undefined) {
   if (!answers) return;
+  markServerAnswersRead();
   const key = answers.map((a) => `${a.target}|${a.at}|${a.state}`).join(" ");
   if (key === serverKey) return;
   serverKey = key;
@@ -393,6 +415,7 @@ function savePlaces(list: string, rows: { slot: string }[]) {
 /** Tests only. */
 export const resetSent = () => {
   sent = new Map();
+  answersRead = false;
   lastAnswer = 0;
   serverKey = "";
   try {

@@ -15,6 +15,7 @@ const GREETINGS: [RegExp, (m: RegExpExecArray) => string][] = [
   [/^Hi (.+?), I'm the desk line\. How can I help\?$/, (m) => `Hola ${m[1]}, soy la línea del equipo. ¿En qué te ayudo?`],
   [/^Hi (.+?), objectives coach here\. Which objective do you want to work on\?$/, (m) => `Hola ${m[1]}, aquí tu coach de objetivos. ¿En qué objetivo quieres trabajar?`],
   [/^Hi (.+?), your objectives review\./, (m) => `Hola ${m[1]}, tu repaso de objetivos. Voy objetivo por objetivo, primero lo que está en rojo. ¿Empezamos?`],
+  [/^Hi (.+?), the (.+?) manager here\. What's new since we last spoke\?$/, (m) => `Hola ${m[1]}, aquí el responsable de ${m[2]}. ¿Qué hay de nuevo desde la última vez?`],
   [/^Hi (.+?), your briefer for (.+?)\. Key results first, or straight to what is red\?$/, (m) => `Hola ${m[1]}, soy tu briefer de ${m[2]}. ¿Empezamos por los resultados clave o vamos directos a lo que está en rojo?`],
   [/^Hi (.+?), your (.+?) (?:briefer|partner) here\./, (m) => `Hola ${m[1]}, aquí tu briefer de ${m[2]}. ¿Quieres primero los números, posts, respuestas, mensajes y testers, o vamos directos al bloqueo número uno?`],
   [/^Hi (.+?), your (.+?) launch strategist here, on the (.+?) objective\./, (m) => `Hola ${m[1]}, aquí tu estratega de lanzamiento de ${m[2]}, en el objetivo ${m[3]}. ¿Por dónde seguimos?`],

@@ -270,7 +270,7 @@ export function IdeasPage() {
       {error && !social && <ErrorBox error={error} />}
       {loading && !social && <Loading />}
       {sample && <p className="mb-3 text-xs text-amber-700 dark:text-amber-400" data-testid="ideas-sample">Sample data: no console server here, nothing is saved.</p>}
-      {noRepo && <Empty>No social repo in this world yet.</Empty>}
+      {noRepo && <Empty>No social repo in this workspace yet.</Empty>}
       {social && !noRepo && (
         <div className="grid min-w-0 grid-cols-1 gap-4">
           <Card className="min-w-0 p-4" data-testid="my-ideas">

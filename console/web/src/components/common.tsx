@@ -243,7 +243,7 @@ export function HeldChip({ heldOn, next }: { heldOn: string; next?: string }) {
       data-testid="held-chip"
       title={
         heldOn === "credits"
-          ? "Held: this world is out of credits. It starts again after a top-up or the monthly grant."
+          ? "Held: this workspace is out of credits. It starts again after a top-up or the monthly grant."
           : `Held: the Team Browser route ${heldOn} is offline. Nothing for you to do; it resumes when it is back.${next ? ` Fallback check ${formatDateTime(next)}.` : ""}`
       }
     >
@@ -418,7 +418,7 @@ function OtherWorld({ world }: { world: { id: string; name: string } }) {
     if (worldSwitching.on) return; // another box on this page already switches
     try {
       // a switch for this same page under a minute ago did not open it: stop, never loop
-      if (Date.now() - Number(sessionStorage.getItem(key) ?? 0) < 60_000) return setErr("This page did not open after switching. Use Your worlds in the menu.");
+      if (Date.now() - Number(sessionStorage.getItem(key) ?? 0) < 60_000) return setErr("This page did not open after switching. Use Your workspaces in the menu.");
       sessionStorage.setItem(key, String(Date.now()));
     } catch {
       /* no storage: switch once anyway */

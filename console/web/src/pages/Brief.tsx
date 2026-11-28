@@ -31,7 +31,7 @@ export { BRIEF_PATH };
  * through the `brief` write action (one commit as the owner) and shows the pack's 422 issue lines inline. Below it, the
  * Assets library (data/assets.md with computed "used by") and an upload to data/assets/. Social skin only.
  */
-export const BRIEF_LABEL = "Campaign brief";
+export const BRIEF_LABEL = "Objective brief";
 
 const ASSET_KINDS = ["diagram", "screenshot", "clip", "video", "logo"] as const;
 
@@ -274,7 +274,7 @@ export function BriefPage() {
     return (
       <>
         <PageHeader title={inCampaign ? "Brief" : BRIEF_LABEL} />
-        <Empty>No campaign repo in this world yet: turn the social pack on in a repo (pack init social) to set its brief.</Empty>
+        <Empty>No social repo in this workspace yet: turn the social pack on in a repo (pack init social) to set its brief.</Empty>
       </>
     );
 
@@ -323,7 +323,7 @@ export function BriefPage() {
         title={inCampaign ? "Brief" : BRIEF_LABEL}
         description={
           <>
-            The standing layer: every team member reads it on every wake.{social.repo ? ` Campaign repo: ${social.repo}.` : ""}
+            The standing layer: every team member reads it on every wake.{social.repo ? ` Repo: ${social.repo}.` : ""}
             {social.sample && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:text-amber-400">sample</span>}
           </>
         }
@@ -432,7 +432,7 @@ export function BriefPage() {
 
         <Block title="Cadence per persona" where="console assignments (when each wakes)" testId="brief-cadence">
           {cadences.length === 0 ? (
-            <Empty>No team member is assigned to this campaign yet.</Empty>
+            <Empty>No team member is assigned to this objective yet.</Empty>
           ) : (
             <div className="grid gap-3">
               {cadences.map((c) => (

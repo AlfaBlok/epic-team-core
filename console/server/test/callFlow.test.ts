@@ -21,7 +21,10 @@ const KINDS: [string, string][] = [
 describe("every call voice keeps his flow", () => {
   it("the one rule: phase two leads, no permission asks, no desk talk, time left said, quick check-in merged in", () => {
     expect(CALL_FLOW_RULE).toMatch(/Phase one, he gives you his context: let him talk\. Short acknowledgements only/);
-    expect(CALL_FLOW_RULE).toMatch(/Phase two.*you lead.*'Here is what I propose: …'.*Never wait for his yes before going on/);
+    expect(CALL_FLOW_RULE).toMatch(/Phase two.*you lead.*'Here is what I propose: …'/);
+    // his newer word (28 Nov) replaces "never wait for his yes": each item is settled before the next.
+    expect(CALL_FLOW_RULE).not.toMatch(/Never wait for his yes before going on/);
+    expect(CALL_FLOW_RULE).toMatch(/One item at a time, settled before the next/);
     expect(CALL_FLOW_RULE).toMatch(/Never ask permission after a point: no 'Pass it\?'/);
     expect(CALL_FLOW_RULE).toMatch(/Never talk about passing things on: no 'I'll pass this to the desk'.*The whole call reaches his team by itself/);
     expect(CALL_FLOW_RULE).toMatch(/note from the call's clock comes, say its line out loud at once/);

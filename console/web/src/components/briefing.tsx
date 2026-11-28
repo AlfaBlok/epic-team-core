@@ -65,7 +65,7 @@ export function Briefing({ nodes, kind, onClose }: { nodes: ScorecardNode[]; kin
   const [filed, setFiled] = useState<Record<string, true>>({});
   const total = nodes.length;
   const done = i >= total;
-  const label = kind === "campaign" ? "campaign" : "objective";
+  const label = "objective";
   return (
     <section className="grid min-w-0 gap-3 rounded-xl border bg-card px-3 py-3 sm:px-4" aria-label="Briefing" data-testid="briefing">
       <div className="flex min-w-0 items-center justify-between gap-2">
@@ -213,7 +213,7 @@ export function BriefingSlot({ nodes, kind }: { nodes: ScorecardNode[]; kind: "o
       <Button size="sm" variant="outline" className={PHONE_TAP} onClick={() => set(true)} data-testid="briefing-start">
         <Mic className="h-4 w-4" /> Briefing
       </Button>
-      <span className="text-xs text-muted-foreground">Each {kind}, one by one. You answer by voice.</span>
+      <span className="text-xs text-muted-foreground">Each objective, one by one. You answer by voice.</span>
     </div>
   );
 }

@@ -15,7 +15,7 @@ import { useSocial, worldId } from "@/lib/useSocial";
  * with me" asks the campaign's chat (its Repo desk) to draft it; the desk holds the draft for him as a review card, and
  * it shows here marked as a draft until he approves it there or saves it here. Agents never write his lines.
  */
-export const DRAFT_SEED = "Help me draft this campaign's one-pager.";
+export const DRAFT_SEED = "Help me draft this objective's one-pager.";
 
 const HINTS: Record<OnePagerPart, { hint: string; rows: number }> = {
   "Why this campaign": { hint: "What it is and what changes if it works: one sentence, your intent", rows: 2 },
@@ -23,7 +23,7 @@ const HINTS: Record<OnePagerPart, { hint: string; rows: number }> = {
   "What we measure": { hint: "Leading signals each week, and the result", rows: 3 },
   "What we hope": { hint: "Numbers by the end, said plainly as hopes: followers, traction", rows: 3 },
   "My calls": { hint: "How you decide: the patterns behind your Approves and Revises, one per line", rows: 4 },
-  "Not doing": { hint: "What this campaign will not do", rows: 2 },
+  "Not doing": { hint: "What this objective will not do", rows: 2 },
   Approval: { hint: "One line: what waits for your Approve, from your hold rules", rows: 2 },
 };
 

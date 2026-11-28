@@ -337,7 +337,7 @@ export function PlanView({ plan, onEdit }: { plan: MarketingPlan; onEdit?: () =>
       : plan.source === "spine"
       ? `From ${plan.repo} · ${plan.path}, section Plan.`
       : plan.source === "copy"
-        ? `The team's copy (${plan.path}) until the campaign's own spine has its Plan section.`
+        ? `The team's copy (${plan.path}) until the objective's own spine has its Plan section.`
         : `Not written yet. It belongs in ${plan.repo} · ${plan.path}, section Plan.`;
   return (
     <div className="grid max-w-4xl gap-4" data-testid="plan-tab">

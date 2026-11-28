@@ -104,7 +104,7 @@ describe("T78-S13: a note box on every Product tab slide", () => {
     fireEvent.click(within(box).getByTestId("product-note-send"));
     await waitFor(() => expect(file).toHaveBeenCalledWith("w", "ms-memo", { file: FILE, slide: "What we push", note: "Yes to the metric." }));
     await waitFor(() => expect(chat).toHaveBeenCalledWith("ms-memo", `[product slide 1: What we push · file ${FILE}] Yes to the metric.`));
-    expect((await within(box).findByRole("status")).textContent).toMatch(/^Filed in the campaign's spine and sent to the campaign chat/);
+    expect((await within(box).findByRole("status")).textContent).toMatch(/^Filed in the objective's spine and sent to its chat/);
     await waitFor(() => expect(within(screen.getByTestId("product-notes")).getAllByTestId("product-note-line").map((l) => l.textContent)).toEqual(["9 Nov Yes to the metric.", "8 Nov Older note on slide one."]));
   });
 

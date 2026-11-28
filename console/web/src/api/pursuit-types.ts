@@ -224,6 +224,19 @@ export interface KeyResultPlan {
   greenWhen?: string;
   ifStuck?: string;
 }
+/** an EpicTeam objective's Blueprint chapter, docs/scorecards/blueprints/<id>.md. */
+export interface ObjectiveBlueprint {
+  path: string;
+  present: boolean;
+  /** what is being built, in one sentence */
+  what?: string;
+  /** what stays true whatever we build */
+  truths: string[];
+  /** the parts of what is being built */
+  parts: string[];
+  /** the engine's own blueprint (how every app is built), markdown, shown under the objective's own */
+  engine?: { path: string; text: string };
+}
 export interface WheelPlan {
   id: string;
   path: string;

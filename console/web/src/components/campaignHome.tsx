@@ -1,12 +1,11 @@
 import { Plus } from "lucide-react";
 import { useMemo } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { api, type Milestone } from "@/api";
 import type { CampaignCard } from "@/api/campaign-types";
 import type { ScorecardNode, ScorecardRow, ScorecardRowState } from "@/api/pursuit-types";
 import { BriefingSlot } from "@/components/briefing";
 import { AnswerBox, STATE_FILL, TabStrip, WheelsTable, keyResultsOf, lightOf } from "@/components/goalSets";
-import { CountPill, PILL_TITLES } from "@/components/homeSection";
 import { INBOX_PATH } from "@/components/inboxLine";
 import { campaignMilestones, campaignsByMilestone, useCampaigns } from "@/lib/campaign";
 import { splitBigRoots } from "@/lib/bigRoots";
@@ -16,6 +15,9 @@ import { milestoneName } from "@/lib/format";
 import { useSnoozes } from "@/lib/snooze";
 import { statusOf } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { brandOfRepo } from "@/lib/project";
+import { SidebarObjective } from "@/components/goalSets";
+import { SET_NAME } from "@/lib/scorecards";
 
 /**
  * the social skin's Home and the top of its sidebar, built on the console skin's All objectives page (one shared console, L-62).
@@ -70,9 +72,15 @@ export function campaignKeyResults(card: CampaignCard | undefined): ScorecardRow
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** one campaign as an objective node, so the console skin's table draws it. */
+/**
+ * one of the world's objectives (his "it's objective everywhere", 28 Nov 12:47Z, Log/2026-11-28.md#^e-497258) as an
+ * objective node, named `Product: goal` like every EpicTeam objective (the product from its repo), so the sidebar row and
+ * the home table draw it exactly as the console skin draws its objectives.
+ */
 export function campaignNode(m: Pick<Milestone, "id" | "title" | "docTitle" | "titleOverride">, card: CampaignCard | undefined): ScorecardNode {
-  const name = card?.campaign?.name ?? card?.title ?? milestoneName(m as Milestone);
+  const goal = card?.campaign?.name ?? card?.title ?? milestoneName(m as Milestone);
+  const product = card?.repo ? brandOfRepo(card.repo).replace(/\s+/g, "") : "";
+  const name = product && !goal.includes(":") ? `${product}: ${goal}` : goal;
   const krs = campaignKeyResults(card);
   return { id: m.id, kind: "pursuit", name, headline: name, milestoneId: m.id, greens: krs.filter((r) => r.state === "green").length, total: krs.length, spines: [], children: [], rows: [], keyResults: krs };
 }
@@ -91,7 +99,8 @@ export function useCampaignHome() {
   const all = useMemo(() => campaignMilestones(camps.data?.campaigns, ms.data), [camps.data, ms.data]);
   const { roots } = splitBigRoots(all);
   const pinned = roots.length > 0;
-  const shown = pinned ? roots : all.filter((m) => byMs.has(m.id));
+  // only the world's objectives, never a milestone with no card of its own (one entry type, one page: ^e-483365)
+  const shown = (pinned ? roots : all).filter((m) => byMs.has(m.id));
   const nodes = shown.map((m) => campaignNode(m, byMs.get(m.id)));
   const countFor = (id: string) => ({
     ask: statusOf(statuses, id)?.loading ? 0 : blockedItems(statusOf(statuses, id), { snoozing }).length,
@@ -119,45 +128,27 @@ export function CampaignRing({ metric, size = 30 }: { metric: Metric | null | un
 }
 
 /**
- * the sidebar's campaigns (social skin): his pinned campaigns, each its ring, its name and its inbox pills (the owner,
- * 13 Nov 20:03Z, on the console skin's sidebar: "we only need name, inbox and circle").
+ * the sidebar's objectives (social skin), drawn by the very row the console skin's objectives use (SidebarObjective): his
+ * 28 Nov words, "every entry of the sidebar is identical in structure ... Single schema per app. Single UX per app"
+ * (Log/2026-11-28.md#^e-483365) and "let's just call them objectives" (^e-497258). One heading, one entry type, each
+ * opening its objective page with this app's chapters.
  */
 export function SidebarCampaigns({ onNavigate }: { onNavigate?: () => void }) {
-  const { nodes, cardOf, countFor, read } = useCampaignHome();
+  const { nodes, countFor, read } = useCampaignHome();
+  const { pathname } = useLocation();
   if (!read) return null;
+  const activeId = pathname.startsWith("/milestones/") ? decodeURIComponent(pathname.split("/")[2] ?? "") : undefined;
   return (
     <div className="grid min-w-0 grid-cols-1 gap-1" data-testid="sidebar-campaigns">
-      {nodes.length > 0 && <div className="px-2.5 pb-0.5 text-xs font-medium text-muted-foreground">Your campaigns</div>}
-      {nodes.length > 0 && <ul className="grid min-w-0 gap-1">
-        {nodes.map((n) => {
-          const card = cardOf(n.id);
-          const c = countFor(n.id);
-          return (
-            <li key={n.id} className="grid min-w-0" data-testid="sidebar-campaign" data-milestone-id={n.id}>
-              <NavLink
-                to={`/milestones/${n.id}`}
-                onClick={onNavigate}
-                className={({ isActive }) => cn("flex min-w-0 items-center gap-2 rounded-md border-l-[3px] px-2.5 py-1.5", isActive ? "border-l-foreground bg-card shadow-sm ring-1 ring-border" : "border-l-transparent hover:bg-accent/60")}
-                title={[n.name, card?.goal?.line].filter(Boolean).join(": ")}
-                data-testid="sidebar-campaign-link"
-              >
-                <CampaignRing metric={card?.goal?.metric} />
-                <span className="min-w-0 flex-1 text-[14px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="sidebar-campaign-name">
-                  {n.name}
-                </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  {c.ask > 0 && <CountPill count={c.ask} tone="needs-you" title={PILL_TITLES["needs-you"](c.ask)} testId="sidebar-campaign-asks" />}
-                  {c.review > 0 && <CountPill count={c.review} tone="review" title={PILL_TITLES.review(c.review)} testId="sidebar-campaign-review" />}
-                </span>
-              </NavLink>
-            </li>
-          );
-        })}
+      {nodes.length > 0 && <div className="px-2.5 pb-0.5 text-xs font-medium text-muted-foreground" data-testid="sidebar-objectives-heading">{SET_NAME.many}</div>}
+      {nodes.length > 0 && <ul className="grid min-w-0 gap-1" data-testid="sidebar-objectives">
+        {nodes.map((n) => (
+          <SidebarObjective key={n.id} n={n} countFor={countFor} onNavigate={onNavigate} activeId={activeId} href={`/milestones/${n.id}`} inboxHref={`/milestones/${n.id}?tab=waiting`} />
+        ))}
       </ul>}
-      {/* a customer adds a campaign right under their campaigns (the wizard), not only from More. */}
       <NavLink to="/campaigns/new" onClick={onNavigate} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground" data-testid="sidebar-add-campaign">
         <Plus className="h-4 w-4" />
-        Add campaign
+        Add objective
       </NavLink>
     </div>
   );
@@ -169,11 +160,11 @@ export function campaignAnswer(nodes: ScorecardNode[], cardOf: (id: string) => C
     const m = cardOf(n.id)?.goal?.metric;
     return m ? `${n.name} ${m.now === null ? "?" : m.now} of ${m.target} ${m.label}` : `${n.name} has no number yet`;
   });
-  const lead = nodes.length === 1 ? "One campaign" : `${nodes.length} campaigns`;
+  const lead = nodes.length === 1 ? "One objective" : `${nodes.length} objectives`;
   return `${lead}: ${numbers.join(", ")}. ${waits === 0 ? "Nothing waits on you." : `${waits} ${waits === 1 ? "thing waits" : "things wait"} on you.`}`;
 }
 
-const HOME_TABS = [{ id: "table", label: "Campaigns" }] as const;
+const HOME_TABS = [{ id: "table", label: "Objectives" }] as const;
 
 /** the social skin's Home: the console skin's All objectives page with his campaigns as the objectives. */
 export function CampaignsHome() {
@@ -183,7 +174,7 @@ export function CampaignsHome() {
   const others = all.length - nodes.length;
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-3" data-testid="campaigns-home">
-      <AnswerBox light={lightOf(krs)} title={pinned ? "Your campaigns" : "Every campaign"} testId="campaigns-answer" answer={loading ? "Reading your campaigns…" : nodes.length ? campaignAnswer(nodes, cardOf, waits) : "No campaign runs yet."} />
+      <AnswerBox light={lightOf(krs)} title={pinned ? "Your objectives" : "Every objective"} testId="campaigns-answer" answer={loading ? "Reading your objectives…" : nodes.length ? campaignAnswer(nodes, cardOf, waits) : "No objective runs yet."} />
       {error && <div className="text-sm text-destructive">Could not read the campaigns: {error.message}</div>}
       <TabStrip tabs={HOME_TABS} tab="table" links={{ inbox: { label: "Inbox", to: `/${INBOX_PATH}`, count: waits } }} label="Home pages" />
       {!loading && <BriefingSlot nodes={nodes} kind="campaign" />}
@@ -192,7 +183,7 @@ export function CampaignsHome() {
       )}
       {others > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="campaigns-home-more">
-          {others} more {others === 1 ? "campaign is" : "campaigns are"} under More in the menu{pinned ? ": pin one to show it here." : "."}
+          {others} more {others === 1 ? "objective is" : "objectives are"} kept, not on the menu{pinned ? ": pin one to show it here." : "."}
         </p>
       )}
     </div>

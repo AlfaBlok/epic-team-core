@@ -41,6 +41,7 @@ import { CardAge, cardAgeWords } from "@/components/common";
 import { lazyPage } from "@/lib/lazyPage";
 import { spineViewHref } from "@/lib/nodes";
 import { useHomeTab, useWheelPages, WheelPagesTab } from "@/components/wheelPages";
+import { BlueprintTab } from "@/components/blueprint";
 import { WheelPlanTab } from "@/components/wheelPlan";
 import { TotemTab, productOfObjective, useTotemMaps } from "@/components/totemTabs";
 import { wheelTabsOf } from "@/lib/wheelTabs";
@@ -945,7 +946,8 @@ export function GoalHeader({ rows, title, answer, children, testId = "set-answer
  * no numbers; the ring, then the product word over the goal, both on one left edge; the product word is coloured text with
  * no box (its padding broke the edge), the pills sit at the right of the product line and the goal may run under them.
  */
-function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardNode; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string }) {
+/** one objective's sidebar row, both skins (`href`/`inboxHref`: where this app's objective page opens, else /sets). */
+export function SidebarObjective({ n, countFor, onNavigate, activeId, href, inboxHref }: { n: ScorecardNode; countFor: (id: string) => { ask: number; review: number }; onNavigate?: () => void; activeId?: string; href?: string; inboxHref?: string }) {
   const c = countFor(n.id);
   const krs = keyResultsOf(n);
   const active = activeId === n.id;
@@ -953,7 +955,7 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
   return (
     <li className="grid min-w-0" data-testid="sidebar-set" data-set={n.id} data-depth={0}>
       <Link
-        to={scorecardHref(n.id)}
+        to={href ?? scorecardHref(n.id)}
         onClick={onNavigate}
         className={cn(
           "grid min-w-0 grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-2.5 gap-y-0.5 rounded-md border-l-[3px] py-2 pl-2 pr-2.5",
@@ -980,7 +982,7 @@ function SidebarObjective({ n, countFor, onNavigate, activeId }: { n: ScorecardN
         </span>
         <span className="col-start-3 row-start-1 flex h-[18px] shrink-0 items-center gap-1">
           <IdlePill n={n} testId="sidebar-set-idle" />
-          <GoalPills c={c} to={scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
+          <GoalPills c={c} to={inboxHref ?? scorecardHref(n.id, GOAL_INBOX_TAB)} onNavigate={onNavigate} />
         </span>
         {product ? (
           <span className="col-span-2 col-start-2 row-start-2 min-w-0 text-[14px] font-medium leading-snug text-foreground [overflow-wrap:anywhere]" data-testid="objective-goal">
@@ -1797,6 +1799,8 @@ export function GoalSetPage() {
           {tab === "personas" && <Personas node={node} />}
           {/* the wheel's plan and nothing else: a social kit or marketing material stays on its campaign. */}
           {tab === "plan" && <WheelPlanTab id={pursuit.id} keyResults={keyResultsOf(node)} />}
+          {/* the build-out's hard truths and basic blueprint, EpicTeam's twin of the social product's message house. */}
+          {tab === "blueprint" && <BlueprintTab id={pursuit.id} />}
           {tab === "trackers" && <TrackersTab wheel={pursuit.id} />}
           {tab === "log" && <PersonaLogTab wheel={pursuit.id} />}
           {tab === "consumption" && <ConsumptionTab wheel={pursuit.id} />}

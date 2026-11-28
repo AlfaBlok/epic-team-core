@@ -49,9 +49,9 @@ export function ProductNoteBox({ m, s, notes, onFiled }: { m: Pick<Milestone, "i
         if (files.ids.length) await api.sendMilestoneChatMessage(m.id, productSlideNote(s, words), undefined, undefined, files.ids);
         else await api.sendMilestoneChatMessage(m.id, productSlideNote(s, words));
         files.clear();
-        setNote({ ok: true, chat: true, text: "Filed in the campaign's spine and sent to the campaign chat, which acts on it." });
+        setNote({ ok: true, chat: true, text: "Filed in the objective's spine and sent to its chat, which acts on it." });
       } catch (e) {
-        setNote({ ok: true, text: `Filed in the campaign's spine. The campaign chat did not get it: ${(e as Error).message}` });
+        setNote({ ok: true, text: `Filed in the objective's spine. Its chat did not get it: ${(e as Error).message}` });
       }
     } catch (e) {
       setNote({ ok: false, text: `Not filed: ${(e as Error).message}` });

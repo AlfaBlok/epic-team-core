@@ -79,7 +79,7 @@ describe("Team's Add in the social skin", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add job" }));
     expect(await screen.findByRole("heading", { name: "Add job" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New campaign" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New objective" }));
     expect(await screen.findByTestId("wizard")).toBeTruthy();
   });
 });

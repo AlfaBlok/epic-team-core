@@ -140,7 +140,7 @@ export function CampaignsPage() {
     <div>
       <PageHeader
         title={w.milestones}
-        description="Each campaign is a named plan inside a repo with the social pack on; the repo's own card shows every post."
+        description="Each objective is a named plan inside a repo with the social pack on; the repo's own card shows every post."
         actions={
           <Button asChild>
             <Link to={`/${NEW_CAMPAIGN_PATH}`}>
@@ -194,7 +194,7 @@ function PlanView({ p }: { p: CampaignPlan }) {
   return (
     <div className="grid gap-4 text-sm">
       <ul className="grid list-disc gap-1 pl-5">
-        {line("plan-milestone", p.milestone.action === "create" ? `Create the campaign "${p.title}" (its spine is ${p.milestone.path})` : `Campaign "${p.title}" exists already: kept`, p.milestone.action === "exists")}
+        {line("plan-milestone", p.milestone.action === "create" ? `Create the objective "${p.title}" (its spine is ${p.milestone.path})` : `Objective "${p.title}" exists already: kept`, p.milestone.action === "exists")}
         {line("plan-spine", p.spine.action === "create" ? `Write the root spine ${p.spine.path}` : `Root spine ${p.spine.path} exists: kept`, p.spine.action === "exists")}
         {line("plan-init", p.init.action === "run" ? `Turn the social pack on: ${p.init.files.length} file${p.init.files.length === 1 ? "" : "s"} (${p.init.files.join(", ")})` : `Pack init skipped: ${p.init.reason}`, p.init.action === "skip")}
         {line("plan-brief", p.brief.action === "write" ? `Seed the brief: ${p.brief.sections.join(" and ").replace("key_messages", "key messages")}` : "Brief left as it is (no objective or key messages given)", p.brief.action === "skip")}
@@ -290,7 +290,7 @@ export function NewCampaignPage() {
   const picked = repos.data?.repos.find((r) => r.name === repo);
   return (
     <div className="max-w-3xl">
-      <PageHeader title="New campaign" description="From a repo the console already has: nothing is written until you confirm the preview." />
+      <PageHeader title="New objective" description="From a repo the console already has: nothing is written until you confirm the preview." />
       {err && (
         <div className="mb-4">
           <ErrorBox error={err} />
@@ -302,7 +302,7 @@ export function NewCampaignPage() {
         ) : repos.error ? (
           <ErrorBox error={repos.error} />
         ) : !repos.data?.repos.length ? (
-          <Empty>No repos this world can use. Clone the campaign repo onto the host first.</Empty>
+          <Empty>No repos this workspace can use. Clone the repo onto the host first.</Empty>
         ) : (
           <Card>
             <CardContent className="grid gap-3 p-4">
@@ -312,7 +312,7 @@ export function NewCampaignPage() {
                   <label key={r.name} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent/60">
                     <input type="radio" name="repo" value={r.name} checked={repo === r.name} onChange={() => setRepo(r.name)} />
                     <span className="min-w-0 break-words">{r.remote ?? r.name}</span>
-                    {r.campaign ? <Badge variant="blue">campaign</Badge> : r.hasPack ? <Badge variant="gray">pack on</Badge> : null}
+                    {r.campaign ? <Badge variant="blue">objective</Badge> : r.hasPack ? <Badge variant="gray">pack on</Badge> : null}
                   </label>
                 ))}
               </div>
@@ -380,7 +380,7 @@ export function NewCampaignPage() {
                 <ArrowLeft className="h-4 w-4" /> Back
               </Button>
               <Button disabled={busy} onClick={create}>
-                {busy ? "Creating…" : plan.milestone.action === "create" ? "Create campaign" : "Update campaign"}
+                {busy ? "Creating…" : plan.milestone.action === "create" ? "Create objective" : "Update objective"}
               </Button>
             </div>
           </CardContent>

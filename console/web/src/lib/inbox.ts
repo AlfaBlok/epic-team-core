@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, type MilestoneStatusView, type PendingItem, type ReviewItem, type StatusBatch } from "@/api";
 import { useRawWaiting, useSharedQuery } from "@/lib/data";
 import { useSnoozes } from "@/lib/snooze";
-import { answeredHere, answeredSlot, applyServerAnswers, useSentVersion } from "@/lib/sentRows";
+import { ANSWERS_WAIT_MS, answeredHere, answeredSlot, applyServerAnswers, markServerAnswersRead, serverAnswersRead, useSentVersion, useServerAnswersRead } from "@/lib/sentRows";
 import { fromGapFinder, useGapFinder } from "@/lib/gapFinder";
 import { foldReviews } from "@/lib/sameTopic";
 import { pickUrgent, type UrgentWhy } from "@/lib/cardKind";
@@ -124,8 +124,17 @@ export function reviewCards<T extends Pick<ReviewItem, "id" | "milestoneId">>(
  * laptop leave the same cards out (lib/sentRows withServerAnswers). One shared fetch, polled with the inbox.
  */
 export function useServerAnswers() {
-  const { data } = useSharedQuery("presses-answered", () => (api.listAnsweredPresses ? api.listAnsweredPresses() : Promise.resolve(undefined)), { tag: "inbox" });
+  const { data, error, loading } = useSharedQuery("presses-answered", () => (api.listAnsweredPresses ? api.listAnsweredPresses() : Promise.resolve(undefined)), { tag: "inbox" });
   useEffect(() => applyServerAnswers(data?.answers), [data]);
+  // E948-S231 iteration 2: the lists count once the answers were read; a failed, missing or slow read never holds them
+  useEffect(() => {
+    if (error || !api.listAnsweredPresses || (!loading && !data?.answers)) markServerAnswersRead();
+  }, [error, loading, data]);
+  useEffect(() => {
+    if (serverAnswersRead()) return;
+    const t = setTimeout(markServerAnswersRead, ANSWERS_WAIT_MS);
+    return () => clearTimeout(t);
+  }, []);
 }
 export const useStatusBatch = () => {
   useServerAnswers();
@@ -180,7 +189,9 @@ export function useReviewCards(o: { keep?: Keep } = {}) {
     return data.map((i) => ({ ...i, urgent: why.get(i.id) ?? null }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, openKey, asks]);
-  return { data: stamped, error, loading, cards: stamped && reviewCards(stamped, { ...o, snoozing: entries, gone: g }) };
+  // E948-S231 iteration 2: no count and no list before his answers from every device are in (lib/sentRows serverAnswersRead)
+  const answersIn = useServerAnswersRead();
+  return { data: stamped, error, loading, cards: stamped && answersIn ? reviewCards(stamped, { ...o, snoozing: entries, gone: g }) : undefined };
 }
 
 /** The status a Waiting on you list counts from: the world's batch, one milestone's, or none (an untracked spine). */

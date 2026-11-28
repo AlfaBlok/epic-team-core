@@ -638,7 +638,7 @@ const SETTING_ICONS: Record<string, typeof Files> = {
 };
 
 /** the social skin's add button (mockup note 6): a standing campaign or a one-off job, one dialog. */
-export const ADD_CAMPAIGN_OR_JOB = "Add campaign or job";
+export const ADD_CAMPAIGN_OR_JOB = "Add objective or job";
 
 /**
  * Setup (repo, X, Reddit, LinkedIn) shows in the menu with its count only while something is
@@ -667,7 +667,6 @@ function SetupLink({ onNavigate }: { onNavigate?: () => void }) {
  * to) and Log out, at the bottom of the menu on both sites. The server routes are's /api/access/{switch,logout}.
  */
 export function AccountBlock() {
-  const w = useWords();
   const { data: me } = useSharedQuery("sb:me", () => (api.getMe ? api.getMe() : Promise.resolve(undefined)));
   const [busy, setBusy] = useState<"logout">();
   const [err, setErr] = useState<string>();
@@ -724,7 +723,7 @@ export function AccountBlock() {
           {err}
         </p>
       )}
-      {showsSibling(me) && <SiblingLink appName={w.appName} />}
+      {/* no link into the other app: "I shouldn't be sent to another workspace in a different app" (28 Nov, ^e-00230c) */}
     </div>
   );
 }
@@ -823,7 +822,10 @@ export function WorldSwitcher() {
   const customer = !campaigns && !!here && here !== homeWorld() && !knownDoor() && !!api.newWorkspace;
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
-  const worlds = data?.worlds ?? [];
+  // only this app's workspaces: a workspace is inside an app, and the menu never sends him into the other app (his 28 Nov
+  // 11:52Z words, Log/2026-11-28.md#^e-00230c). A server without `app` lists them all, as before.
+  const app = campaigns ? "social" : "team";
+  const worlds = (data?.worlds ?? []).filter((x) => !x.app || x.app === app || x.current);
   if (worlds.length < 2 && !customer) return null;
   const make = async (e: FormEvent) => {
     e.preventDefault();
@@ -854,12 +856,12 @@ export function WorldSwitcher() {
   return (
     // not pinned; the last section of the menu (desktop sidebar and phone menu), under the account block.
     <div className="grid min-w-0 gap-1 border-t pt-3" data-testid="world-switcher">
-      <div className="px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{customer ? "Your workspaces" : "Your worlds"}</div>
+      <div className="px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Your workspaces</div>
       <p className="px-2.5 pb-0.5 text-xs text-muted-foreground" data-testid="world-switcher-hint">
-        {customer ? "Each workspace is a separate home with its own team." : "Each world is a separate home with its own team."}
+        Each workspace is a separate home with its own team.
         {hasProjects ? " Projects at the top switch inside this one." : ""}
       </p>
-      <ul className="grid min-w-0 gap-0.5" aria-label={customer ? "Your workspaces" : "Your worlds"}>
+      <ul className="grid min-w-0 gap-0.5" aria-label="Your workspaces">
         {worlds.map((w) => (
           <li key={w.tenantId}>
             <button

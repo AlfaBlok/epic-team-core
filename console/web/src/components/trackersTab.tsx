@@ -468,7 +468,7 @@ export function CampaignTrackersTab({ load }: { load: () => Promise<CampaignTrac
         </div>
       ))}
       <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground" data-testid="trackers-add">
-        {n ? "Another table" : "This campaign's objective has no shortlist yet. A table"} is asked for by the team when its work needs one, and opens with your yes.
+        {n ? "Another table" : "This objective has no shortlist yet. A table"} is asked for by the team when its work needs one, and opens with your yes.
       </p>
     </section>
   );

@@ -1054,3 +1054,21 @@ describe("the call keeps its word (his call defects of 18 Nov)", () => {
     expect(NORMAL_TURN).toMatchObject({ type: "semantic_vad", eagerness: "low", interrupt_response: true });
   });
 });
+
+describe("a hang-up the console never got does not block his next call", () => {
+  it("the next call in this tab ends it first, then starts", async () => {
+    const f = fakes();
+    await f.open();
+    f.api.end.mockRejectedValueOnce(Object.assign(new Error("console answered 502"), { status: 502 }));
+    const endActive = vi.fn(async () => ({ ended: true }));
+    (f.api as any).endActive = endActive;
+    await f.engine.hangup("bye");
+    expect(f.engine.view().phase).toBe("ended");
+    await f.engine.start();
+    expect(endActive).toHaveBeenCalledWith("call_1");
+    expect(endActive.mock.invocationCallOrder[0]).toBeLessThan(f.api.start.mock.invocationCallOrder.at(-1)!);
+    const { unendedCalls } = await import("./engine");
+    expect(unendedCalls()).toEqual([]);
+  });
+});
+

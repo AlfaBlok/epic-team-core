@@ -1563,6 +1563,10 @@ const mockMail = () => ({
         ],
       });
     },
+    /** an objective's Blueprint chapter: two hard truths and two parts. */
+    async getObjectiveBlueprint(id: string) {
+      return ok({ path: `docs/scorecards/blueprints/${id}.md`, present: true, what: "One console that wakes personas in a workspace.", truths: ["Every app runs the same engine.", "The repo is the only source."], parts: ["Console: the screens and the API.", "Personas: woken on a cadence."] });
+    },
     /** an objective's wheel plan: how its first key result gets to green, one step done. */
     async getObjectivePlan(id: string) {
       return ok({

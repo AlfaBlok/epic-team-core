@@ -716,7 +716,7 @@ export function goalsSplit(objectiveCards: number, campaignLines: number, obj?: 
   const n = obj?.needGoal ?? objectiveCards;
   const objs = obj ? `${n} of your ${obj.active} objectives ${n === 1 ? "still needs" : "still need"} a goal` : `${n} ${n === 1 ? "objective needs" : "objectives need"} a goal`;
   if (!campaignLines) return `${objs}.`;
-  const camps = `${campaignLines} ${campaignLines === 1 ? "campaign needs" : "campaigns need"} a number`;
+  const camps = `${campaignLines} ${campaignLines === 1 ? "objective needs" : "objectives need"} a number`;
   return n || obj ? `${objs}, and ${camps}.` : `${camps[0].toUpperCase()}${camps.slice(1)}.`;
 }
 

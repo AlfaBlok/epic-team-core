@@ -50,7 +50,7 @@ export const STEP_SCREENS: Record<OnboardingTick["id"], { to: string; screen: Sc
   campaign: {
     to: "/campaigns/new",
     screen: "campaigns",
-    label: "Make a campaign",
+    label: "Make an objective",
   },
   post: { to: "/pipeline", screen: "pipeline", label: "Open the Pipeline" },
 };

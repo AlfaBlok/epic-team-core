@@ -359,7 +359,7 @@ export function TeamPage({
       {/* the owner's "how do I add a new root?": a new milestone (existing spine or new epic) made focus in one step. */}
       {/* the social twins: New campaign (the wizard; the campaign is pinned) and Add job (a one-off milestone). */}
       <Button variant="outline" className={PHONE_TAP} onClick={() => (campaigns ? navigate(`/${NEW_CAMPAIGN_PATH}`) : setFocusOpen(true))} data-testid="new-focus">
-        <Pin /> {campaigns ? "New campaign" : `New focus ${w.milestone}`}
+        <Pin /> {campaigns ? "New objective" : `New focus ${w.milestone}`}
       </Button>
       <Button variant="outline" className={PHONE_TAP} onClick={() => setNewOpen(true)} data-testid="add-job">
         <Plus /> {campaigns ? "Add job" : w.addMilestone}
@@ -378,7 +378,7 @@ export function TeamPage({
       {!settings && (
         <PageHeader
           title={campaigns && only !== "inbox" ? "Home" : campaigns ? "Inbox" : w.team}
-          description={inboxPage || only === "goals" ? undefined : "Your campaigns, then what waits on you."}
+          description={inboxPage || only === "goals" ? undefined : "Your objectives, then what waits on you."}
           actions={!inboxPage && campaigns && only !== "goals" ? actions : undefined}
         />
       )}
@@ -392,7 +392,7 @@ export function TeamPage({
               results with a light each; everything else folds under one line below. */}
           {only === "goals" && <GoalLights />}
           {only === "goals" ? (
-            <MoreOnHome label="More: all objectives, campaigns, your Inbox, what the team is doing">
+            <MoreOnHome label="More: all objectives, your Inbox, what the team is doing">
               <InboxLine />
               {shows("goalSets") && (
                 <Link to={`/${SCORECARDS_PATH}`} className="mb-3 flex min-h-11 items-center rounded-lg border bg-card px-3 text-sm hover:bg-accent" data-testid="home-all-objectives">
@@ -758,7 +758,7 @@ export function ProjectCampaigns<M extends MilestoneRow>({
         ...projects.filter((p) => !current || p.repo === current.repo).map((p) => ({ key: p.repo, name: p.name, repo: p.repo, ms: all.filter((m) => projectOf(m.id)?.repo === p.repo) })),
         { key: "other", name: "Other", ms: all.filter((m) => !projectOf(m.id)) },
       ] as Group[]).filter((g) => g.repo || g.ms.length)
-    : [{ key: "campaigns", name: "Campaigns", ms: all }];
+    : [{ key: "campaigns", name: "Objectives", ms: all }];
   return (
     <section className="mb-6 grid gap-5" data-testid="project-campaigns">
       {note && (
@@ -784,7 +784,7 @@ export function ProjectCampaigns<M extends MilestoneRow>({
           {g.ms.length ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{g.ms.map(card)}</div>
           ) : (
-            !loading && (empty ?? <Empty>No campaigns here yet. Start one with New campaign above.</Empty>)
+            !loading && (empty ?? <Empty>No objectives here yet. Start one with New objective above.</Empty>)
           )}
         </div>
       ))}

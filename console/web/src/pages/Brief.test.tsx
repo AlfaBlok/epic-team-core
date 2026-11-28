@@ -248,7 +248,7 @@ describe("T34-S7 Campaign brief screen", () => {
         <BriefPage />
       </MemoryRouter>,
     );
-    expect((await screen.findByText(/No campaign repo in this world yet/)).textContent).toContain("pack init social");
+    expect((await screen.findByText(/No social repo in this workspace yet/)).textContent).toContain("pack init social");
   });
 });
 

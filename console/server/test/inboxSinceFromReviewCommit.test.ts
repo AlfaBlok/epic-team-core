@@ -125,6 +125,20 @@ describe("inboxSince", () => {
     expect((await inboxSinceOf(rows, 50, slow)).size).toBe(0);
     expect((await inboxSinceOf(rows, 50, fast)).get("a")).toBe("2026-10-22T00:00:00Z");
   });
+
+  // E948-S231 iteration 2 (the count check 28 Nov 13:56Z: after the same answers his phone drew Decisions 7, his laptop 8):
+  // a list that cannot wait for a restamped row's look-up answers the time it knew, never none; a card he answered (its
+  // place in his inbox turns on this time) waits for its fresh one
+  it("a row still being looked up answers its last known time, and an answered card waits for its fresh one", async () => {
+    commit(row("review", "2026-10-20"), "2026-10-20T10:00:00Z");
+    const known = await inboxSince(dir, "docs/e.md", "T1-S1", "review");
+    expect(known).toBe("2026-10-20T10:00:00.000Z");
+    const rows = [{ id: "a", repoDir: dir, path: "docs/e.md", ref: "T1-S1", status: "review" }];
+    const slow = () => new Promise<string | undefined>((r) => setTimeout(() => r("2026-10-21T00:00:00Z"), 300));
+    // before: the list left the time out (size 0), so one device hid the card a second device drew
+    expect((await inboxSinceOf(rows, 20, slow)).get("a")).toBe(known);
+    expect((await inboxSinceOf(rows, 20, slow, new Set(["a"]))).get("a")).toBe("2026-10-21T00:00:00Z");
+  });
 });
 
 describe("entryFromLog", () => {

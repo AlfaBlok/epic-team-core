@@ -436,7 +436,7 @@ export function roleOf(name: string, base: string): string {
   if (/briefer/i.test(name)) return "Briefer: the numbers and what happened";
   if (/partner$/i.test(name)) return "Senior partner: your objectives and key results";
   if (/desk line$/i.test(name)) return "Desk line: quick status, passes your words on";
-  if (base.includes("/milestones/")) return "Campaign manager: this campaign only";
+  if (base.includes("/milestones/")) return "Campaign manager: this objective only";
   if (base.includes("/objectives/")) return "Objective manager: this objective only";
   return "On the line with you";
 }

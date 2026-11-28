@@ -20,6 +20,8 @@ export interface ElevenHooks {
   signedUrl: string;
   instructions?: string;
   greeting?: string;
+  /** the voice of who answers (Marcus a man's voice, each manager its own), when the console names one. */
+  voiceId?: string;
   tools: Record<string, (args: Record<string, unknown>) => Promise<string>>;
   onLive(conversationId: string): void;
   onLine(who: "owner" | "voice", text: string): void;
@@ -64,12 +66,15 @@ export async function catchMic<T>(seen: ((s: MediaStream) => void) | undefined, 
   }
 }
 
+/** a manager's voice on a switched call is asked for with its name as a tag (<Sophia>…</Sophia>): never shown as words. */
+export const withoutVoiceTags = (t: string) => t.replace(/<\/?[A-Z][A-Za-z]{1,20}>/g, "").replace(/\s{2,}/g, " ").trim();
+
 export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
   let convId: string | undefined;
   const conv = await catchMic(h.onMic, () => Conversation.startSession({
     signedUrl: h.signedUrl,
     connectionType: "websocket",
-    overrides: { agent: { ...(h.instructions ? { prompt: { prompt: h.instructions } } : {}), ...(h.greeting ? { firstMessage: h.greeting } : {}) } },
+    overrides: { agent: { ...(h.instructions ? { prompt: { prompt: h.instructions } } : {}), ...(h.greeting ? { firstMessage: h.greeting } : {}) }, ...(h.voiceId ? { tts: { voiceId: h.voiceId } } : {}) },
     clientTools: Object.fromEntries(Object.entries(h.tools).map(([k, fn]) => [k, (p: any) => fn((p ?? {}) as Record<string, unknown>)])),
     onConnect: ({ conversationId }) => {
       convId = conversationId;
@@ -78,7 +83,8 @@ export async function startEleven(h: ElevenHooks): Promise<ElevenLine> {
     onMessage: (m) => {
       // ElevenLabs writes his silence as "...": not a line of the transcript.
       if (m.message?.startsWith(CLOCK_MARK)) return;
-      if (m.message?.replace(/[.\s…]/g, "")) h.onLine(m.role === "user" ? "owner" : "voice", m.message);
+      const text = m.role === "user" ? m.message : withoutVoiceTags(m.message ?? "");
+      if (text?.replace(/[.\s…]/g, "")) h.onLine(m.role === "user" ? "owner" : "voice", text);
     },
     onModeChange: ({ mode }) => h.onMode(mode === "speaking"),
     onDisconnect: (d) => h.onEnded(d.reason === "agent" ? "bye" : d.reason === "user" ? "hangup" : "line_dropped"),

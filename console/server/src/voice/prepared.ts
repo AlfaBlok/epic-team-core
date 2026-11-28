@@ -70,13 +70,21 @@ export function objectiveProposal(c: LevelCard, o: { onboarding?: string; open?:
 /** a spoken sentence's end: a question keeps its mark, anything else gets a full stop. */
 const end = (s: string) => (/[?.!]$/.test(s) ? s : `${s}.`);
 
-/** an objective manager's first words: who, where it stands in one line, our proposal, one question. */
+/**
+ * an objective manager's first words: who, where it stands in one line, then the big-picture question (his
+ * call_2332dcc1: "you went a little bit too quickly into specifics ... you are more about the bigger picture ... let me
+ * talk"). Our proposal waits in the call's rule (OBJECTIVE_PREPARED_RULE) until he has said what is on his mind.
+ */
 export function objectiveOpening(c: LevelCard, o: { onboarding?: string; open?: string[]; person?: string } = {}): string {
-  const k = reddest(c);
-  const stand = `${cut(c.krs, 60)}${k ? `; the first not green is '${cut(k.label, 90)}'${numberOf(k)}` : ""}`;
   const who = o.person ? `${sayable(o.person)} here, the ${levelName(c.name)}` : `the ${levelName(c.name)} here`;
-  return `Hi ${ownerName()}, ${who}. Where we stand: ${stand}. Our proposal: ${end(objectiveProposal(c, o))} Shall we start there?`;
+  return `Hi ${ownerName()}, ${who}. In one line: ${cut(c.krs, 60)}. What's new since we last spoke?`;
 }
+/** the objective call's prepared rule: the proposal it holds back, and never re-asking what his answers settle. */
+export const objectiveRule = (c: LevelCard, o: { onboarding?: string; open?: string[] } = {}) =>
+  [
+    `This call is prepared. Your greeting said where it stands in one line and asked what is new since you last spoke. Let him talk first. When he has said what is on his mind, the proposal you hold is: ${end(objectiveProposal(c, o))} Bring it in your words, and settle it with him.`,
+    "His recorded answers settle their points (his newest words in force, the brief, what earlier calls decided, all below): never ask any of them again; build on them and say which one you build on.",
+  ].join("\n");
 
 /** a campaign manager's first words: its spine's Status and Next action, else its objective's line. */
 export function campaignOpening(title: string, state: string[], card?: LevelCard, o: { onboarding?: string; open?: string[] } = {}): string {

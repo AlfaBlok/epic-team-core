@@ -135,7 +135,7 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign, p
       <DialogContent className="max-w-2xl">
         <div className="grid gap-4" data-testid="job-dialog">
           <DialogHeader>
-            <DialogTitle>{project ? "Add project" : offerCampaign ? "Add campaign or job" : "Add job"}</DialogTitle>
+            <DialogTitle>{project ? "Add project" : offerCampaign ? "Add objective or job" : "Add job"}</DialogTitle>
             <DialogDescription>
               {project
                 ? "A project is one goal for your team, with what done means. It is saved in your workspace and shows on Home."
@@ -193,9 +193,9 @@ function JobDialog({ open, onOpenChange, onCreated, offerCampaign, onCampaign, p
             <Textarea aria-label="Done means" rows={3} value={done} onChange={(e) => setDone(e.target.value)} placeholder="e.g. the list is in the brief with each sub's rules" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="In" hint={project ? "Your workspace's repo" : "This world's repo"}>
+            <Field label="In" hint={project ? "Your workspace's repo" : "This workspace's repo"}>
               <NativeSelect aria-label="Repo" value={repoValue} onChange={(e) => setRepo(e.target.value)}>
-                {repos.length === 0 && <option value="">{project ? "No repo yet: it is made when your plan is paid" : "No repo yet: start a campaign first"}</option>}
+                {repos.length === 0 && <option value="">{project ? "No repo yet: it is made when your plan is paid" : "No repo yet: start an objective first"}</option>}
                 {repos.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}

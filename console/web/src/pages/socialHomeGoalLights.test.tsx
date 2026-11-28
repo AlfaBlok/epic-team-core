@@ -79,7 +79,7 @@ describe("the SocialApp Home: key results with a traffic light each", () => {
     expect(screen.queryByText(/Your campaigns and how they are doing/)).toBeNull();
     expect(screen.queryByTestId("new-focus")).toBeNull();
     const toggle = screen.getByTestId("home-more-toggle");
-    expect(toggle.textContent).toMatch(/More: all objectives, campaigns, your Inbox/);
+    expect(toggle.textContent).toMatch(/More: all objectives, your Inbox/);
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByTestId("home-more-body")).toBeTruthy());
     expect(screen.getByTestId("new-focus")).toBeTruthy();

@@ -306,7 +306,7 @@ function WorldDesk({ world }: { world: string }) {
   return (
     <DeskPage
       partner={deskPartner(true)}
-      description="The team desk: new ideas and which campaign they belong to, answers, and starting, steering or stopping runs. One chat for every campaign."
+      description="The team desk: new ideas and which objective they belong to, answers, and starting, steering or stopping runs. One chat for every objective."
       who="Team desk"
       callBase={deskVoiceBase(world)}
       caller={whoAnswers.socialDeskCall(deskVoiceBase(world))}

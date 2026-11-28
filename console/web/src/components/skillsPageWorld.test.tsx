@@ -72,7 +72,7 @@ describe("T53-S6 Skills page in a world", () => {
     const remove = vi.spyOn(api, "removeTeamSkill").mockResolvedValue({ removed: "pdf", sha: "abc", detachedFrom: [], sync: [{ host: "main", ok: true, note: "linked in 1 checkout of this world" }], syncNote: "" });
     page();
     fireEvent.click(await screen.findByLabelText("Remove pdf"));
-    expect(screen.getByText(/It leaves this world's skills/)).toBeTruthy();
+    expect(screen.getByText(/It leaves this workspace's skills/)).toBeTruthy();
     fireEvent.click(screen.getByTestId("skill-remove-confirm"));
     await waitFor(() => expect(remove).toHaveBeenCalledWith("pdf", false));
     expect((await screen.findByTestId("skill-done")).textContent).toContain("pdf removed");
@@ -82,7 +82,7 @@ describe("T53-S6 Skills page in a world", () => {
     await screen.findByTestId("world-skills-section");
     expect(screen.queryByTestId("add-skill")).toBeNull();
     expect(screen.queryByLabelText("Remove pdf")).toBeNull();
-    expect(screen.getByText(/Only the world's owner adds or removes its skills/)).toBeTruthy();
+    expect(screen.getByText(/Only the workspace's owner adds or removes its skills/)).toBeTruthy();
   });
 });
 

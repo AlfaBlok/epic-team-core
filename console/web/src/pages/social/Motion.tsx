@@ -37,7 +37,7 @@ function useMotion(repoAsked?: string, campaign?: string) {
 }
 
 /** who reads this, said in one line on both product pages (the wake's order, motionCompute READ_ORDER). */
-export const READS_LINE = "Personas read this: the project's product deck first, then their campaign's product deck, then the targets and their role's line.";
+export const READS_LINE = "Personas read this: the project's product deck first, then their objective's product deck, then the targets and their role's line.";
 
 /** `?slide=n` paging with the arrow keys (not while typing). */
 function usePaged(total: number, param: string) {
@@ -161,7 +161,7 @@ export function ProductView({ m, deck = m.product, target, note }: { m: MotionBo
   if (!slides.length)
     return (
       <div className="rounded-xl border p-4 text-sm text-muted-foreground" data-testid="product-missing">
-        {m.repo ? `${m.repo} has no ${deck === m.product ? "product deck" : "product deck for this campaign"} yet: ${deck.file} is where it goes, one part per slide (${deck.missing.join(", ")}).` : "Pick a project to see its product deck."}
+        {m.repo ? `${m.repo} has no ${deck === m.product ? "product deck" : "product deck for this objective"} yet: ${deck.file} is where it goes, one part per slide (${deck.missing.join(", ")}).` : "Pick a project to see its product deck."}
       </div>
     );
   return (
@@ -249,7 +249,7 @@ export function ProductPage() {
       {project.current && <Crumbs items={[{ label: project.current.name, to: `/?project=${encodeURIComponent(project.current.repo)}` }, { label: "Product" }]} />}
       <PageHeader
         title="Product"
-        description="What the project sells, to whom and for how much: the landing page as a deck. Each campaign narrows it in its own Product tab."
+        description="What the project sells, to whom and for how much: the landing page as a deck. Each objective narrows it in its own Product chapter."
       />
       <ReadsLine />
       {error ? <div className="rounded-xl border p-3 text-sm text-muted-foreground">The product deck could not load: {error.message}</div> : data ? <ProductView m={data} /> : <div className="text-sm text-muted-foreground">Loading…</div>}

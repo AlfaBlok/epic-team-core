@@ -85,7 +85,7 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
 
   // the owner, 28 Nov: the social product is the same engine as the console with a different skin: the social menu is the console's menu, its campaigns where the console lists its objectives, no More fold,
   // no home-world objectives, Tools and Settings folded as in the console skin.
-  it("the menu is the console skin's: Inbox, Chat, then his campaigns as the objectives, Tools and Settings folded", async () => {
+  it("the menu is the console skin's: Inbox, Chat, then his objectives in the objective row, Tools and Settings folded", async () => {
     at(<SidebarNav />);
     const pinned = await screen.findByTestId("sidebar-campaigns", undefined, { timeout: 8000 });
     const main = screen.getByTestId("nav-main");
@@ -93,8 +93,17 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
     expect(entries.slice(0, 2)).toEqual(["Inbox", "Chat"]);
     expect(entries).not.toContain("Home"); // the name at the top opens Home, as in the console skin
     // the pinned campaigns in his order (1, 2, 3), each with its number ring; the unpinned one is not here
-    await waitFor(() => expect(within(pinned).getAllByTestId("sidebar-campaign").map((a) => a.dataset.milestoneId)).toEqual(["m-z1", "m-z2", "m-e1"]));
-    expect(within(pinned).getAllByTestId("campaign-ring")).toHaveLength(3);
+    //  (his ^e-483365 "every entry of the sidebar is identical in structure"): each is the console skin's own
+    // objective row under one Objectives heading, named Product: goal, opening its objective page
+    await waitFor(() => expect(within(pinned).getAllByTestId("sidebar-set").map((a) => a.dataset.set)).toEqual(["m-z1", "m-z2", "m-e1"]));
+    expect(within(pinned).getAllByTestId("sidebar-set-wheel")).toHaveLength(3);
+    expect(within(pinned).getByTestId("sidebar-objectives-heading").textContent).toBe("Objectives");
+    const first = within(pinned).getAllByTestId("sidebar-set-link")[0];
+    expect(first.getAttribute("href")).toBe("/milestones/m-z1");
+    expect(within(first).getByTestId("objective-product").textContent).toContain("Social");
+    expect(within(first).getByTestId("objective-goal").textContent).toBe("Memory testers");
+    expect(within(pinned).getByTestId("sidebar-add-campaign").textContent).toContain("Add objective");
+    expect(within(pinned).getByTestId("sidebar-objectives-heading").textContent).not.toMatch(/campaign/i);
     expect(main.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // the old social-only parts are gone: no More fold, no project groups, no home-world objectives, no other goals
     expect(screen.queryByTestId("sidebar-more-toggle")).toBeNull();
@@ -112,7 +121,7 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
   it("Home is the console skin's All objectives page with his pinned campaigns as the rows", async () => {
     at(<HomePage />);
     const home = await screen.findByTestId("campaigns-home");
-    expect(within(home).getByRole("heading", { name: "Your campaigns" })).toBeTruthy();
+    expect(within(home).getByRole("heading", { name: "Your objectives" })).toBeTruthy();
     await waitFor(() => expect(within(home).getAllByTestId("all-sets-row").map((r) => r.dataset.set)).toEqual(["m-z1", "m-z2", "m-e1"]));
     // lean rows: number ring, light, name, colour bar; the row opens the campaign
     const first = within(home).getAllByTestId("all-sets-row")[0];
@@ -120,7 +129,7 @@ describe("T60-S10 the SocialApp home: Home first, campaigns by project, widgets 
     expect(within(first).getByTestId("kr-strip")).toBeTruthy();
     expect(within(first).getByTestId("wheel-row-link").getAttribute("href")).toBe("/milestones/m-z1");
     expect(within(home).getByTestId("set-tab-inbox").getAttribute("href")).toBe("/inbox");
-    expect(within(home).getByTestId("campaigns-home-more").textContent).toContain("1 more campaign");
+    expect(within(home).getByTestId("campaigns-home-more").textContent).toContain("1 more objective");
     // no old campaign grid
     expect(screen.queryByTestId("project-campaigns")).toBeNull();
   });

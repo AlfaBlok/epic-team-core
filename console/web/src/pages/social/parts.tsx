@@ -63,7 +63,7 @@ export function SocialScreen({ title, intro, social, error, children }: { title:
         title={title}
         description={
           <>
-            {intro} From {social?.sample ? "sample data (no console server here)" : social?.repo ? `${social.repo} (social pack)` : social ? "no social repo in this world" : "…"}.
+            {intro} From {social?.sample ? "sample data (no console server here)" : social?.repo ? `${social.repo} (social pack)` : social ? "no social repo in this workspace" : "…"}.
           </>
         }
       />

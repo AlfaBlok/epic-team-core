@@ -20,7 +20,7 @@ export const PLAN_WORDS =
   "Your AI subscription, our console. Your team runs on your own AI seats, vault, repo and cloud. We host the console for €49 a month, and can run your server too, billed by the minute.";
 /** one plain price per server size (cents a minute, a month at most), never how it was set. */
 /** what Epic Leads says before its payment (same engine, same checkout as EpicTeam). */
-export const LEADS_WORDS = "Your sales team starts once your plan is paid: your first campaign is one product and one audience.";
+export const LEADS_WORDS = "Your sales team starts once your plan is paid: your first objective is one product and one audience.";
 export const centsLabel = (c: number) => `${c.toLocaleString("en-GB", { maximumFractionDigits: 2 })} cents`;
 export function ComputePrices({ plan }: { plan: PlanState }) {
   const sizes = plan.compute?.sizes ?? [];

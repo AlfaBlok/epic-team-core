@@ -79,7 +79,9 @@ export function clientTool(t: ToolDef) {
 }
 
 /** the agent as made on the account: the base prompt is replaced per call by the console's own instructions. */
-export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[], name: string = ELEVEN_AGENT_NAME, tags: string[] = ["epicteam", "team-desk"], lang: CallLang = "en") {
+/** a voice a call may switch to on the same line (ElevenLabs multi-voice: the agent asks for it with <label>…</label>). */
+export type SwitchVoice = { label: string; voice_id: string; description: string };
+export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[], name: string = ELEVEN_AGENT_NAME, tags: string[] = ["epicteam", "team-desk"], lang: CallLang = "en", voices: SwitchVoice[] = []) {
   return {
     name,
     tags,
@@ -97,12 +99,13 @@ export function agentBody(prompt: string, firstMessage: string, tools: ToolDef[]
           ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_ES, stability: ELEVEN_STABILITY_ES }
           : lang === "ca"
             ? { voice_id: ELEVEN_VOICE_ID_ES, model_id: ELEVEN_TTS_MODEL_CA, stability: ELEVEN_STABILITY_ES }
-            : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL },
+            : { voice_id: ELEVEN_VOICE_ID, model_id: ELEVEN_TTS_MODEL, ...(voices.length ? { supported_voices: voices } : {}) },
       conversation: { max_duration_seconds: 20 * 60 },
       // his silence for this long and the agent speaks up ("Are you still with me?", the call's own instructions)
       turn: { turn_timeout: ELEVEN_TURN_TIMEOUT_S },
     },
-    platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true } } } },
+    // tts.voice_id: each call speaks in the voice of who answers it, set by the page at the call's start
+    platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true, language: true }, tts: { voice_id: true } } } },
   };
 }
 
@@ -118,6 +121,8 @@ export function toolNames(agent: any): string[] {
   return [...(Array.isArray(p.tools) ? p.tools : []).map((t: any) => String(t?.name ?? "")), ...(Array.isArray(p.built_in_tools) ? [] : Object.keys(p.built_in_tools ?? {}).filter((k) => p.built_in_tools[k]))].filter(Boolean);
 }
 
+/** the first link after a start waits this long for the agent's update (its voices and the per-call voice allowed). */
+export const PATCH_WAIT_MS = 5_000;
 /** how long a link made when the call page opened waits for its press (ElevenLabs lets a signed link start a
  * conversation within 15 minutes; 10 keeps a margin). */
 export const READY_LINK_MS = 10 * 60_000;
@@ -131,7 +136,7 @@ export interface ElevenLink {
  * The console's door to ElevenLabs Agents: `link()` finds (or makes, once) the desk agent and returns a signed link
  * for one call. `key` reads agent-team-console/ELEVENLABS_API_KEY per call, held in memory only.
  */
-type ElevenOpts = { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void }; /** the agent as made on the account (default agentBody); the public clinic receptionist (clinicDemo.ts) takes no overrides. */ body?: typeof agentBody };
+type ElevenOpts = { /** the agent's name on the account (default: the Team desk's); the objectives coach has its own. */ name?: string; tags?: string[]; key: () => Promise<string | undefined>; prompt: () => string; firstMessage: () => string; tools: () => ToolDef[]; f?: typeof fetch; known?: { get(): string | undefined; set(id: string): void }; /** the agent as made on the account (default agentBody); the public clinic receptionist (clinicDemo.ts) takes no overrides. */ body?: typeof agentBody; /** the voices a call may switch to on the same line (the managers'). */ voices?: () => SwitchVoice[] };
 
 /** one door per language: English is the agent as before, Spanish and Catalan each its own agent, found again by its
  * name. `known` (the agent id kept in the console) belongs to the door's own language: `knownLang` (default English). */
@@ -167,6 +172,7 @@ function elevenLine(o: ElevenOpts, lang: CallLang) {
     if (!r.ok) throw new VoiceError(502, "elevenlabs_refused", `ElevenLabs refused the call (${r.status}): ${String(j?.detail?.message ?? j?.detail?.status ?? JSON.stringify(j?.detail ?? "no message")).slice(0, 200)}`);
     return j;
   };
+  let patched: Promise<unknown> | undefined;
   async function agent(k: string): Promise<string> {
     if (agentId) return agentId;
     let id: string | undefined = o.known?.get() || undefined;
@@ -174,7 +180,7 @@ function elevenLine(o: ElevenOpts, lang: CallLang) {
       const found = await api(k, "GET", `/v1/convai/agents?search=${encodeURIComponent(agentName)}&page_size=30`);
       id = (found.agents ?? []).find((a: any) => a.name === agentName)?.agent_id;
     }
-    const body = (o.body ?? agentBody)(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags, lang);
+    const body = (o.body ?? agentBody)(o.prompt(), o.firstMessage(), o.tools(), agentName, o.tags, lang, lang === "en" ? (o.voices?.() ?? []) : []);
     // found: brought in step with this console's greeting once per start, in the background (the call
     // never waits on it; each call overrides the prompt and greeting anyway); gone from the account: the signed link's
     // 404 makes it again (link()).
@@ -182,7 +188,9 @@ function elevenLine(o: ElevenOpts, lang: CallLang) {
       const known = id;
       // a tool added on the console (the briefer's lookups) reaches an agent made before it: when the agent
       // lacks one of the console's tool names, the PATCH carries the tools once; else it leaves them as they are.
-      void api(k, "GET", `/v1/convai/agents/${encodeURIComponent(known)}`)
+      // The first link waits for it (at most PATCH_WAIT_MS): a call that sets its voice before the agent allows it is
+      // refused by ElevenLabs ("Override for field 'voice_id' is not allowed by config") and drops after a second.
+      patched = api(k, "GET", `/v1/convai/agents/${encodeURIComponent(known)}`)
         .catch(() => undefined)
         .then((have) => {
           const names = new Set(toolNames(have));
@@ -211,6 +219,11 @@ function elevenLine(o: ElevenOpts, lang: CallLang) {
     const k = await o.key();
     if (!k) throw new VoiceError(503, "no_key", "the console has no ELEVENLABS_API_KEY (secret store agent-team-console/ELEVENLABS_API_KEY)");
     const id = await agent(k);
+    if (patched) {
+      const p = patched;
+      await Promise.race([p, new Promise((ok) => setTimeout(ok, PATCH_WAIT_MS).unref?.())]);
+      patched = undefined;
+    }
     try {
       const j = await api(k, "GET", `/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`);
       return { agentId: id, signedUrl: j.signed_url };

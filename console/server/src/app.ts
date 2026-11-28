@@ -37,6 +37,7 @@ import { activeGrantsFor } from "./cycle/grants.js";
 import { hisViewsFor, workerBriefRules, type HisView } from "./cycle/prompts.js";
 import { contextMissing, readTicketContext } from "./cycle/ticketContext.js";
 import { readWhereWeAre, whereWeAreSection } from "./whereWeAre.js";
+import { readBlueprint } from "./blueprint.js";
 import { keyResultPlanText, planSection, readWheelPlan } from "./wheelPlan.js";
 import { onboardingSection, onboardingText } from "./voice/campaignOnboarding.js";
 import { runStateFor } from "./cycle/runState.js";
@@ -235,9 +236,9 @@ import { createWholeCall } from "./voice/wholeCall.js";
 import { CALL_TRANSCRIPT_HEAD, createVoice, GREETING_LEAD, VoiceError, keyOrWait, INBOX_TOOLS, OBJECTIVE_TOOLS, OPENING_LINE, PRESS_TOOL, VOICE_TOOLS, voiceInstructions, openAiMinter, openAiStoreFile, quickStatusText, type DeskPort, type Minter, type Voice } from "./voice/voice.js";
 import { mountCampaignVoice, mountCoachVoice, mountObjectiveVoice, mountOnboardingVoice, mountOwnCall, mountVoice, mountWorldDeskVoice } from "./voice/routes.js";
 import { SWITCH_TOOL, switchAnswer, switchRule } from "./voice/switchTo.js";
-import { boardManager, faceUrl, facePath, managerByName, managerOfObjective, readManagers, teamLine } from "./voice/managers.js";
+import { boardManager, callVoices, faceUrl, facePath, managerByName, managerOfObjective, readManagers, readManagerVoice, teamLine, voiceLabel, voiceRule } from "./voice/managers.js";
 import { asksOf, campaignGreeting, levelKnows, levelName, objectiveCallInstructions, objectiveNoteText, partnerRule, spineState, type LevelCard } from "./voice/levelCall.js";
-import { boardOpening, campaignOpening, objectiveOpening, PREPARED_RULE } from "./voice/prepared.js";
+import { boardOpening, campaignOpening, objectiveOpening, objectiveRule, PREPARED_RULE } from "./voice/prepared.js";
 import { elevenlabsTranscriber, localTranscriber, mountTranscription, pickedTranscriber } from "./voice/transcription.js";
 import { agentBody, elevenCalls, elevenTranscript, type ElevenCalls } from "./voice/elevenAgent.js";
 import { RECALL_HOURS } from "./voice/recall.js";
@@ -2257,6 +2258,12 @@ export function createApp(
     const v = readWhereWeAre(w ? worldRepoDir(read.reposRoot, db, w)(w) : pursuits.homeDir(), c.req.param("id"));
     return v ? c.json(v) : c.json({ error: { code: "not_found" } }, 404);
   });
+  // an EpicTeam objective's Blueprint chapter: its hard truths and basic blueprint, docs/scorecards/blueprints/<id>.md.
+  api.get("/pursuits/:id/blueprint", (c) => {
+    const w = connectedWorld();
+    const v = readBlueprint(w ? worldRepoDir(read.reposRoot, db, w)(w) : pursuits.homeDir(), c.req.param("id"));
+    return v ? c.json(v) : c.json({ error: { code: "not_found", message: `no objective ${c.req.param("id")}` } }, 404);
+  });
   // an objective's Plan tab: its wheel's plan, how each key result gets to green (steps, owners, dates), from the
   // `plan` block of docs/scorecards/<id>.json.
   api.get("/pursuits/:id/plan", (c) => {
@@ -3400,6 +3407,8 @@ export function createApp(
   // each switch_to call knows the team by name (docs/personas/managers.json)
   const managersLine = (homeIsBoard: boolean) =>
     teamLine(readManagers(pursuits.homeDir()), (id) => pursuits.doc()?.pursuits.find((p) => p.id === id)?.name, homeIsBoard);
+  // "if we have eight types of character, we should have eight voices": every voice a switched call may speak in.
+  const callVoicesNow = () => callVoices(readManagers(pursuits.homeDir()), readManagerVoice(pursuits.homeDir()));
   const switchOn = async (home: string, callId: string, args: Record<string, unknown>, deskPack?: () => Promise<string>) => {
     // "pass me to Sam" names a person: that manager's objective (or the board manager's desk) is where the call goes
     const people = readManagers(pursuits.homeDir());
@@ -3419,9 +3428,14 @@ export function createApp(
     const cards = r0.objective ? await levelCards().catch(() => [] as LevelCard[]) : [];
     const objectiveId = r0.objective ? cards.find((c) => c.name === r0.objective)?.id : undefined;
     const who = r0.name === home ? boardManager(people) : r0.objective ? managerOfObjective(people, objectiveId) : undefined;
-    const r = who
+    // the voice of who is on the line now: the named manager's, else the plain manager's for an objective with no person
+    const voices = callVoicesNow();
+    const voice = r0.name ? (who ? voices.find((v) => v.label === voiceLabel(who.name)) : r0.objective ? voices.find((v) => v.label === "Manager") : undefined) : undefined;
+    const said = voiceRule(voice);
+    const r1 = who
       ? { ...r0, person: who.name, ...(faceUrl(who) ? { face: faceUrl(who) } : {}), result: `Your own name on this call is ${who.name} (${who.role === "board" ? "the board manager, over all his objectives" : `the campaign manager of ${r0.objective}`}): say "${who.name} here" first, and give it if he asks who he is talking to.\n\n${r0.result}` }
       : r0;
+    const r = said ? { ...r1, result: `${said}\n\n${r1.result}` } : r1;
     if (r.objective) switchedTo.set(callId, r.objective);
     else if (r.name === home) switchedTo.delete(callId);
     console.log(`[voice] ${callId} switch_to "${String(args.to ?? "").slice(0, 60)}": ${r.name || "not switched"}`);
@@ -3714,6 +3728,7 @@ export function createApp(
       ? undefined
       : elevenCalls({
           name: COACH_AGENT_NAME,
+          voices: callVoicesNow,
           tags: ["epicteam", "objectives-coach"],
           key: elevenKey,
           prompt: coachInstructions,
@@ -3728,6 +3743,8 @@ export function createApp(
   const coachVoice = createVoice({
     ...voiceBase,
     eleven: coachEleven,
+    // "you are coming in my phone as Marcus. So Marcus sounds very feminine": the board manager's own voice.
+    speakerVoice: () => boardManager(readManagers(pursuits.homeDir()))?.voice,
     // the coach runs on ElevenLabs only: never OpenAI's paid realtime voice.
     mint: async () => {
       throw new VoiceError(409, "coach_eleven_only", "The objectives coach runs on ElevenLabs only, and ElevenLabs calls are off on this console.");
@@ -3749,10 +3766,10 @@ export function createApp(
     objectiveCards: voiceObjectiveCards,
     context: async () => coachKnows(await voiceObjectiveCards()),
     walkRule: () => "",
-    relay: async (callId, args) => {
+    relay: async (callId, args, seq) => {
       const r = relayIn(args);
       if (!r.objective) r.objective = switchedTo.get(callId) ?? "";
-      const n = ++coachRelays;
+      const n = seq ?? ++coachRelays;
       if (r.desk === "team") {
         await desk.send(teamRelayText(callId, r), COACH_PAGE, `coach-${callId}-${n}`);
         console.log(`[voice] ${callId} coach relayed his words to the Team desk`);
@@ -3783,6 +3800,7 @@ export function createApp(
       ? undefined
       : elevenCalls({
           name: BRIEFING_AGENT_NAME,
+          voices: callVoicesNow,
           tags: ["epicteam", "briefing-call"],
           key: elevenKey,
           prompt: briefingInstructions,
@@ -3859,7 +3877,7 @@ export function createApp(
       if (!socialArea?.callLookup) throw new VoiceError(404, "unknown_tool", "no lookups on this console");
       return socialArea.callLookup(name, args, { store: createStore(db), world: socialWorld(), homeDir: resolveRepo(read.reposRoot, homeRepo())?.path, browserUrls: browserArea?.urlsFor(DEFAULT_TENANT) ?? [], browserHeaders: (u) => browserArea?.headersFor(u) ?? {} });
     },
-    relay: async (callId, args) => {
+    relay: async (callId, args, seq) => {
       const words = typeof args.words === "string" ? args.words.replace(/\s+/g, " ").trim().slice(0, 6000) : "";
       if (!words) throw new VoiceError(400, "no_words", "words (his words, as he said them) are required");
       const note = typeof args.note === "string" ? args.note.trim().slice(0, 600) : "";
@@ -3873,7 +3891,7 @@ export function createApp(
       } catch {
         /* no objective known: the note still lands */
       }
-      const n = ++briefingNotes;
+      const n = seq ?? ++briefingNotes;
       await desk.send(briefingNoteText(callId, { words, note, ...(objective ? { objective } : {}) }), BRIEFING_PAGE, `briefing-${callId}-${n}`);
       console.log(`[voice] ${callId} briefing note ${n} sent to the Team desk${objective ? ` (objective ${objective})` : ""}`);
       return { desk: "team", state: "sent", requestId: `briefing-${callId}-${n}`, result: "Passed to the Team desk as one request. Tell him in a few words." };
@@ -3901,6 +3919,7 @@ export function createApp(
       ? undefined
       : elevenCalls({
           name: marketingAgentName(),
+          voices: callVoicesNow,
           tags: [socialProduct().toLowerCase(), "marketing-call"],
           key: elevenKey,
           prompt: () => marketingInstructions(readMarketingBrief()),
@@ -3984,14 +4003,14 @@ export function createApp(
       return [marketingKnows({ brief, objectives: await voiceObjectiveCards(), campaigns, numbers }), level].filter(Boolean).join("\n\n");
     },
     walkRule: () => "",
-    relay: async (callId, args) => {
+    relay: async (callId, args, seq) => {
       let r: ReturnType<typeof marketingRelayIn>;
       try {
         r = marketingRelayIn(args);
       } catch (e) {
         throw new VoiceError(400, "bad_relay", (e as Error).message);
       }
-      const n = ++marketingNotes;
+      const n = seq ?? ++marketingNotes;
       if (r.desk === "social") {
         const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: MARKETING_PAGE, requestId: `marketing-${callId}-${n}` });
         if (p) {
@@ -4022,6 +4041,7 @@ export function createApp(
       ? undefined
       : elevenCalls({
           name: strategyAgentName(),
+          voices: callVoicesNow,
           tags: [teamProduct().toLowerCase(), "strategy-call"],
           key: elevenKey,
           prompt: strategyInstructions,
@@ -4058,14 +4078,14 @@ export function createApp(
       return [strategyKnows({ brief, objectives: await voiceObjectiveCards() }), level].filter(Boolean).join("\n\n");
     },
     walkRule: () => "",
-    relay: async (callId, args) => {
+    relay: async (callId, args, seq) => {
       let r: ReturnType<typeof marketingRelayIn>;
       try {
         r = marketingRelayIn(args);
       } catch (e) {
         throw new VoiceError(400, "bad_relay", (e as Error).message);
       }
-      const n = ++strategyNotes;
+      const n = seq ?? ++strategyNotes;
       if (r.desk === "social") {
         const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: STRATEGY_PAGE, requestId: `strategy-${callId}-${n}` });
         if (p) {
@@ -4101,8 +4121,11 @@ export function createApp(
         const who = managerOfObjective(readManagers(pursuits.homeDir()), id);
         const n = name() ?? id;
         const base = who ? objectiveCallInstructions(n).replace(`the ${levelName(n)} here.`, `${who.name} here, the ${levelName(n)}.`) : objectiveCallInstructions(n);
-        return `${base}${who ? `\nYour own name is ${who.name}: you are ${who.name}, the campaign manager of this objective. Say "${who.name} here" when you greet him, and give your name if he asks who he is talking to.` : ""}\n${PREPARED_RULE}`;
+        // the prepared rule with its held-back proposal comes with the context (objectiveRule, voice/prepared.ts)
+        return `${base}${who ? `\nYour own name is ${who.name}: you are ${who.name}, the campaign manager of this objective. Say "${who.name} here" when you greet him, and give your name if he asks who he is talking to.` : ""}`;
       },
+      // its manager's own voice (Sophia a woman's, Leo a man's), else the plain manager's.
+      speakerVoice: () => managerOfObjective(readManagers(pursuits.homeDir()), id)?.voice ?? readManagerVoice(pursuits.homeDir())?.voice_id,
       // prepared (voice/prepared.ts): its status and our proposal, greeted by its manager's own name.
       opening: async () => {
         const card = (await levelCards()).find((c) => c.id === id);
@@ -4114,17 +4137,18 @@ export function createApp(
       context: async () => {
         const n = name() ?? id;
         const card = (await levelCards()).find((c) => c.id === id);
-        return levelOf("objective", n, card ? [card] : [], { plan: levelPlan(id, n) });
+        const known = await levelOf("objective", n, card ? [card] : [], { plan: levelPlan(id, n) });
+        return card ? `${objectiveRule(card, { onboarding: onboardingText(pursuits.homeDir(), card.id), open: readWhereWeAre(pursuits.homeDir(), card.id)?.open ?? [] })}\n\n${known}` : known;
       },
       walkRule: () => "",
-      relay: async (callId, args) => {
+      relay: async (callId, args, seq) => {
         let r: ReturnType<typeof marketingRelayIn>;
         try {
           r = marketingRelayIn(args);
         } catch (e) {
           throw new VoiceError(400, "bad_relay", (e as Error).message);
         }
-        const n = ++notes;
+        const n = seq ?? ++notes;
         const page = `objective call ${id}`;
         if (r.desk === "social") {
           const p = await deskCross?.pass({ world: DEFAULT_TENANT, quote: r.words, about: page, requestId: `objective-${callId}-${n}` });
@@ -5093,7 +5117,7 @@ export function createApp(
       quickStatus: noStatus,
       context: () => onboardingKnows({ workspace: String(teamWorkspace(w)?.name || w), owner: owner(), words: signupWords(w), objectives: workspaceObjectives(w) }),
       walkRule: () => "",
-      relay: async (callId, args) => {
+      relay: async (callId, args, seq) => {
         let r: ReturnType<typeof onboardingObjectiveIn>;
         try {
           r = onboardingObjectiveIn(args);

@@ -1327,7 +1327,7 @@ export function AllPipelinePage({ now }: { now?: Date }) {
   const toggles = sources ?? [];
   return (
     <>
-      <PageHeader title="Pipeline" description="Every campaign's posts on one board, in four columns: Ideas, Drafts, Scheduled, Posted. Drag a card to move it, click it to open it, or open it full screen. Rows lists every post one under the other; Full width uses the whole screen." />
+      <PageHeader title="Pipeline" description="Every objective's posts on one board, in four columns: Ideas, Drafts, Scheduled, Posted. Drag a card to move it, click it to open it, or open it full screen. Rows lists every post one under the other; Full width uses the whole screen." />
       {toggles.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-testid="force-review-all">
           <span className="text-muted-foreground" title="Off: every post of the campaign waits in Drafts for you. On: posts that pass their checks go out at their slot. A new campaign starts off.">

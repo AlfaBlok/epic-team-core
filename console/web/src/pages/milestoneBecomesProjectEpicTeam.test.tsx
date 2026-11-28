@@ -13,9 +13,9 @@ describe("T101-S9 milestone becomes project on EpicTeam's screens", () => {
     expect(remitHint(w.milestone)).toBe("Write the job, not the project. At each wake the persona is told which project, repo and spine it is working on.");
   });
 
-  it("the social skin says campaign where EpicTeam says project", () => {
+  it("the social skin says objective where EpicTeam says project (his ^e-497258)", () => {
     const w = SKINS.social.words;
-    expect([w.milestones, w.milestone, w.milestonesWord, w.addMilestone]).toEqual(["Campaigns", "campaign", "campaigns", "Add campaign"]);
-    expect(focusHeading(w)).toBe("Campaigns");
+    expect([w.milestones, w.milestone, w.milestonesWord, w.addMilestone]).toEqual(["Objectives", "objective", "objectives", "Add objective"]);
+    expect(focusHeading(w)).toBe("Objectives");
   });
 });

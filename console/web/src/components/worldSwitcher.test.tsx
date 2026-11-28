@@ -45,6 +45,24 @@ describe("T77-S1 world switcher", () => {
     vi.unstubAllGlobals();
   });
 
+  it("lists only this app's workspaces, never one in the other app (his 28 Nov ^e-00230c)", async () => {
+    vi.spyOn(api, "getWorldCounts").mockResolvedValue({
+      worlds: [
+        { tenantId: "acme", tenantName: "acme", role: "owner", current: true, needsYou: 0, review: 0, app: "team" },
+        { tenantId: "side", tenantName: "Side project", role: "owner", current: false, needsYou: 0, review: 0, app: "team" },
+        { tenantId: "memo-social", tenantName: "Memo social", role: "owner", current: false, needsYou: 2, review: 1, app: "social" },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <WorldSwitcher />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("world-side")).toBeTruthy();
+    expect(screen.queryByTestId("world-memo-social")).toBeNull();
+    expect(screen.getByTestId("world-switcher").textContent).not.toMatch(/world/i);
+  });
+
   it("T77-S3: sits in the flow of the menu (not pinned) and says what a world is", async () => {
     vi.spyOn(api, "getWorldCounts").mockResolvedValue({
       worlds: [
@@ -59,8 +77,8 @@ describe("T77-S1 world switcher", () => {
     );
     const box = await screen.findByTestId("world-switcher");
     expect(box.className).not.toMatch(/sticky|fixed/);
-    expect(box.textContent).toContain("Your worlds");
-    expect(screen.getByTestId("world-switcher-hint").textContent).toBe("Each world is a separate home with its own team.");
+    expect(box.textContent).toContain("Your workspaces");
+    expect(screen.getByTestId("world-switcher-hint").textContent).toBe("Each workspace is a separate home with its own team.");
   });
 
   it("T77-S3 round 3: a world on the other host opens through the link the switch answers", async () => {

@@ -89,7 +89,7 @@ export function AddSkillDialog({ open, onOpenChange, syncNote, onDone, world }: 
       const r = await mutate(() => api.addTeamSkill({ url: url.trim(), commit: preview?.skill.source.commit, ...(useWhen.trim() ? { useWhen: useWhen.trim() } : {}) }));
       onDone(
         r.action === "unchanged"
-          ? `${r.skill.name} is already ${world ? "one of this world's skills" : "in the library"} at this commit.`
+          ? `${r.skill.name} is already ${world ? "one of this workspace's skills" : "in the library"} at this commit.`
           : `${r.skill.name} ${r.action === "repinned" ? "repinned" : "added"}${r.sha ? ` (commit ${r.sha})` : ""}.${world ? " Tick it on a persona to assign it." : ""}`,
         r.sync,
       );
@@ -100,7 +100,7 @@ export function AddSkillDialog({ open, onOpenChange, syncNote, onDone, world }: 
       <DialogContent className="max-w-xl">
         <form onSubmit={doPreview} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>{world ? "Add a skill to this world" : "Add a team skill"}</DialogTitle>
+            <DialogTitle>{world ? "Add a skill to this workspace" : "Add a team skill"}</DialogTitle>
             <DialogDescription>Paste the skill's GitHub URL. You see what it is and the commit it pins before anything is added.</DialogDescription>
           </DialogHeader>
           <Field label="GitHub URL" hint="https://github.com/<owner>/<repo>, or …/tree/<branch>/<path to the skill folder>">
@@ -185,7 +185,7 @@ export function RemoveSkillDialog({ skill, onOpenChange, onDone, world }: { skil
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Remove {skill?.name}?</DialogTitle>
-          <DialogDescription>{world ? "It leaves this world's skills. Its personas stop getting it at their next wake." : "It leaves the team library and every seat at the next sync."}</DialogDescription>
+          <DialogDescription>{world ? "It leaves this workspace's skills. Its personas stop getting it at their next wake." : "It leaves the team library and every seat at the next sync."}</DialogDescription>
         </DialogHeader>
         {used.length > 0 && (
           <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm" data-testid="remove-warning">
@@ -198,7 +198,7 @@ export function RemoveSkillDialog({ skill, onOpenChange, onDone, world }: { skil
             Cancel
           </Button>
           <Button variant="destructive" disabled={busy} onClick={remove} data-testid="skill-remove-confirm">
-            {busy ? "Removing…" : used.length ? `Remove from ${world ? "this world" : "library"} and ${used.length} persona${used.length > 1 ? "s" : ""}` : "Remove"}
+            {busy ? "Removing…" : used.length ? `Remove from ${world ? "this workspace" : "library"} and ${used.length} persona${used.length > 1 ? "s" : ""}` : "Remove"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -277,7 +277,7 @@ export function TeamSkillsPage() {
         title={words.teamSkills}
         description={
           world
-            ? "Your team's skills. Every world gets the team's skills, and you can add your own from GitHub. Tick a skill on a persona (Personas, then Edit) to assign it. Its wake then names the skill and when to use it."
+            ? "Your team's skills. Every workspace gets the team's skills, and you can add your own from GitHub. Tick a skill on a persona (Personas, then Edit) to assign it. Its wake then names the skill and when to use it."
             : "One library, installed on every seat. Each persona attaches the skills it uses (Personas → Edit); its wake names them with their use-when line."
         }
         actions={addButton}
@@ -336,7 +336,7 @@ export function TeamSkillsPage() {
       {data && (
         <p className="mt-4 text-xs text-muted-foreground">
           {data.syncNote}
-          {data.canEdit ? "" : world ? " Only the world's owner adds or removes its skills." : ` Only ${ownerName()} adds or removes skills.`}
+          {data.canEdit ? "" : world ? " Only the workspace's owner adds or removes its skills." : ` Only ${ownerName()} adds or removes skills.`}
         </p>
       )}
       {data && <AddSkillDialog open={adding} onOpenChange={setAdding} syncNote={data.syncNote} onDone={onDone} world={world} />}

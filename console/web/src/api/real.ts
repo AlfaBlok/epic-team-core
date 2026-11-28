@@ -540,6 +540,7 @@ export function createRealClient(): ApiClient {
     getCampaignBriefings: (tenantId, id) => call("GET", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/briefings`),
     saveCampaignPlan: (tenantId, id, input) => call("POST", `/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(id)}/plan/sections`, input),
     getObjectivePlan: (id) => call("GET", `/pursuits/${encodeURIComponent(id)}/plan`),
+    getObjectiveBlueprint: (id) => call("GET", `/pursuits/${encodeURIComponent(id)}/blueprint`),
     getTotems: () => call("GET", "/totems"),
     getTotem: (product, id) => call("GET", `/totems/${encodeURIComponent(product)}/${encodeURIComponent(id)}`),
     getTrackers: (wheel) => call("GET", `/trackers/${encodeURIComponent(wheel)}`),

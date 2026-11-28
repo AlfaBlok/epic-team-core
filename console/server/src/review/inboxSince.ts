@@ -66,6 +66,27 @@ export function entryFromLog(log: string, rowId: string, statusCol: number, want
 
 type Hit = { line: string; at: Promise<string | undefined> };
 const cache = new Map<string, Hit>();
+/**
+ * E948-S231 iteration 2 (the owner 28 Nov, the fourth time: "counter off again"; the count check 13:56Z: after the same
+ * answers his phone drew Decisions 7 and Done 68, his laptop 8 and 69): the last time found for each row, whatever its
+ * line. A row line that changed (a restamp, a new link) looks its time up again in git; a list that could not wait for it
+ * left the card's time out, and a card he answered whose owner sent it back is shown only by that time (web lib/sentRows
+ * `cameBack`): one read drew it, the next read a second later hid it, so his phone and his laptop differed by one. Now a
+ * row whose look-up is still running answers its last known time, and a card he answered waits for its fresh one.
+ */
+const lastAt = new Map<string, string>();
+const keyOf = (repoDir: string, rel: string, rowId: string) => `${repoDir}\0${rel}\0${rowId}`;
+/** the last time found for the row, any line (the memory, else the database), or undefined. */
+export function lastInboxSince(repoDir: string, rel: string, rowId: string): string | undefined {
+  const key = keyOf(repoDir, rel, rowId);
+  const m = lastAt.get(key);
+  if (m) return m;
+  try {
+    return kept?.get(key)?.at ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Where found times outlive a restart: the console's database (review/review.ts `review_inbox_since`).
@@ -147,7 +168,7 @@ export function inboxSince(repoDir: string, rel: string, rowId: string, status: 
   if (!abs || !want) return Promise.resolve(undefined);
   const now = rowNow(abs, rowId, status);
   if (!now) return Promise.resolve(undefined);
-  const key = `${repoDir}\0${rel}\0${rowId}`;
+  const key = keyOf(repoDir, rel, rowId);
   const hit = cache.get(key);
   if (hit && hit.line === now.line) return hit.at;
   let stored: ReturnType<InboxSinceStore["get"]>;
@@ -157,12 +178,14 @@ export function inboxSince(repoDir: string, rel: string, rowId: string, status: 
     stored = undefined;
   }
   if (stored && stored.line === now.line) {
+    if (stored.at) lastAt.set(key, stored.at);
     const at = Promise.resolve(stored.at ?? undefined);
     cache.set(key, { line: now.line, at });
     return at;
   }
   const line = now.line;
   const at = lookup(repoDir, rel, rowId, now.col, want, cells(line).length).then((r) => {
+    if (r.at) lastAt.set(key, r.at);
     // git failed (a timeout on a loaded host): kept in memory as none until the next start, never stored, so the next
     // start asks again and no list spawns git again meanwhile
     if (r.ok) {
@@ -179,34 +202,52 @@ export function inboxSince(repoDir: string, rel: string, rowId: string, status: 
 }
 
 /**
- * Each row's inbox time, by id, waiting at most `budgetMs` in all (four lookups at a time); a row still being looked up
- * is left out this time and is ready on the next list.
+ * Each row's inbox time, by id, waiting at most `budgetMs` in all (four lookups at a time). A row still being looked up
+ * answers its last known time (`lastInboxSince`), so no list leaves out a time an earlier list had. E948-S231 iteration 2:
+ * the rows in `mustWait` (cards he answered: whether each is back in his inbox turns on this time) wait for their fresh
+ * time up to `mustWaitMs`, so every device reads the same card list at the same moment.
  */
 export async function inboxSinceOf(
   rows: { id: string; repoDir?: string; path: string; ref: string; status: string }[],
   budgetMs = 1_500,
   find: typeof inboxSince = inboxSince,
+  mustWait: ReadonlySet<string> = new Set(),
+  mustWaitMs = 15_000,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  let i = 0;
-  const next = async (): Promise<void> => {
-    const r = rows[i++];
-    if (!r) return;
-    if (r.repoDir) {
-      const at = await find(r.repoDir, r.path, r.ref, r.status).catch(() => undefined);
-      if (at) out.set(r.id, at);
-    }
-    return next();
+  const must = rows.filter((r) => mustWait.has(r.id));
+  const rest = rows.filter((r) => !mustWait.has(r.id));
+  const look = (list: typeof rows) => {
+    let i = 0;
+    const next = async (): Promise<void> => {
+      const r = list[i++];
+      if (!r) return;
+      if (r.repoDir) {
+        const at = await find(r.repoDir, r.path, r.ref, r.status).catch(() => undefined);
+        if (at) out.set(r.id, at);
+      }
+      return next();
+    };
+    return Promise.all(Array.from({ length: Math.min(4, list.length) }, next));
   };
-  const all = Promise.all(Array.from({ length: Math.min(4, rows.length) }, next));
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([all, new Promise<void>((res) => (timer = setTimeout(res, budgetMs)))]);
-  if (timer) clearTimeout(timer);
-  return new Map(out);
+  const race = async (p: Promise<unknown>, ms: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([p, new Promise<void>((res) => (timer = setTimeout(res, ms)))]);
+    if (timer) clearTimeout(timer);
+  };
+  await Promise.all([race(look(must), mustWaitMs), race(look(rest), budgetMs)]);
+  const res = new Map(out);
+  for (const r of rows) {
+    if (res.has(r.id) || !r.repoDir) continue;
+    const last = lastInboxSince(r.repoDir, r.path, r.ref);
+    if (last) res.set(r.id, last);
+  }
+  return res;
 }
 
 /** Tests only. */
 export const resetInboxSince = () => {
   cache.clear();
+  lastAt.clear();
   fileRows.clear();
 };

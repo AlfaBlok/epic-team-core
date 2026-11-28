@@ -2943,6 +2943,8 @@ export interface WorldCounts {
   tenantName: string;
   role: string;
   current: boolean;
+  /** the app the workspace is in; the switcher lists only this app's workspaces (his ^e-00230c). */
+  app?: "social" | "team";
   needsYou: number | null;
   review: number;
 }

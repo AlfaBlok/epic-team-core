@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardOpening, campaignOpening, cut, objectiveOpening, PREPARED_RULE, sayable } from "../src/voice/prepared.js";
+import { boardOpening, campaignOpening, cut, objectiveOpening, objectiveRule, PREPARED_RULE, sayable } from "../src/voice/prepared.js";
 import { greetingOf, GREETING_LEAD, withGreeting } from "../src/voice/voice.js";
 import { objectiveCallInstructions } from "../src/voice/levelCall.js";
 
@@ -20,17 +20,17 @@ const card = (over: Partial<Parameters<typeof objectiveOpening>[0]> = {}) => ({
 });
 
 describe("prepared call openings ", () => {
-  it("an objective's manager opens on its status and proposes work on the red key result nothing moves", () => {
+  it("an objective's manager opens on the big picture: its line, then what is new; the proposal waits in its rule", () => {
     const o = objectiveOpening(card());
-    expect(o).toMatch(/^Hi \w+, the Launch Acme manager here\. Where we stand: 1 of 3 key results green; the first not green is 'Testers using it daily', now 0 against 5\./);
-    expect(o).toContain("Our proposal: we open work this week on 'Posts a day', since nothing moves it yet. Shall we start there?");
+    expect(o).toMatch(/^Hi \w+, the Launch Acme manager here\. In one line: 1 of 3 key results green\. What's new since we last spoke\?$/);
     expect(o).not.toContain('"');
+    expect(objectiveRule(card())).toContain("the proposal you hold is: we open work this week on 'Posts a day', since nothing moves it yet.");
   });
 
-  it("a ready pitch is the proposal; else his first open question, without codes", () => {
-    expect(objectiveOpening(card(), { onboarding: "## The pitch (phase 3)\n1. What we found: x" })).toContain("Our proposal: I walk you through the one-week plan we prepared");
+  it("a ready pitch is the proposal it holds; else his first open question, without codes", () => {
+    expect(objectiveRule(card(), { onboarding: "## The pitch (phase 3)\n1. What we found: x" })).toContain("the proposal you hold is: I walk you through the one-week plan we prepared");
     const k = card({ keyResults: [{ label: "Testers", state: "red", value: "0", target: "5", tickets: ["E907-S3"] }] });
-    expect(objectiveOpening(k, { open: ["Does Sam keep the prices? (card E907-S4)"] })).toContain("Our proposal: we settle one open question first: does Sam keep the prices? Shall we start there?");
+    expect(objectiveRule(k, { open: ["Does Sam keep the prices? (card E907-S4)"] })).toContain("the proposal you hold is: we settle one open question first: does Sam keep the prices?");
   });
 
   it("a campaign's manager reads its spine's Status and Next action", () => {
@@ -56,7 +56,7 @@ describe("prepared call openings ", () => {
   });
 
   it("a manager with its own name greets by it", () => {
-    expect(objectiveOpening(card(), { person: "Ana" })).toMatch(/^Hi \w+, Ana here, the Launch Acme manager\. Where we stand/);
+    expect(objectiveOpening(card(), { person: "Ana" })).toMatch(/^Hi \w+, Ana here, the Launch Acme manager\. In one line/);
     expect(boardOpening([{ name: "A: B", light: "red" }], "Team desk partner", "Lea")).toMatch(/^Hi \w+, Lea here, your Team desk partner, on the board of your 1 objectives/);
   });
 

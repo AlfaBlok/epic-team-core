@@ -340,7 +340,7 @@ function mountCalls(api: Hono, prefix: string, pick: (c: Context) => Voice | Res
   api.post(
     `${prefix}/calls/:cid/relay`,
     ownerOnly(async (c, voice) => {
-      const p = z.object({ desk: z.string().min(1).max(20), words: z.string().min(1).max(8000), note: z.string().max(2000).optional(), objective: z.string().max(300).optional() }).safeParse(await body(c));
+      const p = z.object({ desk: z.string().min(1).max(20), words: z.string().min(1).max(8000), note: z.string().max(2000).optional(), objective: z.string().max(300).optional(), campaign: z.string().max(300).optional(), key: z.string().max(80).optional() }).safeParse(await body(c));
       if (!p.success) return bad(c, 'desk ("team" or "social") and words (his words) are required');
       return c.json(await voice.relay(c.req.param("cid") ?? "", p.data), 201);
     }),

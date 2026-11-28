@@ -390,7 +390,7 @@ describe("T61-S2 a held post is the same card, in its own words", () => {
     expect(postButtons({ kind: "outreach" })[0]).toMatchObject({ label: "✓ Schedule this reply", sub: "The team sends this reply in the thread, inside today's limits." });
     const late = postButtons({ kind: "post", slot: "2020-01-01 09:00", nextSlot: "2026-11-03T14:00Z" });
     expect(late.map((b) => b.label)).toEqual(["✓ Schedule for Tue 3 Nov 14:00 UTC", "Pick a new time"]);
-    expect(late[0]).toMatchObject({ slot: "2026-11-03T14:00Z", sub: "Its own time has passed. This is the next free time within the campaign's limits." });
+    expect(late[0]).toMatchObject({ slot: "2026-11-03T14:00Z", sub: "Its own time has passed. This is the next free time within the objective's limits." });
     for (const b of [...late, ...postButtons({ kind: "post", slot: "2099-11-04 09:00" })]) expect(b.label).not.toMatch(/post now/i);
     // its time has passed and nothing is free in the next 3 days: only Pick a new time, never a Schedule that sends now
     expect(postButtons({ kind: "post", slot: "2020-01-01 09:00" })).toEqual([expect.objectContaining({ label: "Pick a new time", how: "pick", go: false, sub: expect.stringMatching(/nothing is free in the next 3 days/) })]);

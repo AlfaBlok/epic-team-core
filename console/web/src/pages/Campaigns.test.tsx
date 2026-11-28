@@ -77,14 +77,14 @@ describe("Campaigns list", () => {
     expect(screen.getByText(/Not found/)).toBeTruthy();
   });
 
-  it("T58-S3: no Campaigns menu entry; Add campaign under the campaigns opens the wizard", async () => {
+  it("T58-S3: no Campaigns menu entry; Add objective under the objectives opens the wizard", async () => {
     // one menu for both skins: Add campaign sits under the campaigns, as Add objective sits under the objectives.
     vi.spyOn(api, "listCampaignRepos").mockResolvedValue([]);
     at("/"); // the Layout renders the sidebar
     // no menu entry (Home's own "Campaigns" tab is not the menu)
     expect(screen.queryAllByRole("link", { name: "Campaigns" }).filter((a) => !a.closest('[data-testid="set-tabs"]'))).toEqual([]);
     fireEvent.click((await screen.findAllByTestId("sidebar-add-campaign", undefined, { timeout: 8000 }))[0]); // the menu draws at once, when its lists are in
-    expect(await screen.findByRole("heading", { name: "New campaign" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "New objective" })).toBeTruthy();
   });
 });
 
@@ -127,7 +127,7 @@ describe("New campaign wizard", () => {
     const form = { repo: "acme-social", title: "Acme social", objective: "Acme heard by builders.", keyMessages: ["git is memory", "durable state"] };
     expect(preview).toHaveBeenCalledWith("home", form);
     expect(create).not.toHaveBeenCalled();
-    expect(screen.getByTestId("plan-milestone").textContent).toBe('Create the campaign "Acme social" (its spine is docs/spines/root.md)');
+    expect(screen.getByTestId("plan-milestone").textContent).toBe('Create the objective "Acme social" (its spine is docs/spines/root.md)');
     expect(screen.getByTestId("plan-init").textContent).toMatch(/^Turn the social pack on: 3 files/);
     expect(screen.getByTestId("plan-brief").textContent).toBe("Seed the brief: objective and key messages");
     expect(screen.getByTestId("plan-push").textContent).toBe("Commit as Sam and push to origin");
@@ -136,7 +136,7 @@ describe("New campaign wizard", () => {
     expect(within(screen.getByTestId("plan-role-Scout")).getByText(/new, from template scout/)).toBeTruthy();
     expect(within(screen.getByTestId("plan-role-Scout")).getByText("new, enabled")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create objective" }));
     const done = await screen.findByTestId("campaign-done");
     expect(create).toHaveBeenCalledWith("home", form);
     expect(done.textContent).toMatch(/Pack on: commit abcdef1 \(pushed\)/);
@@ -158,7 +158,7 @@ describe("New campaign wizard", () => {
     expect(screen.getByTestId("plan-brief").textContent).toBe("Brief left as it is (no objective or key messages given)");
     expect(within(screen.getByTestId("plan-role-Scout")).getByText("exists: kept")).toBeTruthy();
     expect(within(screen.getByTestId("plan-role-Reporter")).getByText("new, enabled")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Update campaign" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update objective" }));
     await waitFor(() => expect(screen.getByText(/uncommitted changes in AGENTS.md/)).toBeTruthy());
     expect(screen.queryByTestId("campaign-done")).toBeNull();
   });

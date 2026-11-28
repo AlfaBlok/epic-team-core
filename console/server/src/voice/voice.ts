@@ -67,6 +67,8 @@ export const HISTORY_TOKENS_MAX = 28000;
 export const HISTORY_RETENTION = 0.8;
 /** A call whose page sent no heartbeat for this long is over (tab closed, phone locked). */
 export const LOST_AFTER_MS = 3 * 60_000;
+/** a new call closes an earlier open call of the world whose page has not beaten for this long (the page beats every 20 s). */
+export const STALE_ON_START_MS = 45_000;
 /** the end reason of a call hung up from a page that did not hold it. */
 export const ENDED_ELSEWHERE = "ended_elsewhere";
 /** Below this much left in the month, no new call starts (one short call costs about this). */
@@ -99,7 +101,7 @@ export const callTranscriptUrl = (callId: string) => `${teamLink().replace(/\/+$
 
 export type CallLine = { who: string; text: string; feedback?: string };
 /** One note a call passed on live with its relay tool (his words, short), kept on the call (voice_calls.relays). */
-export type RelayedNote = { n: number; at: string; desk: string; state?: string; requestId?: string; words: string };
+export type RelayedNote = { n: number; at: string; desk: string; state?: string; requestId?: string; words: string; key?: string; result?: string };
 /** the words of a relayed note kept for the whole-call post: enough for the desk to match the point, not the whole note. */
 export const RELAY_WORDS_MAX = 240;
 const relayDeskName = (desk: string) => (desk === "team" ? "the Team desk" : desk === "social" ? "the social desk" : desk === "objective" ? "the workspace's objectives" : `the ${desk} desk`);
@@ -258,10 +260,19 @@ export const WHOLE_TRANSCRIPT_RULE = `The whole transcript, by design (know this
  *   phase one: he talks ──▶ short acknowledgements only ──▶ phase two: you propose and lead ──▶ he reacts ──▶ next proposal
  *   never after a point: "Pass it?", "Want me to…?", "I'll pass this to the desk": the whole call reaches the team anyway
  */
+/**
+ * One item at a time, settled with him before the next (his call_a41d905a, 28 Nov 13:53Z: "you're going too fast ... you're
+ * going through all the item without having settled it ... you should go item by item and then settling them on my behalf.
+ * If you just read them, that's not helpful"). Replaces 27 Nov's "never wait for his yes before going on": his
+ * newer word wins. Every partner voice has it, in How every call flows.
+ */
+export const SETTLE_RULE =
+  "One item at a time, settled before the next (his words, 28 Nov: 'you should go item by item and then settling them on my behalf. If you just read them, that's not helpful'). An item is one topic, one blocker or one proposal. Give it in one or two sentences and end your turn with one short question for his decision on it ('What do you say?'). Then stop and wait. It is settled only when he decides: yes, no, a change, or park it. A question or a remark of his is not his decision: answer it, then ask for his decision on the same item again. Once he decides, say in one short line what is settled for that item, in his terms, and pass it if you pass notes; only then, in the same turn, name the next item. Never put two items, or a proposal and the next topic, in one turn. Never say 'Next topic' while the item before it is open. If he says to skip or move on, it is parked: say so in a few words and go on.";
 export const CALL_FLOW_RULE = [
   "# How every call flows (the most important rule on this call, above anything else in these instructions)",
   "- Phase one, he gives you his context: let him talk. Short acknowledgements only ('Go on.', 'Mm-hm.', 'Got it.'). No read-back of each point, no question after each point, no proposal yet. A pause is not the end of his thought.",
-  "- Phase two, once he has given his context (he stops for your view, asks what you think, says he has finished, or has made his points on the topic): you lead. Say what you gather in one sentence and propose: 'Here is what I propose: …', with its one reason, then go on to your next proposal. Have a real opinion, and surprise him if you can. He reacts; take his reaction and carry on. Never wait for his yes before going on.",
+  "- Phase two, once he has given his context (he stops for your view, asks what you think, says he has finished, or has made his points on the topic): you lead. Say what you gather in one sentence and propose: 'Here is what I propose: …', with its one reason. Have a real opinion, and surprise him if you can.",
+  `- ${SETTLE_RULE}`,
   "- Never ask permission after a point: no 'Pass it?', 'Want me to pass that?', 'Shall I?', 'File it?', 'Is that the point you want passed?', and no either-or question after each thing he says. What he says he wants or decides is his yes. Ask only when you truly cannot go on without his answer, one question, once. Pressing a button on one of his cards keeps its one read-back.",
   "- Never talk about passing things on: no 'I'll pass this to the desk', 'That's a note for the Team desk', 'Passed.', 'I'll send it all together'. The whole call reaches his team by itself when it ends. If you have a tool that passes or files his words, use it silently as he speaks. Only if he asks whether something got through, answer in one short line.",
   `- ${WHOLE_TRANSCRIPT_RULE}`,
@@ -446,6 +457,8 @@ export interface CallStart {
   signedUrl?: string;
   agentId?: string;
   instructions?: string;
+  /** the voice of who answers (each manager its own). */
+  voiceId?: string;
 }
 export interface Limits {
   callMaxMin: number;
@@ -569,7 +582,10 @@ export interface VoiceDeps {
    */
   walkRule?: (total: number) => string;
   /** the coach's relay_to_desk: his words to the Team desk or the social desk (POST …/calls/:cid/relay). */
-  relay?: (callId: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** `n`: this note's number on the call, kept in the call's row (a restart mid-call never gives two notes one request id). */
+  relay?: (callId: string, args: Record<string, unknown>, n: number) => Promise<Record<string, unknown>>;
+  /** the ElevenLabs voice of who answers this call (each manager its own voice); none: the agent's own. English only. */
+  speakerVoice?: () => string | undefined;
   /** the briefer's read-only lookups during a call: exact rows from one source, as text (POST …/calls/:cid/lookup). */
   lookup?: (callId: string, name: string, args: Record<string, unknown>) => Promise<string>;
   /**
@@ -868,6 +884,19 @@ export function createVoice(d: VoiceDeps) {
     for (const r of db.prepare(`SELECT id, last_beat_at FROM voice_calls WHERE ended_at IS NULL AND (last_beat_at < @l OR started_at < @o) AND ${inWorld}`).all({ l: lostBefore, o: tooOld, w: world }) as any[])
       db.prepare("UPDATE voice_calls SET ended_at = ?, end_reason = 'lost' WHERE id = ? AND ended_at IS NULL").run(r.last_beat_at, r.id);
   }
+  /**
+   * his vn_c309d256, 28 Nov: "I tried calling another number in the directory, and then it didn't happen": his
+   * call_2332dcc1 ended on the voice's goodbye but its hang-up never reached the console, so it stayed "on" until its beats
+   * were 3 minutes old and his next call was refused (one call at a time). A new call he starts closes an earlier one whose
+   * page has not beaten for STALE_ON_START_MS (over two missed beats): that page is gone. A double press still meets the guard.
+   */
+  function closeStale() {
+    const before = iso(now() - STALE_ON_START_MS);
+    for (const r of db.prepare(`SELECT id, last_beat_at FROM voice_calls WHERE ended_at IS NULL AND last_beat_at < @l AND ${inWorld}`).all({ l: before, w: world }) as any[]) {
+      if (db.prepare("UPDATE voice_calls SET ended_at = ?, end_reason = 'lost' WHERE id = ? AND ended_at IS NULL").run(r.last_beat_at, r.id).changes)
+        console.log(`[voice] ${r.id} closed as lost: a new call started and its page last beat at ${r.last_beat_at}`);
+    }
+  }
   const active = (): VoiceCall | undefined => {
     closeLost();
     const r = db.prepare(`SELECT * FROM voice_calls WHERE ended_at IS NULL AND ${inWorld} ORDER BY started_at DESC LIMIT 1`).get({ w: world });
@@ -971,6 +1000,7 @@ export function createVoice(d: VoiceDeps) {
 
   /** `lang`: the language he picked on the call screen: Spanish runs on the Spanish agent and voice. */
   async function start(focus?: InboxFocus, lang: CallLang = "en"): Promise<CallStart> {
+    closeStale();
     const no = refusal();
     if (no) throw new VoiceError(409, no.code, no.message);
     const mdl = model();
@@ -1018,7 +1048,7 @@ export function createVoice(d: VoiceDeps) {
       if (objectiveCards.length) db.prepare("UPDATE voice_calls SET objectives = ? WHERE id = ?").run(JSON.stringify(objectiveCards), id);
       // each step's time in the log, so a slow start names its part (key and link, or the context read)
       console.log(`[voice] ${id} starts on ElevenLabs Agents (${link.agentId}${lang === "es" ? ", Spanish" : ""}) in ${Date.now() - t0} ms: link ${(link as { warm?: boolean }).warm ? "made when the page opened" : `${linkMs ?? "?"} ms`}, context ${ctxMs} ms`);
-      return { call: must(id), clientSecret: "", expiresAt: Math.floor(now() / 1000) + 15 * 60, model: ELEVEN_MODEL_LABEL, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, ...(greeting ? { greeting } : {}), provider: "elevenlabs", signedUrl: link.signedUrl, agentId: link.agentId, instructions };
+      return { call: must(id), clientSecret: "", expiresAt: Math.floor(now() / 1000) + 15 * 60, model: ELEVEN_MODEL_LABEL, limits: limits(), turnDetection: cfg.session.audio.input.turn_detection, ...(greeting ? { greeting } : {}), provider: "elevenlabs", signedUrl: link.signedUrl, agentId: link.agentId, instructions, ...(lang === "en" && d.speakerVoice?.() ? { voiceId: d.speakerVoice() } : {}) };
     }
     const key = await d.mint(cfg);
     const id = `call_${crypto.randomBytes(4).toString("hex")}`;
@@ -1277,22 +1307,53 @@ export function createVoice(d: VoiceDeps) {
   }
 
   /** the objectives coach's relay: his words to a desk, on a call of this Voice that is still on or just ended. */
+  // a relay the page sent again (the front door's 502) while the first is still on its way: the same answer.
+  const relaying = new Map<string, Promise<Record<string, unknown>>>();
+  const inFlight = new Map<string, number>();
   async function relay(id: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const c = must(id);
     if (!d.relay) throw new VoiceError(404, "unknown_tool", "this call has no relay");
     if (c.endedAt && now() - Date.parse(c.endedAt) > 60_000) throw new VoiceError(409, "call_ended", `call ${id} has ended`);
+    const key = typeof args.key === "string" && args.key.trim() ? args.key.trim().slice(0, 80) : undefined;
+    const { key: _k, ...rest } = args;
+    if (key) {
+      const done = relayedNotes(db, id).find((x) => x.key === key);
+      if (done) return { desk: done.desk, ...(done.state ? { state: done.state } : {}), ...(done.requestId ? { requestId: done.requestId } : {}), result: done.result ?? "Passed on." };
+      const on = relaying.get(`${id} ${key}`);
+      if (on) return on;
+    }
+    const run = (async () => {
+      // the note's number comes from the call's own row, never a counter a restart sets back to zero
+      const pending = inFlight.get(id) ?? 0;
+      inFlight.set(id, pending + 1);
+      const n = relayedNotes(db, id).length + pending + 1;
+      try {
+        const out = await d.relay!(id, rest, n);
+        // keep what reached a desk live, so the whole-call post lists it and the desk never handles it twice.
+        const list = relayedNotes(db, id);
+        const note: RelayedNote = { n: list.length + 1, at: new Date(now()).toISOString(), desk: String(out?.desk ?? "team"), words: relayWords(rest) };
+        if (typeof out?.state === "string") note.state = out.state;
+        if (typeof out?.requestId === "string") note.requestId = out.requestId;
+        if (key) note.key = key;
+        if (typeof out?.result === "string") note.result = out.result.slice(0, 300);
+        db.prepare("UPDATE voice_calls SET relays = ? WHERE id = ?").run(JSON.stringify([...list, note]), id);
+        return out;
+      } catch (e) {
+        console.warn(`[voice] ${id} relay not passed: ${(e as Error).message.slice(0, 200)}`);
+        if (e instanceof VoiceError) throw e;
+        throw new VoiceError(400, "validation_error", (e as Error).message);
+      } finally {
+        const left = (inFlight.get(id) ?? 1) - 1;
+        if (left > 0) inFlight.set(id, left);
+        else inFlight.delete(id);
+      }
+    })();
+    if (!key) return run;
+    relaying.set(`${id} ${key}`, run);
     try {
-      const out = await d.relay(id, args);
-      // keep what reached a desk live, so the whole-call post lists it and the desk never handles it twice.
-      const list = relayedNotes(db, id);
-      const note: RelayedNote = { n: list.length + 1, at: new Date(now()).toISOString(), desk: String(out?.desk ?? "team"), words: relayWords(args) };
-      if (typeof out?.state === "string") note.state = out.state;
-      if (typeof out?.requestId === "string") note.requestId = out.requestId;
-      db.prepare("UPDATE voice_calls SET relays = ? WHERE id = ?").run(JSON.stringify([...list, note]), id);
-      return out;
-    } catch (e) {
-      if (e instanceof VoiceError) throw e;
-      throw new VoiceError(400, "validation_error", (e as Error).message);
+      return await run;
+    } finally {
+      relaying.delete(`${id} ${key}`);
     }
   }
 

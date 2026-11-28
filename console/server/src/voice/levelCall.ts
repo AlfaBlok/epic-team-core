@@ -83,13 +83,27 @@ export function partnerRule(level: "desk" | "objective" | "campaign", name: stri
   ].join("\n");
 }
 
+/**
+ * How an objective's manager talks with him (his call_2332dcc1, 28 Nov 14:09Z, the first time he spoke to one: "you went a
+ * little bit too quickly into specifics ... you are more about the bigger picture ... let me talk ... at the beginning, like
+ * what's on my mind, open questions. ... The other person was asking me, like, what's new since we last spoke. That's a very
+ * nice brief, but ... pointed question"; and later: "when you ask this, the same question you asked at the beginning, it almost
+ * feels like the answer I gave you was not ..."). The objective call and switch_to both carry it.
+ */
+export const MANAGER_MANNER = [
+  "You hold the big picture of this objective, not its details. Open with one question, \"What's new since we last spoke?\", then let him talk: what is on his mind, his open questions, how he feels about it. Short acknowledgements only while he does.",
+  "Ask \"What's new since we last spoke?\" once on this whole call: if it was asked already on this call (by you, or by the partner before a switch), never ask it again; build on what he said instead.",
+  "Go into specifics (one unit, one number, one date, a list to send) only when he does or asks for them. When he has said what is on his mind, give the one or two things that matter most for the objective, in plain words, and settle them one at a time.",
+].join("\n");
+
 /** the objective briefer's own instructions: one objective, his partner on it. */
 export function objectiveCallInstructions(name: string): string {
   return [
     `You are the ${levelName(name)}, ${ownerName()}'s manager for one objective, "${name}", on a phone call with him, often while he walks. That is your one name (he sees it on the call screen): never call yourself a briefer or a strategist. Above you is his Team desk partner, who covers all his objectives: when he wants another objective, say that the Team desk partner (Partner in his Team desk chat) or that objective's own Call covers it. You know that objective's key results with today's numbers, where we are, his newest words on it and what waits on him, below.`,
     `When the line opens, the console has you say this greeting, once: "${objectiveGreeting(name)}" Never greet again.`,
     partnerRule("objective", name),
-    "Ask one question at a time and let him talk; once he has given his context, lead with your proposal (How every call flows, below). Never lecture, never list more than three things, never read codes, links or long numbers.",
+    "Ask one question at a time and let him talk; once he has given his context, lead with your proposal and settle it with him before the next (How every call flows, below). Never lecture, never list more than three things, never read codes, links or long numbers.",
+    MANAGER_MANNER,
     `Notes: each thing he decides or wants done is one note. Pass it quietly as he says it, with no read-back and no yes asked: call relay_to_desk, desk "team" for building, plans and key results; desk "social" for ${socialProduct()}'s campaigns, posts and channels. One note, one call, his own words. If a pass does not go through, say so once.`,
     "Speak in his language (English or Spanish). Short turns: one to three sentences. Warm, direct and sharp. He always has priority: never talk over him.",
     "Ending: when he clearly says he is done ('bye', 'that's all', 'hang up', 'adiós'), give a one-line recap of what you settled together, say goodbye and call hang_up. The whole call is saved to his Team desk chat when it ends.",
@@ -99,7 +113,7 @@ export function objectiveCallInstructions(name: string): string {
 /** the name of who answers a level's call (objective or campaign), the same words as the web's whoAnswers.ts. */
 /** the objectives folded into it ("(with: …)") are not part of whose call it is. */
 export const levelName = (name: string) => `${clip(flat(name).replace(/\s*\(with:.*$/, "").replace(/^[^:]{1,30}:\s*/, ""), 80) || name} manager`;
-export const objectiveGreeting = (name: string) => `Hi ${ownerName()}, the ${levelName(name)} here. Key results first, or straight to what is red?`;
+export const objectiveGreeting = (name: string) => `Hi ${ownerName()}, the ${levelName(name)} here. What's new since we last spoke?`;
 /** a campaign's call greets by its name (any world's owner, so no name of his): the greeting after `lead` (voice.ts GREETING_LEAD) is replaced, the rest kept. */
 export function campaignGreeting(instructions: string, title: string, lead: string): string {
   const i = instructions.indexOf(lead);

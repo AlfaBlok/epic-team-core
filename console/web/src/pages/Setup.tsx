@@ -150,7 +150,7 @@ function ConnectionCard({ c }: { c: Connection }) {
         ))}
       </ol>
       <div className="mt-auto flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled title="Arrives with per-world sign-in">
+        <Button size="sm" disabled title="Arrives with per-workspace sign-in">
           {c.state === "connected" ? "Reconnect" : "Connect"}
         </Button>
         <span className="text-xs text-muted-foreground">Preview: connecting arrives with per-world sign-in.</span>

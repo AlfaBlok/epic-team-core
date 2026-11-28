@@ -1,4 +1,5 @@
 import { ownerName } from "../identity.js";
+import { MANAGER_MANNER } from "./levelCall.js";
 
 /**
  * Switch on the same call (the owner, 27 Nov: "why is it that we need to really hand over? ... Can
@@ -100,6 +101,7 @@ export async function switchAnswer(
     objective: card.name,
     result: [
       `SWITCHED: you are now the ${name}, the manager of "${card.name}", on this same call. Speak as the ${name} from now on (say so in one line if you have not), and answer from this package only, exactly: never round or guess a number. switch_to "desk" brings back the ${o.home}.`,
+      MANAGER_MANNER,
       pack || "Its package could not be read right now: say so once, and offer to pass his question to the Team desk.",
     ].join("\n\n"),
   };

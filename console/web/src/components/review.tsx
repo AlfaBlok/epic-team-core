@@ -1428,10 +1428,10 @@ export function postButtons(p: Pick<PostCardInfo, "kind" | "slot" | "nextSlot">,
   if (reply) return [{ label: "✓ Schedule this reply", sub: "The team sends this reply in the thread, inside today's limits.", how: "schedule", go: true }];
   // its time has passed and nothing is free in the next 3 days: no Schedule (it would send now), he picks a time.
   if (!p.nextSlot && when === "its time has passed")
-    return [{ label: "Pick a new time", sub: "Its time has passed and nothing is free in the next 3 days within the campaign's limits. You choose when it goes out, in UTC.", how: "pick", go: false }];
+    return [{ label: "Pick a new time", sub: "Its time has passed and nothing is free in the next 3 days within the objective's limits. You choose when it goes out, in UTC.", how: "pick", go: false }];
   if (p.nextSlot)
     return [
-      { label: `✓ Schedule for ${slotShort(p.nextSlot)}`, sub: `${p.slot ? "Its own time has passed. " : ""}This is the next free time within the campaign's limits.`, how: "schedule", go: true, slot: p.nextSlot },
+      { label: `✓ Schedule for ${slotShort(p.nextSlot)}`, sub: `${p.slot ? "Its own time has passed. " : ""}This is the next free time within the objective's limits.`, how: "schedule", go: true, slot: p.nextSlot },
       { label: "Pick a new time", sub: "You choose when it goes out, in UTC.", how: "pick", go: false },
     ];
   return [{ label: "✓ Schedule", sub: when && when !== "its time has passed" ? `It goes out ${when}.` : "It goes out at the next free time.", how: "schedule", go: true }];
@@ -1551,7 +1551,7 @@ function PostReviewCardBody(card: CardProps) {
           <dd>
             <A href={p.pageUrl}>{p.id}</A>
           </dd>
-          <dt>Campaign files</dt>
+          <dt>Objective files</dt>
           <dd>{p.repo}</dd>
         </dl>
       </details>

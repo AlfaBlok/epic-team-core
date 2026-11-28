@@ -153,7 +153,7 @@ export function WorkTab({ m }: { m: Milestone }) {
 export function WaitingTab({ m }: { m: Milestone }) {
   return (
     <div data-testid="waiting-tab">
-      <TabHead title="Inbox">The asks and reviews of this campaign that need your answer. Answer here or on the Team page, where the asks of every campaign wait together.</TabHead>
+      <TabHead title="Inbox">The asks and reviews of this objective that need your answer. Answer here or in the Inbox, where the asks of every objective wait together.</TabHead>
       <WaitingOnYou milestoneId={m.id} fold="campaign-work-waiting" />
     </div>
   );
@@ -291,7 +291,7 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
   const byId = new Map(stats.pillars.map((p) => [p.id, p]));
   const most = Math.max(1, ...stats.pillars.map((p) => p.posts));
   const counted = posts.data && !posts.error;
-  const where = scope === "campaign" ? "this campaign's" : "the product's";
+  const where = scope === "campaign" ? "this objective's" : "the product's";
   return (
     <div data-testid="pillars-tab" data-lines={b.lines.length}>
       <TabHead
@@ -303,7 +303,7 @@ export function PillarsTab({ m, repo, campaign }: { m: Milestone; repo?: string;
               onChange={setScope}
               testId="pillars-scope"
               options={[
-                ["campaign", "This campaign"],
+                ["campaign", "This objective"],
                 ["product", "Whole product"],
               ]}
             />
@@ -446,7 +446,7 @@ export function ObservationsTab({ m }: { m: Milestone }) {
             onChange={setScope}
             testId="observations-scope"
             options={[
-              ["campaign", "This campaign"],
+              ["campaign", "This objective"],
               ["team", "Whole team"],
             ]}
           />
